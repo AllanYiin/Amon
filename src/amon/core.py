@@ -14,6 +14,8 @@ from typing import Any
 import yaml
 
 from .config import DEFAULT_CONFIG, deep_merge, get_config_value, read_yaml, set_config_value, write_yaml
+from .fs.safety import canonicalize_path, make_change_plan, require_confirm
+from .fs.trash import trash_move, trash_restore
 from .logging import log_billing, log_event
 from .logging_utils import setup_logger
 from .providers import OpenAICompatibleProvider, ProviderError
@@ -337,6 +339,65 @@ class AmonCore:
         slug = "".join(char.lower() for char in name if char.isalnum())
         short_id = uuid.uuid4().hex[:6]
         return f"{slug or 'project'}-{short_id}"
+
+    def fs_delete(self, target: str | Path) -> str | None:
+        self.ensure_base_structure()
+        allowed_paths = [self.projects_dir]
+        canonical_target = canonicalize_path(Path(target), allowed_paths)
+        if not canonical_target.exists():
+            raise FileNotFoundError("找不到要刪除的路徑")
+        plan = make_change_plan(
+            [
+                {
+                    "action": "移動至回收桶",
+                    "target": str(canonical_target),
+                    "detail": "可透過 amon fs restore 還原",
+                }
+            ]
+        )
+        if not require_confirm(plan):
+            log_event(
+                {
+                    "level": "INFO",
+                    "event": "fs_delete_cancelled",
+                    "target": str(canonical_target),
+                }
+            )
+            return None
+        trash_id = trash_move(canonical_target, self.trash_dir, self.projects_dir)
+        log_event(
+            {
+                "level": "INFO",
+                "event": "fs_delete",
+                "target": str(canonical_target),
+                "trash_id": trash_id,
+            }
+        )
+        return trash_id
+
+    def fs_restore(self, trash_id: str) -> Path:
+        self.ensure_base_structure()
+        manifest_path = self.trash_dir / trash_id / "manifest.json"
+        if not manifest_path.exists():
+            raise FileNotFoundError("找不到回收桶項目")
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.error("讀取回收桶清單失敗：%s", exc, exc_info=True)
+            raise
+        original_path = canonicalize_path(Path(manifest.get("original_path", "")), [self.projects_dir])
+        restored_path = trash_restore(trash_id, self.trash_dir)
+        if restored_path != original_path:
+            self.logger.warning("還原路徑與清單不一致：%s -> %s", original_path, restored_path)
+        log_event(
+            {
+                "level": "INFO",
+                "event": "fs_restore",
+                "trash_id": trash_id,
+                "restored_path": str(restored_path),
+            }
+        )
+        return restored_path
 
     def _create_project_structure(self, project_path: Path) -> None:
         (project_path / "workspace").mkdir(parents=True, exist_ok=True)
