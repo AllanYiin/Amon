@@ -83,7 +83,11 @@ def build_parser() -> argparse.ArgumentParser:
     skills_sub = skills_parser.add_subparsers(dest="skills_command")
     skills_scan = skills_sub.add_parser("scan", help="掃描技能")
     skills_scan.add_argument("--project", help="指定專案 ID")
-    skills_sub.add_parser("list", help="列出技能")
+    skills_list = skills_sub.add_parser("list", help="列出技能")
+    skills_list.add_argument("--project", help="指定專案 ID")
+    skills_show = skills_sub.add_parser("show", help="顯示技能內容")
+    skills_show.add_argument("name", help="技能名稱")
+    skills_show.add_argument("--project", help="指定專案 ID")
 
     mcp_parser = subparsers.add_parser("mcp", help="MCP 設定")
     mcp_sub = mcp_parser.add_subparsers(dest="mcp_command")
@@ -227,14 +231,31 @@ def _handle_skills(core: AmonCore, args: argparse.Namespace) -> None:
         print(f"已掃描 {len(skills)} 個技能")
         return
     if args.skills_command == "list":
-        skills = core.list_skills()
+        if args.project:
+            skills = core.scan_skills(project_path=project_path)
+        else:
+            skills = core.list_skills()
+            if not skills:
+                print("尚未建立技能索引，請先執行 amon skills scan。")
+                return
         if not skills:
-            print("尚未建立技能索引，請先執行 amon skills scan。")
+            print("未找到任何技能。")
             return
         for skill in skills:
             scope = "全域" if skill.get("scope") == "global" else "專案"
             description = skill.get("description") or "無描述"
             print(f"{skill.get('name')}｜{scope}｜{description}")
+        return
+    if args.skills_command == "show":
+        skill = core.get_skill(args.name, project_path=project_path)
+        scope = "全域" if skill.get("scope") == "global" else "專案"
+        description = skill.get("description") or "無描述"
+        print(f"名稱：{skill.get('name')}")
+        print(f"範圍：{scope}")
+        print(f"描述：{description}")
+        print(f"路徑：{skill.get('path')}")
+        print("內容：")
+        print(skill.get("content", ""))
         return
     raise ValueError("請指定技能指令")
 

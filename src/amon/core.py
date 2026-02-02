@@ -359,6 +359,23 @@ class AmonCore:
             raise
         return data.get("skills", [])
 
+    def get_skill(self, name: str, project_path: Path | None = None) -> dict[str, Any]:
+        if project_path:
+            skills = self.scan_skills(project_path)
+        else:
+            skills = self.list_skills()
+            if not skills:
+                skills = self.scan_skills()
+        for skill in skills:
+            if skill.get("name") == name:
+                try:
+                    content = Path(skill["path"]).read_text(encoding="utf-8")
+                except OSError as exc:
+                    self.logger.error("讀取技能檔案失敗：%s", exc, exc_info=True)
+                    raise
+                return {**skill, "content": content}
+        raise KeyError(f"找不到技能：{name}")
+
     def get_project_path(self, project_id: str) -> Path:
         record = self.get_project(project_id)
         return Path(record.path)
@@ -620,7 +637,11 @@ class AmonCore:
         if content.startswith("---"):
             parts = content.split("---", 2)
             if len(parts) >= 3:
-                frontmatter = yaml.safe_load(parts[1]) or {}
+                try:
+                    frontmatter = yaml.safe_load(parts[1]) or {}
+                except yaml.YAMLError as exc:
+                    self.logger.warning("解析技能 YAML frontmatter 失敗：%s", exc, exc_info=True)
+                    frontmatter = {}
                 name = frontmatter.get("name", name)
                 description = frontmatter.get("description", "")
         return {
@@ -634,25 +655,11 @@ class AmonCore:
         if not prompt.startswith("/"):
             return ""
         skill_name = prompt.split()[0].lstrip("/")
-        skills = self.list_skills()
-        for skill in skills:
-            if skill.get("name") == skill_name:
-                try:
-                    return Path(skill["path"]).read_text(encoding="utf-8")
-                except OSError as exc:
-                    self.logger.error("讀取技能檔案失敗：%s", exc, exc_info=True)
-                    raise
-        if project_path:
-            self.scan_skills(project_path)
-        skills = self.list_skills()
-        for skill in skills:
-            if skill.get("name") == skill_name:
-                try:
-                    return Path(skill["path"]).read_text(encoding="utf-8")
-                except OSError as exc:
-                    self.logger.error("讀取技能檔案失敗：%s", exc, exc_info=True)
-                    raise
-        return ""
+        try:
+            skill = self.get_skill(skill_name, project_path=project_path)
+        except KeyError:
+            return ""
+        return skill.get("content", "")
 
     def _prepare_session_path(self, project_path: Path | None, session_id: str) -> Path:
         if not project_path:
