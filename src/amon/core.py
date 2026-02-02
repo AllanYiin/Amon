@@ -14,7 +14,8 @@ from typing import Any
 import yaml
 
 from .config import DEFAULT_CONFIG, deep_merge, get_config_value, read_yaml, set_config_value, write_yaml
-from .logging_utils import setup_billing_logger, setup_logger
+from .logging import log_billing, log_event
+from .logging_utils import setup_logger
 from .providers import OpenAICompatibleProvider, ProviderError
 
 
@@ -52,7 +53,6 @@ class AmonCore:
         self.node_env_dir = self.data_dir / "node_env"
         self.billing_log = self.logs_dir / "billing.log"
         self.logger = setup_logger("amon", self.logs_dir)
-        self.billing_logger = setup_billing_logger(self.logs_dir)
 
     def ensure_base_structure(self) -> None:
         for path in [
@@ -119,11 +119,27 @@ class AmonCore:
             status="active",
         )
         self._save_record(record)
+        log_event(
+            {
+                "level": "INFO",
+                "event": "project_create",
+                "project_id": project_id,
+                "project_name": name,
+            }
+        )
         self.logger.info("已建立專案 %s (%s)", name, project_id)
         return record
 
     def list_projects(self, include_deleted: bool = False) -> list[ProjectRecord]:
         records = self._load_records()
+        log_event(
+            {
+                "level": "INFO",
+                "event": "project_list",
+                "include_deleted": include_deleted,
+                "count": len(records),
+            }
+        )
         if include_deleted:
             return records
         return [record for record in records if record.status == "active"]
@@ -142,6 +158,14 @@ class AmonCore:
                 record.updated_at = self._now()
                 self._update_project_config(Path(record.path), new_name)
                 self._write_records(records)
+                log_event(
+                    {
+                        "level": "INFO",
+                        "event": "project_update",
+                        "project_id": project_id,
+                        "project_name": new_name,
+                    }
+                )
                 self.logger.info("已更新專案名稱 %s (%s)", new_name, project_id)
                 return record
         raise KeyError(f"找不到專案：{project_id}")
@@ -160,6 +184,15 @@ class AmonCore:
                 record.updated_at = self._now()
                 self._write_records(records)
                 self._append_trash_entry(record, trash_path)
+                log_event(
+                    {
+                        "level": "INFO",
+                        "event": "project_delete",
+                        "project_id": project_id,
+                        "project_name": record.name,
+                        "trash_path": str(trash_path),
+                    }
+                )
                 self.logger.info("已刪除專案 %s (%s)", record.name, project_id)
                 return record
         raise KeyError(f"找不到專案：{project_id}")
@@ -180,6 +213,14 @@ class AmonCore:
                 record.updated_at = self._now()
                 self._write_records(records)
                 self._mark_trash_restored(project_id)
+                log_event(
+                    {
+                        "level": "INFO",
+                        "event": "project_restore",
+                        "project_id": project_id,
+                        "project_name": record.name,
+                    }
+                )
                 self.logger.info("已還原專案 %s (%s)", record.name, project_id)
                 return record
         raise KeyError(f"找不到專案：{project_id}")
@@ -541,12 +582,16 @@ class AmonCore:
     ) -> None:
         if not config.get("billing", {}).get("enabled", True):
             return
-        self.billing_logger.info(
-            "provider=%s model=%s prompt_chars=%s response_chars=%s",
-            provider,
-            model,
-            len(prompt),
-            len(response),
+        log_billing(
+            {
+                "level": "INFO",
+                "event": "billing_record",
+                "provider": provider,
+                "model": model,
+                "prompt_chars": len(prompt),
+                "response_chars": len(response),
+                "token": 0,
+            }
         )
 
     @staticmethod
