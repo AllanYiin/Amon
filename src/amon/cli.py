@@ -87,6 +87,9 @@ def build_parser() -> argparse.ArgumentParser:
     mcp_deny = mcp_sub.add_parser("deny", help="移除 MCP tool 權限")
     mcp_deny.add_argument("tool", help="tool 名稱")
 
+    ui_parser = subparsers.add_parser("ui", help="啟動 UI 預覽")
+    ui_parser.add_argument("--port", type=int, default=8000, help="UI 服務埠號（預設 8000）")
+
     return parser
 
 
@@ -116,6 +119,8 @@ def main() -> None:
             _handle_skills(core, args)
         elif args.command == "mcp":
             _handle_mcp(core, args)
+        elif args.command == "ui":
+            _handle_ui(args)
         else:
             parser.print_help()
     except Exception as exc:  # noqa: BLE001
@@ -234,3 +239,9 @@ def _handle_mcp(core: AmonCore, args: argparse.Namespace) -> None:
         print("已更新 MCP tool 權限")
         return
     raise ValueError("請指定 MCP 指令")
+
+
+def _handle_ui(args: argparse.Namespace) -> None:
+    from .ui_server import serve_ui
+
+    serve_ui(port=args.port)

@@ -38,6 +38,9 @@ amon run --prompt "請用繁體中文摘要以下內容..." --project <project_i
 
 # 列出 MCP server 設定
 amon mcp list
+
+# 啟動 UI 預覽（瀏覽 http://localhost:8000）
+amon ui --port 8000
 ```
 
 > 提醒：模型金鑰需放在環境變數中（例如 `OPENAI_API_KEY`）。  
