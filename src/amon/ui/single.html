@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Amon｜單一模式</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="page">
+      <div class="layout single-grid">
+        <section class="single-card">
+          <div class="single-header">
+            <h2 class="main-title" style="margin: 0;">Single Agent mode</h2>
+            <span class="badge">單一模式</span>
+          </div>
+          <div class="notice">
+            適合快速問答與簡單寫作。Amon 會即時串流輸出結果，避免等待過久造成卡頓。
+          </div>
+          <div class="chat-bubble user">你：請用條列整理 2026Q1 市場研究的四個重點。</div>
+          <div class="chat-bubble agent">
+            Amon：
+            <ol style="margin: 6px 0 0 18px; padding: 0;">
+              <li>市場趨勢與需求變化摘要。</li>
+              <li>主要競品定位與差異化策略。</li>
+              <li>目標客群輪廓與購買動機。</li>
+              <li>行銷時程與風險提醒。</li>
+            </ol>
+          </div>
+          <div class="progress"><span></span></div>
+          <div class="chat-input">
+            <div class="field">輸入你想問的內容…</div>
+            <button class="send">送出</button>
+          </div>
+        </section>
+      </div>
+    </main>
+  </body>
+</html>

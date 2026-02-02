@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Amon｜專案工作台</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="page">
+      <div class="layout">
+        <header class="topbar">
+          <div class="topbar-title">專案：2026Q1 市場研究</div>
+          <button class="dropdown-btn">切換模式 ▾</button>
+        </header>
+
+        <section class="workspace-grid">
+          <div class="panel">
+            <h3>任務清單</h3>
+            <div class="task-item">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="status-dot" style="background: var(--accent);"></span>
+                <span class="task-title">競品摘要</span>
+              </div>
+              <div class="task-meta">狀態：執行中</div>
+            </div>
+            <div class="task-item secondary">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="status-dot" style="background: var(--warning);"></span>
+                <span class="task-title">風險與限制</span>
+              </div>
+              <div class="task-meta">狀態：審查中</div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h3>對話</h3>
+            <div class="chat-bubble user">你：請做 2026Q1 市場研究，整理競品與策略。</div>
+            <div class="chat-bubble agent">
+              Amon：我會用「團隊模式」拆任務並產出文件。<br />
+              接著我會先給你一份待辦清單供確認。
+            </div>
+            <div class="chat-input">
+              <div class="field">輸入任務…</div>
+              <button class="send">送出</button>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h3>文件</h3>
+            <div class="doc-item">
+              <div class="task-title">PM_整合報告.md</div>
+              <div class="doc-meta" style="color: var(--success);">Final</div>
+            </div>
+            <div class="doc-item secondary">
+              <div class="task-title">競品摘要_成員A.md</div>
+            </div>
+            <div class="doc-item secondary">
+              <div class="task-title">稽核回饋.json</div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </body>
+</html>
