@@ -332,6 +332,140 @@ class AmonCore:
         self._log_billing(config, provider_name, provider_model, prompt, response_text, session_id=session_id)
         return response_text
 
+    def run_self_critique(self, prompt: str, project_path: Path | None = None, model: str | None = None) -> str:
+        if not project_path:
+            raise ValueError("執行 self_critique 需要指定專案")
+        config = self.load_config(project_path)
+        provider_name = config.get("amon", {}).get("provider", "openai")
+        provider_cfg = config.get("providers", {}).get(provider_name, {})
+        provider_type = provider_cfg.get("type")
+        provider_model = model or provider_cfg.get("default_model") or provider_cfg.get("model")
+        provider = build_provider(provider_cfg, model=provider_model)
+        session_id = uuid.uuid4().hex
+        session_path = self._prepare_session_path(project_path, session_id)
+        docs_dir = project_path / "docs"
+        draft_path, reviews_dir, final_path, version = self._resolve_doc_paths(docs_dir)
+        log_event(
+            {
+                "level": "INFO",
+                "event": "self_critique_start",
+                "provider": provider_name,
+                "model": provider_model,
+                "session_id": session_id,
+                "doc_version": version,
+                "project_id": project_path.name,
+            }
+        )
+        if provider_type == "mock":
+            print("提醒：目前使用 mock provider，輸出為模擬結果。")
+
+        personas = self._generate_reviewer_personas(
+            provider=provider,
+            provider_name=provider_name,
+            provider_model=provider_model,
+            prompt=prompt,
+            session_path=session_path,
+            session_id=session_id,
+            config=config,
+            provider_type=provider_type,
+        )
+
+        writer_system = "你是 Writer，負責撰寫草稿。請用繁體中文輸出 markdown。"
+        draft_messages = [
+            {"role": "system", "content": writer_system},
+            {"role": "user", "content": f"任務：{prompt}\n\n請先產出草稿。"},
+        ]
+        draft_text = self._stream_to_file(
+            provider=provider,
+            provider_name=provider_name,
+            provider_model=provider_model,
+            messages=draft_messages,
+            output_path=draft_path,
+            session_path=session_path,
+            session_id=session_id,
+            stage="draft",
+            config=config,
+            provider_type=provider_type,
+            prompt_text=draft_messages[-1]["content"],
+        )
+
+        reviews: list[tuple[dict[str, str], str, Path]] = []
+        for persona in personas:
+            reviewer_messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是 Reviewer，請根據指定 persona 嚴格評論草稿，"
+                        "提出具體缺陷與改善建議。請用繁體中文輸出 markdown。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "persona:\n"
+                        f"- persona_id: {persona['persona_id']}\n"
+                        f"- name: {persona['name']}\n"
+                        f"- focus: {persona['focus']}\n"
+                        f"- tone: {persona['tone']}\n"
+                        f"- instructions: {persona['instructions']}\n\n"
+                        "draft:\n"
+                        f"{draft_text}\n\n請提供批評與建議。"
+                    ),
+                },
+            ]
+            review_filename = self._review_filename(persona)
+            review_path = reviews_dir / review_filename
+            review_text = self._stream_to_file(
+                provider=provider,
+                provider_name=provider_name,
+                provider_model=provider_model,
+                messages=reviewer_messages,
+                output_path=review_path,
+                session_path=session_path,
+                session_id=session_id,
+                stage=f"review:{persona['persona_id']}",
+                config=config,
+                provider_type=provider_type,
+                prompt_text=reviewer_messages[-1]["content"],
+            )
+            reviews.append((persona, review_text, review_path))
+
+        final_messages = [
+            {
+                "role": "system",
+                "content": "你是 Writer，負責整合所有 reviews，產出最終版本。請用繁體中文輸出 markdown。",
+            },
+            {
+                "role": "user",
+                "content": self._build_final_prompt(prompt, draft_text, reviews),
+            },
+        ]
+        final_text = self._stream_to_file(
+            provider=provider,
+            provider_name=provider_name,
+            provider_model=provider_model,
+            messages=final_messages,
+            output_path=final_path,
+            session_path=session_path,
+            session_id=session_id,
+            stage="final",
+            config=config,
+            provider_type=provider_type,
+            prompt_text=final_messages[-1]["content"],
+        )
+        log_event(
+            {
+                "level": "INFO",
+                "event": "self_critique_complete",
+                "provider": provider_name,
+                "model": provider_model,
+                "session_id": session_id,
+                "doc_version": version,
+                "project_id": project_path.name,
+            }
+        )
+        return final_text
+
     def scan_skills(self, project_path: Path | None = None) -> list[dict[str, Any]]:
         config = self.load_config(project_path)
         skills = []
@@ -763,6 +897,273 @@ class AmonCore:
             self.logger.error("建立 sessions 目錄失敗：%s", exc, exc_info=True)
             raise
         return sessions_dir / f"{session_id}.jsonl"
+
+    def _resolve_doc_paths(self, docs_dir: Path) -> tuple[Path, Path, Path, int]:
+        try:
+            docs_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            self.logger.error("建立 docs 目錄失敗：%s", exc, exc_info=True)
+            raise
+        version = self._next_doc_version(docs_dir)
+        suffix = "" if version == 1 else f"_v{version}"
+        draft_path = docs_dir / f"draft{suffix}.md"
+        final_path = docs_dir / f"final{suffix}.md"
+        reviews_dir = docs_dir / f"reviews{suffix}"
+        try:
+            reviews_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            self.logger.error("建立 reviews 目錄失敗：%s", exc, exc_info=True)
+            raise
+        return draft_path, reviews_dir, final_path, version
+
+    def _next_doc_version(self, docs_dir: Path) -> int:
+        max_version = 0
+        if (docs_dir / "draft.md").exists() or (docs_dir / "final.md").exists() or (docs_dir / "reviews").exists():
+            max_version = 1
+        for path in docs_dir.glob("draft_v*.md"):
+            try:
+                version = int(path.stem.split("_v")[-1])
+            except ValueError:
+                continue
+            max_version = max(max_version, version)
+        return max_version + 1 if max_version else 1
+
+    def _generate_reviewer_personas(
+        self,
+        provider: Any,
+        provider_name: str,
+        provider_model: str | None,
+        prompt: str,
+        session_path: Path,
+        session_id: str,
+        config: dict[str, Any],
+        provider_type: str | None,
+    ) -> list[dict[str, str]]:
+        role_factory_system = (
+            "你是 RoleFactory，負責產生 10 位 reviewer personas。"
+            "請以 JSON 陣列輸出，每筆符合 schema："
+            '{"persona_id":"reviewer01","name":"","focus":"","tone":"","instructions":""}。'
+            "persona_id 必須是 reviewer01 ~ reviewer10，且只輸出 JSON。"
+        )
+        role_factory_messages = [
+            {"role": "system", "content": role_factory_system},
+            {"role": "user", "content": f"任務：{prompt}\n\n請輸出 10 位 reviewer personas。"},
+        ]
+        if provider_type == "mock":
+            print("提醒：目前使用 mock provider，輸出為模擬結果。")
+        raw = self._stream_and_collect(
+            provider=provider,
+            provider_name=provider_name,
+            provider_model=provider_model,
+            messages=role_factory_messages,
+            session_path=session_path,
+            session_id=session_id,
+            stage="role_factory",
+            config=config,
+            prompt_text=role_factory_messages[-1]["content"],
+        )
+        try:
+            personas = json.loads(raw)
+        except json.JSONDecodeError:
+            self.logger.warning("解析 reviewer personas JSON 失敗，改用預設清單。")
+            personas = self._default_personas()
+        if not isinstance(personas, list) or len(personas) != 10:
+            self.logger.warning("reviewer personas 格式不符，改用預設清單。")
+            personas = self._default_personas()
+        normalized = []
+        for index, persona in enumerate(personas, start=1):
+            if not isinstance(persona, dict):
+                continue
+            persona_id = str(persona.get("persona_id") or f"reviewer{index:02d}")
+            normalized.append(
+                {
+                    "persona_id": persona_id,
+                    "name": str(persona.get("name") or f"Reviewer{index:02d}"),
+                    "focus": str(persona.get("focus") or "通用審查"),
+                    "tone": str(persona.get("tone") or "直接"),
+                    "instructions": str(persona.get("instructions") or "提供具體改進建議。"),
+                }
+            )
+        if len(normalized) != 10:
+            normalized = self._default_personas()
+        return normalized
+
+    def _default_personas(self) -> list[dict[str, str]]:
+        return [
+            {
+                "persona_id": f"reviewer{index:02d}",
+                "name": name,
+                "focus": focus,
+                "tone": tone,
+                "instructions": instruction,
+            }
+            for index, (name, focus, tone, instruction) in enumerate(
+                [
+                    ("架構審查", "架構一致性與模組化", "嚴謹", "檢查是否符合規格並提出改善點。"),
+                    ("資料一致性", "資料結構與流程", "審慎", "指出資料流與持久化問題。"),
+                    ("安全守門員", "安全與風險", "直接", "列出可能風險與對應修正。"),
+                    ("使用者體驗", "UX 與可讀性", "溫和", "提出可讀性與流程改善建議。"),
+                    ("測試工程師", "測試與驗收", "務實", "補強測試缺口與驗收。"),
+                    ("效能守護", "效能與擴展性", "直白", "指出效能瓶頸與優化方向。"),
+                    ("錯誤處理", "錯誤流程", "嚴格", "檢查錯誤處理與日誌。"),
+                    ("文件品質", "文件與可維護性", "平實", "提出文件與維護性建議。"),
+                    ("CLI 流程", "CLI 使用流程", "精準", "檢查 CLI 流程與輸出。"),
+                    ("向下相容", "向下相容與最小變動", "小心", "確認最小改動與相容性。"),
+                ],
+                start=1,
+            )
+        ]
+
+    @staticmethod
+    def _review_filename(persona: dict[str, str]) -> str:
+        safe_name = "".join(
+            char if char.isalnum() or char in {"-", "_"} else "_" for char in persona["name"].strip()
+        )
+        safe_name = safe_name or "reviewer"
+        return f"{persona['persona_id']}_{safe_name}.md"
+
+    @staticmethod
+    def _build_final_prompt(
+        prompt: str, draft: str, reviews: list[tuple[dict[str, str], str, Path]]
+    ) -> str:
+        review_sections = []
+        for persona, review_text, _path in reviews:
+            review_sections.append(
+                "review:\n"
+                f"- persona_id: {persona['persona_id']}\n"
+                f"- name: {persona['name']}\n"
+                f"- focus: {persona['focus']}\n"
+                f"- tone: {persona['tone']}\n"
+                f"- instructions: {persona['instructions']}\n"
+                f"{review_text}"
+            )
+        reviews_block = "\n\n".join(review_sections)
+        return f"任務：{prompt}\n\n草稿：\n{draft}\n\nReviews：\n{reviews_block}\n\n請整合後輸出 final。"
+
+    def _stream_to_file(
+        self,
+        provider: Any,
+        provider_name: str,
+        provider_model: str | None,
+        messages: list[dict[str, str]],
+        output_path: Path,
+        session_path: Path,
+        session_id: str,
+        stage: str,
+        config: dict[str, Any],
+        provider_type: str | None,
+        prompt_text: str,
+    ) -> str:
+        response_text = ""
+        if provider_type == "mock":
+            print("提醒：目前使用 mock provider，輸出為模擬結果。")
+        try:
+            self._append_session_event(
+                session_path,
+                {
+                    "event": "prompt",
+                    "content": prompt_text,
+                    "stage": stage,
+                    "provider": provider_name,
+                    "model": provider_model,
+                },
+                session_id=session_id,
+            )
+            with output_path.open("w", encoding="utf-8") as handle:
+                for index, token in enumerate(provider.generate_stream(messages, model=provider_model)):
+                    print(token, end="", flush=True)
+                    handle.write(token)
+                    response_text += token
+                    self._append_session_event(
+                        session_path,
+                        {
+                            "event": "chunk",
+                            "index": index,
+                            "content": token,
+                            "stage": stage,
+                            "provider": provider_name,
+                            "model": provider_model,
+                        },
+                        session_id=session_id,
+                    )
+            print("")
+        except OSError as exc:
+            self.logger.error("寫入輸出失敗：%s", exc, exc_info=True)
+            raise
+        except ProviderError as exc:
+            self.logger.error("模型執行失敗：%s", exc, exc_info=True)
+            raise
+        self._append_session_event(
+            session_path,
+            {
+                "event": "final",
+                "content": response_text,
+                "stage": stage,
+                "provider": provider_name,
+                "model": provider_model,
+            },
+            session_id=session_id,
+        )
+        self._log_billing(config, provider_name, provider_model or "", prompt_text, response_text, session_id=session_id)
+        return response_text
+
+    def _stream_and_collect(
+        self,
+        provider: Any,
+        provider_name: str,
+        provider_model: str | None,
+        messages: list[dict[str, str]],
+        session_path: Path,
+        session_id: str,
+        stage: str,
+        config: dict[str, Any],
+        prompt_text: str,
+    ) -> str:
+        response_text = ""
+        try:
+            self._append_session_event(
+                session_path,
+                {
+                    "event": "prompt",
+                    "content": prompt_text,
+                    "stage": stage,
+                    "provider": provider_name,
+                    "model": provider_model,
+                },
+                session_id=session_id,
+            )
+            for index, token in enumerate(provider.generate_stream(messages, model=provider_model)):
+                print(token, end="", flush=True)
+                response_text += token
+                self._append_session_event(
+                    session_path,
+                    {
+                        "event": "chunk",
+                        "index": index,
+                        "content": token,
+                        "stage": stage,
+                        "provider": provider_name,
+                        "model": provider_model,
+                    },
+                    session_id=session_id,
+                )
+            print("")
+        except ProviderError as exc:
+            self.logger.error("模型執行失敗：%s", exc, exc_info=True)
+            raise
+        self._append_session_event(
+            session_path,
+            {
+                "event": "final",
+                "content": response_text,
+                "stage": stage,
+                "provider": provider_name,
+                "model": provider_model,
+            },
+            session_id=session_id,
+        )
+        self._log_billing(config, provider_name, provider_model or "", prompt_text, response_text, session_id=session_id)
+        return response_text
 
     def _load_mcp_servers(self, config: dict[str, Any]) -> list[MCPServerConfig]:
         servers_config = config.get("mcp", {}).get("servers", {}) or {}
