@@ -18,7 +18,7 @@ from .fs.safety import canonicalize_path, make_change_plan, require_confirm
 from .fs.trash import trash_move, trash_restore
 from .logging import log_billing, log_event
 from .logging_utils import setup_logger
-from .providers import OpenAICompatibleProvider, ProviderError
+from .models import ProviderError, build_provider
 
 
 @dataclass
@@ -251,15 +251,8 @@ class AmonCore:
         provider_name = config.get("amon", {}).get("provider", "openai")
         provider_cfg = config.get("providers", {}).get(provider_name, {})
         provider_type = provider_cfg.get("type")
-        if provider_type != "openai_compatible":
-            raise ValueError(f"不支援的 provider 類型：{provider_type}")
-        provider_model = model or provider_cfg.get("model")
-        provider = OpenAICompatibleProvider(
-            base_url=provider_cfg.get("base_url", ""),
-            api_key_env=provider_cfg.get("api_key_env", ""),
-            model=provider_model,
-            timeout_s=provider_cfg.get("timeout_s", 60),
-        )
+        provider_model = model or provider_cfg.get("default_model") or provider_cfg.get("model")
+        provider = build_provider(provider_cfg, model=provider_model)
         system_message = "你是 Amon 的專案助理，請用繁體中文回覆。"
         skill_context = self._resolve_skill_context(prompt, project_path)
         if skill_context:
@@ -272,16 +265,69 @@ class AmonCore:
             {"role": "user", "content": user_prompt or prompt},
         ]
         response_text = ""
+        session_id = uuid.uuid4().hex
+        session_path = self._prepare_session_path(project_path, session_id)
+        log_event(
+            {
+                "level": "INFO",
+                "event": "run_single_start",
+                "provider": provider_name,
+                "model": provider_model,
+                "session_id": session_id,
+            }
+        )
+        self._append_session_event(
+            session_path,
+            {
+                "event": "prompt",
+                "role": "user",
+                "content": user_prompt or prompt,
+                "provider": provider_name,
+                "model": provider_model,
+            },
+            session_id=session_id,
+        )
+        if provider_type == "mock":
+            print("提醒：目前使用 mock provider，輸出為模擬結果。")
         try:
-            for token in provider.stream_chat(messages):
+            for index, token in enumerate(provider.generate_stream(messages, model=provider_model)):
                 print(token, end="", flush=True)
                 response_text += token
+                self._append_session_event(
+                    session_path,
+                    {
+                        "event": "chunk",
+                        "index": index,
+                        "content": token,
+                        "provider": provider_name,
+                        "model": provider_model,
+                    },
+                    session_id=session_id,
+                )
             print("")
         except ProviderError as exc:
             self.logger.error("模型執行失敗：%s", exc, exc_info=True)
             raise
-        self._write_session(project_path, prompt, response_text, provider_name, provider_model)
-        self._log_billing(config, provider_name, provider_model, prompt, response_text)
+        self._append_session_event(
+            session_path,
+            {
+                "event": "final",
+                "content": response_text,
+                "provider": provider_name,
+                "model": provider_model,
+            },
+            session_id=session_id,
+        )
+        log_event(
+            {
+                "level": "INFO",
+                "event": "run_single_complete",
+                "provider": provider_name,
+                "model": provider_model,
+                "session_id": session_id,
+            }
+        )
+        self._log_billing(config, provider_name, provider_model, prompt, response_text, session_id=session_id)
         return response_text
 
     def scan_skills(self, project_path: Path | None = None) -> list[dict[str, Any]]:
@@ -608,38 +654,36 @@ class AmonCore:
                     raise
         return ""
 
-    def _write_session(
-        self,
-        project_path: Path | None,
-        prompt: str,
-        response: str,
-        provider: str,
-        model: str,
-    ) -> None:
+    def _prepare_session_path(self, project_path: Path | None, session_id: str) -> Path:
         if not project_path:
-            return
+            raise ValueError("執行任務需要指定專案")
         sessions_dir = project_path / "sessions"
         try:
             sessions_dir.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
             self.logger.error("建立 sessions 目錄失敗：%s", exc, exc_info=True)
             raise
-        session_path = sessions_dir / f"session_{datetime.now().strftime('%Y%m%d%H%M%S')}.jsonl"
-        payload = {
-            "timestamp": self._now(),
-            "provider": provider,
-            "model": model,
-            "prompt": prompt,
-            "response": response,
-        }
+        return sessions_dir / f"{session_id}.jsonl"
+
+    def _append_session_event(self, session_path: Path, payload: dict[str, Any], session_id: str) -> None:
+        event_payload = {"timestamp": self._now(), "session_id": session_id}
+        event_payload.update(payload)
         try:
-            session_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            with session_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(event_payload, ensure_ascii=False))
+                handle.write("\n")
         except OSError as exc:
-            self.logger.error("寫入 session 失敗：%s", exc, exc_info=True)
+            self.logger.error("寫入 session 事件失敗：%s", exc, exc_info=True)
             raise
 
     def _log_billing(
-        self, config: dict[str, Any], provider: str, model: str, prompt: str, response: str
+        self,
+        config: dict[str, Any],
+        provider: str,
+        model: str,
+        prompt: str,
+        response: str,
+        session_id: str | None = None,
     ) -> None:
         if not config.get("billing", {}).get("enabled", True):
             return
@@ -652,6 +696,7 @@ class AmonCore:
                 "prompt_chars": len(prompt),
                 "response_chars": len(response),
                 "token": 0,
+                "session_id": session_id,
             }
         )
 
