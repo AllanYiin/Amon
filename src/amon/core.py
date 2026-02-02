@@ -466,6 +466,564 @@ class AmonCore:
         )
         return final_text
 
+    def run_team(self, prompt: str, project_path: Path | None = None, model: str | None = None) -> str:
+        if not project_path:
+            raise ValueError("執行 team 需要指定專案")
+        config = self.load_config(project_path)
+        provider_name = config.get("amon", {}).get("provider", "openai")
+        provider_cfg = config.get("providers", {}).get(provider_name, {})
+        provider_type = provider_cfg.get("type")
+        provider_model = model or provider_cfg.get("default_model") or provider_cfg.get("model")
+        provider = build_provider(provider_cfg, model=provider_model)
+        session_id = uuid.uuid4().hex
+        session_path = self._prepare_session_path(project_path, session_id)
+        docs_dir = project_path / "docs"
+        tasks_dir = project_path / "tasks"
+        tasks_path = tasks_dir / "tasks.json"
+        team_max_retries = int(config.get("amon", {}).get("team_max_retries", 2))
+        log_event(
+            {
+                "level": "INFO",
+                "event": "team_start",
+                "provider": provider_name,
+                "model": provider_model,
+                "session_id": session_id,
+                "project_id": project_path.name,
+            }
+        )
+        if provider_type == "mock":
+            print("提醒：目前使用 mock provider，輸出為模擬結果。")
+        try:
+            docs_dir.mkdir(parents=True, exist_ok=True)
+            tasks_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            self.logger.error("建立 team 目錄失敗：%s", exc, exc_info=True)
+            raise
+
+        tasks_payload = self._load_tasks_payload(tasks_path)
+        if not tasks_payload["tasks"]:
+            tasks_payload = self._team_plan_tasks(
+                provider=provider,
+                provider_name=provider_name,
+                provider_model=provider_model,
+                provider_type=provider_type,
+                prompt=prompt,
+                docs_dir=docs_dir,
+                session_path=session_path,
+                session_id=session_id,
+                config=config,
+            )
+            self._write_tasks_payload(tasks_path, tasks_payload)
+        tasks_payload["tasks"] = self._normalize_team_tasks(tasks_payload.get("tasks", []))
+        self._write_tasks_payload(tasks_path, tasks_payload)
+
+        for task in tasks_payload["tasks"]:
+            if task["status"] == "done":
+                continue
+            attempts = int(task.get("attempts", 0))
+            while attempts < team_max_retries:
+                task["status"] = "in_progress"
+                task["attempts"] = attempts
+                self._write_tasks_payload(tasks_path, tasks_payload)
+                log_event(
+                    {
+                        "level": "INFO",
+                        "event": "team_task_start",
+                        "task_id": task["task_id"],
+                        "title": task["title"],
+                        "session_id": session_id,
+                        "project_id": project_path.name,
+                    }
+                )
+
+                persona = self._team_role_factory(
+                    provider=provider,
+                    provider_name=provider_name,
+                    provider_model=provider_model,
+                    provider_type=provider_type,
+                    task=task,
+                    docs_dir=docs_dir,
+                    session_path=session_path,
+                    session_id=session_id,
+                    config=config,
+                )
+                result_path = self._team_execute_task(
+                    provider=provider,
+                    provider_name=provider_name,
+                    provider_model=provider_model,
+                    provider_type=provider_type,
+                    prompt=prompt,
+                    task=task,
+                    persona=persona,
+                    docs_dir=docs_dir,
+                    session_path=session_path,
+                    session_id=session_id,
+                    config=config,
+                )
+                audit = self._team_audit_task(
+                    provider=provider,
+                    provider_name=provider_name,
+                    provider_model=provider_model,
+                    provider_type=provider_type,
+                    task=task,
+                    result_path=result_path,
+                    docs_dir=docs_dir,
+                    session_path=session_path,
+                    session_id=session_id,
+                    config=config,
+                )
+                if audit["status"] == "APPROVED":
+                    task["status"] = "done"
+                    task["feedback"] = audit.get("feedback")
+                    self._write_tasks_payload(tasks_path, tasks_payload)
+                    log_event(
+                        {
+                            "level": "INFO",
+                            "event": "team_task_approved",
+                            "task_id": task["task_id"],
+                            "session_id": session_id,
+                            "project_id": project_path.name,
+                        }
+                    )
+                    break
+                attempts += 1
+                task["attempts"] = attempts
+                task["status"] = "todo"
+                task["feedback"] = audit.get("feedback")
+                self._write_tasks_payload(tasks_path, tasks_payload)
+                log_event(
+                    {
+                        "level": "WARNING",
+                        "event": "team_task_rejected",
+                        "task_id": task["task_id"],
+                        "session_id": session_id,
+                        "project_id": project_path.name,
+                        "attempts": attempts,
+                    }
+                )
+                if attempts >= team_max_retries:
+                    task["status"] = "failed"
+                    self._write_tasks_payload(tasks_path, tasks_payload)
+                    log_event(
+                        {
+                            "level": "ERROR",
+                            "event": "team_task_failed",
+                            "task_id": task["task_id"],
+                            "session_id": session_id,
+                            "project_id": project_path.name,
+                        }
+                    )
+                    break
+
+        final_text = self._team_synthesize(
+            provider=provider,
+            provider_name=provider_name,
+            provider_model=provider_model,
+            provider_type=provider_type,
+            prompt=prompt,
+            tasks=tasks_payload["tasks"],
+            docs_dir=docs_dir,
+            session_path=session_path,
+            session_id=session_id,
+            config=config,
+        )
+        log_event(
+            {
+                "level": "INFO",
+                "event": "team_complete",
+                "provider": provider_name,
+                "model": provider_model,
+                "session_id": session_id,
+                "project_id": project_path.name,
+            }
+        )
+        return final_text
+
+    def _team_plan_tasks(
+        self,
+        provider: Any,
+        provider_name: str,
+        provider_model: str | None,
+        provider_type: str | None,
+        prompt: str,
+        docs_dir: Path,
+        session_path: Path,
+        session_id: str,
+        config: dict[str, Any],
+    ) -> dict[str, Any]:
+        plan_dir = docs_dir / "tasks"
+        try:
+            plan_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            self.logger.error("建立 team 任務目錄失敗：%s", exc, exc_info=True)
+            raise
+        plan_path = plan_dir / "plan.json"
+        system_message = "你是 PM，負責拆解任務並輸出 JSON。"
+        user_message = (
+            "請根據 user_task 拆解任務，輸出 JSON 格式："
+            '{"tasks":[{"task_id":"t1","title":"...","requiredCapabilities":["capability"]}]}。'
+            "請只輸出 JSON。user_task: "
+            f"{prompt}"
+        )
+        messages = [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": user_message},
+        ]
+        if provider_type == "mock":
+            print("提醒：目前使用 mock provider，輸出為模擬結果。")
+        response_text = self._stream_and_collect(
+            provider=provider,
+            provider_name=provider_name,
+            provider_model=provider_model,
+            messages=messages,
+            session_path=session_path,
+            session_id=session_id,
+            stage="team:plan",
+            config=config,
+            prompt_text=user_message,
+        )
+        try:
+            plan_path.write_text(response_text, encoding="utf-8")
+        except OSError as exc:
+            self.logger.error("寫入 team 任務規劃失敗：%s", exc, exc_info=True)
+            raise
+        parsed = self._parse_json_payload(response_text)
+        tasks_data = []
+        if isinstance(parsed, dict):
+            tasks_data = parsed.get("tasks", [])
+        elif isinstance(parsed, list):
+            tasks_data = parsed
+        if not tasks_data:
+            tasks_data = [
+                {
+                    "task_id": "task-1",
+                    "title": "預設任務",
+                    "requiredCapabilities": ["generalist"],
+                }
+            ]
+        return {"tasks": tasks_data}
+
+    def _team_role_factory(
+        self,
+        provider: Any,
+        provider_name: str,
+        provider_model: str | None,
+        provider_type: str | None,
+        task: dict[str, Any],
+        docs_dir: Path,
+        session_path: Path,
+        session_id: str,
+        config: dict[str, Any],
+    ) -> dict[str, Any]:
+        role_dir = docs_dir / "tasks" / task["task_id"]
+        try:
+            role_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            self.logger.error("建立角色目錄失敗：%s", exc, exc_info=True)
+            raise
+        persona_path = role_dir / "persona.json"
+        system_message = "你是 RoleFactory，請為任務建立 persona，輸出 JSON。"
+        user_message = (
+            "請輸出 persona JSON："
+            '{"persona_id":"p1","name":"...","focus":"...","tone":"...","instructions":"..."}。'
+            f" 任務：{task['title']}，能力：{', '.join(task['requiredCapabilities'])}"
+        )
+        messages = [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": user_message},
+        ]
+        if provider_type == "mock":
+            print("提醒：目前使用 mock provider，輸出為模擬結果。")
+        response_text = self._stream_and_collect(
+            provider=provider,
+            provider_name=provider_name,
+            provider_model=provider_model,
+            messages=messages,
+            session_path=session_path,
+            session_id=session_id,
+            stage=f"team:role:{task['task_id']}",
+            config=config,
+            prompt_text=user_message,
+        )
+        parsed = self._parse_json_payload(response_text)
+        if not isinstance(parsed, dict) or not {"persona_id", "name", "focus", "tone", "instructions"}.issubset(
+            parsed.keys()
+        ):
+            parsed = {
+                "persona_id": f"persona-{task['task_id']}",
+                "name": "通用執行者",
+                "focus": "任務交付",
+                "tone": "務實",
+                "instructions": "依照任務需求完成工作，輸出清楚的結果。",
+            }
+        try:
+            persona_path.write_text(json.dumps(parsed, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as exc:
+            self.logger.error("寫入 persona 失敗：%s", exc, exc_info=True)
+            raise
+        return parsed
+
+    def _team_execute_task(
+        self,
+        provider: Any,
+        provider_name: str,
+        provider_model: str | None,
+        provider_type: str | None,
+        prompt: str,
+        task: dict[str, Any],
+        persona: dict[str, Any],
+        docs_dir: Path,
+        session_path: Path,
+        session_id: str,
+        config: dict[str, Any],
+    ) -> Path:
+        task_dir = docs_dir / "tasks" / task["task_id"]
+        try:
+            task_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            self.logger.error("建立任務目錄失敗：%s", exc, exc_info=True)
+            raise
+        result_path = task_dir / "result.md"
+        system_message = "你是 StemAgent，負責完成指定任務。請用繁體中文輸出 markdown。"
+        persona_block = (
+            f"persona_id: {persona.get('persona_id')}\n"
+            f"name: {persona.get('name')}\n"
+            f"focus: {persona.get('focus')}\n"
+            f"tone: {persona.get('tone')}\n"
+            f"instructions: {persona.get('instructions')}"
+        )
+        user_message = (
+            f"user_task: {prompt}\n\n"
+            f"task: {task['title']}\n"
+            f"requiredCapabilities: {', '.join(task['requiredCapabilities'])}\n\n"
+            f"persona:\n{persona_block}\n\n"
+            "請產出對應的結果。"
+        )
+        messages = [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": user_message},
+        ]
+        self._stream_to_file(
+            provider=provider,
+            provider_name=provider_name,
+            provider_model=provider_model,
+            messages=messages,
+            output_path=result_path,
+            session_path=session_path,
+            session_id=session_id,
+            stage=f"team:execute:{task['task_id']}",
+            config=config,
+            provider_type=provider_type,
+            prompt_text=user_message,
+        )
+        return result_path
+
+    def _team_audit_task(
+        self,
+        provider: Any,
+        provider_name: str,
+        provider_model: str | None,
+        provider_type: str | None,
+        task: dict[str, Any],
+        result_path: Path,
+        docs_dir: Path,
+        session_path: Path,
+        session_id: str,
+        config: dict[str, Any],
+    ) -> dict[str, Any]:
+        audits_dir = docs_dir / "audits"
+        try:
+            audits_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            self.logger.error("建立 audits 目錄失敗：%s", exc, exc_info=True)
+            raise
+        audit_path = audits_dir / f"{task['task_id']}.json"
+        try:
+            result_text = result_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            self.logger.error("讀取任務結果失敗：%s", exc, exc_info=True)
+            raise
+        system_message = "你是 Auditor，請審核任務結果並輸出 JSON。"
+        user_message = (
+            "請輸出 JSON 格式："
+            '{"status":"APPROVED|REJECTED","feedback":"..."}。'
+            f" 任務：{task['title']}\n結果：\n{result_text}"
+        )
+        messages = [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": user_message},
+        ]
+        if provider_type == "mock":
+            print("提醒：目前使用 mock provider，輸出為模擬結果。")
+        response_text = self._stream_and_collect(
+            provider=provider,
+            provider_name=provider_name,
+            provider_model=provider_model,
+            messages=messages,
+            session_path=session_path,
+            session_id=session_id,
+            stage=f"team:audit:{task['task_id']}",
+            config=config,
+            prompt_text=user_message,
+        )
+        parsed = self._parse_json_payload(response_text)
+        status = "APPROVED"
+        feedback = "自動通過（未提供有效審核結果）。"
+        if isinstance(parsed, dict):
+            status = str(parsed.get("status") or status).upper()
+            feedback = str(parsed.get("feedback") or feedback)
+        if status not in {"APPROVED", "REJECTED"}:
+            status = "APPROVED"
+        audit_payload = {"status": status, "feedback": feedback}
+        try:
+            audit_path.write_text(json.dumps(audit_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as exc:
+            self.logger.error("寫入審核結果失敗：%s", exc, exc_info=True)
+            raise
+        return audit_payload
+
+    def _team_synthesize(
+        self,
+        provider: Any,
+        provider_name: str,
+        provider_model: str | None,
+        provider_type: str | None,
+        prompt: str,
+        tasks: list[dict[str, Any]],
+        docs_dir: Path,
+        session_path: Path,
+        session_id: str,
+        config: dict[str, Any],
+    ) -> str:
+        final_path = docs_dir / "final.md"
+        approved_tasks = [task for task in tasks if task.get("status") == "done"]
+        if not approved_tasks:
+            fallback_text = "目前沒有通過審核的任務，無法產出最終整合結果。"
+            try:
+                final_path.write_text(fallback_text, encoding="utf-8")
+            except OSError as exc:
+                self.logger.error("寫入 final.md 失敗：%s", exc, exc_info=True)
+                raise
+            return fallback_text
+        result_blocks = []
+        for task in approved_tasks:
+            result_path = docs_dir / "tasks" / task["task_id"] / "result.md"
+            try:
+                result_text = result_path.read_text(encoding="utf-8")
+            except OSError as exc:
+                self.logger.error("讀取任務結果失敗：%s", exc, exc_info=True)
+                raise
+            result_blocks.append(f"task_id: {task['task_id']}\n標題：{task['title']}\n{result_text}")
+        synthesis_prompt = (
+            f"user_task: {prompt}\n\n"
+            "以下是已通過審核的任務結果，請整合為最終輸出：\n\n"
+            + "\n\n".join(result_blocks)
+        )
+        messages = [
+            {"role": "system", "content": "你是 PM，負責整合所有任務輸出。請用繁體中文輸出 markdown。"},
+            {"role": "user", "content": synthesis_prompt},
+        ]
+        return self._stream_to_file(
+            provider=provider,
+            provider_name=provider_name,
+            provider_model=provider_model,
+            messages=messages,
+            output_path=final_path,
+            session_path=session_path,
+            session_id=session_id,
+            stage="team:final",
+            config=config,
+            provider_type=provider_type,
+            prompt_text=synthesis_prompt,
+        )
+
+    def _load_tasks_payload(self, tasks_path: Path) -> dict[str, Any]:
+        if not tasks_path.exists():
+            return {"tasks": []}
+        try:
+            return json.loads(tasks_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.error("讀取 tasks.json 失敗：%s", exc, exc_info=True)
+            raise
+
+    def _write_tasks_payload(self, tasks_path: Path, payload: dict[str, Any]) -> None:
+        try:
+            tasks_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as exc:
+            self.logger.error("寫入 tasks.json 失敗：%s", exc, exc_info=True)
+            raise
+
+    def _normalize_team_tasks(self, tasks: list[Any]) -> list[dict[str, Any]]:
+        normalized: list[dict[str, Any]] = []
+        for index, task in enumerate(tasks, start=1):
+            if not isinstance(task, dict):
+                continue
+            task_id = str(task.get("task_id") or task.get("id") or f"task-{index}")
+            title = str(task.get("title") or task.get("name") or f"任務 {index}")
+            capabilities = task.get("requiredCapabilities") or task.get("required_capabilities") or task.get("capabilities")
+            if isinstance(capabilities, str):
+                capabilities = [capabilities]
+            if not isinstance(capabilities, list):
+                capabilities = []
+            status = str(task.get("status") or "todo")
+            attempts = int(task.get("attempts", 0) or 0)
+            feedback = task.get("feedback")
+            normalized.append(
+                {
+                    "task_id": task_id,
+                    "title": title,
+                    "requiredCapabilities": capabilities,
+                    "status": status,
+                    "attempts": attempts,
+                    "feedback": feedback,
+                }
+            )
+        if not normalized:
+            normalized.append(
+                {
+                    "task_id": "task-1",
+                    "title": "預設任務",
+                    "requiredCapabilities": ["generalist"],
+                    "status": "todo",
+                    "attempts": 0,
+                    "feedback": None,
+                }
+            )
+        return normalized
+
+    def _parse_json_payload(self, text: str) -> Any:
+        text = text.strip()
+        if not text:
+            return None
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+        if "```" in text:
+            for chunk in text.split("```"):
+                candidate = chunk.strip()
+                if not candidate:
+                    continue
+                lines = candidate.splitlines()
+                if lines and lines[0].strip().lower() in {"json", "jsonl"}:
+                    candidate = "\n".join(lines[1:]).strip()
+                try:
+                    return json.loads(candidate)
+                except json.JSONDecodeError:
+                    continue
+        start_positions = [pos for pos in [text.find("{"), text.find("[")] if pos != -1]
+        if not start_positions:
+            return None
+        start = min(start_positions)
+        end = max(text.rfind("}"), text.rfind("]"))
+        if end == -1 or end <= start:
+            return None
+        snippet = text[start : end + 1]
+        try:
+            return json.loads(snippet)
+        except json.JSONDecodeError:
+            return None
+
     def scan_skills(self, project_path: Path | None = None) -> list[dict[str, Any]]:
         config = self.load_config(project_path)
         skills = []
