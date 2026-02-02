@@ -73,12 +73,12 @@ def build_parser() -> argparse.ArgumentParser:
     config_show = config_sub.add_parser("show", help="顯示合併後設定")
     config_show.add_argument("--project", help="指定專案 ID")
 
-    run_parser = subparsers.add_parser("run", help="執行單一模式")
+    run_parser = subparsers.add_parser("run", help="執行模式")
     run_parser.add_argument("user_task", nargs="?", help="輸入任務")
     run_parser.add_argument("--prompt", help="輸入提示（相容舊版）")
     run_parser.add_argument("--project", required=True, help="指定專案 ID")
     run_parser.add_argument("--model", help="指定模型")
-    run_parser.add_argument("--mode", default="single", help="指定模式（預設 single）")
+    run_parser.add_argument("--mode", default="single", help="指定模式（single/self_critique）")
 
     skills_parser = subparsers.add_parser("skills", help="技能管理")
     skills_sub = skills_parser.add_subparsers(dest="skills_command")
@@ -225,13 +225,17 @@ def _handle_config(core: AmonCore, args: argparse.Namespace) -> None:
 
 
 def _handle_run(core: AmonCore, args: argparse.Namespace) -> None:
-    if args.mode != "single":
-        raise ValueError(f"目前僅支援 single 模式（收到：{args.mode}）")
     user_task = args.user_task or args.prompt
     if not user_task:
         raise ValueError("請提供任務內容")
     project_path = core.get_project_path(args.project) if args.project else None
-    core.run_single(user_task, project_path=project_path, model=args.model)
+    if args.mode == "single":
+        core.run_single(user_task, project_path=project_path, model=args.model)
+        return
+    if args.mode == "self_critique":
+        core.run_self_critique(user_task, project_path=project_path, model=args.model)
+        return
+    raise ValueError(f"目前僅支援 single/self_critique 模式（收到：{args.mode}）")
 
 
 def _handle_skills(core: AmonCore, args: argparse.Namespace) -> None:
