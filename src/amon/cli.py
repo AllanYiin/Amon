@@ -6,6 +6,8 @@ import argparse
 import sys
 from pathlib import Path
 
+import yaml
+
 from .core import AmonCore
 
 
@@ -30,6 +32,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command")
 
+    subparsers.add_parser("init", help="初始化 Amon 資料夾")
+
     project_parser = subparsers.add_parser("project", help="專案管理")
     project_sub = project_parser.add_subparsers(dest="project_command")
 
@@ -52,6 +56,37 @@ def build_parser() -> argparse.ArgumentParser:
     restore_parser = project_sub.add_parser("restore", help="還原專案")
     restore_parser.add_argument("project_id", help="專案 ID")
 
+    config_parser = subparsers.add_parser("config", help="設定管理")
+    config_sub = config_parser.add_subparsers(dest="config_command")
+
+    config_get = config_sub.add_parser("get", help="讀取設定")
+    config_get.add_argument("key", help="設定鍵（例如 providers.openai.model）")
+    config_get.add_argument("--project", help="指定專案 ID")
+
+    config_set = config_sub.add_parser("set", help="更新設定")
+    config_set.add_argument("key", help="設定鍵（例如 providers.openai.model）")
+    config_set.add_argument("value", help="設定值（會以 YAML 解析）")
+    config_set.add_argument("--project", help="指定專案 ID")
+
+    run_parser = subparsers.add_parser("run", help="執行單一模式")
+    run_parser.add_argument("--prompt", required=True, help="輸入提示")
+    run_parser.add_argument("--project", help="指定專案 ID")
+    run_parser.add_argument("--model", help="指定模型")
+
+    skills_parser = subparsers.add_parser("skills", help="技能管理")
+    skills_sub = skills_parser.add_subparsers(dest="skills_command")
+    skills_scan = skills_sub.add_parser("scan", help="掃描技能")
+    skills_scan.add_argument("--project", help="指定專案 ID")
+    skills_sub.add_parser("list", help="列出技能")
+
+    mcp_parser = subparsers.add_parser("mcp", help="MCP 設定")
+    mcp_sub = mcp_parser.add_subparsers(dest="mcp_command")
+    mcp_sub.add_parser("list", help="列出 MCP Server")
+    mcp_allow = mcp_sub.add_parser("allow", help="允許 MCP tool")
+    mcp_allow.add_argument("tool", help="tool 名稱")
+    mcp_deny = mcp_sub.add_parser("deny", help="移除 MCP tool 權限")
+    mcp_deny.add_argument("tool", help="tool 名稱")
+
     return parser
 
 
@@ -67,8 +102,20 @@ def main() -> None:
     core = AmonCore(data_dir=data_dir)
 
     try:
+        if args.command == "init":
+            core.initialize()
+            print("已完成初始化")
+            return
         if args.command == "project":
             _handle_project(core, args)
+        elif args.command == "config":
+            _handle_config(core, args)
+        elif args.command == "run":
+            _handle_run(core, args)
+        elif args.command == "skills":
+            _handle_skills(core, args)
+        elif args.command == "mcp":
+            _handle_mcp(core, args)
         else:
             parser.print_help()
     except Exception as exc:  # noqa: BLE001
@@ -118,3 +165,72 @@ def _handle_project(core: AmonCore, args: argparse.Namespace) -> None:
         return
 
     raise ValueError("請指定專案指令")
+
+
+def _handle_config(core: AmonCore, args: argparse.Namespace) -> None:
+    project_path = core.get_project_path(args.project) if args.project else None
+    if args.config_command == "get":
+        value = core.get_config_value(args.key, project_path=project_path)
+        print(value)
+        return
+    if args.config_command == "set":
+        try:
+            parsed_value = yaml.safe_load(args.value)
+        except yaml.YAMLError as exc:
+            raise ValueError("設定值格式錯誤") from exc
+        core.set_config_value(args.key, parsed_value, project_path=project_path)
+        print("已更新設定")
+        return
+    raise ValueError("請指定設定指令")
+
+
+def _handle_run(core: AmonCore, args: argparse.Namespace) -> None:
+    project_path = core.get_project_path(args.project) if args.project else None
+    core.run_single(args.prompt, project_path=project_path, model=args.model)
+
+
+def _handle_skills(core: AmonCore, args: argparse.Namespace) -> None:
+    project_path = core.get_project_path(args.project) if args.project else None
+    if args.skills_command == "scan":
+        skills = core.scan_skills(project_path=project_path)
+        print(f"已掃描 {len(skills)} 個技能")
+        return
+    if args.skills_command == "list":
+        skills = core.list_skills()
+        if not skills:
+            print("尚未建立技能索引，請先執行 amon skills scan。")
+            return
+        for skill in skills:
+            scope = "全域" if skill.get("scope") == "global" else "專案"
+            description = skill.get("description") or "無描述"
+            print(f"{skill.get('name')}｜{scope}｜{description}")
+        return
+    raise ValueError("請指定技能指令")
+
+
+def _handle_mcp(core: AmonCore, args: argparse.Namespace) -> None:
+    if args.mcp_command == "list":
+        config = core.load_config()
+        servers = config.get("mcp", {}).get("servers", {})
+        allowed_tools = config.get("mcp", {}).get("allowed_tools", [])
+        if not servers:
+            print("尚未設定 MCP server。")
+        else:
+            for name, server in servers.items():
+                server_type = server.get("type", "unknown")
+                endpoint = server.get("endpoint", "")
+                print(f"{name}｜{server_type}｜{endpoint}")
+        if allowed_tools:
+            print("允許的 tools：")
+            for tool in allowed_tools:
+                print(f"- {tool}")
+        return
+    if args.mcp_command == "allow":
+        core.add_allowed_tool(args.tool)
+        print("已更新 MCP tool 權限")
+        return
+    if args.mcp_command == "deny":
+        core.remove_allowed_tool(args.tool)
+        print("已更新 MCP tool 權限")
+        return
+    raise ValueError("請指定 MCP 指令")
