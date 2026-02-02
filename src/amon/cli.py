@@ -94,6 +94,13 @@ def build_parser() -> argparse.ArgumentParser:
     ui_parser = subparsers.add_parser("ui", help="啟動 UI 預覽")
     ui_parser.add_argument("--port", type=int, default=8000, help="UI 服務埠號（預設 8000）")
 
+    fs_parser = subparsers.add_parser("fs", help="檔案安全操作")
+    fs_sub = fs_parser.add_subparsers(dest="fs_command")
+    fs_delete = fs_sub.add_parser("delete", help="刪除檔案（移到回收桶）")
+    fs_delete.add_argument("path", help="要刪除的路徑")
+    fs_restore = fs_sub.add_parser("restore", help="從回收桶還原")
+    fs_restore.add_argument("trash_id", help="回收桶 ID")
+
     return parser
 
 
@@ -125,6 +132,8 @@ def main() -> None:
             _handle_mcp(core, args)
         elif args.command == "ui":
             _handle_ui(args)
+        elif args.command == "fs":
+            _handle_fs(core, args)
         else:
             parser.print_help()
     except Exception as exc:  # noqa: BLE001
@@ -255,3 +264,18 @@ def _handle_ui(args: argparse.Namespace) -> None:
     from .ui_server import serve_ui
 
     serve_ui(port=args.port)
+
+
+def _handle_fs(core: AmonCore, args: argparse.Namespace) -> None:
+    if args.fs_command == "delete":
+        trash_id = core.fs_delete(args.path)
+        if not trash_id:
+            print("已取消操作")
+            return
+        print(f"已移至回收桶：{trash_id}")
+        return
+    if args.fs_command == "restore":
+        restored_path = core.fs_restore(args.trash_id)
+        print(f"已還原到：{restored_path}")
+        return
+    raise ValueError("請指定 fs 指令")

@@ -1,0 +1,40 @@
+"""Safety helpers for filesystem operations."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+
+def make_change_plan(ops: list[dict[str, str]]) -> str:
+    lines = ["# 變更計畫", ""]
+    for op in ops:
+        action = op.get("action", "unknown")
+        target = op.get("target", "")
+        detail = op.get("detail", "")
+        if detail:
+            lines.append(f"- {action}: {target}（{detail}）")
+        else:
+            lines.append(f"- {action}: {target}")
+    return "\n".join(lines)
+
+
+def require_confirm(plan_text: str) -> bool:
+    print(plan_text)
+    response = input("請確認是否繼續？(y/N)：").strip().lower()
+    return response == "y"
+
+
+def canonicalize_path(path: Path, allowed_paths: list[Path]) -> Path:
+    resolved = path.expanduser().resolve()
+    allowed = [allowed_path.expanduser().resolve() for allowed_path in allowed_paths]
+    if not any(_is_within(resolved, base) for base in allowed):
+        raise ValueError("路徑不允許操作")
+    return resolved
+
+
+def _is_within(target: Path, base: Path) -> bool:
+    try:
+        target.relative_to(base)
+    except ValueError:
+        return False
+    return True
