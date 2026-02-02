@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import uuid
 from dataclasses import dataclass
@@ -41,7 +42,7 @@ class ProjectRecord:
 
 class AmonCore:
     def __init__(self, data_dir: Path | None = None) -> None:
-        self.data_dir = data_dir or Path("~/.amon").expanduser()
+        self.data_dir = data_dir or self._resolve_data_dir()
         self.logs_dir = self.data_dir / "logs"
         self.cache_dir = self.data_dir / "cache"
         self.projects_dir = self.data_dir / "projects"
@@ -65,6 +66,7 @@ class AmonCore:
             self.node_env_dir,
         ]:
             path.mkdir(parents=True, exist_ok=True)
+        self._touch_log(self.logs_dir / "amon.log")
         if not self.billing_log.exists():
             try:
                 self.billing_log.write_text("", encoding="utf-8")
@@ -73,7 +75,7 @@ class AmonCore:
                 raise
         config_path = self._global_config_path()
         if not config_path.exists():
-            write_yaml(config_path, DEFAULT_CONFIG)
+            write_yaml(config_path, self._initial_config())
         trash_manifest = self.trash_dir / "manifest.json"
         if not trash_manifest.exists():
             try:
@@ -375,6 +377,33 @@ class AmonCore:
 
     def _global_config_path(self) -> Path:
         return self.data_dir / "config.yaml"
+
+    def _initial_config(self) -> dict[str, Any]:
+        return {
+            "amon": {"data_dir": str(self.data_dir)},
+            "paths": {
+                "skills_dir": str(self.skills_dir),
+                "python_env": str(self.python_env_dir),
+                "node_env": str(self.node_env_dir),
+            },
+            "skills": {"global_dir": str(self.skills_dir)},
+        }
+
+    @staticmethod
+    def _resolve_data_dir() -> Path:
+        env_path = os.environ.get("AMON_HOME")
+        if env_path:
+            return Path(env_path).expanduser()
+        return Path("~/.amon").expanduser()
+
+    def _touch_log(self, path: Path) -> None:
+        if path.exists():
+            return
+        try:
+            path.write_text("", encoding="utf-8")
+        except OSError as exc:
+            self.logger.error("建立 %s 失敗：%s", path.name, exc, exc_info=True)
+            raise
 
     def _project_config_name(self) -> str:
         return DEFAULT_CONFIG["projects"]["config_name"]
