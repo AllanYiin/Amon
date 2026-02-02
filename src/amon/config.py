@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import os
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import yaml
 
@@ -92,3 +94,82 @@ def get_config_value(config: dict[str, Any], key_path: str) -> Any:
             raise KeyError(f"找不到設定鍵：{key_path}")
         cursor = cursor[part]
     return cursor
+
+
+def _assign_sources(value: Any, source: str) -> Any:
+    if isinstance(value, dict):
+        return {key: _assign_sources(val, source) for key, val in value.items()}
+    return source
+
+
+def _merge_with_sources(
+    base: dict[str, Any],
+    sources: dict[str, Any],
+    updates: Mapping[str, Any],
+    source: str,
+) -> None:
+    for key, value in updates.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict) and isinstance(sources.get(key), dict):
+            _merge_with_sources(base[key], sources[key], value, source)
+        else:
+            base[key] = value
+            sources[key] = _assign_sources(value, source)
+
+
+def annotate_config(effective: Any, sources: Any) -> Any:
+    if isinstance(effective, dict) and isinstance(sources, dict):
+        return {key: annotate_config(effective[key], sources.get(key)) for key in effective}
+    return {"value": effective, "source": sources}
+
+
+@dataclass
+class ConfigResolution:
+    effective: dict[str, Any]
+    sources: dict[str, Any]
+
+    def annotated(self) -> dict[str, Any]:
+        return annotate_config(self.effective, self.sources)
+
+
+class ConfigLoader:
+    def __init__(self, data_dir: Path | None = None) -> None:
+        self.data_dir = data_dir or self._resolve_data_dir()
+
+    def load_global(self) -> dict[str, Any]:
+        return read_yaml(self._global_config_path())
+
+    def load_project(self, project_id: str) -> dict[str, Any]:
+        return read_yaml(self._project_config_path(project_id))
+
+    def resolve(
+        self,
+        project_id: str | None = None,
+        cli_overrides: Mapping[str, Any] | None = None,
+    ) -> ConfigResolution:
+        effective = deepcopy(DEFAULT_CONFIG)
+        sources = _assign_sources(DEFAULT_CONFIG, "default")
+
+        global_config = self.load_global()
+        _merge_with_sources(effective, sources, global_config, "global")
+
+        if project_id:
+            project_config = self.load_project(project_id)
+            _merge_with_sources(effective, sources, project_config, "project")
+
+        if cli_overrides:
+            _merge_with_sources(effective, sources, cli_overrides, "cli")
+
+        return ConfigResolution(effective=effective, sources=sources)
+
+    @staticmethod
+    def _resolve_data_dir() -> Path:
+        env_path = os.environ.get("AMON_HOME")
+        if env_path:
+            return Path(env_path).expanduser()
+        return Path("~/.amon").expanduser()
+
+    def _global_config_path(self) -> Path:
+        return self.data_dir / "config.yaml"
+
+    def _project_config_path(self, project_id: str) -> Path:
+        return self.data_dir / "projects" / project_id / DEFAULT_CONFIG["projects"]["config_name"]

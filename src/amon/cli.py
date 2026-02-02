@@ -8,6 +8,7 @@ from pathlib import Path
 
 import yaml
 
+from .config import ConfigLoader
 from .core import AmonCore
 
 
@@ -67,6 +68,9 @@ def build_parser() -> argparse.ArgumentParser:
     config_set.add_argument("key", help="設定鍵（例如 providers.openai.model）")
     config_set.add_argument("value", help="設定值（會以 YAML 解析）")
     config_set.add_argument("--project", help="指定專案 ID")
+
+    config_show = config_sub.add_parser("show", help="顯示合併後設定")
+    config_show.add_argument("--project", help="指定專案 ID")
 
     run_parser = subparsers.add_parser("run", help="執行單一模式")
     run_parser.add_argument("--prompt", required=True, help="輸入提示")
@@ -173,18 +177,24 @@ def _handle_project(core: AmonCore, args: argparse.Namespace) -> None:
 
 
 def _handle_config(core: AmonCore, args: argparse.Namespace) -> None:
-    project_path = core.get_project_path(args.project) if args.project else None
     if args.config_command == "get":
+        project_path = core.get_project_path(args.project) if args.project else None
         value = core.get_config_value(args.key, project_path=project_path)
         print(value)
         return
     if args.config_command == "set":
+        project_path = core.get_project_path(args.project) if args.project else None
         try:
             parsed_value = yaml.safe_load(args.value)
         except yaml.YAMLError as exc:
             raise ValueError("設定值格式錯誤") from exc
         core.set_config_value(args.key, parsed_value, project_path=project_path)
         print("已更新設定")
+        return
+    if args.config_command == "show":
+        loader = ConfigLoader(data_dir=core.data_dir)
+        resolution = loader.resolve(project_id=args.project)
+        print(yaml.safe_dump(resolution.annotated(), allow_unicode=True, sort_keys=False))
         return
     raise ValueError("請指定設定指令")
 
