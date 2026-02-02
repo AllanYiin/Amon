@@ -7,6 +7,7 @@ import os
 import shlex
 import shutil
 import uuid
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -250,6 +251,12 @@ class AmonCore:
 
     def run_single(self, prompt: str, project_path: Path | None = None, model: str | None = None) -> str:
         config = self.load_config(project_path)
+        project_id = project_path.name if project_path else None
+        budget_status = self._evaluate_budget(config, project_id=project_id)
+        if budget_status["exceeded"]:
+            message = "提醒：已超過用量上限，single 仍可執行，但 self_critique/team 會被拒絕。"
+            print(message)
+            self._log_budget_event(budget_status, mode="single", project_id=project_id, action="allow")
         provider_name = config.get("amon", {}).get("provider", "openai")
         provider_cfg = config.get("providers", {}).get(provider_name, {})
         provider_type = provider_cfg.get("type")
@@ -329,13 +336,26 @@ class AmonCore:
                 "session_id": session_id,
             }
         )
-        self._log_billing(config, provider_name, provider_model, prompt, response_text, session_id=session_id)
+        self._log_billing(
+            config,
+            provider_name,
+            provider_model,
+            prompt,
+            response_text,
+            session_id=session_id,
+            project_id=project_id,
+        )
         return response_text
 
     def run_self_critique(self, prompt: str, project_path: Path | None = None, model: str | None = None) -> str:
         if not project_path:
             raise ValueError("執行 self_critique 需要指定專案")
         config = self.load_config(project_path)
+        project_id = project_path.name
+        budget_status = self._evaluate_budget(config, project_id=project_id)
+        if budget_status["exceeded"]:
+            self._log_budget_event(budget_status, mode="self_critique", project_id=project_id, action="reject")
+            raise RuntimeError("已超過用量上限，拒絕執行 self_critique")
         provider_name = config.get("amon", {}).get("provider", "openai")
         provider_cfg = config.get("providers", {}).get(provider_name, {})
         provider_type = provider_cfg.get("type")
@@ -368,6 +388,7 @@ class AmonCore:
             session_id=session_id,
             config=config,
             provider_type=provider_type,
+            project_id=project_path.name,
         )
 
         writer_system = "你是 Writer，負責撰寫草稿。請用繁體中文輸出 markdown。"
@@ -387,6 +408,7 @@ class AmonCore:
             config=config,
             provider_type=provider_type,
             prompt_text=draft_messages[-1]["content"],
+            project_id=project_path.name,
         )
 
         reviews: list[tuple[dict[str, str], str, Path]] = []
@@ -427,6 +449,7 @@ class AmonCore:
                 config=config,
                 provider_type=provider_type,
                 prompt_text=reviewer_messages[-1]["content"],
+                project_id=project_path.name,
             )
             reviews.append((persona, review_text, review_path))
 
@@ -452,6 +475,7 @@ class AmonCore:
             config=config,
             provider_type=provider_type,
             prompt_text=final_messages[-1]["content"],
+            project_id=project_path.name,
         )
         log_event(
             {
@@ -470,6 +494,11 @@ class AmonCore:
         if not project_path:
             raise ValueError("執行 team 需要指定專案")
         config = self.load_config(project_path)
+        project_id = project_path.name
+        budget_status = self._evaluate_budget(config, project_id=project_id)
+        if budget_status["exceeded"]:
+            self._log_budget_event(budget_status, mode="team", project_id=project_id, action="reject")
+            raise RuntimeError("已超過用量上限，拒絕執行 team")
         provider_name = config.get("amon", {}).get("provider", "openai")
         provider_cfg = config.get("providers", {}).get(provider_name, {})
         provider_type = provider_cfg.get("type")
@@ -512,6 +541,7 @@ class AmonCore:
                 session_path=session_path,
                 session_id=session_id,
                 config=config,
+                project_id=project_id,
             )
             self._write_tasks_payload(tasks_path, tasks_payload)
         tasks_payload["tasks"] = self._normalize_team_tasks(tasks_payload.get("tasks", []))
@@ -546,6 +576,7 @@ class AmonCore:
                     session_path=session_path,
                     session_id=session_id,
                     config=config,
+                    project_id=project_id,
                 )
                 result_path = self._team_execute_task(
                     provider=provider,
@@ -559,6 +590,7 @@ class AmonCore:
                     session_path=session_path,
                     session_id=session_id,
                     config=config,
+                    project_id=project_id,
                 )
                 audit = self._team_audit_task(
                     provider=provider,
@@ -571,6 +603,7 @@ class AmonCore:
                     session_path=session_path,
                     session_id=session_id,
                     config=config,
+                    project_id=project_id,
                 )
                 if audit["status"] == "APPROVED":
                     task["status"] = "done"
@@ -626,6 +659,7 @@ class AmonCore:
             session_path=session_path,
             session_id=session_id,
             config=config,
+            project_id=project_id,
         )
         log_event(
             {
@@ -639,6 +673,110 @@ class AmonCore:
         )
         return final_text
 
+    def export_project(self, project_id: str, output_path: Path) -> Path:
+        record = self.get_project(project_id)
+        project_path = Path(record.path)
+        if not project_path.exists():
+            raise FileNotFoundError(f"專案路徑不存在：{project_path}")
+        output_path = output_path.expanduser()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        payload_paths = [
+            project_path / "amon.project.yaml",
+            project_path / "docs",
+            project_path / "tasks",
+            project_path / "sessions",
+            project_path / "logs",
+        ]
+        base_prefix = project_path.name
+        try:
+            with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                for path in payload_paths:
+                    self._add_export_path(archive, path, base_prefix, project_path)
+        except OSError as exc:
+            self.logger.error("匯出專案失敗：%s", exc, exc_info=True)
+            raise
+        log_event(
+            {
+                "level": "INFO",
+                "event": "project_export",
+                "project_id": project_id,
+                "output_path": str(output_path),
+            }
+        )
+        return output_path
+
+    def run_eval(self, suite: str = "basic") -> dict[str, Any]:
+        if suite != "basic":
+            raise ValueError(f"不支援的評測套件：{suite}")
+        self.ensure_base_structure()
+        project_name = f"eval-basic-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        project = self.create_project(project_name)
+        project_path = Path(project.path)
+        self.set_config_value(
+            "providers.mock",
+            {
+                "type": "mock",
+                "default_model": "mock-model",
+                "stream_chunks": ["[mock]"],
+            },
+            project_path=project_path,
+        )
+        self.set_config_value("amon.provider", "mock", project_path=project_path)
+        log_event(
+            {
+                "level": "INFO",
+                "event": "eval_start",
+                "suite": suite,
+                "project_id": project_path.name,
+            }
+        )
+
+        results: list[dict[str, Any]] = []
+        failures: list[str] = []
+        tasks = [
+            ("single", "請輸出評測訊息。"),
+            ("self_critique", "請建立評測草稿。"),
+            ("team", "請完成評測任務。"),
+        ]
+        for mode, task_prompt in tasks:
+            try:
+                if mode == "single":
+                    self.run_single(task_prompt, project_path=project_path)
+                elif mode == "self_critique":
+                    self.run_self_critique(task_prompt, project_path=project_path)
+                elif mode == "team":
+                    self.run_team(task_prompt, project_path=project_path)
+                else:
+                    raise ValueError(f"未知模式：{mode}")
+                results.append({"task": mode, "status": "passed"})
+            except Exception as exc:  # noqa: BLE001
+                results.append({"task": mode, "status": "failed", "error": str(exc)})
+                failures.append(mode)
+
+        checks = self._validate_eval_outputs(project_path)
+        for check in checks:
+            if check["status"] != "passed":
+                failures.append(check["check"])
+
+        status = "passed" if not failures else "failed"
+        payload = {
+            "suite": suite,
+            "project_id": project_path.name,
+            "status": status,
+            "tasks": results,
+            "checks": checks,
+        }
+        log_event(
+            {
+                "level": "INFO" if status == "passed" else "ERROR",
+                "event": "eval_complete",
+                "suite": suite,
+                "project_id": project_path.name,
+                "status": status,
+            }
+        )
+        return payload
+
     def _team_plan_tasks(
         self,
         provider: Any,
@@ -650,6 +788,7 @@ class AmonCore:
         session_path: Path,
         session_id: str,
         config: dict[str, Any],
+        project_id: str | None,
     ) -> dict[str, Any]:
         plan_dir = docs_dir / "tasks"
         try:
@@ -681,6 +820,7 @@ class AmonCore:
             stage="team:plan",
             config=config,
             prompt_text=user_message,
+            project_id=project_id,
         )
         try:
             plan_path.write_text(response_text, encoding="utf-8")
@@ -714,6 +854,7 @@ class AmonCore:
         session_path: Path,
         session_id: str,
         config: dict[str, Any],
+        project_id: str | None,
     ) -> dict[str, Any]:
         role_dir = docs_dir / "tasks" / task["task_id"]
         try:
@@ -744,6 +885,7 @@ class AmonCore:
             stage=f"team:role:{task['task_id']}",
             config=config,
             prompt_text=user_message,
+            project_id=project_id,
         )
         parsed = self._parse_json_payload(response_text)
         if not isinstance(parsed, dict) or not {"persona_id", "name", "focus", "tone", "instructions"}.issubset(
@@ -776,6 +918,7 @@ class AmonCore:
         session_path: Path,
         session_id: str,
         config: dict[str, Any],
+        project_id: str | None,
     ) -> Path:
         task_dir = docs_dir / "tasks" / task["task_id"]
         try:
@@ -815,6 +958,7 @@ class AmonCore:
             config=config,
             provider_type=provider_type,
             prompt_text=user_message,
+            project_id=project_id,
         )
         return result_path
 
@@ -830,6 +974,7 @@ class AmonCore:
         session_path: Path,
         session_id: str,
         config: dict[str, Any],
+        project_id: str | None,
     ) -> dict[str, Any]:
         audits_dir = docs_dir / "audits"
         try:
@@ -865,6 +1010,7 @@ class AmonCore:
             stage=f"team:audit:{task['task_id']}",
             config=config,
             prompt_text=user_message,
+            project_id=project_id,
         )
         parsed = self._parse_json_payload(response_text)
         status = "APPROVED"
@@ -894,6 +1040,7 @@ class AmonCore:
         session_path: Path,
         session_id: str,
         config: dict[str, Any],
+        project_id: str | None,
     ) -> str:
         final_path = docs_dir / "final.md"
         approved_tasks = [task for task in tasks if task.get("status") == "done"]
@@ -935,6 +1082,7 @@ class AmonCore:
             config=config,
             provider_type=provider_type,
             prompt_text=synthesis_prompt,
+            project_id=project_id,
         )
 
     def _load_tasks_payload(self, tasks_path: Path) -> dict[str, Any]:
@@ -1496,6 +1644,7 @@ class AmonCore:
         session_id: str,
         config: dict[str, Any],
         provider_type: str | None,
+        project_id: str | None,
     ) -> list[dict[str, str]]:
         role_factory_system = (
             "你是 RoleFactory，負責產生 10 位 reviewer personas。"
@@ -1519,6 +1668,7 @@ class AmonCore:
             stage="role_factory",
             config=config,
             prompt_text=role_factory_messages[-1]["content"],
+            project_id=project_id,
         )
         try:
             personas = json.loads(raw)
@@ -1611,6 +1761,7 @@ class AmonCore:
         config: dict[str, Any],
         provider_type: str | None,
         prompt_text: str,
+        project_id: str | None,
     ) -> str:
         response_text = ""
         if provider_type == "mock":
@@ -1662,7 +1813,15 @@ class AmonCore:
             },
             session_id=session_id,
         )
-        self._log_billing(config, provider_name, provider_model or "", prompt_text, response_text, session_id=session_id)
+        self._log_billing(
+            config,
+            provider_name,
+            provider_model or "",
+            prompt_text,
+            response_text,
+            session_id=session_id,
+            project_id=project_id,
+        )
         return response_text
 
     def _stream_and_collect(
@@ -1676,6 +1835,7 @@ class AmonCore:
         stage: str,
         config: dict[str, Any],
         prompt_text: str,
+        project_id: str | None,
     ) -> str:
         response_text = ""
         try:
@@ -1720,7 +1880,15 @@ class AmonCore:
             },
             session_id=session_id,
         )
-        self._log_billing(config, provider_name, provider_model or "", prompt_text, response_text, session_id=session_id)
+        self._log_billing(
+            config,
+            provider_name,
+            provider_model or "",
+            prompt_text,
+            response_text,
+            session_id=session_id,
+            project_id=project_id,
+        )
         return response_text
 
     def _load_mcp_servers(self, config: dict[str, Any]) -> list[MCPServerConfig]:
@@ -1819,6 +1987,7 @@ class AmonCore:
         prompt: str,
         response: str,
         session_id: str | None = None,
+        project_id: str | None = None,
     ) -> None:
         if not config.get("billing", {}).get("enabled", True):
             return
@@ -1832,9 +2001,203 @@ class AmonCore:
                 "response_chars": len(response),
                 "token": 0,
                 "session_id": session_id,
+                "project_id": project_id,
             }
         )
 
     @staticmethod
     def _now() -> str:
         return datetime.now().isoformat(timespec="seconds")
+
+    def _evaluate_budget(self, config: dict[str, Any], project_id: str | None) -> dict[str, Any]:
+        billing_config = config.get("billing", {})
+        daily_budget = self._normalize_budget(billing_config.get("daily_budget"))
+        project_budget = self._normalize_budget(billing_config.get("per_project_budget"))
+        if daily_budget is None and project_budget is None:
+            return {
+                "exceeded": False,
+                "daily_budget": None,
+                "per_project_budget": None,
+                "daily_usage": 0,
+                "project_usage": 0,
+            }
+        records = self._load_billing_records()
+        today = datetime.now().date()
+        daily_usage = self._sum_billing_usage(records, target_date=today, project_id=None)
+        project_usage = (
+            self._sum_billing_usage(records, target_date=None, project_id=project_id) if project_id else 0
+        )
+        exceeded = False
+        if daily_budget is not None and daily_usage >= daily_budget:
+            exceeded = True
+        if project_budget is not None and project_usage >= project_budget:
+            exceeded = True
+        return {
+            "exceeded": exceeded,
+            "daily_budget": daily_budget,
+            "per_project_budget": project_budget,
+            "daily_usage": daily_usage,
+            "project_usage": project_usage,
+        }
+
+    def _log_budget_event(self, status: dict[str, Any], mode: str, project_id: str | None, action: str) -> None:
+        log_event(
+            {
+                "level": "WARNING",
+                "event": "budget_exceeded",
+                "mode": mode,
+                "action": action,
+                "project_id": project_id,
+                "daily_budget": status.get("daily_budget"),
+                "per_project_budget": status.get("per_project_budget"),
+                "daily_usage": status.get("daily_usage"),
+                "project_usage": status.get("project_usage"),
+            }
+        )
+
+    @staticmethod
+    def _normalize_budget(value: Any) -> float | None:
+        if value is None:
+            return None
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        if parsed < 0:
+            return None
+        return parsed
+
+    def _load_billing_records(self) -> list[dict[str, Any]]:
+        if not self.billing_log.exists():
+            return []
+        try:
+            lines = self.billing_log.read_text(encoding="utf-8").splitlines()
+        except OSError as exc:
+            self.logger.error("讀取 billing log 失敗：%s", exc, exc_info=True)
+            raise
+        records = []
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+        return records
+
+    def _sum_billing_usage(
+        self,
+        records: list[dict[str, Any]],
+        target_date: datetime.date | None,
+        project_id: str | None,
+    ) -> int:
+        total = 0
+        for record in records:
+            if project_id and record.get("project_id") != project_id:
+                continue
+            if target_date:
+                record_date = self._parse_record_date(record.get("ts"))
+                if record_date != target_date:
+                    continue
+            prompt_chars = int(record.get("prompt_chars", 0) or 0)
+            response_chars = int(record.get("response_chars", 0) or 0)
+            total += prompt_chars + response_chars
+        return total
+
+    @staticmethod
+    def _parse_record_date(timestamp: str | None) -> datetime.date | None:
+        if not timestamp:
+            return None
+        try:
+            return datetime.fromisoformat(timestamp).date()
+        except ValueError:
+            return None
+
+    def _add_export_path(
+        self,
+        archive: zipfile.ZipFile,
+        path: Path,
+        base_prefix: str,
+        project_path: Path,
+    ) -> None:
+        if not path.exists():
+            return
+        relative = path.relative_to(project_path)
+        if path.is_dir():
+            entries = list(path.rglob("*"))
+            if not entries:
+                archive.writestr(f"{base_prefix}/{relative}/", "")
+                return
+            for entry in entries:
+                if entry.is_file():
+                    archive.write(entry, arcname=f"{base_prefix}/{entry.relative_to(project_path)}")
+        else:
+            archive.write(path, arcname=f"{base_prefix}/{relative}")
+
+    def _validate_eval_outputs(self, project_path: Path) -> list[dict[str, Any]]:
+        checks: list[dict[str, Any]] = []
+        sessions = list((project_path / "sessions").glob("*.jsonl"))
+        checks.append(
+            {
+                "check": "sessions_exists",
+                "status": "passed" if sessions else "failed",
+                "detail": f"found={len(sessions)}",
+            }
+        )
+        docs_dir = project_path / "docs"
+        checks.append(
+            {
+                "check": "self_critique_docs",
+                "status": "passed"
+                if (docs_dir / "draft.md").exists() and (docs_dir / "final.md").exists()
+                else "failed",
+                "detail": "draft/final",
+            }
+        )
+        reviews_dir = docs_dir / "reviews"
+        review_files = list(reviews_dir.glob("*.md")) if reviews_dir.exists() else []
+        checks.append(
+            {
+                "check": "self_critique_reviews",
+                "status": "passed" if review_files else "failed",
+                "detail": f"count={len(review_files)}",
+            }
+        )
+        tasks_path = project_path / "tasks" / "tasks.json"
+        if tasks_path.exists():
+            try:
+                tasks_payload = json.loads(tasks_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                tasks_payload = None
+        else:
+            tasks_payload = None
+        checks.append(
+            {
+                "check": "team_tasks_schema",
+                "status": "passed" if self._has_valid_tasks_schema(tasks_payload) else "failed",
+                "detail": "tasks.json",
+            }
+        )
+        checks.append(
+            {
+                "check": "team_final_doc",
+                "status": "passed" if (docs_dir / "final.md").exists() else "failed",
+                "detail": "docs/final.md",
+            }
+        )
+        return checks
+
+    @staticmethod
+    def _has_valid_tasks_schema(payload: Any) -> bool:
+        if not isinstance(payload, dict):
+            return False
+        tasks = payload.get("tasks")
+        if not isinstance(tasks, list) or not tasks:
+            return False
+        required_keys = {"task_id", "title", "requiredCapabilities", "status", "attempts", "feedback"}
+        for task in tasks:
+            if not isinstance(task, dict):
+                return False
+            if not required_keys.issubset(task.keys()):
+                return False
+        return True
