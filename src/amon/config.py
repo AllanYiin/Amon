@@ -49,6 +49,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "mcp": {
         "servers": {},
         "allowed_tools": [],
+        "denied_tools": [],
     },
     "billing": {"enabled": True, "currency": "USD"},
 }

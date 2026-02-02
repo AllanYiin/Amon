@@ -39,6 +39,12 @@ amon run --prompt "請用繁體中文摘要以下內容..." --project <project_i
 # 列出 MCP server 設定
 amon mcp list
 
+# 列出 MCP tools
+amon tools list
+
+# 呼叫 MCP tool
+amon tools call local-tools:echo --args '{"text":"hello"}'
+
 # 啟動 UI 預覽（瀏覽 http://localhost:8000）
 amon ui --port 8000
 ```

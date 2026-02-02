@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -97,6 +98,13 @@ def build_parser() -> argparse.ArgumentParser:
     mcp_deny = mcp_sub.add_parser("deny", help="移除 MCP tool 權限")
     mcp_deny.add_argument("tool", help="tool 名稱")
 
+    tools_parser = subparsers.add_parser("tools", help="MCP tools 管理")
+    tools_sub = tools_parser.add_subparsers(dest="tools_command")
+    tools_sub.add_parser("list", help="列出 MCP tools")
+    tools_call = tools_sub.add_parser("call", help="呼叫 MCP tool")
+    tools_call.add_argument("target", help="格式：<server>:<tool>")
+    tools_call.add_argument("--args", default="{}", help="JSON 格式的參數")
+
     ui_parser = subparsers.add_parser("ui", help="啟動 UI 預覽")
     ui_parser.add_argument("--port", type=int, default=8000, help="UI 服務埠號（預設 8000）")
 
@@ -136,6 +144,8 @@ def main() -> None:
             _handle_skills(core, args)
         elif args.command == "mcp":
             _handle_mcp(core, args)
+        elif args.command == "tools":
+            _handle_tools(core, args)
         elif args.command == "ui":
             _handle_ui(args)
         elif args.command == "fs":
@@ -286,6 +296,41 @@ def _handle_mcp(core: AmonCore, args: argparse.Namespace) -> None:
         print("已更新 MCP tool 權限")
         return
     raise ValueError("請指定 MCP 指令")
+
+
+def _handle_tools(core: AmonCore, args: argparse.Namespace) -> None:
+    if args.tools_command == "list":
+        registry = core.refresh_mcp_registry()
+        servers = registry.get("servers", {})
+        if not servers:
+            print("尚未設定 MCP tools。")
+            return
+        for name, info in servers.items():
+            tools = info.get("tools", [])
+            error = info.get("error")
+            if error:
+                print(f"{name}｜{info.get('transport', 'unknown')}｜錯誤：{error}")
+                continue
+            if not tools:
+                print(f"{name}｜{info.get('transport', 'unknown')}｜無可用 tools")
+                continue
+            for tool in tools:
+                tool_name = tool.get("name", "unknown")
+                description = tool.get("description", "")
+                print(f"{name}:{tool_name}｜{description}")
+        return
+    if args.tools_command == "call":
+        if ":" not in args.target:
+            raise ValueError("請提供 <server>:<tool> 格式")
+        server_name, tool_name = args.target.split(":", 1)
+        try:
+            parsed_args = json.loads(args.args)
+        except json.JSONDecodeError as exc:
+            raise ValueError("args 必須是 JSON 格式") from exc
+        result = core.call_mcp_tool(server_name, tool_name, parsed_args)
+        print(yaml.safe_dump(result, allow_unicode=True, sort_keys=False))
+        return
+    raise ValueError("請指定 tools 指令")
 
 
 def _handle_ui(args: argparse.Namespace) -> None:

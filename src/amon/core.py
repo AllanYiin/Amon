@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import uuid
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ from .fs.safety import canonicalize_path, make_change_plan, require_confirm
 from .fs.trash import trash_move, trash_restore
 from .logging import log_billing, log_event
 from .logging_utils import setup_logger
+from .mcp_client import MCPClientError, MCPServerConfig, MCPStdioClient
 from .models import ProviderError, build_provider
 
 
@@ -398,6 +400,93 @@ class AmonCore:
             tools.remove(tool_name)
             write_yaml(config_path, config)
 
+    def refresh_mcp_registry(self) -> dict[str, Any]:
+        self.ensure_base_structure()
+        config = self.load_config()
+        servers = self._load_mcp_servers(config)
+        registry = {"updated_at": self._now(), "servers": {}}
+        for server in servers:
+            if server.transport != "stdio":
+                registry["servers"][server.name] = {
+                    "transport": server.transport,
+                    "tools": [],
+                    "error": "尚未支援的 transport",
+                }
+                continue
+            if not server.command:
+                registry["servers"][server.name] = {
+                    "transport": server.transport,
+                    "tools": [],
+                    "error": "缺少 command 設定",
+                }
+                continue
+            try:
+                with MCPStdioClient(server.command) as client:
+                    tools = client.list_tools()
+                registry["servers"][server.name] = {
+                    "transport": server.transport,
+                    "tools": tools,
+                }
+            except MCPClientError as exc:
+                self.logger.error("MCP tools 讀取失敗：%s", exc, exc_info=True)
+                registry["servers"][server.name] = {
+                    "transport": server.transport,
+                    "tools": [],
+                    "error": str(exc),
+                }
+        self._write_mcp_registry(registry)
+        return registry
+
+    def call_mcp_tool(self, server_name: str, tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
+        self.ensure_base_structure()
+        config = self.load_config()
+        servers = {server.name: server for server in self._load_mcp_servers(config)}
+        if server_name not in servers:
+            raise KeyError(f"找不到 MCP server：{server_name}")
+        server = servers[server_name]
+        full_tool = f"{server_name}:{tool_name}"
+        if self._is_tool_denied(full_tool, config, server):
+            raise PermissionError("工具已被拒絕")
+        if not self._is_tool_allowed(full_tool, config, server):
+            raise PermissionError("工具尚未被允許")
+        if self._is_high_risk_tool(tool_name):
+            plan = make_change_plan(
+                [
+                    {
+                        "action": "執行高風險工具",
+                        "target": full_tool,
+                        "detail": "包含 write/delete 等可能影響資料的操作",
+                    }
+                ]
+            )
+            if not require_confirm(plan):
+                log_event(
+                    {
+                        "level": "INFO",
+                        "event": "mcp_tool_cancelled",
+                        "tool_name": full_tool,
+                    }
+                )
+                raise RuntimeError("使用者取消操作")
+        if server.transport != "stdio" or not server.command:
+            raise RuntimeError("目前僅支援 stdio transport")
+        try:
+            with MCPStdioClient(server.command) as client:
+                result = client.call_tool(tool_name, args)
+        except MCPClientError as exc:
+            self.logger.error("MCP tool 呼叫失敗：%s", exc, exc_info=True)
+            raise
+        log_event(
+            {
+                "level": "INFO",
+                "event": "mcp_tool_call",
+                "tool_name": full_tool,
+                "args_summary": self._summarize_value(args),
+                "result_summary": self._summarize_value(result),
+            }
+        )
+        return result
+
     def _generate_project_id(self, name: str) -> str:
         slug = "".join(char.lower() for char in name if char.isalnum())
         short_id = uuid.uuid4().hex[:6]
@@ -570,6 +659,9 @@ class AmonCore:
             self.logger.error("建立 %s 失敗：%s", path.name, exc, exc_info=True)
             raise
 
+    def _mcp_registry_path(self) -> Path:
+        return self.cache_dir / "mcp_registry.json"
+
     def _project_config_name(self) -> str:
         return DEFAULT_CONFIG["projects"]["config_name"]
 
@@ -671,6 +763,83 @@ class AmonCore:
             self.logger.error("建立 sessions 目錄失敗：%s", exc, exc_info=True)
             raise
         return sessions_dir / f"{session_id}.jsonl"
+
+    def _load_mcp_servers(self, config: dict[str, Any]) -> list[MCPServerConfig]:
+        servers_config = config.get("mcp", {}).get("servers", {}) or {}
+        servers: list[MCPServerConfig] = []
+        for name, server in servers_config.items():
+            transport = server.get("transport") or server.get("type") or "stdio"
+            command = server.get("command")
+            url = server.get("url") or server.get("endpoint")
+            allowed = server.get("allowed")
+            parsed_command: list[str] | None = None
+            if isinstance(command, list):
+                parsed_command = [str(item) for item in command]
+            elif isinstance(command, str):
+                parsed_command = shlex.split(command)
+            servers.append(
+                MCPServerConfig(
+                    name=name,
+                    transport=str(transport),
+                    command=parsed_command,
+                    url=str(url) if url else None,
+                    allowed=allowed,
+                )
+            )
+        return servers
+
+    def _write_mcp_registry(self, registry: dict[str, Any]) -> None:
+        path = self._mcp_registry_path()
+        try:
+            path.write_text(json.dumps(registry, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as exc:
+            self.logger.error("寫入 MCP registry 失敗：%s", exc, exc_info=True)
+            raise
+
+    def _is_tool_allowed(self, full_tool: str, config: dict[str, Any], server: MCPServerConfig) -> bool:
+        allowed_tools = config.get("mcp", {}).get("allowed_tools", []) or []
+        server_allowed = server.allowed or []
+        if allowed_tools:
+            return self._match_tool(full_tool, allowed_tools)
+        if server_allowed:
+            return self._match_tool(
+                full_tool,
+                [f"{server.name}:{item}" if ":" not in item else item for item in server_allowed],
+            )
+        return True
+
+    def _is_tool_denied(self, full_tool: str, config: dict[str, Any], server: MCPServerConfig) -> bool:
+        denied_tools = config.get("mcp", {}).get("denied_tools", []) or []
+        return self._match_tool(full_tool, denied_tools)
+
+    @staticmethod
+    def _match_tool(full_tool: str, patterns: list[str]) -> bool:
+        for pattern in patterns:
+            if pattern == full_tool:
+                return True
+            if pattern.endswith(".*") and full_tool.startswith(pattern[:-2]):
+                return True
+            if ":" not in pattern and full_tool.endswith(f":{pattern}"):
+                return True
+        return False
+
+    @staticmethod
+    def _is_high_risk_tool(tool_name: str) -> bool:
+        lowered = tool_name.lower()
+        return any(token in lowered for token in ["write", "delete", "remove", "destroy"])
+
+    @staticmethod
+    def _summarize_value(value: Any, limit: int = 200) -> str:
+        if isinstance(value, dict):
+            keys = ", ".join(sorted(value.keys()))
+            text = f"dict(keys=[{keys}])"
+        elif isinstance(value, list):
+            text = f"list(len={len(value)})"
+        else:
+            text = str(value)
+        if len(text) > limit:
+            return f"{text[:limit]}..."
+        return text
 
     def _append_session_event(self, session_path: Path, payload: dict[str, Any], session_id: str) -> None:
         event_payload = {"timestamp": self._now(), "session_id": session_id}
