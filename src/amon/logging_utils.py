@@ -32,3 +32,22 @@ def setup_logger(name: str, log_dir: Path) -> logging.Logger:
     logger.addHandler(stream_handler)
 
     return logger
+
+
+def setup_billing_logger(log_dir: Path) -> logging.Logger:
+    logger = logging.getLogger("amon.billing")
+    if logger.handlers:
+        return logger
+
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "billing.log"
+
+    logger.setLevel(logging.INFO)
+    formatter = logging.Formatter(LOG_FORMAT)
+
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(formatter)
+
+    logger.addHandler(file_handler)
+    return logger

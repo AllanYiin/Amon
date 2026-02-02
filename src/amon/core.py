@@ -12,21 +12,9 @@ from typing import Any
 
 import yaml
 
-from .logging_utils import setup_logger
-
-
-DEFAULT_CONFIG = {
-    "amon": {
-        "data_dir": "~/.amon",
-        "default_mode": "auto",
-        "ui": {"theme": "light", "streaming": True},
-    },
-    "skills": {
-        "global_dir": "~/.amon/skills",
-        "project_dir_rel": ".claude/skills",
-    },
-    "billing": {"enabled": True, "currency": "USD"},
-}
+from .config import DEFAULT_CONFIG, deep_merge, get_config_value, read_yaml, set_config_value, write_yaml
+from .logging_utils import setup_billing_logger, setup_logger
+from .providers import OpenAICompatibleProvider, ProviderError
 
 
 @dataclass
@@ -58,14 +46,51 @@ class AmonCore:
         self.cache_dir = self.data_dir / "cache"
         self.projects_dir = self.data_dir / "projects"
         self.trash_dir = self.data_dir / "trash"
+        self.skills_dir = self.data_dir / "skills"
+        self.python_env_dir = self.data_dir / "python_env"
+        self.node_env_dir = self.data_dir / "node_env"
+        self.billing_log = self.logs_dir / "billing.log"
         self.logger = setup_logger("amon", self.logs_dir)
+        self.billing_logger = setup_billing_logger(self.logs_dir)
 
     def ensure_base_structure(self) -> None:
-        for path in [self.data_dir, self.logs_dir, self.cache_dir, self.projects_dir, self.trash_dir]:
+        for path in [
+            self.data_dir,
+            self.logs_dir,
+            self.cache_dir,
+            self.projects_dir,
+            self.trash_dir,
+            self.skills_dir,
+            self.python_env_dir,
+            self.node_env_dir,
+        ]:
             path.mkdir(parents=True, exist_ok=True)
-        config_path = self.data_dir / "config.yaml"
+        if not self.billing_log.exists():
+            try:
+                self.billing_log.write_text("", encoding="utf-8")
+            except OSError as exc:
+                self.logger.error("建立 billing.log 失敗：%s", exc, exc_info=True)
+                raise
+        config_path = self._global_config_path()
         if not config_path.exists():
-            self._write_yaml(config_path, DEFAULT_CONFIG)
+            write_yaml(config_path, DEFAULT_CONFIG)
+        trash_manifest = self.trash_dir / "manifest.json"
+        if not trash_manifest.exists():
+            try:
+                trash_manifest.write_text(
+                    json.dumps({"entries": []}, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+            except OSError as exc:
+                self.logger.error("建立回收桶清單失敗：%s", exc, exc_info=True)
+                raise
+
+    def initialize(self) -> None:
+        try:
+            self.ensure_base_structure()
+        except OSError as exc:
+            self.logger.error("初始化 Amon 失敗：%s", exc, exc_info=True)
+            raise
 
     def create_project(self, name: str) -> ProjectRecord:
         self.ensure_base_structure()
@@ -132,6 +157,7 @@ class AmonCore:
                 record.trash_path = str(trash_path)
                 record.updated_at = self._now()
                 self._write_records(records)
+                self._append_trash_entry(record, trash_path)
                 self.logger.info("已刪除專案 %s (%s)", record.name, project_id)
                 return record
         raise KeyError(f"找不到專案：{project_id}")
@@ -151,9 +177,118 @@ class AmonCore:
                 record.path = str(original_path)
                 record.updated_at = self._now()
                 self._write_records(records)
+                self._mark_trash_restored(project_id)
                 self.logger.info("已還原專案 %s (%s)", record.name, project_id)
                 return record
         raise KeyError(f"找不到專案：{project_id}")
+
+    def load_config(self, project_path: Path | None = None) -> dict[str, Any]:
+        self.ensure_base_structure()
+        global_config = deep_merge(DEFAULT_CONFIG, read_yaml(self._global_config_path()))
+        if not project_path:
+            return global_config
+        project_config = read_yaml(project_path / self._project_config_name())
+        return deep_merge(global_config, project_config)
+
+    def get_config_value(self, key_path: str, project_path: Path | None = None) -> Any:
+        config = self.load_config(project_path)
+        return get_config_value(config, key_path)
+
+    def set_config_value(self, key_path: str, value: Any, project_path: Path | None = None) -> None:
+        self.ensure_base_structure()
+        config_path = self._global_config_path() if project_path is None else project_path / self._project_config_name()
+        current = read_yaml(config_path)
+        updated = set_config_value(current, key_path, value)
+        write_yaml(config_path, updated)
+
+    def run_single(self, prompt: str, project_path: Path | None = None, model: str | None = None) -> str:
+        config = self.load_config(project_path)
+        provider_name = config.get("amon", {}).get("provider", "openai")
+        provider_cfg = config.get("providers", {}).get(provider_name, {})
+        provider_type = provider_cfg.get("type")
+        if provider_type != "openai_compatible":
+            raise ValueError(f"不支援的 provider 類型：{provider_type}")
+        provider_model = model or provider_cfg.get("model")
+        provider = OpenAICompatibleProvider(
+            base_url=provider_cfg.get("base_url", ""),
+            api_key_env=provider_cfg.get("api_key_env", ""),
+            model=provider_model,
+            timeout_s=provider_cfg.get("timeout_s", 60),
+        )
+        system_message = "你是 Amon 的專案助理，請用繁體中文回覆。"
+        skill_context = self._resolve_skill_context(prompt, project_path)
+        if skill_context:
+            system_message = f"{system_message}\n\n[Skill]\n{skill_context}"
+        user_prompt = prompt
+        if prompt.startswith("/"):
+            user_prompt = " ".join(prompt.split()[1:]).strip()
+        messages = [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": user_prompt or prompt},
+        ]
+        response_text = ""
+        try:
+            for token in provider.stream_chat(messages):
+                print(token, end="", flush=True)
+                response_text += token
+            print("")
+        except ProviderError as exc:
+            self.logger.error("模型執行失敗：%s", exc, exc_info=True)
+            raise
+        self._write_session(project_path, prompt, response_text, provider_name, provider_model)
+        self._log_billing(config, provider_name, provider_model, prompt, response_text)
+        return response_text
+
+    def scan_skills(self, project_path: Path | None = None) -> list[dict[str, Any]]:
+        config = self.load_config(project_path)
+        skills = []
+        global_dir = Path(config["skills"]["global_dir"]).expanduser()
+        if global_dir.exists():
+            skills.extend(self._scan_skill_dir(global_dir, scope="global"))
+        if project_path:
+            project_dir = project_path / config["skills"]["project_dir_rel"]
+            if project_dir.exists():
+                skills.extend(self._scan_skill_dir(project_dir, scope="project"))
+        index_path = self.cache_dir / "skills_index.json"
+        try:
+            index_path.write_text(json.dumps({"skills": skills}, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as exc:
+            self.logger.error("寫入技能索引失敗：%s", exc, exc_info=True)
+            raise
+        return skills
+
+    def list_skills(self) -> list[dict[str, Any]]:
+        index_path = self.cache_dir / "skills_index.json"
+        if not index_path.exists():
+            return []
+        try:
+            data = json.loads(index_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.error("讀取技能索引失敗：%s", exc, exc_info=True)
+            raise
+        return data.get("skills", [])
+
+    def get_project_path(self, project_id: str) -> Path:
+        record = self.get_project(project_id)
+        return Path(record.path)
+
+    def add_allowed_tool(self, tool_name: str) -> None:
+        config_path = self._global_config_path()
+        config = read_yaml(config_path)
+        mcp = config.setdefault("mcp", {})
+        tools = mcp.setdefault("allowed_tools", [])
+        if tool_name not in tools:
+            tools.append(tool_name)
+            write_yaml(config_path, config)
+
+    def remove_allowed_tool(self, tool_name: str) -> None:
+        config_path = self._global_config_path()
+        config = read_yaml(config_path)
+        mcp = config.setdefault("mcp", {})
+        tools = mcp.setdefault("allowed_tools", [])
+        if tool_name in tools:
+            tools.remove(tool_name)
+            write_yaml(config_path, config)
 
     def _generate_project_id(self, name: str) -> str:
         slug = "".join(char.lower() for char in name if char.isalnum())
@@ -199,13 +334,21 @@ class AmonCore:
         index_path = self.cache_dir / "projects_index.json"
         if not index_path.exists():
             return []
-        data = json.loads(index_path.read_text(encoding="utf-8"))
+        try:
+            data = json.loads(index_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.error("讀取專案索引失敗：%s", exc, exc_info=True)
+            raise
         return [ProjectRecord(**item) for item in data.get("projects", [])]
 
     def _write_records(self, records: list[ProjectRecord]) -> None:
         index_path = self.cache_dir / "projects_index.json"
         payload = {"projects": [record.to_dict() for record in records]}
-        index_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        try:
+            index_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as exc:
+            self.logger.error("寫入專案索引失敗：%s", exc, exc_info=True)
+            raise
 
     def _write_yaml(self, path: Path, data: dict[str, Any]) -> None:
         try:
@@ -229,6 +372,153 @@ class AmonCore:
         except OSError as exc:
             self.logger.error("%s失敗：%s", action, exc, exc_info=True)
             raise
+
+    def _global_config_path(self) -> Path:
+        return self.data_dir / "config.yaml"
+
+    def _project_config_name(self) -> str:
+        return DEFAULT_CONFIG["projects"]["config_name"]
+
+    def _append_trash_entry(self, record: ProjectRecord, trash_path: Path) -> None:
+        manifest_path = self.trash_dir / "manifest.json"
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.error("讀取回收桶清單失敗：%s", exc, exc_info=True)
+            raise
+        manifest.setdefault("entries", [])
+        manifest["entries"].append(
+            {
+                "project_id": record.project_id,
+                "name": record.name,
+                "original_path": record.path,
+                "trash_path": str(trash_path),
+                "deleted_at": self._now(),
+                "restored_at": None,
+            }
+        )
+        try:
+            manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as exc:
+            self.logger.error("寫入回收桶清單失敗：%s", exc, exc_info=True)
+            raise
+
+    def _mark_trash_restored(self, project_id: str) -> None:
+        manifest_path = self.trash_dir / "manifest.json"
+        if not manifest_path.exists():
+            return
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.error("讀取回收桶清單失敗：%s", exc, exc_info=True)
+            raise
+        for entry in manifest.get("entries", []):
+            if entry.get("project_id") == project_id and not entry.get("restored_at"):
+                entry["restored_at"] = self._now()
+        try:
+            manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as exc:
+            self.logger.error("寫入回收桶清單失敗：%s", exc, exc_info=True)
+            raise
+
+    def _scan_skill_dir(self, base_dir: Path, scope: str) -> list[dict[str, Any]]:
+        skills = []
+        for child in base_dir.iterdir():
+            if not child.is_dir():
+                continue
+            skill_file = child / "SKILL.md"
+            if not skill_file.exists():
+                continue
+            skills.append(self._read_skill(skill_file, child.name, scope))
+        return skills
+
+    def _read_skill(self, skill_file: Path, fallback_name: str, scope: str) -> dict[str, Any]:
+        try:
+            content = skill_file.read_text(encoding="utf-8")
+        except OSError as exc:
+            self.logger.error("讀取技能檔案失敗：%s", exc, exc_info=True)
+            raise
+        name = fallback_name
+        description = ""
+        if content.startswith("---"):
+            parts = content.split("---", 2)
+            if len(parts) >= 3:
+                frontmatter = yaml.safe_load(parts[1]) or {}
+                name = frontmatter.get("name", name)
+                description = frontmatter.get("description", "")
+        return {
+            "name": name,
+            "description": description,
+            "path": str(skill_file),
+            "scope": scope,
+        }
+
+    def _resolve_skill_context(self, prompt: str, project_path: Path | None) -> str:
+        if not prompt.startswith("/"):
+            return ""
+        skill_name = prompt.split()[0].lstrip("/")
+        skills = self.list_skills()
+        for skill in skills:
+            if skill.get("name") == skill_name:
+                try:
+                    return Path(skill["path"]).read_text(encoding="utf-8")
+                except OSError as exc:
+                    self.logger.error("讀取技能檔案失敗：%s", exc, exc_info=True)
+                    raise
+        if project_path:
+            self.scan_skills(project_path)
+        skills = self.list_skills()
+        for skill in skills:
+            if skill.get("name") == skill_name:
+                try:
+                    return Path(skill["path"]).read_text(encoding="utf-8")
+                except OSError as exc:
+                    self.logger.error("讀取技能檔案失敗：%s", exc, exc_info=True)
+                    raise
+        return ""
+
+    def _write_session(
+        self,
+        project_path: Path | None,
+        prompt: str,
+        response: str,
+        provider: str,
+        model: str,
+    ) -> None:
+        if not project_path:
+            return
+        sessions_dir = project_path / "sessions"
+        try:
+            sessions_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            self.logger.error("建立 sessions 目錄失敗：%s", exc, exc_info=True)
+            raise
+        session_path = sessions_dir / f"session_{datetime.now().strftime('%Y%m%d%H%M%S')}.jsonl"
+        payload = {
+            "timestamp": self._now(),
+            "provider": provider,
+            "model": model,
+            "prompt": prompt,
+            "response": response,
+        }
+        try:
+            session_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        except OSError as exc:
+            self.logger.error("寫入 session 失敗：%s", exc, exc_info=True)
+            raise
+
+    def _log_billing(
+        self, config: dict[str, Any], provider: str, model: str, prompt: str, response: str
+    ) -> None:
+        if not config.get("billing", {}).get("enabled", True):
+            return
+        self.billing_logger.info(
+            "provider=%s model=%s prompt_chars=%s response_chars=%s",
+            provider,
+            model,
+            len(prompt),
+            len(response),
+        )
 
     @staticmethod
     def _now() -> str:
