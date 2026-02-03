@@ -1819,6 +1819,85 @@ class AmonCore:
                 )
         return mentions
 
+    def _extract_explicit_entities(self, text: str) -> list[dict[str, Any]]:
+        mentions: list[dict[str, Any]] = []
+        surname_list = (
+            "王李張劉陳楊黃趙吳周徐孫馬朱胡郭何高林羅鄭梁謝宋唐許韓馮"
+            "鄧曹彭曾蕭田董袁潘於蔣蔡余杜葉程蘇魏呂丁任沈姚盧姜崔鐘譚"
+            "陸汪范金石廖賴邵熊孟秦白江閻薛尹段雷侯龍史陶黎賀顧毛郝龔"
+            "邱萬錢嚴覃武戴莫孔向湯"
+        )
+        person_pattern = rf"(?P<name>[{surname_list}][\u4e00-\u9fff]{{1,2}})"
+        org_pattern = r"(?P<name>[\u4e00-\u9fff]{2,12}(公司|企業|機構|組織|基金會|工作室|學校|大學|協會))"
+        for match in re.finditer(person_pattern, text):
+            mentions.append(
+                {
+                    "name": match.group("name"),
+                    "type": "person",
+                    "start": match.start(),
+                    "end": match.end(),
+                }
+            )
+        for match in re.finditer(org_pattern, text):
+            mentions.append(
+                {
+                    "name": match.group("name"),
+                    "type": "org",
+                    "start": match.start(),
+                    "end": match.end(),
+                }
+            )
+        return sorted(mentions, key=lambda item: item["start"])
+
+    def _extract_pronoun_mentions(self, text: str) -> list[dict[str, Any]]:
+        pronouns = ["他們", "她們", "他", "她", "這家公司", "該公司", "這個公司", "該企業", "該組織"]
+        pattern = "|".join(re.escape(pronoun) for pronoun in pronouns)
+        mentions: list[dict[str, Any]] = []
+        for match in re.finditer(pattern, text):
+            mentions.append(
+                {
+                    "pronoun": match.group(0),
+                    "start": match.start(),
+                    "end": match.end(),
+                }
+            )
+        return mentions
+
+    def _resolve_pronouns_in_text(
+        self,
+        text: str,
+        last_entity: dict[str, Any] | None,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+        mentions: list[dict[str, Any]] = []
+        explicit_entities = self._extract_explicit_entities(text)
+        pronouns = self._extract_pronoun_mentions(text)
+        events: list[dict[str, Any]] = []
+        for entity in explicit_entities:
+            event = dict(entity)
+            event["kind"] = "entity"
+            events.append(event)
+        for pronoun in pronouns:
+            event = dict(pronoun)
+            event["kind"] = "pronoun"
+            events.append(event)
+        for event in sorted(events, key=lambda item: item["start"]):
+            if event["kind"] == "entity":
+                last_entity = {"name": event["name"], "type": event["type"]}
+                continue
+            resolved_to = last_entity.get("name") if last_entity else None
+            entity_type = last_entity.get("type") if last_entity else None
+            mentions.append(
+                {
+                    "pronoun": event["pronoun"],
+                    "resolved_to": resolved_to,
+                    "entity_type": entity_type,
+                    "confidence": 0.6 if resolved_to else 0.0,
+                    "needs_review": resolved_to is None,
+                    "rule": "session_last_explicit",
+                }
+            )
+        return mentions, last_entity
+
     def ingest_session_memory(
         self,
         project_path: Path,
@@ -1880,14 +1959,18 @@ class AmonCore:
         memory_dir = self._prepare_memory_dir(project_path)
         chunks_path = memory_dir / "chunks.jsonl"
         normalized_path = memory_dir / "normalized.jsonl"
+        entities_path = memory_dir / "entities.jsonl"
         if not chunks_path.exists():
             self.logger.error("找不到 memory chunks 檔案：%s", chunks_path)
             raise FileNotFoundError(f"找不到 memory chunks 檔案：{chunks_path}")
         normalized_count = 0
+        session_last_entity: dict[str, dict[str, Any] | None] = {}
         try:
-            with chunks_path.open("r", encoding="utf-8") as handle, normalized_path.open(
-                "w", encoding="utf-8"
-            ) as out_handle:
+            with (
+                chunks_path.open("r", encoding="utf-8") as handle,
+                normalized_path.open("w", encoding="utf-8") as out_handle,
+                entities_path.open("w", encoding="utf-8") as entity_handle,
+            ):
                 for line in handle:
                     payload = line.strip()
                     if not payload:
@@ -1901,11 +1984,26 @@ class AmonCore:
                     created_at = str(chunk.get("created_at") or "")
                     mentions = self._extract_time_mentions(text, created_at)
                     geo_mentions = self._extract_geo_mentions(text)
+                    session_id = str(chunk.get("session_id") or "")
+                    last_entity = session_last_entity.get(session_id)
+                    pronoun_mentions, last_entity = self._resolve_pronouns_in_text(text, last_entity)
+                    session_last_entity[session_id] = last_entity
                     normalized = dict(chunk)
                     normalized["time"] = {"mentions": mentions}
                     normalized["geo"] = {"mentions": geo_mentions}
                     out_handle.write(json.dumps(normalized, ensure_ascii=False))
                     out_handle.write("\n")
+                    for mention in pronoun_mentions:
+                        entity_record = {
+                            "chunk_id": chunk.get("chunk_id"),
+                            "project_id": chunk.get("project_id"),
+                            "session_id": session_id,
+                            "source_path": chunk.get("source_path"),
+                            "text": text,
+                            "mention": mention,
+                        }
+                        entity_handle.write(json.dumps(entity_record, ensure_ascii=False))
+                        entity_handle.write("\n")
                     normalized_count += 1
         except OSError as exc:
             self.logger.error("寫入 memory normalized 失敗：%s", exc, exc_info=True)
