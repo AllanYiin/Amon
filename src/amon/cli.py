@@ -124,6 +124,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("doctor", help="一鍵診斷系統狀態")
 
+    graph_parser = subparsers.add_parser("graph", help="Graph 執行")
+    graph_sub = graph_parser.add_subparsers(dest="graph_command")
+    graph_run = graph_sub.add_parser("run", help="執行 graph")
+    graph_run.add_argument("--project", required=True, help="指定專案 ID")
+    graph_run.add_argument("--graph", required=True, help="graph.json 路徑")
+    graph_run.add_argument("--var", action="append", default=[], help="變數（k=v）")
+
     return parser
 
 
@@ -165,6 +172,8 @@ def main() -> None:
             _handle_eval(core, args)
         elif args.command == "doctor":
             _handle_doctor(core)
+        elif args.command == "graph":
+            _handle_graph(core, args)
         else:
             parser.print_help()
     except Exception as exc:  # noqa: BLE001
@@ -395,3 +404,27 @@ def _handle_export(core: AmonCore, args: argparse.Namespace) -> None:
 def _handle_eval(core: AmonCore, args: argparse.Namespace) -> None:
     result = core.run_eval(suite=args.suite)
     print(yaml.safe_dump(result, allow_unicode=True, sort_keys=False))
+
+
+def _handle_graph(core: AmonCore, args: argparse.Namespace) -> None:
+    if args.graph_command != "run":
+        raise ValueError("請指定 graph 指令")
+    project_path = core.get_project_path(args.project)
+    graph_path = Path(args.graph).expanduser()
+    variables = _parse_vars(args.var)
+    result = core.run_graph(project_path=project_path, graph_path=graph_path, variables=variables)
+    print(f"已完成 graph 執行：{result.run_id}")
+    print(f"結果目錄：{result.run_dir}")
+
+
+def _parse_vars(items: list[str]) -> dict[str, str]:
+    variables: dict[str, str] = {}
+    for item in items:
+        if "=" not in item:
+            raise ValueError("--var 格式需為 k=v")
+        key, value = item.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise ValueError("--var 鍵不可為空")
+        variables[key] = value
+    return variables

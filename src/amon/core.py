@@ -28,6 +28,7 @@ from .logging import log_billing, log_event
 from .logging_utils import setup_logger
 from .mcp_client import MCPClientError, MCPServerConfig, MCPStdioClient
 from .models import ProviderError, build_provider
+from .graph_runtime import GraphRuntime, GraphRunResult
 
 
 @dataclass
@@ -714,6 +715,22 @@ class AmonCore:
             }
         )
         return output_path
+
+    def run_graph(
+        self,
+        project_path: Path,
+        graph_path: Path,
+        variables: dict[str, Any] | None = None,
+    ) -> GraphRunResult:
+        if not project_path:
+            raise ValueError("執行 graph 需要指定專案")
+        runtime = GraphRuntime(
+            core=self,
+            project_path=project_path,
+            graph_path=graph_path,
+            variables=variables,
+        )
+        return runtime.run()
 
     def run_eval(self, suite: str = "basic") -> dict[str, Any]:
         if suite != "basic":
