@@ -1723,6 +1723,123 @@ class AmonCore:
             raise
         return memory_dir
 
+    def _sanitize_tag_value(self, value: str) -> str:
+        sanitized = value.replace("\n", " ").replace("\r", " ")
+        sanitized = sanitized.replace("```", "").replace("`", "")
+        sanitized = sanitized.replace("<", "").replace(">", "")
+        sanitized = re.sub(r"\s+", " ", sanitized).strip()
+        return sanitized
+
+    def _build_tags_markdown(
+        self,
+        normalized: dict[str, Any],
+        entity_mentions: list[dict[str, Any]],
+    ) -> str:
+        lines = ["## AMON_MEMORY_TAGS"]
+        time_mentions = normalized.get("time", {}).get("mentions", [])
+        geo_mentions = normalized.get("geo", {}).get("mentions", [])
+
+        if time_mentions:
+            for mention in time_mentions:
+                raw = self._sanitize_tag_value(str(mention.get("raw") or ""))
+                resolved = self._sanitize_tag_value(str(mention.get("resolved_date") or ""))
+                lines.append(f'- time_mentions: raw="{raw}", resolved_date="{resolved}"')
+        else:
+            lines.append("- time_mentions: none")
+
+        if geo_mentions:
+            for mention in geo_mentions:
+                raw = self._sanitize_tag_value(str(mention.get("raw") or ""))
+                geocode = self._sanitize_tag_value(str(mention.get("geocode_id") or ""))
+                normalized_name = self._sanitize_tag_value(str(mention.get("normalized_name") or ""))
+                lines.append(
+                    f'- geo_mentions: raw="{raw}", geocode_id="{geocode}", normalized_name="{normalized_name}"'
+                )
+        else:
+            lines.append("- geo_mentions: none")
+
+        if entity_mentions:
+            for mention in entity_mentions:
+                pronoun = self._sanitize_tag_value(str(mention.get("pronoun") or ""))
+                resolved_to = self._sanitize_tag_value(str(mention.get("resolved_to") or ""))
+                entity_type = self._sanitize_tag_value(str(mention.get("entity_type") or ""))
+                confidence = mention.get("confidence")
+                needs_review = mention.get("needs_review")
+                rule = self._sanitize_tag_value(str(mention.get("rule") or ""))
+                lines.append(
+                    "- entity_mentions: "
+                    f'pronoun="{pronoun}", resolved_to="{resolved_to}", entity_type="{entity_type}", '
+                    f'confidence="{confidence}", needs_review="{needs_review}", rule="{rule}"'
+                )
+        else:
+            lines.append("- entity_mentions: none")
+
+        return "\n".join(lines)
+
+    def generate_memory_tags(self, project_path: Path) -> int:
+        if not project_path:
+            raise ValueError("執行 memory tags 需要指定專案")
+        memory_dir = self._prepare_memory_dir(project_path)
+        normalized_path = memory_dir / "normalized.jsonl"
+        entities_path = memory_dir / "entities.jsonl"
+        tags_path = memory_dir / "tags.jsonl"
+        if not normalized_path.exists():
+            self.logger.error("找不到 memory normalized 檔案：%s", normalized_path)
+            raise FileNotFoundError(f"找不到 memory normalized 檔案：{normalized_path}")
+        entity_map: dict[str, list[dict[str, Any]]] = {}
+        if entities_path.exists():
+            try:
+                with entities_path.open("r", encoding="utf-8") as entity_handle:
+                    for line in entity_handle:
+                        payload = line.strip()
+                        if not payload:
+                            continue
+                        try:
+                            record = json.loads(payload)
+                        except json.JSONDecodeError as exc:
+                            self.logger.error("解析 memory entities 失敗：%s", exc, exc_info=True)
+                            raise
+                        chunk_id = str(record.get("chunk_id") or "")
+                        if not chunk_id:
+                            continue
+                        mention = record.get("mention") or {}
+                        entity_map.setdefault(chunk_id, []).append(mention)
+            except OSError as exc:
+                self.logger.error("讀取 memory entities 失敗：%s", exc, exc_info=True)
+                raise
+        tag_count = 0
+        try:
+            with (
+                normalized_path.open("r", encoding="utf-8") as normalized_handle,
+                tags_path.open("w", encoding="utf-8") as tags_handle,
+            ):
+                for line in normalized_handle:
+                    payload = line.strip()
+                    if not payload:
+                        continue
+                    try:
+                        normalized = json.loads(payload)
+                    except json.JSONDecodeError as exc:
+                        self.logger.error("解析 memory normalized 失敗：%s", exc, exc_info=True)
+                        raise
+                    chunk_id = str(normalized.get("chunk_id") or "")
+                    text = str(normalized.get("text") or "")
+                    entity_mentions = entity_map.get(chunk_id, [])
+                    tags_markdown = self._build_tags_markdown(normalized, entity_mentions)
+                    embedding_text = f"{text}\n\n{tags_markdown}"
+                    record = {
+                        "chunk_id": chunk_id,
+                        "tags_markdown": tags_markdown,
+                        "embedding_text": embedding_text,
+                    }
+                    tags_handle.write(json.dumps(record, ensure_ascii=False))
+                    tags_handle.write("\n")
+                    tag_count += 1
+        except OSError as exc:
+            self.logger.error("寫入 memory tags 失敗：%s", exc, exc_info=True)
+            raise
+        return tag_count
+
     def _parse_chunk_created_at(self, created_at: str) -> datetime | None:
         try:
             parsed = datetime.fromisoformat(created_at)
@@ -2007,6 +2124,11 @@ class AmonCore:
                     normalized_count += 1
         except OSError as exc:
             self.logger.error("寫入 memory normalized 失敗：%s", exc, exc_info=True)
+            raise
+        try:
+            self.generate_memory_tags(project_path)
+        except Exception as exc:  # noqa: BLE001
+            self.logger.error("產生 memory tags 失敗：%s", exc, exc_info=True)
             raise
         return normalized_count
 

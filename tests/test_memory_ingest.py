@@ -161,6 +161,39 @@ class MemoryIngestTests(unittest.TestCase):
             self.assertEqual(mention["pronoun"], "他")
             self.assertEqual(mention["resolved_to"], "王小明")
 
+    def test_generate_tags_includes_embedding_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            project_path = Path(temp_dir) / "project"
+            memory_dir = project_path / "memory"
+            memory_dir.mkdir(parents=True, exist_ok=True)
+            chunks_path = memory_dir / "chunks.jsonl"
+
+            chunk = {
+                "chunk_id": "chunk-tag-1",
+                "project_id": "proj-tag-1",
+                "session_id": "session-tag-1",
+                "source_path": "sessions/session-tag-1.jsonl",
+                "text": "昨天到台北開會。",
+                "created_at": "2026-02-03T10:00:00+08:00",
+                "lang": "zh-TW",
+            }
+            with chunks_path.open("w", encoding="utf-8") as handle:
+                handle.write(json.dumps(chunk, ensure_ascii=False))
+                handle.write("\n")
+
+            core = AmonCore(data_dir=data_dir)
+            core.normalize_memory_dates(project_path)
+
+            tags_path = memory_dir / "tags.jsonl"
+            self.assertTrue(tags_path.exists())
+            tags_lines = tags_path.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(tags_lines), 1)
+            record = json.loads(tags_lines[0])
+            embedding_text = record["embedding_text"]
+            self.assertIn("昨天到台北開會。", embedding_text)
+            self.assertIn("## AMON_MEMORY_TAGS", embedding_text)
+
 
 if __name__ == "__main__":
     unittest.main()
