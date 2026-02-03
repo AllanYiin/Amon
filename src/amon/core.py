@@ -1496,6 +1496,7 @@ class AmonCore:
         (project_path / "docs").mkdir(parents=True, exist_ok=True)
         (project_path / "tasks").mkdir(parents=True, exist_ok=True)
         (project_path / "sessions").mkdir(parents=True, exist_ok=True)
+        (project_path / "memory").mkdir(parents=True, exist_ok=True)
         (project_path / "logs").mkdir(parents=True, exist_ok=True)
         (project_path / ".claude" / "skills").mkdir(parents=True, exist_ok=True)
         (project_path / ".amon" / "locks").mkdir(parents=True, exist_ok=True)
@@ -1710,6 +1711,65 @@ class AmonCore:
             self.logger.error("建立 sessions 目錄失敗：%s", exc, exc_info=True)
             raise
         return sessions_dir / f"{session_id}.jsonl"
+
+    def _prepare_memory_dir(self, project_path: Path) -> Path:
+        memory_dir = project_path / "memory"
+        try:
+            memory_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            self.logger.error("建立 memory 目錄失敗：%s", exc, exc_info=True)
+            raise
+        return memory_dir
+
+    def ingest_session_memory(
+        self,
+        project_path: Path,
+        session_id: str,
+        project_id: str | None = None,
+        lang: str = "zh-TW",
+    ) -> int:
+        if not project_path:
+            raise ValueError("執行 memory ingest 需要指定專案")
+        source_path = project_path / "sessions" / f"{session_id}.jsonl"
+        if not source_path.exists():
+            self.logger.error("找不到 sessions 檔案：%s", source_path)
+            raise FileNotFoundError(f"找不到 sessions 檔案：{source_path}")
+        memory_dir = self._prepare_memory_dir(project_path)
+        chunks_path = memory_dir / "chunks.jsonl"
+        source_rel_path = f"sessions/{session_id}.jsonl"
+        chunk_count = 0
+        try:
+            with source_path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    payload = line.strip()
+                    if not payload:
+                        continue
+                    try:
+                        event = json.loads(payload)
+                    except json.JSONDecodeError as exc:
+                        self.logger.error("解析 session JSONL 失敗：%s", exc, exc_info=True)
+                        raise
+                    event_type = str(event.get("event") or "")
+                    if event_type not in {"prompt", "final"}:
+                        continue
+                    text = str(event.get("content") or "")
+                    chunk = {
+                        "chunk_id": uuid.uuid4().hex,
+                        "project_id": project_id or project_path.name,
+                        "session_id": session_id,
+                        "source_path": source_rel_path,
+                        "text": text,
+                        "created_at": self._now(),
+                        "lang": lang,
+                    }
+                    with chunks_path.open("a", encoding="utf-8") as chunk_handle:
+                        chunk_handle.write(json.dumps(chunk, ensure_ascii=False))
+                        chunk_handle.write("\n")
+                    chunk_count += 1
+        except OSError as exc:
+            self.logger.error("寫入 memory chunk 失敗：%s", exc, exc_info=True)
+            raise
+        return chunk_count
 
     @contextmanager
     def _project_lock(self, project_path: Path, action: str) -> Any:
