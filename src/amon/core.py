@@ -64,6 +64,7 @@ class AmonCore:
         self.projects_dir = self.data_dir / "projects"
         self.trash_dir = self.data_dir / "trash"
         self.skills_dir = self.data_dir / "skills"
+        self.templates_dir = self.data_dir / "templates"
         self.python_env_dir = self.data_dir / "python_env"
         self.node_env_dir = self.data_dir / "node_env"
         self.billing_log = self.logs_dir / "billing.log"
@@ -77,6 +78,7 @@ class AmonCore:
             self.projects_dir,
             self.trash_dir,
             self.skills_dir,
+            self.templates_dir,
             self.python_env_dir,
             self.node_env_dir,
         ]:
@@ -734,6 +736,173 @@ class AmonCore:
             variables=variables,
         )
         return runtime.run()
+
+    def create_graph_template(self, project_id: str, run_id: str) -> dict[str, Any]:
+        self.ensure_base_structure()
+        project_path = self.get_project_path(project_id)
+        resolved_path = project_path / ".amon" / "runs" / run_id / "graph.resolved.json"
+        if not resolved_path.exists():
+            raise FileNotFoundError("找不到 graph.resolved.json")
+        try:
+            resolved = json.loads(resolved_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.error("讀取 graph.resolved.json 失敗：%s", exc, exc_info=True)
+            raise
+        template_id = uuid.uuid4().hex
+        template_dir = self.templates_dir / template_id
+        template_dir.mkdir(parents=True, exist_ok=False)
+        payload = {
+            "template_id": template_id,
+            "project_id": project_id,
+            "source_run_id": run_id,
+            "created_at": self._now(),
+            "variables_schema": {},
+            "nodes": resolved.get("nodes", []),
+            "edges": resolved.get("edges", []),
+            "variables": resolved.get("variables", {}),
+        }
+        template_path = template_dir / "graph.template.json"
+        self._atomic_write_text(template_path, json.dumps(payload, ensure_ascii=False, indent=2))
+        return {"template_id": template_id, "path": str(template_path)}
+
+    def parametrize_graph_template(self, template_id: str, json_path: str, var_name: str) -> dict[str, Any]:
+        template_path = self._template_path(template_id)
+        try:
+            payload = json.loads(template_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.error("讀取 graph.template.json 失敗：%s", exc, exc_info=True)
+            raise
+        tokens = self._parse_json_path(json_path)
+        parent, last_token = self._locate_json_target(payload, tokens)
+        try:
+            original_value = parent[last_token]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ValueError("JSONPath 指向的欄位不存在") from exc
+        placeholder = f"{{{{{var_name}}}}}"
+        parent[last_token] = placeholder
+        schema = payload.setdefault("variables_schema", {})
+        schema[var_name] = {"type": self._infer_schema_type(original_value)}
+        self._atomic_write_text(template_path, json.dumps(payload, ensure_ascii=False, indent=2))
+        return {"template_id": template_id, "path": str(template_path)}
+
+    def run_graph_template(self, template_id: str, variables: dict[str, Any] | None = None) -> GraphRunResult:
+        template_path = self._template_path(template_id)
+        try:
+            payload = json.loads(template_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.error("讀取 graph.template.json 失敗：%s", exc, exc_info=True)
+            raise
+        project_id = payload.get("project_id")
+        if not project_id:
+            raise ValueError("template 缺少 project_id")
+        schema = payload.get("variables_schema", {})
+        variables = variables or {}
+        missing = [name for name in schema.keys() if name not in variables]
+        if missing:
+            raise ValueError(f"template 缺少變數：{', '.join(missing)}")
+        graph = {
+            "nodes": payload.get("nodes", []),
+            "edges": payload.get("edges", []),
+            "variables": payload.get("variables", {}),
+        }
+        resolved_graph = self._resolve_template_values(graph, variables)
+        template_dir = template_path.parent
+        rendered_path = template_dir / "graph.rendered.json"
+        self._atomic_write_text(rendered_path, json.dumps(resolved_graph, ensure_ascii=False, indent=2))
+        project_path = self.get_project_path(project_id)
+        return self.run_graph(project_path=project_path, graph_path=rendered_path, variables=variables)
+
+    def _template_path(self, template_id: str) -> Path:
+        template_path = self.templates_dir / template_id / "graph.template.json"
+        if not template_path.exists():
+            raise FileNotFoundError("找不到 graph.template.json")
+        return template_path
+
+    def _resolve_template_values(self, payload: Any, variables: dict[str, Any]) -> Any:
+        if isinstance(payload, dict):
+            return {key: self._resolve_template_values(value, variables) for key, value in payload.items()}
+        if isinstance(payload, list):
+            return [self._resolve_template_values(item, variables) for item in payload]
+        if isinstance(payload, str):
+            return self._replace_placeholders(payload, variables)
+        return payload
+
+    def _replace_placeholders(self, text: str, variables: dict[str, Any]) -> str:
+        updated = text
+        for key, value in variables.items():
+            placeholder = f"{{{{{key}}}}}"
+            updated = updated.replace(placeholder, "" if value is None else str(value))
+        return updated
+
+    def _parse_json_path(self, json_path: str) -> list[Any]:
+        if not json_path:
+            raise ValueError("JSONPath 不可為空")
+        path = json_path.strip()
+        if path.startswith("$"):
+            path = path[1:]
+        if path.startswith("."):
+            path = path[1:]
+        tokens: list[Any] = []
+        index = 0
+        while index < len(path):
+            if path[index] == ".":
+                index += 1
+                continue
+            if path[index] == "[":
+                end = path.find("]", index)
+                if end == -1:
+                    raise ValueError("JSONPath 缺少 ]")
+                raw = path[index + 1 : end].strip()
+                if (raw.startswith("\"") and raw.endswith("\"")) or (raw.startswith("'") and raw.endswith("'")):
+                    raw = raw[1:-1]
+                    tokens.append(raw)
+                elif raw.isdigit():
+                    tokens.append(int(raw))
+                elif raw:
+                    tokens.append(raw)
+                else:
+                    raise ValueError("JSONPath 索引不可為空")
+                index = end + 1
+                continue
+            next_index = index
+            while next_index < len(path) and path[next_index] not in ".[" :
+                next_index += 1
+            token = path[index:next_index]
+            if not token:
+                raise ValueError("JSONPath 片段不可為空")
+            tokens.append(token)
+            index = next_index
+        if not tokens:
+            raise ValueError("JSONPath 不可為空")
+        return tokens
+
+    def _locate_json_target(self, payload: Any, tokens: list[Any]) -> tuple[Any, Any]:
+        current = payload
+        for token in tokens[:-1]:
+            if isinstance(token, int):
+                if not isinstance(current, list) or token >= len(current):
+                    raise ValueError("JSONPath 指向的陣列不存在")
+                current = current[token]
+            else:
+                if not isinstance(current, dict) or token not in current:
+                    raise ValueError("JSONPath 指向的欄位不存在")
+                current = current[token]
+        return current, tokens[-1]
+
+    def _infer_schema_type(self, value: Any) -> str:
+        if isinstance(value, bool):
+            return "boolean"
+        if isinstance(value, int) and not isinstance(value, bool):
+            return "integer"
+        if isinstance(value, float):
+            return "number"
+        if isinstance(value, list):
+            return "array"
+        if isinstance(value, dict):
+            return "object"
+        if value is None:
+            return "null"
+        return "string"
 
     def run_eval(self, suite: str = "basic") -> dict[str, Any]:
         if suite != "basic":
