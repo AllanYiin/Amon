@@ -122,6 +122,8 @@ def build_parser() -> argparse.ArgumentParser:
     eval_parser = subparsers.add_parser("eval", help="執行簡易回歸評測")
     eval_parser.add_argument("--suite", default="basic", help="評測套件（預設 basic）")
 
+    subparsers.add_parser("doctor", help="一鍵診斷系統狀態")
+
     return parser
 
 
@@ -161,6 +163,8 @@ def main() -> None:
             _handle_export(core, args)
         elif args.command == "eval":
             _handle_eval(core, args)
+        elif args.command == "doctor":
+            _handle_doctor(core)
         else:
             parser.print_help()
     except Exception as exc:  # noqa: BLE001
@@ -346,9 +350,20 @@ def _handle_tools(core: AmonCore, args: argparse.Namespace) -> None:
         except json.JSONDecodeError as exc:
             raise ValueError("args 必須是 JSON 格式") from exc
         result = core.call_mcp_tool(server_name, tool_name, parsed_args)
-        print(yaml.safe_dump(result, allow_unicode=True, sort_keys=False))
+        print(result.get("data_prompt", ""))
         return
     raise ValueError("請指定 tools 指令")
+
+
+def _handle_doctor(core: AmonCore) -> None:
+    report = core.doctor()
+    print("Amon Doctor")
+    print(f"整體狀態：{report.get('status')}")
+    checks = report.get("checks", {})
+    for name, info in checks.items():
+        status = info.get("status", "unknown")
+        message = info.get("message", "")
+        print(f"- {name}：{status}｜{message}")
 
 
 def _handle_ui(args: argparse.Namespace) -> None:

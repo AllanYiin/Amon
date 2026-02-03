@@ -4,6 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+DEFAULT_DENYLIST = {
+    ".ssh",
+    ".gnupg",
+    ".aws",
+    ".kube",
+    ".docker",
+}
+
 
 def make_change_plan(ops: list[dict[str, str]]) -> str:
     lines = ["# 變更計畫", ""]
@@ -26,6 +34,8 @@ def require_confirm(plan_text: str) -> bool:
 
 def canonicalize_path(path: Path, allowed_paths: list[Path]) -> Path:
     resolved = path.expanduser().resolve()
+    if _contains_denied_segment(resolved):
+        raise PermissionError("路徑包含敏感資料，已拒絕操作")
     allowed = [allowed_path.expanduser().resolve() for allowed_path in allowed_paths]
     if not any(_is_within(resolved, base) for base in allowed):
         raise ValueError("路徑不允許操作")
@@ -38,3 +48,7 @@ def _is_within(target: Path, base: Path) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _contains_denied_segment(path: Path) -> bool:
+    return any(part in DEFAULT_DENYLIST for part in path.parts)

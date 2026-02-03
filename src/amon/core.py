@@ -8,14 +8,18 @@ import shlex
 import shutil
 import uuid
 import zipfile
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+import urllib.error
+import urllib.request
 
 import yaml
 
 from .config import DEFAULT_CONFIG, deep_merge, get_config_value, read_yaml, set_config_value, write_yaml
+from .fs.atomic import atomic_write_text
 from .fs.safety import canonicalize_path, make_change_plan, require_confirm
 from .fs.trash import trash_move, trash_restore
 from .logging import log_billing, log_event
@@ -74,7 +78,7 @@ class AmonCore:
         self._touch_log(self.logs_dir / "amon.log")
         if not self.billing_log.exists():
             try:
-                self.billing_log.write_text("", encoding="utf-8")
+                self._atomic_write_text(self.billing_log, "")
             except OSError as exc:
                 self.logger.error("建立 billing.log 失敗：%s", exc, exc_info=True)
                 raise
@@ -84,9 +88,9 @@ class AmonCore:
         trash_manifest = self.trash_dir / "manifest.json"
         if not trash_manifest.exists():
             try:
-                trash_manifest.write_text(
+                self._atomic_write_text(
+                    trash_manifest,
                     json.dumps({"entries": []}, ensure_ascii=False, indent=2),
-                    encoding="utf-8",
                 )
             except OSError as exc:
                 self.logger.error("建立回收桶清單失敗：%s", exc, exc_info=True)
@@ -250,428 +254,432 @@ class AmonCore:
         write_yaml(config_path, updated)
 
     def run_single(self, prompt: str, project_path: Path | None = None, model: str | None = None) -> str:
-        config = self.load_config(project_path)
-        project_id = project_path.name if project_path else None
-        budget_status = self._evaluate_budget(config, project_id=project_id)
-        if budget_status["exceeded"]:
-            message = "提醒：已超過用量上限，single 仍可執行，但 self_critique/team 會被拒絕。"
-            print(message)
-            self._log_budget_event(budget_status, mode="single", project_id=project_id, action="allow")
-        provider_name = config.get("amon", {}).get("provider", "openai")
-        provider_cfg = config.get("providers", {}).get(provider_name, {})
-        provider_type = provider_cfg.get("type")
-        provider_model = model or provider_cfg.get("default_model") or provider_cfg.get("model")
-        provider = build_provider(provider_cfg, model=provider_model)
-        system_message = "你是 Amon 的專案助理，請用繁體中文回覆。"
-        skill_context = self._resolve_skill_context(prompt, project_path)
-        if skill_context:
-            system_message = f"{system_message}\n\n[Skill]\n{skill_context}"
-        user_prompt = prompt
-        if prompt.startswith("/"):
-            user_prompt = " ".join(prompt.split()[1:]).strip()
-        messages = [
-            {"role": "system", "content": system_message},
-            {"role": "user", "content": user_prompt or prompt},
-        ]
-        response_text = ""
-        session_id = uuid.uuid4().hex
-        session_path = self._prepare_session_path(project_path, session_id)
-        log_event(
-            {
-                "level": "INFO",
-                "event": "run_single_start",
-                "provider": provider_name,
-                "model": provider_model,
-                "session_id": session_id,
-            }
-        )
-        self._append_session_event(
-            session_path,
-            {
-                "event": "prompt",
-                "role": "user",
-                "content": user_prompt or prompt,
-                "provider": provider_name,
-                "model": provider_model,
-            },
-            session_id=session_id,
-        )
-        if provider_type == "mock":
-            print("提醒：目前使用 mock provider，輸出為模擬結果。")
-        try:
-            for index, token in enumerate(provider.generate_stream(messages, model=provider_model)):
-                print(token, end="", flush=True)
-                response_text += token
-                self._append_session_event(
-                    session_path,
-                    {
-                        "event": "chunk",
-                        "index": index,
-                        "content": token,
-                        "provider": provider_name,
-                        "model": provider_model,
-                    },
-                    session_id=session_id,
-                )
-            print("")
-        except ProviderError as exc:
-            self.logger.error("模型執行失敗：%s", exc, exc_info=True)
-            raise
-        self._append_session_event(
-            session_path,
-            {
-                "event": "final",
-                "content": response_text,
-                "provider": provider_name,
-                "model": provider_model,
-            },
-            session_id=session_id,
-        )
-        log_event(
-            {
-                "level": "INFO",
-                "event": "run_single_complete",
-                "provider": provider_name,
-                "model": provider_model,
-                "session_id": session_id,
-            }
-        )
-        self._log_billing(
-            config,
-            provider_name,
-            provider_model,
-            prompt,
-            response_text,
-            session_id=session_id,
-            project_id=project_id,
-        )
-        return response_text
+        lock_context = self._project_lock(project_path, "single") if project_path else nullcontext()
+        with lock_context:
+            config = self.load_config(project_path)
+            project_id = project_path.name if project_path else None
+            budget_status = self._evaluate_budget(config, project_id=project_id)
+            if budget_status["exceeded"]:
+                message = "提醒：已超過用量上限，single 仍可執行，但 self_critique/team 會被拒絕。"
+                print(message)
+                self._log_budget_event(budget_status, mode="single", project_id=project_id, action="allow")
+            provider_name = config.get("amon", {}).get("provider", "openai")
+            provider_cfg = config.get("providers", {}).get(provider_name, {})
+            provider_type = provider_cfg.get("type")
+            provider_model = model or provider_cfg.get("default_model") or provider_cfg.get("model")
+            provider = build_provider(provider_cfg, model=provider_model)
+            system_message = "你是 Amon 的專案助理，請用繁體中文回覆。"
+            skill_context = self._resolve_skill_context(prompt, project_path)
+            if skill_context:
+                system_message = f"{system_message}\n\n[Skill]\n{skill_context}"
+            user_prompt = prompt
+            if prompt.startswith("/"):
+                user_prompt = " ".join(prompt.split()[1:]).strip()
+            messages = [
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": user_prompt or prompt},
+            ]
+            response_text = ""
+            session_id = uuid.uuid4().hex
+            session_path = self._prepare_session_path(project_path, session_id)
+            log_event(
+                {
+                    "level": "INFO",
+                    "event": "run_single_start",
+                    "provider": provider_name,
+                    "model": provider_model,
+                    "session_id": session_id,
+                }
+            )
+            self._append_session_event(
+                session_path,
+                {
+                    "event": "prompt",
+                    "role": "user",
+                    "content": user_prompt or prompt,
+                    "provider": provider_name,
+                    "model": provider_model,
+                },
+                session_id=session_id,
+            )
+            if provider_type == "mock":
+                print("提醒：目前使用 mock provider，輸出為模擬結果。")
+            try:
+                for index, token in enumerate(provider.generate_stream(messages, model=provider_model)):
+                    print(token, end="", flush=True)
+                    response_text += token
+                    self._append_session_event(
+                        session_path,
+                        {
+                            "event": "chunk",
+                            "index": index,
+                            "content": token,
+                            "provider": provider_name,
+                            "model": provider_model,
+                        },
+                        session_id=session_id,
+                    )
+                print("")
+            except ProviderError as exc:
+                self.logger.error("模型執行失敗：%s", exc, exc_info=True)
+                raise
+            self._append_session_event(
+                session_path,
+                {
+                    "event": "final",
+                    "content": response_text,
+                    "provider": provider_name,
+                    "model": provider_model,
+                },
+                session_id=session_id,
+            )
+            log_event(
+                {
+                    "level": "INFO",
+                    "event": "run_single_complete",
+                    "provider": provider_name,
+                    "model": provider_model,
+                    "session_id": session_id,
+                }
+            )
+            self._log_billing(
+                config,
+                provider_name,
+                provider_model,
+                prompt,
+                response_text,
+                session_id=session_id,
+                project_id=project_id,
+            )
+            return response_text
 
     def run_self_critique(self, prompt: str, project_path: Path | None = None, model: str | None = None) -> str:
         if not project_path:
             raise ValueError("執行 self_critique 需要指定專案")
-        config = self.load_config(project_path)
-        project_id = project_path.name
-        budget_status = self._evaluate_budget(config, project_id=project_id)
-        if budget_status["exceeded"]:
-            self._log_budget_event(budget_status, mode="self_critique", project_id=project_id, action="reject")
-            raise RuntimeError("已超過用量上限，拒絕執行 self_critique")
-        provider_name = config.get("amon", {}).get("provider", "openai")
-        provider_cfg = config.get("providers", {}).get(provider_name, {})
-        provider_type = provider_cfg.get("type")
-        provider_model = model or provider_cfg.get("default_model") or provider_cfg.get("model")
-        provider = build_provider(provider_cfg, model=provider_model)
-        session_id = uuid.uuid4().hex
-        session_path = self._prepare_session_path(project_path, session_id)
-        docs_dir = project_path / "docs"
-        draft_path, reviews_dir, final_path, version = self._resolve_doc_paths(docs_dir)
-        log_event(
-            {
-                "level": "INFO",
-                "event": "self_critique_start",
-                "provider": provider_name,
-                "model": provider_model,
-                "session_id": session_id,
-                "doc_version": version,
-                "project_id": project_path.name,
-            }
-        )
-        if provider_type == "mock":
-            print("提醒：目前使用 mock provider，輸出為模擬結果。")
-
-        personas = self._generate_reviewer_personas(
-            provider=provider,
-            provider_name=provider_name,
-            provider_model=provider_model,
-            prompt=prompt,
-            session_path=session_path,
-            session_id=session_id,
-            config=config,
-            provider_type=provider_type,
-            project_id=project_path.name,
-        )
-
-        writer_system = "你是 Writer，負責撰寫草稿。請用繁體中文輸出 markdown。"
-        draft_messages = [
-            {"role": "system", "content": writer_system},
-            {"role": "user", "content": f"任務：{prompt}\n\n請先產出草稿。"},
-        ]
-        draft_text = self._stream_to_file(
-            provider=provider,
-            provider_name=provider_name,
-            provider_model=provider_model,
-            messages=draft_messages,
-            output_path=draft_path,
-            session_path=session_path,
-            session_id=session_id,
-            stage="draft",
-            config=config,
-            provider_type=provider_type,
-            prompt_text=draft_messages[-1]["content"],
-            project_id=project_path.name,
-        )
-
-        reviews: list[tuple[dict[str, str], str, Path]] = []
-        for persona in personas:
-            reviewer_messages = [
+        with self._project_lock(project_path, "self_critique"):
+            config = self.load_config(project_path)
+            project_id = project_path.name
+            budget_status = self._evaluate_budget(config, project_id=project_id)
+            if budget_status["exceeded"]:
+                self._log_budget_event(budget_status, mode="self_critique", project_id=project_id, action="reject")
+                raise RuntimeError("已超過用量上限，拒絕執行 self_critique")
+            provider_name = config.get("amon", {}).get("provider", "openai")
+            provider_cfg = config.get("providers", {}).get(provider_name, {})
+            provider_type = provider_cfg.get("type")
+            provider_model = model or provider_cfg.get("default_model") or provider_cfg.get("model")
+            provider = build_provider(provider_cfg, model=provider_model)
+            session_id = uuid.uuid4().hex
+            session_path = self._prepare_session_path(project_path, session_id)
+            docs_dir = project_path / "docs"
+            draft_path, reviews_dir, final_path, version = self._resolve_doc_paths(docs_dir)
+            log_event(
                 {
-                    "role": "system",
-                    "content": (
-                        "你是 Reviewer，請根據指定 persona 嚴格評論草稿，"
-                        "提出具體缺陷與改善建議。請用繁體中文輸出 markdown。"
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        "persona:\n"
-                        f"- persona_id: {persona['persona_id']}\n"
-                        f"- name: {persona['name']}\n"
-                        f"- focus: {persona['focus']}\n"
-                        f"- tone: {persona['tone']}\n"
-                        f"- instructions: {persona['instructions']}\n\n"
-                        "draft:\n"
-                        f"{draft_text}\n\n請提供批評與建議。"
-                    ),
-                },
-            ]
-            review_filename = self._review_filename(persona)
-            review_path = reviews_dir / review_filename
-            review_text = self._stream_to_file(
+                    "level": "INFO",
+                    "event": "self_critique_start",
+                    "provider": provider_name,
+                    "model": provider_model,
+                    "session_id": session_id,
+                    "doc_version": version,
+                    "project_id": project_path.name,
+                }
+            )
+            if provider_type == "mock":
+                print("提醒：目前使用 mock provider，輸出為模擬結果。")
+
+            personas = self._generate_reviewer_personas(
                 provider=provider,
                 provider_name=provider_name,
                 provider_model=provider_model,
-                messages=reviewer_messages,
-                output_path=review_path,
+                prompt=prompt,
                 session_path=session_path,
                 session_id=session_id,
-                stage=f"review:{persona['persona_id']}",
                 config=config,
                 provider_type=provider_type,
-                prompt_text=reviewer_messages[-1]["content"],
                 project_id=project_path.name,
             )
-            reviews.append((persona, review_text, review_path))
 
-        final_messages = [
-            {
-                "role": "system",
-                "content": "你是 Writer，負責整合所有 reviews，產出最終版本。請用繁體中文輸出 markdown。",
-            },
-            {
-                "role": "user",
-                "content": self._build_final_prompt(prompt, draft_text, reviews),
-            },
-        ]
-        final_text = self._stream_to_file(
-            provider=provider,
-            provider_name=provider_name,
-            provider_model=provider_model,
-            messages=final_messages,
-            output_path=final_path,
-            session_path=session_path,
-            session_id=session_id,
-            stage="final",
-            config=config,
-            provider_type=provider_type,
-            prompt_text=final_messages[-1]["content"],
-            project_id=project_path.name,
-        )
-        log_event(
-            {
-                "level": "INFO",
-                "event": "self_critique_complete",
-                "provider": provider_name,
-                "model": provider_model,
-                "session_id": session_id,
-                "doc_version": version,
-                "project_id": project_path.name,
-            }
-        )
-        return final_text
+            writer_system = "你是 Writer，負責撰寫草稿。請用繁體中文輸出 markdown。"
+            draft_messages = [
+                {"role": "system", "content": writer_system},
+                {"role": "user", "content": f"任務：{prompt}\n\n請先產出草稿。"},
+            ]
+            draft_text = self._stream_to_file(
+                provider=provider,
+                provider_name=provider_name,
+                provider_model=provider_model,
+                messages=draft_messages,
+                output_path=draft_path,
+                session_path=session_path,
+                session_id=session_id,
+                stage="draft",
+                config=config,
+                provider_type=provider_type,
+                prompt_text=draft_messages[-1]["content"],
+                project_id=project_path.name,
+            )
+
+            reviews: list[tuple[dict[str, str], str, Path]] = []
+            for persona in personas:
+                reviewer_messages = [
+                    {
+                        "role": "system",
+                        "content": (
+                            "你是 Reviewer，請根據指定 persona 嚴格評論草稿，"
+                            "提出具體缺陷與改善建議。請用繁體中文輸出 markdown。"
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            "persona:\n"
+                            f"- persona_id: {persona['persona_id']}\n"
+                            f"- name: {persona['name']}\n"
+                            f"- focus: {persona['focus']}\n"
+                            f"- tone: {persona['tone']}\n"
+                            f"- instructions: {persona['instructions']}\n\n"
+                            "draft:\n"
+                            f"{draft_text}\n\n請提供批評與建議。"
+                        ),
+                    },
+                ]
+                review_filename = self._review_filename(persona)
+                review_path = reviews_dir / review_filename
+                review_text = self._stream_to_file(
+                    provider=provider,
+                    provider_name=provider_name,
+                    provider_model=provider_model,
+                    messages=reviewer_messages,
+                    output_path=review_path,
+                    session_path=session_path,
+                    session_id=session_id,
+                    stage=f"review:{persona['persona_id']}",
+                    config=config,
+                    provider_type=provider_type,
+                    prompt_text=reviewer_messages[-1]["content"],
+                    project_id=project_path.name,
+                )
+                reviews.append((persona, review_text, review_path))
+
+            final_messages = [
+                {
+                    "role": "system",
+                    "content": "你是 Writer，負責整合所有 reviews，產出最終版本。請用繁體中文輸出 markdown。",
+                },
+                {
+                    "role": "user",
+                    "content": self._build_final_prompt(prompt, draft_text, reviews),
+                },
+            ]
+            final_text = self._stream_to_file(
+                provider=provider,
+                provider_name=provider_name,
+                provider_model=provider_model,
+                messages=final_messages,
+                output_path=final_path,
+                session_path=session_path,
+                session_id=session_id,
+                stage="final",
+                config=config,
+                provider_type=provider_type,
+                prompt_text=final_messages[-1]["content"],
+                project_id=project_path.name,
+            )
+            log_event(
+                {
+                    "level": "INFO",
+                    "event": "self_critique_complete",
+                    "provider": provider_name,
+                    "model": provider_model,
+                    "session_id": session_id,
+                    "doc_version": version,
+                    "project_id": project_path.name,
+                }
+            )
+            return final_text
 
     def run_team(self, prompt: str, project_path: Path | None = None, model: str | None = None) -> str:
         if not project_path:
             raise ValueError("執行 team 需要指定專案")
-        config = self.load_config(project_path)
-        project_id = project_path.name
-        budget_status = self._evaluate_budget(config, project_id=project_id)
-        if budget_status["exceeded"]:
-            self._log_budget_event(budget_status, mode="team", project_id=project_id, action="reject")
-            raise RuntimeError("已超過用量上限，拒絕執行 team")
-        provider_name = config.get("amon", {}).get("provider", "openai")
-        provider_cfg = config.get("providers", {}).get(provider_name, {})
-        provider_type = provider_cfg.get("type")
-        provider_model = model or provider_cfg.get("default_model") or provider_cfg.get("model")
-        provider = build_provider(provider_cfg, model=provider_model)
-        session_id = uuid.uuid4().hex
-        session_path = self._prepare_session_path(project_path, session_id)
-        docs_dir = project_path / "docs"
-        tasks_dir = project_path / "tasks"
-        tasks_path = tasks_dir / "tasks.json"
-        team_max_retries = int(config.get("amon", {}).get("team_max_retries", 2))
-        log_event(
-            {
-                "level": "INFO",
-                "event": "team_start",
-                "provider": provider_name,
-                "model": provider_model,
-                "session_id": session_id,
-                "project_id": project_path.name,
-            }
-        )
-        if provider_type == "mock":
-            print("提醒：目前使用 mock provider，輸出為模擬結果。")
-        try:
-            docs_dir.mkdir(parents=True, exist_ok=True)
-            tasks_dir.mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
-            self.logger.error("建立 team 目錄失敗：%s", exc, exc_info=True)
-            raise
+        with self._project_lock(project_path, "team"):
+            config = self.load_config(project_path)
+            project_id = project_path.name
+            budget_status = self._evaluate_budget(config, project_id=project_id)
+            if budget_status["exceeded"]:
+                self._log_budget_event(budget_status, mode="team", project_id=project_id, action="reject")
+                raise RuntimeError("已超過用量上限，拒絕執行 team")
+            provider_name = config.get("amon", {}).get("provider", "openai")
+            provider_cfg = config.get("providers", {}).get(provider_name, {})
+            provider_type = provider_cfg.get("type")
+            provider_model = model or provider_cfg.get("default_model") or provider_cfg.get("model")
+            provider = build_provider(provider_cfg, model=provider_model)
+            session_id = uuid.uuid4().hex
+            session_path = self._prepare_session_path(project_path, session_id)
+            docs_dir = project_path / "docs"
+            tasks_dir = project_path / "tasks"
+            tasks_path = tasks_dir / "tasks.json"
+            team_max_retries = int(config.get("amon", {}).get("team_max_retries", 2))
+            log_event(
+                {
+                    "level": "INFO",
+                    "event": "team_start",
+                    "provider": provider_name,
+                    "model": provider_model,
+                    "session_id": session_id,
+                    "project_id": project_path.name,
+                }
+            )
+            if provider_type == "mock":
+                print("提醒：目前使用 mock provider，輸出為模擬結果。")
+            try:
+                docs_dir.mkdir(parents=True, exist_ok=True)
+                tasks_dir.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                self.logger.error("建立 team 目錄失敗：%s", exc, exc_info=True)
+                raise
 
-        tasks_payload = self._load_tasks_payload(tasks_path)
-        if not tasks_payload["tasks"]:
-            tasks_payload = self._team_plan_tasks(
+            tasks_payload = self._load_tasks_payload(tasks_path)
+            if not tasks_payload["tasks"]:
+                tasks_payload = self._team_plan_tasks(
+                    provider=provider,
+                    provider_name=provider_name,
+                    provider_model=provider_model,
+                    provider_type=provider_type,
+                    prompt=prompt,
+                    docs_dir=docs_dir,
+                    session_path=session_path,
+                    session_id=session_id,
+                    config=config,
+                    project_id=project_id,
+                )
+                self._write_tasks_payload(tasks_path, tasks_payload)
+            tasks_payload["tasks"] = self._normalize_team_tasks(tasks_payload.get("tasks", []))
+            self._write_tasks_payload(tasks_path, tasks_payload)
+
+            for task in tasks_payload["tasks"]:
+                if task["status"] == "done":
+                    continue
+                attempts = int(task.get("attempts", 0))
+                while attempts < team_max_retries:
+                    task["status"] = "in_progress"
+                    task["attempts"] = attempts
+                    self._write_tasks_payload(tasks_path, tasks_payload)
+                    log_event(
+                        {
+                            "level": "INFO",
+                            "event": "team_task_start",
+                            "task_id": task["task_id"],
+                            "title": task["title"],
+                            "session_id": session_id,
+                            "project_id": project_path.name,
+                        }
+                    )
+
+                    persona = self._team_role_factory(
+                        provider=provider,
+                        provider_name=provider_name,
+                        provider_model=provider_model,
+                        provider_type=provider_type,
+                        task=task,
+                        docs_dir=docs_dir,
+                        session_path=session_path,
+                        session_id=session_id,
+                        config=config,
+                        project_id=project_id,
+                    )
+                    result_path = self._team_execute_task(
+                        provider=provider,
+                        provider_name=provider_name,
+                        provider_model=provider_model,
+                        provider_type=provider_type,
+                        prompt=prompt,
+                        task=task,
+                        persona=persona,
+                        docs_dir=docs_dir,
+                        session_path=session_path,
+                        session_id=session_id,
+                        config=config,
+                        project_id=project_id,
+                    )
+                    audit = self._team_audit_task(
+                        provider=provider,
+                        provider_name=provider_name,
+                        provider_model=provider_model,
+                        provider_type=provider_type,
+                        task=task,
+                        result_path=result_path,
+                        docs_dir=docs_dir,
+                        session_path=session_path,
+                        session_id=session_id,
+                        config=config,
+                        project_id=project_id,
+                    )
+                    if audit["status"] == "APPROVED":
+                        task["status"] = "done"
+                        task["feedback"] = audit.get("feedback")
+                        self._write_tasks_payload(tasks_path, tasks_payload)
+                        log_event(
+                            {
+                                "level": "INFO",
+                                "event": "team_task_approved",
+                                "task_id": task["task_id"],
+                                "session_id": session_id,
+                                "project_id": project_path.name,
+                            }
+                        )
+                        break
+                    attempts += 1
+                    task["attempts"] = attempts
+                    task["status"] = "todo"
+                    task["feedback"] = audit.get("feedback")
+                    self._write_tasks_payload(tasks_path, tasks_payload)
+                    log_event(
+                        {
+                            "level": "WARNING",
+                            "event": "team_task_rejected",
+                            "task_id": task["task_id"],
+                            "session_id": session_id,
+                            "project_id": project_path.name,
+                            "attempts": attempts,
+                        }
+                    )
+                    if attempts >= team_max_retries:
+                        task["status"] = "failed"
+                        self._write_tasks_payload(tasks_path, tasks_payload)
+                        log_event(
+                            {
+                                "level": "ERROR",
+                                "event": "team_task_failed",
+                                "task_id": task["task_id"],
+                                "session_id": session_id,
+                                "project_id": project_path.name,
+                            }
+                        )
+                        break
+
+            final_text = self._team_synthesize(
                 provider=provider,
                 provider_name=provider_name,
                 provider_model=provider_model,
                 provider_type=provider_type,
                 prompt=prompt,
+                tasks=tasks_payload["tasks"],
                 docs_dir=docs_dir,
                 session_path=session_path,
                 session_id=session_id,
                 config=config,
                 project_id=project_id,
             )
-            self._write_tasks_payload(tasks_path, tasks_payload)
-        tasks_payload["tasks"] = self._normalize_team_tasks(tasks_payload.get("tasks", []))
-        self._write_tasks_payload(tasks_path, tasks_payload)
-
-        for task in tasks_payload["tasks"]:
-            if task["status"] == "done":
-                continue
-            attempts = int(task.get("attempts", 0))
-            while attempts < team_max_retries:
-                task["status"] = "in_progress"
-                task["attempts"] = attempts
-                self._write_tasks_payload(tasks_path, tasks_payload)
-                log_event(
-                    {
-                        "level": "INFO",
-                        "event": "team_task_start",
-                        "task_id": task["task_id"],
-                        "title": task["title"],
-                        "session_id": session_id,
-                        "project_id": project_path.name,
-                    }
-                )
-
-                persona = self._team_role_factory(
-                    provider=provider,
-                    provider_name=provider_name,
-                    provider_model=provider_model,
-                    provider_type=provider_type,
-                    task=task,
-                    docs_dir=docs_dir,
-                    session_path=session_path,
-                    session_id=session_id,
-                    config=config,
-                    project_id=project_id,
-                )
-                result_path = self._team_execute_task(
-                    provider=provider,
-                    provider_name=provider_name,
-                    provider_model=provider_model,
-                    provider_type=provider_type,
-                    prompt=prompt,
-                    task=task,
-                    persona=persona,
-                    docs_dir=docs_dir,
-                    session_path=session_path,
-                    session_id=session_id,
-                    config=config,
-                    project_id=project_id,
-                )
-                audit = self._team_audit_task(
-                    provider=provider,
-                    provider_name=provider_name,
-                    provider_model=provider_model,
-                    provider_type=provider_type,
-                    task=task,
-                    result_path=result_path,
-                    docs_dir=docs_dir,
-                    session_path=session_path,
-                    session_id=session_id,
-                    config=config,
-                    project_id=project_id,
-                )
-                if audit["status"] == "APPROVED":
-                    task["status"] = "done"
-                    task["feedback"] = audit.get("feedback")
-                    self._write_tasks_payload(tasks_path, tasks_payload)
-                    log_event(
-                        {
-                            "level": "INFO",
-                            "event": "team_task_approved",
-                            "task_id": task["task_id"],
-                            "session_id": session_id,
-                            "project_id": project_path.name,
-                        }
-                    )
-                    break
-                attempts += 1
-                task["attempts"] = attempts
-                task["status"] = "todo"
-                task["feedback"] = audit.get("feedback")
-                self._write_tasks_payload(tasks_path, tasks_payload)
-                log_event(
-                    {
-                        "level": "WARNING",
-                        "event": "team_task_rejected",
-                        "task_id": task["task_id"],
-                        "session_id": session_id,
-                        "project_id": project_path.name,
-                        "attempts": attempts,
-                    }
-                )
-                if attempts >= team_max_retries:
-                    task["status"] = "failed"
-                    self._write_tasks_payload(tasks_path, tasks_payload)
-                    log_event(
-                        {
-                            "level": "ERROR",
-                            "event": "team_task_failed",
-                            "task_id": task["task_id"],
-                            "session_id": session_id,
-                            "project_id": project_path.name,
-                        }
-                    )
-                    break
-
-        final_text = self._team_synthesize(
-            provider=provider,
-            provider_name=provider_name,
-            provider_model=provider_model,
-            provider_type=provider_type,
-            prompt=prompt,
-            tasks=tasks_payload["tasks"],
-            docs_dir=docs_dir,
-            session_path=session_path,
-            session_id=session_id,
-            config=config,
-            project_id=project_id,
-        )
-        log_event(
-            {
-                "level": "INFO",
-                "event": "team_complete",
-                "provider": provider_name,
-                "model": provider_model,
-                "session_id": session_id,
-                "project_id": project_path.name,
-            }
-        )
-        return final_text
+            log_event(
+                {
+                    "level": "INFO",
+                    "event": "team_complete",
+                    "provider": provider_name,
+                    "model": provider_model,
+                    "session_id": session_id,
+                    "project_id": project_path.name,
+                }
+            )
+            return final_text
 
     def export_project(self, project_id: str, output_path: Path) -> Path:
         record = self.get_project(project_id)
@@ -777,6 +785,92 @@ class AmonCore:
         )
         return payload
 
+    def doctor(self) -> dict[str, Any]:
+        self.ensure_base_structure()
+        checks = {
+            "root": self._doctor_root(),
+            "config": self._doctor_config(),
+            "model": self._doctor_model(),
+            "skills_index": self._doctor_skills_index(),
+            "mcp": self._doctor_mcp(),
+        }
+        status_order = {"ok": 0, "warning": 1, "error": 2}
+        overall = max(checks.values(), key=lambda item: status_order.get(item["status"], 2))["status"]
+        return {"status": overall, "checks": checks}
+
+    def _doctor_root(self) -> dict[str, str]:
+        try:
+            self.data_dir.mkdir(parents=True, exist_ok=True)
+            probe_path = self.cache_dir / "doctor_probe.txt"
+            self._atomic_write_text(probe_path, "ok")
+            probe_path.unlink(missing_ok=True)
+            return {"status": "ok", "message": "資料目錄可讀寫"}
+        except OSError as exc:
+            self.logger.error("doctor root 檢查失敗：%s", exc, exc_info=True)
+            return {"status": "error", "message": f"資料目錄無法讀寫：{exc}"}
+
+    def _doctor_config(self) -> dict[str, str]:
+        try:
+            _ = self.load_config()
+            return {"status": "ok", "message": "設定檔讀取正常"}
+        except Exception as exc:  # noqa: BLE001
+            self.logger.error("doctor config 檢查失敗：%s", exc, exc_info=True)
+            return {"status": "error", "message": f"設定檔讀取失敗：{exc}"}
+
+    def _doctor_model(self) -> dict[str, str]:
+        try:
+            config = self.load_config()
+            provider_name = config.get("amon", {}).get("provider", "openai")
+            provider_cfg = config.get("providers", {}).get(provider_name, {})
+            provider_type = provider_cfg.get("type")
+            if provider_type == "mock":
+                return {"status": "warning", "message": "目前使用 mock provider，未檢查實際連線"}
+            if provider_type != "openai_compatible":
+                return {"status": "error", "message": f"不支援的 provider 類型：{provider_type}"}
+            base_url = str(provider_cfg.get("base_url", ""))
+            api_key_env = str(provider_cfg.get("api_key_env", ""))
+            api_key = os.getenv(api_key_env) if api_key_env else None
+            if not base_url:
+                return {"status": "error", "message": "模型 base_url 未設定"}
+            if not api_key:
+                return {"status": "error", "message": f"缺少 API Key（請設定環境變數 {api_key_env}）"}
+            request = urllib.request.Request(base_url, method="GET")
+            try:
+                with urllib.request.urlopen(request, timeout=5) as response:  # noqa: S310
+                    return {"status": "ok", "message": f"模型連線正常（HTTP {response.status}）"}
+            except urllib.error.HTTPError as exc:
+                return {"status": "warning", "message": f"模型連線可達但回應錯誤（HTTP {exc.code}）"}
+            except urllib.error.URLError as exc:
+                return {"status": "error", "message": f"模型連線失敗：{exc}"}
+        except Exception as exc:  # noqa: BLE001
+            self.logger.error("doctor model 檢查失敗：%s", exc, exc_info=True)
+            return {"status": "error", "message": f"模型檢查失敗：{exc}"}
+
+    def _doctor_skills_index(self) -> dict[str, str]:
+        index_path = self.cache_dir / "skills_index.json"
+        if not index_path.exists():
+            return {"status": "warning", "message": "尚未建立 skills index（請執行 amon skills scan）"}
+        try:
+            _ = json.loads(index_path.read_text(encoding="utf-8"))
+            return {"status": "ok", "message": "skills index 正常"}
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.error("doctor skills index 檢查失敗：%s", exc, exc_info=True)
+            return {"status": "error", "message": f"skills index 讀取失敗：{exc}"}
+
+    def _doctor_mcp(self) -> dict[str, str]:
+        config = self.load_config()
+        servers = config.get("mcp", {}).get("servers", {}) or {}
+        if not servers:
+            return {"status": "warning", "message": "未設定 MCP servers"}
+        registry = self.refresh_mcp_registry()
+        errors = []
+        for name, info in registry.get("servers", {}).items():
+            if info.get("error"):
+                errors.append(f"{name}: {info['error']}")
+        if errors:
+            return {"status": "error", "message": "MCP 檢查失敗：" + "; ".join(errors)}
+        return {"status": "ok", "message": "MCP tools 連線正常"}
+
     def _team_plan_tasks(
         self,
         provider: Any,
@@ -823,7 +917,7 @@ class AmonCore:
             project_id=project_id,
         )
         try:
-            plan_path.write_text(response_text, encoding="utf-8")
+            self._atomic_write_text(plan_path, response_text)
         except OSError as exc:
             self.logger.error("寫入 team 任務規劃失敗：%s", exc, exc_info=True)
             raise
@@ -899,7 +993,7 @@ class AmonCore:
                 "instructions": "依照任務需求完成工作，輸出清楚的結果。",
             }
         try:
-            persona_path.write_text(json.dumps(parsed, ensure_ascii=False, indent=2), encoding="utf-8")
+            self._atomic_write_text(persona_path, json.dumps(parsed, ensure_ascii=False, indent=2))
         except OSError as exc:
             self.logger.error("寫入 persona 失敗：%s", exc, exc_info=True)
             raise
@@ -1022,7 +1116,7 @@ class AmonCore:
             status = "APPROVED"
         audit_payload = {"status": status, "feedback": feedback}
         try:
-            audit_path.write_text(json.dumps(audit_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            self._atomic_write_text(audit_path, json.dumps(audit_payload, ensure_ascii=False, indent=2))
         except OSError as exc:
             self.logger.error("寫入審核結果失敗：%s", exc, exc_info=True)
             raise
@@ -1047,7 +1141,7 @@ class AmonCore:
         if not approved_tasks:
             fallback_text = "目前沒有通過審核的任務，無法產出最終整合結果。"
             try:
-                final_path.write_text(fallback_text, encoding="utf-8")
+                self._atomic_write_text(final_path, fallback_text)
             except OSError as exc:
                 self.logger.error("寫入 final.md 失敗：%s", exc, exc_info=True)
                 raise
@@ -1096,7 +1190,7 @@ class AmonCore:
 
     def _write_tasks_payload(self, tasks_path: Path, payload: dict[str, Any]) -> None:
         try:
-            tasks_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            self._atomic_write_text(tasks_path, json.dumps(payload, ensure_ascii=False, indent=2))
         except OSError as exc:
             self.logger.error("寫入 tasks.json 失敗：%s", exc, exc_info=True)
             raise
@@ -1184,7 +1278,7 @@ class AmonCore:
                 skills.extend(self._scan_skill_dir(project_dir, scope="project"))
         index_path = self.cache_dir / "skills_index.json"
         try:
-            index_path.write_text(json.dumps({"skills": skills}, ensure_ascii=False, indent=2), encoding="utf-8")
+            self._atomic_write_text(index_path, json.dumps({"skills": skills}, ensure_ascii=False, indent=2))
         except OSError as exc:
             self.logger.error("寫入技能索引失敗：%s", exc, exc_info=True)
             raise
@@ -1316,6 +1410,7 @@ class AmonCore:
         except MCPClientError as exc:
             self.logger.error("MCP tool 呼叫失敗：%s", exc, exc_info=True)
             raise
+        data_prompt = self._format_mcp_result(full_tool, result)
         log_event(
             {
                 "level": "INFO",
@@ -1325,7 +1420,12 @@ class AmonCore:
                 "result_summary": self._summarize_value(result),
             }
         )
-        return result
+        return {"tool": full_tool, "data": result, "data_prompt": data_prompt}
+
+    @staticmethod
+    def _format_mcp_result(tool_name: str, result: dict[str, Any]) -> str:
+        payload = json.dumps(result, ensure_ascii=False, indent=2)
+        return f"[資料]\n工具：{tool_name}\n```json\n{payload}\n```"
 
     def _generate_project_id(self, name: str) -> str:
         slug = "".join(char.lower() for char in name if char.isalnum())
@@ -1402,7 +1502,7 @@ class AmonCore:
 
         tasks_path = project_path / "tasks" / "tasks.json"
         if not tasks_path.exists():
-            tasks_path.write_text(json.dumps({"tasks": []}, ensure_ascii=False, indent=2), encoding="utf-8")
+            self._atomic_write_text(tasks_path, json.dumps({"tasks": []}, ensure_ascii=False, indent=2))
 
     def _write_project_config(self, project_path: Path, name: str) -> None:
         config_path = project_path / "amon.project.yaml"
@@ -1441,16 +1541,23 @@ class AmonCore:
         index_path = self.cache_dir / "projects_index.json"
         payload = {"projects": [record.to_dict() for record in records]}
         try:
-            index_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            self._atomic_write_text(index_path, json.dumps(payload, ensure_ascii=False, indent=2))
         except OSError as exc:
             self.logger.error("寫入專案索引失敗：%s", exc, exc_info=True)
             raise
 
     def _write_yaml(self, path: Path, data: dict[str, Any]) -> None:
         try:
-            path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+            self._atomic_write_text(path, yaml.safe_dump(data, allow_unicode=True, sort_keys=False))
         except OSError as exc:
             self.logger.error("寫入設定檔失敗：%s", exc, exc_info=True)
+            raise
+
+    def _atomic_write_text(self, path: Path, content: str) -> None:
+        try:
+            atomic_write_text(path, content, encoding="utf-8")
+        except OSError as exc:
+            self.logger.error("寫入檔案失敗：%s", exc, exc_info=True)
             raise
 
     def _read_yaml(self, path: Path) -> dict[str, Any] | None:
@@ -1494,7 +1601,7 @@ class AmonCore:
         if path.exists():
             return
         try:
-            path.write_text("", encoding="utf-8")
+            self._atomic_write_text(path, "")
         except OSError as exc:
             self.logger.error("建立 %s 失敗：%s", path.name, exc, exc_info=True)
             raise
@@ -1524,7 +1631,7 @@ class AmonCore:
             }
         )
         try:
-            manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+            self._atomic_write_text(manifest_path, json.dumps(manifest, ensure_ascii=False, indent=2))
         except OSError as exc:
             self.logger.error("寫入回收桶清單失敗：%s", exc, exc_info=True)
             raise
@@ -1542,7 +1649,7 @@ class AmonCore:
             if entry.get("project_id") == project_id and not entry.get("restored_at"):
                 entry["restored_at"] = self._now()
         try:
-            manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+            self._atomic_write_text(manifest_path, json.dumps(manifest, ensure_ascii=False, indent=2))
         except OSError as exc:
             self.logger.error("寫入回收桶清單失敗：%s", exc, exc_info=True)
             raise
@@ -1604,6 +1711,46 @@ class AmonCore:
             raise
         return sessions_dir / f"{session_id}.jsonl"
 
+    @contextmanager
+    def _project_lock(self, project_path: Path, action: str) -> Any:
+        lock_path = self._acquire_project_lock(project_path, action)
+        try:
+            yield
+        finally:
+            self._release_project_lock(lock_path)
+
+    def _acquire_project_lock(self, project_path: Path, action: str) -> Path:
+        locks_dir = project_path / ".amon" / "locks"
+        try:
+            locks_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            self.logger.error("建立鎖定目錄失敗：%s", exc, exc_info=True)
+            raise
+        lock_path = locks_dir / "project.lock"
+        payload = {"pid": os.getpid(), "action": action, "created_at": self._now()}
+        try:
+            with lock_path.open("x", encoding="utf-8") as handle:
+                handle.write(json.dumps(payload, ensure_ascii=False, indent=2))
+        except FileExistsError:
+            detail = ""
+            try:
+                detail = lock_path.read_text(encoding="utf-8")
+            except OSError:
+                detail = "（無法讀取鎖定內容）"
+            raise RuntimeError(f"專案正在執行其他指令，請稍後再試。鎖定資訊：{detail}")
+        except OSError as exc:
+            self.logger.error("建立鎖定失敗：%s", exc, exc_info=True)
+            raise
+        return lock_path
+
+    def _release_project_lock(self, lock_path: Path) -> None:
+        try:
+            if lock_path.exists():
+                lock_path.unlink()
+        except OSError as exc:
+            self.logger.error("釋放鎖定失敗：%s", exc, exc_info=True)
+            raise
+
     def _resolve_doc_paths(self, docs_dir: Path) -> tuple[Path, Path, Path, int]:
         try:
             docs_dir.mkdir(parents=True, exist_ok=True)
@@ -1611,7 +1758,7 @@ class AmonCore:
             self.logger.error("建立 docs 目錄失敗：%s", exc, exc_info=True)
             raise
         version = self._next_doc_version(docs_dir)
-        suffix = "" if version == 1 else f"_v{version}"
+        suffix = f"_v{version}"
         draft_path = docs_dir / f"draft{suffix}.md"
         final_path = docs_dir / f"final{suffix}.md"
         reviews_dir = docs_dir / f"reviews{suffix}"
@@ -1624,9 +1771,16 @@ class AmonCore:
 
     def _next_doc_version(self, docs_dir: Path) -> int:
         max_version = 0
-        if (docs_dir / "draft.md").exists() or (docs_dir / "final.md").exists() or (docs_dir / "reviews").exists():
+        legacy_paths = [docs_dir / "draft.md", docs_dir / "final.md", docs_dir / "reviews"]
+        if any(path.exists() for path in legacy_paths):
             max_version = 1
         for path in docs_dir.glob("draft_v*.md"):
+            try:
+                version = int(path.stem.split("_v")[-1])
+            except ValueError:
+                continue
+            max_version = max(max_version, version)
+        for path in docs_dir.glob("final_v*.md"):
             try:
                 version = int(path.stem.split("_v")[-1])
             except ValueError:
@@ -1918,7 +2072,7 @@ class AmonCore:
     def _write_mcp_registry(self, registry: dict[str, Any]) -> None:
         path = self._mcp_registry_path()
         try:
-            path.write_text(json.dumps(registry, ensure_ascii=False, indent=2), encoding="utf-8")
+            self._atomic_write_text(path, json.dumps(registry, ensure_ascii=False, indent=2))
         except OSError as exc:
             self.logger.error("寫入 MCP registry 失敗：%s", exc, exc_info=True)
             raise
@@ -2145,17 +2299,21 @@ class AmonCore:
             }
         )
         docs_dir = project_path / "docs"
+        draft_files = list(docs_dir.glob("draft_v*.md"))
+        final_files = list(docs_dir.glob("final_v*.md"))
         checks.append(
             {
                 "check": "self_critique_docs",
                 "status": "passed"
-                if (docs_dir / "draft.md").exists() and (docs_dir / "final.md").exists()
+                if draft_files and final_files
                 else "failed",
-                "detail": "draft/final",
+                "detail": f"draft={len(draft_files)} final={len(final_files)}",
             }
         )
-        reviews_dir = docs_dir / "reviews"
-        review_files = list(reviews_dir.glob("*.md")) if reviews_dir.exists() else []
+        review_files: list[Path] = []
+        for reviews_dir in docs_dir.glob("reviews_v*"):
+            if reviews_dir.is_dir():
+                review_files.extend(list(reviews_dir.glob("*.md")))
         checks.append(
             {
                 "check": "self_critique_reviews",

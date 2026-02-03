@@ -33,7 +33,7 @@ class MCPToolsTests(unittest.TestCase):
                 self.assertTrue(any(tool.get("name") == "echo" for tool in tools))
 
                 result = core.call_mcp_tool("stub", "echo", {"text": "hello"})
-                self.assertEqual(result.get("echo", {}).get("arguments", {}).get("text"), "hello")
+                self.assertEqual(result.get("data", {}).get("echo", {}).get("arguments", {}).get("text"), "hello")
 
                 log_path = Path(temp_dir) / "logs" / "amon.log"
                 log_text = log_path.read_text(encoding="utf-8")
