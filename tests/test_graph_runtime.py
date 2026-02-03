@@ -74,6 +74,63 @@ class GraphRuntimeTests(unittest.TestCase):
             self.assertTrue(output_path.exists())
             self.assertEqual(output_path.read_text(encoding="utf-8"), "Hello Amon")
 
+    def test_graph_template_parametrize_and_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("Template 專案")
+                project_path = Path(project.path)
+                core.set_config_value(
+                    "providers.mock",
+                    {
+                        "type": "mock",
+                        "default_model": "mock-model",
+                        "stream_chunks": ["OK"],
+                    },
+                    project_path=project_path,
+                )
+                core.set_config_value("amon.provider", "mock", project_path=project_path)
+
+                graph = {
+                    "variables": {},
+                    "nodes": [
+                        {
+                            "id": "write",
+                            "type": "write_file",
+                            "path": "docs/output.txt",
+                            "content": "Tesla",
+                        }
+                    ],
+                    "edges": [],
+                }
+                graph_path = project_path / "graph.json"
+                graph_path.write_text(json.dumps(graph, ensure_ascii=False), encoding="utf-8")
+
+                run_result = core.run_graph(project_path=project_path, graph_path=graph_path)
+                template_result = core.create_graph_template(project.project_id, run_result.run_id)
+                core.parametrize_graph_template(
+                    template_result["template_id"],
+                    "$.nodes[0].content",
+                    "company",
+                )
+                template_path = Path(template_result["path"])
+                template_payload = json.loads(template_path.read_text(encoding="utf-8"))
+                self.assertIn("company", template_payload.get("variables_schema", {}))
+
+                template_run = core.run_graph_template(
+                    template_result["template_id"],
+                    {"company": "Amon"},
+                )
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+            output_path = project_path / "docs" / "output.txt"
+            self.assertTrue(output_path.exists())
+            self.assertEqual(output_path.read_text(encoding="utf-8"), "Amon")
+            self.assertNotEqual(run_result.run_id, template_run.run_id)
+
 
 if __name__ == "__main__":
     unittest.main()

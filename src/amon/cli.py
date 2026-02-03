@@ -148,9 +148,20 @@ def build_parser() -> argparse.ArgumentParser:
     graph_parser = subparsers.add_parser("graph", help="Graph 執行")
     graph_sub = graph_parser.add_subparsers(dest="graph_command")
     graph_run = graph_sub.add_parser("run", help="執行 graph")
-    graph_run.add_argument("--project", required=True, help="指定專案 ID")
-    graph_run.add_argument("--graph", required=True, help="graph.json 路徑")
+    graph_run.add_argument("--project", help="指定專案 ID")
+    graph_run.add_argument("--graph", help="graph.json 路徑")
+    graph_run.add_argument("--template", help="template ID")
     graph_run.add_argument("--var", action="append", default=[], help="變數（k=v）")
+
+    graph_template = graph_sub.add_parser("template", help="Graph template 管理")
+    graph_template_sub = graph_template.add_subparsers(dest="template_command")
+    template_create = graph_template_sub.add_parser("create", help="建立 graph template")
+    template_create.add_argument("--project", required=True, help="指定專案 ID")
+    template_create.add_argument("--run", required=True, help="graph run ID")
+    template_param = graph_template_sub.add_parser("parametrize", help="參數化 template")
+    template_param.add_argument("--template", required=True, help="template ID")
+    template_param.add_argument("--path", required=True, help="JSONPath")
+    template_param.add_argument("--var_name", required=True, help="變數名稱")
 
     return parser
 
@@ -456,14 +467,34 @@ def _handle_eval(core: AmonCore, args: argparse.Namespace) -> None:
 
 
 def _handle_graph(core: AmonCore, args: argparse.Namespace) -> None:
-    if args.graph_command != "run":
-        raise ValueError("請指定 graph 指令")
-    project_path = core.get_project_path(args.project)
-    graph_path = Path(args.graph).expanduser()
-    variables = _parse_vars(args.var)
-    result = core.run_graph(project_path=project_path, graph_path=graph_path, variables=variables)
-    print(f"已完成 graph 執行：{result.run_id}")
-    print(f"結果目錄：{result.run_dir}")
+    if args.graph_command == "run":
+        variables = _parse_vars(args.var)
+        if args.template:
+            result = core.run_graph_template(args.template, variables)
+            print(f"已完成 graph template 執行：{result.run_id}")
+            print(f"結果目錄：{result.run_dir}")
+            return
+        if not args.project or not args.graph:
+            raise ValueError("執行 graph 需要指定 --project 與 --graph")
+        project_path = core.get_project_path(args.project)
+        graph_path = Path(args.graph).expanduser()
+        result = core.run_graph(project_path=project_path, graph_path=graph_path, variables=variables)
+        print(f"已完成 graph 執行：{result.run_id}")
+        print(f"結果目錄：{result.run_dir}")
+        return
+    if args.graph_command == "template":
+        if args.template_command == "create":
+            result = core.create_graph_template(args.project, args.run)
+            print(f"已建立 graph template：{result['template_id']}")
+            print(f"template 路徑：{result['path']}")
+            return
+        if args.template_command == "parametrize":
+            result = core.parametrize_graph_template(args.template, args.path, args.var_name)
+            print(f"已更新 graph template：{result['template_id']}")
+            print(f"template 路徑：{result['path']}")
+            return
+        raise ValueError("請指定 graph template 指令")
+    raise ValueError("請指定 graph 指令")
 
 
 def _parse_vars(items: list[str]) -> dict[str, str]:
