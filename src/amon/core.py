@@ -9,11 +9,14 @@ import shlex
 import shutil
 import uuid
 import zipfile
+from collections import Counter
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+import hashlib
 from pathlib import Path
 from typing import Any
+import unicodedata
 from zoneinfo import ZoneInfo
 import urllib.error
 import urllib.request
@@ -1723,6 +1726,264 @@ class AmonCore:
             raise
         return memory_dir
 
+    def _entity_aliases_path(self, memory_dir: Path) -> Path:
+        return memory_dir / "entity_aliases.json"
+
+    def _normalize_alias_key(self, name: str) -> str:
+        normalized = unicodedata.normalize("NFKC", name).strip().lower()
+        normalized = re.sub(r"\s+", "", normalized)
+        return normalized
+
+    def _slugify_entity_name(self, name: str) -> str:
+        normalized = unicodedata.normalize("NFKC", name).strip().lower()
+        normalized = re.sub(r"\s+", "_", normalized)
+        normalized = re.sub(r"[^\w\u4e00-\u9fff]+", "_", normalized)
+        normalized = normalized.strip("_")
+        return normalized or "unknown"
+
+    def _load_entity_aliases(self, memory_dir: Path) -> dict[str, Any]:
+        aliases_path = self._entity_aliases_path(memory_dir)
+        if not aliases_path.exists():
+            return {"entities": {}, "aliases": {}}
+        try:
+            payload = json.loads(aliases_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.error("讀取 entity aliases 失敗：%s", exc, exc_info=True)
+            raise
+        if not isinstance(payload, dict):
+            return {"entities": {}, "aliases": {}}
+        payload.setdefault("entities", {})
+        payload.setdefault("aliases", {})
+        return payload
+
+    def _save_entity_aliases(self, memory_dir: Path, payload: dict[str, Any]) -> None:
+        aliases_path = self._entity_aliases_path(memory_dir)
+        try:
+            self._atomic_write_text(
+                aliases_path,
+                json.dumps(payload, ensure_ascii=False, indent=2),
+            )
+        except OSError as exc:
+            self.logger.error("寫入 entity aliases 失敗：%s", exc, exc_info=True)
+            raise
+
+    def _build_canonical_id(self, entity_type: str, name: str, entities: dict[str, Any]) -> str:
+        base_slug = self._slugify_entity_name(name)
+        canonical_id = f"{entity_type}:{base_slug}"
+        if canonical_id in entities and entities[canonical_id].get("name") != name:
+            digest = hashlib.md5(name.encode("utf-8")).hexdigest()[:6]
+            canonical_id = f"{canonical_id}-{digest}"
+        return canonical_id
+
+    def _ensure_entity_alias(
+        self,
+        entities: dict[str, Any],
+        canonical_id: str,
+        alias: str,
+        entity_type: str | None = None,
+    ) -> None:
+        entry = entities.setdefault(
+            canonical_id,
+            {
+                "canonical_id": canonical_id,
+                "name": alias,
+                "type": entity_type or "",
+                "aliases": [],
+                "merged_ids": [],
+            },
+        )
+        if entity_type and not entry.get("type"):
+            entry["type"] = entity_type
+        if alias and not entry.get("name"):
+            entry["name"] = alias
+        alias_list = entry.setdefault("aliases", [])
+        if alias not in alias_list:
+            alias_list.append(alias)
+
+    def _find_alias_merge_candidate(
+        self,
+        name: str,
+        entity_type: str,
+        entities: dict[str, Any],
+    ) -> str | None:
+        if entity_type != "person":
+            return None
+        if len(name) > 3:
+            return None
+        candidates: list[tuple[int, str]] = []
+        for canonical_id, entry in entities.items():
+            if entry.get("type") != "person":
+                continue
+            known_name = str(entry.get("name") or "")
+            aliases = entry.get("aliases") or []
+            if name and (known_name.endswith(name) or name in known_name):
+                candidates.append((len(known_name), canonical_id))
+                continue
+            if any(name and (alias.endswith(name) or name in alias) for alias in aliases):
+                candidates.append((len(known_name), canonical_id))
+        if not candidates:
+            return None
+        candidates.sort(reverse=True)
+        return candidates[0][1]
+
+    def _resolve_entity_canonical_id(
+        self,
+        name: str,
+        entity_type: str,
+        alias_state: dict[str, Any],
+    ) -> str:
+        alias_key = self._normalize_alias_key(name)
+        aliases = alias_state.setdefault("aliases", {})
+        entities = alias_state.setdefault("entities", {})
+        if alias_key in aliases:
+            canonical_id = aliases[alias_key]
+            self._ensure_entity_alias(entities, canonical_id, name, entity_type)
+            return canonical_id
+        candidate_id = self._find_alias_merge_candidate(name, entity_type, entities)
+        if candidate_id:
+            aliases[alias_key] = candidate_id
+            self._ensure_entity_alias(entities, candidate_id, name, entity_type)
+            return candidate_id
+        canonical_id = self._build_canonical_id(entity_type, name, entities)
+        aliases[alias_key] = canonical_id
+        entities.setdefault(
+            canonical_id,
+            {
+                "canonical_id": canonical_id,
+                "name": name,
+                "type": entity_type,
+                "aliases": [name],
+                "merged_ids": [],
+            },
+        )
+        if entity_type == "person":
+            for derived in self._derive_person_aliases(name):
+                derived_key = self._normalize_alias_key(derived)
+                if derived_key not in aliases:
+                    aliases[derived_key] = canonical_id
+                    self._ensure_entity_alias(entities, canonical_id, derived, entity_type)
+        return canonical_id
+
+    def _derive_person_aliases(self, name: str) -> list[str]:
+        normalized = unicodedata.normalize("NFKC", name).strip()
+        if len(normalized) < 3:
+            return []
+        alias = normalized[1:]
+        return [alias] if alias and alias != normalized else []
+
+    def _vectorize_text(self, text: str) -> Counter[str]:
+        cleaned = re.sub(r"\s+", "", text.lower())
+        if len(cleaned) < 2:
+            return Counter({cleaned: 1}) if cleaned else Counter()
+        grams = [cleaned[index : index + 2] for index in range(len(cleaned) - 1)]
+        return Counter(grams)
+
+    def _cosine_similarity(self, left: Counter[str], right: Counter[str]) -> float:
+        if not left or not right:
+            return 0.0
+        intersection = set(left) & set(right)
+        numerator = sum(left[token] * right[token] for token in intersection)
+        left_norm = sum(value * value for value in left.values()) ** 0.5
+        right_norm = sum(value * value for value in right.values()) ** 0.5
+        if left_norm == 0 or right_norm == 0:
+            return 0.0
+        return numerator / (left_norm * right_norm)
+
+    def search_memory(
+        self,
+        project_path: Path,
+        query: str,
+        time_range: dict[str, str] | None = None,
+        top_k: int = 5,
+    ) -> list[dict[str, Any]]:
+        if not project_path:
+            raise ValueError("執行 memory search 需要指定專案")
+        memory_dir = self._prepare_memory_dir(project_path)
+        normalized_path = memory_dir / "normalized.jsonl"
+        tags_path = memory_dir / "tags.jsonl"
+        if not normalized_path.exists() or not tags_path.exists():
+            raise FileNotFoundError("找不到 memory normalized/tags 檔案")
+        tag_map: dict[str, dict[str, Any]] = {}
+        try:
+            with tags_path.open("r", encoding="utf-8") as tags_handle:
+                for line in tags_handle:
+                    payload = line.strip()
+                    if not payload:
+                        continue
+                    record = json.loads(payload)
+                    chunk_id = str(record.get("chunk_id") or "")
+                    if not chunk_id:
+                        continue
+                    tag_map[chunk_id] = record
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.error("讀取 memory tags 失敗：%s", exc, exc_info=True)
+            raise
+        query_vector = self._vectorize_text(query)
+        candidates: list[dict[str, Any]] = []
+        try:
+            with normalized_path.open("r", encoding="utf-8") as normalized_handle:
+                for line in normalized_handle:
+                    payload = line.strip()
+                    if not payload:
+                        continue
+                    normalized = json.loads(payload)
+                    if time_range and not self._within_time_range(normalized, time_range):
+                        continue
+                    chunk_id = str(normalized.get("chunk_id") or "")
+                    tags = tag_map.get(chunk_id, {})
+                    embedding_text = str(tags.get("embedding_text") or normalized.get("text") or "")
+                    score = self._cosine_similarity(query_vector, self._vectorize_text(embedding_text))
+                    candidates.append(
+                        {
+                            "chunk_id": chunk_id,
+                            "score": score,
+                            "text": normalized.get("text"),
+                            "created_at": normalized.get("created_at"),
+                            "source_path": normalized.get("source_path"),
+                            "time": normalized.get("time"),
+                        }
+                    )
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.error("讀取 memory normalized 失敗：%s", exc, exc_info=True)
+            raise
+        candidates.sort(key=lambda item: item["score"], reverse=True)
+        return candidates[: max(top_k, 1)]
+
+    def _within_time_range(self, normalized: dict[str, Any], time_range: dict[str, str]) -> bool:
+        start_raw = time_range.get("start") or time_range.get("from")
+        end_raw = time_range.get("end") or time_range.get("to")
+        if not start_raw and not end_raw:
+            return True
+        try:
+            start_date = date.fromisoformat(start_raw) if start_raw else None
+            end_date = date.fromisoformat(end_raw) if end_raw else None
+        except ValueError:
+            self.logger.warning("time.range 格式錯誤，略過時間過濾。")
+            return True
+        created_at = str(normalized.get("created_at") or "")
+        created = self._parse_chunk_created_at(created_at)
+        created_date = created.date() if created else None
+        mention_dates: list[date] = []
+        for mention in normalized.get("time", {}).get("mentions", []):
+            resolved = mention.get("resolved_date")
+            if not resolved:
+                continue
+            try:
+                mention_dates.append(date.fromisoformat(resolved))
+            except ValueError:
+                continue
+        def in_range(target: date | None) -> bool:
+            if target is None:
+                return False
+            if start_date and target < start_date:
+                return False
+            if end_date and target > end_date:
+                return False
+            return True
+        if in_range(created_date):
+            return True
+        return any(in_range(item) for item in mention_dates)
+
     def _sanitize_tag_value(self, value: str) -> str:
         sanitized = value.replace("\n", " ").replace("\r", " ")
         sanitized = sanitized.replace("```", "").replace("`", "")
@@ -1762,13 +2023,17 @@ class AmonCore:
             for mention in entity_mentions:
                 pronoun = self._sanitize_tag_value(str(mention.get("pronoun") or ""))
                 resolved_to = self._sanitize_tag_value(str(mention.get("resolved_to") or ""))
+                resolved_to_canonical = self._sanitize_tag_value(str(mention.get("resolved_to_canonical_id") or ""))
+                name = self._sanitize_tag_value(str(mention.get("name") or ""))
+                canonical_id = self._sanitize_tag_value(str(mention.get("canonical_id") or ""))
                 entity_type = self._sanitize_tag_value(str(mention.get("entity_type") or ""))
                 confidence = mention.get("confidence")
                 needs_review = mention.get("needs_review")
                 rule = self._sanitize_tag_value(str(mention.get("rule") or ""))
                 lines.append(
                     "- entity_mentions: "
-                    f'pronoun="{pronoun}", resolved_to="{resolved_to}", entity_type="{entity_type}", '
+                    f'pronoun="{pronoun}", resolved_to="{resolved_to}", resolved_to_canonical_id="{resolved_to_canonical}", '
+                    f'name="{name}", canonical_id="{canonical_id}", entity_type="{entity_type}", '
                     f'confidence="{confidence}", needs_review="{needs_review}", rule="{rule}"'
                 )
         else:
@@ -2082,6 +2347,7 @@ class AmonCore:
             raise FileNotFoundError(f"找不到 memory chunks 檔案：{chunks_path}")
         normalized_count = 0
         session_last_entity: dict[str, dict[str, Any] | None] = {}
+        alias_state = self._load_entity_aliases(memory_dir)
         try:
             with (
                 chunks_path.open("r", encoding="utf-8") as handle,
@@ -2105,12 +2371,42 @@ class AmonCore:
                     last_entity = session_last_entity.get(session_id)
                     pronoun_mentions, last_entity = self._resolve_pronouns_in_text(text, last_entity)
                     session_last_entity[session_id] = last_entity
+                    explicit_entities = self._extract_explicit_entities(text)
                     normalized = dict(chunk)
                     normalized["time"] = {"mentions": mentions}
                     normalized["geo"] = {"mentions": geo_mentions}
                     out_handle.write(json.dumps(normalized, ensure_ascii=False))
                     out_handle.write("\n")
+                    for entity in explicit_entities:
+                        name = str(entity.get("name") or "")
+                        entity_type = str(entity.get("type") or "")
+                        canonical_id = self._resolve_entity_canonical_id(name, entity_type, alias_state)
+                        entity_record = {
+                            "chunk_id": chunk.get("chunk_id"),
+                            "project_id": chunk.get("project_id"),
+                            "session_id": session_id,
+                            "source_path": chunk.get("source_path"),
+                            "text": text,
+                            "mention": {
+                                "name": name,
+                                "entity_type": entity_type,
+                                "canonical_id": canonical_id,
+                                "confidence": 1.0,
+                                "needs_review": False,
+                                "rule": "explicit_name",
+                            },
+                        }
+                        entity_handle.write(json.dumps(entity_record, ensure_ascii=False))
+                        entity_handle.write("\n")
                     for mention in pronoun_mentions:
+                        resolved_to = mention.get("resolved_to")
+                        entity_type = mention.get("entity_type") or ""
+                        resolved_canonical_id = (
+                            self._resolve_entity_canonical_id(str(resolved_to), entity_type, alias_state)
+                            if resolved_to
+                            else None
+                        )
+                        mention["resolved_to_canonical_id"] = resolved_canonical_id
                         entity_record = {
                             "chunk_id": chunk.get("chunk_id"),
                             "project_id": chunk.get("project_id"),
@@ -2125,6 +2421,7 @@ class AmonCore:
         except OSError as exc:
             self.logger.error("寫入 memory normalized 失敗：%s", exc, exc_info=True)
             raise
+        self._save_entity_aliases(memory_dir, alias_state)
         try:
             self.generate_memory_tags(project_path)
         except Exception as exc:  # noqa: BLE001

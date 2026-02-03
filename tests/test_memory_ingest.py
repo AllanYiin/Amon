@@ -155,9 +155,11 @@ class MemoryIngestTests(unittest.TestCase):
             entities_path = memory_dir / "entities.jsonl"
             self.assertTrue(entities_path.exists())
             entity_lines = entities_path.read_text(encoding="utf-8").splitlines()
-            self.assertEqual(len(entity_lines), 1)
-            record = json.loads(entity_lines[0])
-            mention = record["mention"]
+            self.assertGreaterEqual(len(entity_lines), 1)
+            records = [json.loads(line) for line in entity_lines]
+            pronoun_records = [record for record in records if record.get("mention", {}).get("pronoun") == "他"]
+            self.assertEqual(len(pronoun_records), 1)
+            mention = pronoun_records[0]["mention"]
             self.assertEqual(mention["pronoun"], "他")
             self.assertEqual(mention["resolved_to"], "王小明")
 
