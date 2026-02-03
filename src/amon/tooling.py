@@ -1,0 +1,155 @@
+"""Tool management utilities for Amon."""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+import sys
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+from .fs.safety import canonicalize_path, make_change_plan, require_confirm
+
+
+@dataclass
+class ToolSpec:
+    name: str
+    version: str
+    inputs_schema: dict[str, Any]
+    outputs_schema: dict[str, Any]
+    risk_level: str
+    allowed_paths: list[str]
+
+
+class ToolingError(RuntimeError):
+    """Tooling error."""
+
+
+TOOL_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{1,63}$")
+
+
+def load_tool_spec(tool_dir: Path) -> ToolSpec:
+    tool_yaml = tool_dir / "tool.yaml"
+    if not tool_yaml.exists():
+        raise ToolingError(f"找不到 tool.yaml：{tool_yaml}")
+    try:
+        data = yaml.safe_load(tool_yaml.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        raise ToolingError(f"讀取 tool.yaml 失敗：{tool_yaml}") from exc
+    missing = [key for key in ["name", "version", "inputs_schema", "outputs_schema", "risk_level", "allowed_paths"] if key not in data]
+    if missing:
+        raise ToolingError(f"tool.yaml 缺少欄位：{', '.join(missing)}")
+    return ToolSpec(
+        name=str(data["name"]),
+        version=str(data["version"]),
+        inputs_schema=data["inputs_schema"] or {},
+        outputs_schema=data["outputs_schema"] or {},
+        risk_level=str(data["risk_level"]),
+        allowed_paths=list(data.get("allowed_paths") or []),
+    )
+
+
+def ensure_tool_name(name: str) -> None:
+    if not TOOL_NAME_RE.match(name):
+        raise ToolingError("工具名稱僅允許英數、底線、連字號，且需 2-64 字元")
+
+
+def write_tool_spec(path: Path, payload: dict[str, Any]) -> None:
+    try:
+        path.write_text(yaml.safe_dump(payload, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    except OSError as exc:
+        raise ToolingError(f"寫入 tool.yaml 失敗：{path}") from exc
+
+
+def run_tool_process(
+    tool_path: Path,
+    payload: dict[str, Any],
+    env: dict[str, str],
+    cwd: Path | None,
+    timeout_s: int = 30,
+) -> dict[str, Any]:
+    try:
+        result = subprocess.run(
+            [sys.executable, str(tool_path)],
+            input=json.dumps(payload, ensure_ascii=False),
+            text=True,
+            capture_output=True,
+            env=env,
+            cwd=str(cwd) if cwd else None,
+            timeout=timeout_s,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ToolingError(f"執行工具失敗：{tool_path}") from exc
+    if result.returncode != 0:
+        raise ToolingError(f"工具執行失敗：{result.stderr.strip()}")
+    try:
+        return json.loads(result.stdout or "{}")
+    except json.JSONDecodeError as exc:
+        raise ToolingError("工具輸出非 JSON") from exc
+
+
+def build_confirm_plan(tool_name: str, risk_level: str) -> str:
+    return make_change_plan(
+        [
+            {
+                "action": "執行工具",
+                "target": tool_name,
+                "detail": f"risk_level={risk_level}",
+            }
+        ]
+    )
+
+
+def resolve_allowed_paths(
+    raw_paths: list[str],
+    project_path: Path | None,
+    project_allowed: list[Path],
+) -> list[Path]:
+    resolved: list[Path] = []
+    for entry in raw_paths:
+        path = Path(entry)
+        if not path.is_absolute():
+            if project_path:
+                path = project_path / path
+            else:
+                path = Path(entry).expanduser()
+        resolved.append(path)
+    for target in resolved:
+        canonicalize_path(target, project_allowed)
+    return resolved
+
+
+def format_registry_entry(
+    tool_spec: ToolSpec,
+    tool_dir: Path,
+    scope: str,
+    project_id: str | None,
+) -> dict[str, Any]:
+    return {
+        "name": tool_spec.name,
+        "version": tool_spec.version,
+        "path": str(tool_dir),
+        "scope": scope,
+        "project_id": project_id,
+        "registered_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+    }
+
+
+def build_tool_env(
+    log_dir: Path,
+    allowed_paths: list[Path],
+    project_path: Path | None,
+) -> dict[str, str]:
+    env = os.environ.copy()
+    env["AMON_TOOL_LOG_DIR"] = str(log_dir)
+    env["AMON_ALLOWED_PATHS"] = json.dumps([str(path) for path in allowed_paths], ensure_ascii=False)
+    if project_path:
+        env["AMON_PROJECT_PATH"] = str(project_path)
+    return env

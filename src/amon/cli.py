@@ -98,12 +98,33 @@ def build_parser() -> argparse.ArgumentParser:
     mcp_deny = mcp_sub.add_parser("deny", help="移除 MCP tool 權限")
     mcp_deny.add_argument("tool", help="tool 名稱")
 
-    tools_parser = subparsers.add_parser("tools", help="MCP tools 管理")
+    tools_parser = subparsers.add_parser("tools", help="工具管理")
     tools_sub = tools_parser.add_subparsers(dest="tools_command")
-    tools_sub.add_parser("list", help="列出 MCP tools")
-    tools_call = tools_sub.add_parser("call", help="呼叫 MCP tool")
-    tools_call.add_argument("target", help="格式：<server>:<tool>")
-    tools_call.add_argument("--args", default="{}", help="JSON 格式的參數")
+    tools_forge = tools_sub.add_parser("forge", help="建立新工具")
+    tools_forge.add_argument("--project", required=True, help="指定專案 ID")
+    tools_forge.add_argument("--name", required=True, help="工具名稱")
+    tools_forge.add_argument("--spec", required=True, help="工具需求規格")
+
+    tools_list = tools_sub.add_parser("list", help="列出工具")
+    tools_list.add_argument("--project", help="指定專案 ID（可顯示專案覆寫）")
+
+    tools_run = tools_sub.add_parser("run", help="執行工具")
+    tools_run.add_argument("tool_name", help="工具名稱")
+    tools_run.add_argument("--project", help="指定專案 ID")
+    tools_run.add_argument("--args", default="{}", help="JSON 格式的參數")
+
+    tools_test = tools_sub.add_parser("test", help="執行工具測試")
+    tools_test.add_argument("tool_name", help="工具名稱")
+    tools_test.add_argument("--project", help="指定專案 ID")
+
+    tools_register = tools_sub.add_parser("register", help="註冊工具")
+    tools_register.add_argument("tool_name", help="工具名稱")
+    tools_register.add_argument("--project", help="指定專案 ID")
+
+    tools_mcp_list = tools_sub.add_parser("mcp-list", help="列出 MCP tools")
+    tools_mcp_call = tools_sub.add_parser("mcp-call", help="呼叫 MCP tool")
+    tools_mcp_call.add_argument("target", help="格式：<server>:<tool>")
+    tools_mcp_call.add_argument("--args", default="{}", help="JSON 格式的參數")
 
     ui_parser = subparsers.add_parser("ui", help="啟動 UI 預覽")
     ui_parser.add_argument("--port", type=int, default=8000, help="UI 服務埠號（預設 8000）")
@@ -330,7 +351,35 @@ def _handle_mcp(core: AmonCore, args: argparse.Namespace) -> None:
 
 
 def _handle_tools(core: AmonCore, args: argparse.Namespace) -> None:
+    if args.tools_command == "forge":
+        tool_dir = core.forge_tool(args.project, args.name, args.spec)
+        print(f"已建立工具：{tool_dir}")
+        return
     if args.tools_command == "list":
+        tools = core.list_tools(project_id=args.project)
+        if not tools:
+            print("目前沒有可用工具。")
+            return
+        for tool in tools:
+            print(f"{tool['name']}｜{tool['version']}｜{tool['risk_level']}｜{tool['scope']}")
+        return
+    if args.tools_command == "run":
+        try:
+            parsed_args = json.loads(args.args)
+        except json.JSONDecodeError as exc:
+            raise ValueError("args 必須是 JSON 格式") from exc
+        output = core.run_tool(args.tool_name, parsed_args, project_id=args.project)
+        print(json.dumps(output, ensure_ascii=False, indent=2))
+        return
+    if args.tools_command == "test":
+        core.test_tool(args.tool_name, project_id=args.project)
+        print("工具測試成功")
+        return
+    if args.tools_command == "register":
+        entry = core.register_tool(args.tool_name, project_id=args.project)
+        print(f"已註冊工具：{entry.get('name')} {entry.get('version')}")
+        return
+    if args.tools_command == "mcp-list":
         registry = core.refresh_mcp_registry()
         servers = registry.get("servers", {})
         if not servers:
@@ -350,7 +399,7 @@ def _handle_tools(core: AmonCore, args: argparse.Namespace) -> None:
                 description = tool.get("description", "")
                 print(f"{name}:{tool_name}｜{description}")
         return
-    if args.tools_command == "call":
+    if args.tools_command == "mcp-call":
         if ":" not in args.target:
             raise ValueError("請提供 <server>:<tool> 格式")
         server_name, tool_name = args.target.split(":", 1)
