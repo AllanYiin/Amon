@@ -1782,6 +1782,43 @@ class AmonCore:
                     mentions.append({"raw": raw, "confidence": 0, "needs_review": True})
         return mentions
 
+    def _extract_geo_mentions(self, text: str) -> list[dict[str, Any]]:
+        mapping = {
+            "台北": {
+                "normalized_name": "Taipei City, Taiwan",
+                "geocode_id": "tw-tpe",
+                "lat": 25.033,
+                "lon": 121.5654,
+            },
+            "臺北": {
+                "normalized_name": "Taipei City, Taiwan",
+                "geocode_id": "tw-tpe",
+                "lat": 25.033,
+                "lon": 121.5654,
+            },
+            "Taipei": {
+                "normalized_name": "Taipei City, Taiwan",
+                "geocode_id": "tw-tpe",
+                "lat": 25.033,
+                "lon": 121.5654,
+            },
+        }
+        mentions: list[dict[str, Any]] = []
+        for alias, info in mapping.items():
+            for match in re.finditer(re.escape(alias), text, flags=re.IGNORECASE):
+                mentions.append(
+                    {
+                        "raw": match.group(0),
+                        "normalized_name": info["normalized_name"],
+                        "geocode_id": info["geocode_id"],
+                        "lat": info["lat"],
+                        "lon": info["lon"],
+                        "confidence": 1,
+                        "needs_review": False,
+                    }
+                )
+        return mentions
+
     def ingest_session_memory(
         self,
         project_path: Path,
@@ -1863,8 +1900,10 @@ class AmonCore:
                     text = str(chunk.get("text") or "")
                     created_at = str(chunk.get("created_at") or "")
                     mentions = self._extract_time_mentions(text, created_at)
+                    geo_mentions = self._extract_geo_mentions(text)
                     normalized = dict(chunk)
                     normalized["time"] = {"mentions": mentions}
+                    normalized["geo"] = {"mentions": geo_mentions}
                     out_handle.write(json.dumps(normalized, ensure_ascii=False))
                     out_handle.write("\n")
                     normalized_count += 1
