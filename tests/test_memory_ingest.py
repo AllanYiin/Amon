@@ -83,6 +83,39 @@ class MemoryIngestTests(unittest.TestCase):
             self.assertEqual(mentions[0]["raw"], "昨天")
             self.assertEqual(mentions[0]["resolved_date"], "2026-02-02")
 
+    def test_normalize_geo_mentions_taipei(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            project_path = Path(temp_dir) / "project"
+            memory_dir = project_path / "memory"
+            memory_dir.mkdir(parents=True, exist_ok=True)
+            chunks_path = memory_dir / "chunks.jsonl"
+
+            chunk = {
+                "chunk_id": "chunk-geo-1",
+                "project_id": "proj-geo-1",
+                "session_id": "session-geo-1",
+                "source_path": "sessions/session-geo-1.jsonl",
+                "text": "台北、臺北、Taipei 都是同一個城市",
+                "created_at": "2026-02-03T10:00:00+08:00",
+                "lang": "zh-TW",
+            }
+            with chunks_path.open("w", encoding="utf-8") as handle:
+                handle.write(json.dumps(chunk, ensure_ascii=False))
+                handle.write("\n")
+
+            core = AmonCore(data_dir=data_dir)
+            normalized_count = core.normalize_memory_dates(project_path)
+
+            normalized_path = memory_dir / "normalized.jsonl"
+            self.assertEqual(normalized_count, 1)
+            normalized_lines = normalized_path.read_text(encoding="utf-8").splitlines()
+            normalized = json.loads(normalized_lines[0])
+            mentions = normalized["geo"]["mentions"]
+            self.assertEqual(len(mentions), 3)
+            geocode_ids = {mention["geocode_id"] for mention in mentions}
+            self.assertEqual(geocode_ids, {"tw-tpe"})
+
 
 if __name__ == "__main__":
     unittest.main()
