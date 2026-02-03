@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import shutil
 import uuid
 import zipfile
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 import urllib.error
 import urllib.request
 
@@ -1721,6 +1723,65 @@ class AmonCore:
             raise
         return memory_dir
 
+    def _parse_chunk_created_at(self, created_at: str) -> datetime | None:
+        try:
+            parsed = datetime.fromisoformat(created_at)
+        except ValueError as exc:
+            self.logger.warning("解析 created_at 失敗：%s", exc, exc_info=True)
+            return None
+        taipei_tz = ZoneInfo("Asia/Taipei")
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=taipei_tz)
+        return parsed.astimezone(taipei_tz)
+
+    def _resolve_relative_date(self, raw: str, base_date: date | None) -> str | None:
+        if base_date is None:
+            return None
+        offsets = {
+            "昨天": -1,
+            "明天": 1,
+            "今天": 0,
+            "前天": -2,
+            "後天": 2,
+        }
+        if raw in offsets:
+            return (base_date + timedelta(days=offsets[raw])).isoformat()
+        if raw.startswith("下週"):
+            weekday_map = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6}
+            weekday_char = raw.replace("下週", "", 1)
+            target_weekday = weekday_map.get(weekday_char)
+            if target_weekday is None:
+                return None
+            days_until_next_monday = 7 - base_date.weekday()
+            resolved = base_date + timedelta(days=days_until_next_monday + target_weekday)
+            return resolved.isoformat()
+        return None
+
+    def _extract_time_mentions(self, text: str, created_at: str) -> list[dict[str, Any]]:
+        base_datetime = self._parse_chunk_created_at(created_at)
+        base_date = base_datetime.date() if base_datetime else None
+        mentions: list[dict[str, Any]] = []
+        patterns = [
+            r"昨天|明天|今天|前天|後天",
+            r"下週[一二三四五六日天]",
+        ]
+        for pattern in patterns:
+            for match in re.finditer(pattern, text):
+                raw = match.group(0)
+                resolved_date = self._resolve_relative_date(raw, base_date)
+                if resolved_date:
+                    mentions.append(
+                        {
+                            "raw": raw,
+                            "resolved_date": resolved_date,
+                            "confidence": 1,
+                            "needs_review": False,
+                        }
+                    )
+                else:
+                    mentions.append({"raw": raw, "confidence": 0, "needs_review": True})
+        return mentions
+
     def ingest_session_memory(
         self,
         project_path: Path,
@@ -1769,7 +1830,48 @@ class AmonCore:
         except OSError as exc:
             self.logger.error("寫入 memory chunk 失敗：%s", exc, exc_info=True)
             raise
+        try:
+            self.normalize_memory_dates(project_path)
+        except Exception as exc:  # noqa: BLE001
+            self.logger.error("日期標準化失敗：%s", exc, exc_info=True)
+            raise
         return chunk_count
+
+    def normalize_memory_dates(self, project_path: Path) -> int:
+        if not project_path:
+            raise ValueError("執行 memory normalize 需要指定專案")
+        memory_dir = self._prepare_memory_dir(project_path)
+        chunks_path = memory_dir / "chunks.jsonl"
+        normalized_path = memory_dir / "normalized.jsonl"
+        if not chunks_path.exists():
+            self.logger.error("找不到 memory chunks 檔案：%s", chunks_path)
+            raise FileNotFoundError(f"找不到 memory chunks 檔案：{chunks_path}")
+        normalized_count = 0
+        try:
+            with chunks_path.open("r", encoding="utf-8") as handle, normalized_path.open(
+                "w", encoding="utf-8"
+            ) as out_handle:
+                for line in handle:
+                    payload = line.strip()
+                    if not payload:
+                        continue
+                    try:
+                        chunk = json.loads(payload)
+                    except json.JSONDecodeError as exc:
+                        self.logger.error("解析 memory chunk 失敗：%s", exc, exc_info=True)
+                        raise
+                    text = str(chunk.get("text") or "")
+                    created_at = str(chunk.get("created_at") or "")
+                    mentions = self._extract_time_mentions(text, created_at)
+                    normalized = dict(chunk)
+                    normalized["time"] = {"mentions": mentions}
+                    out_handle.write(json.dumps(normalized, ensure_ascii=False))
+                    out_handle.write("\n")
+                    normalized_count += 1
+        except OSError as exc:
+            self.logger.error("寫入 memory normalized 失敗：%s", exc, exc_info=True)
+            raise
+        return normalized_count
 
     @contextmanager
     def _project_lock(self, project_path: Path, action: str) -> Any:
