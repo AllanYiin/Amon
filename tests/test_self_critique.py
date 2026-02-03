@@ -35,9 +35,9 @@ class SelfCritiqueTests(unittest.TestCase):
                 os.environ.pop("AMON_HOME", None)
 
             docs_dir = project_path / "docs"
-            self.assertTrue((docs_dir / "draft.md").exists())
-            self.assertTrue((docs_dir / "final.md").exists())
-            reviews_dir = docs_dir / "reviews"
+            self.assertTrue((docs_dir / "draft_v1.md").exists())
+            self.assertTrue((docs_dir / "final_v1.md").exists())
+            reviews_dir = docs_dir / "reviews_v1"
             self.assertTrue(reviews_dir.exists())
             review_files = list(reviews_dir.glob("*.md"))
             self.assertEqual(len(review_files), 10)

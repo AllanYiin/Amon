@@ -10,6 +10,7 @@ from typing import Any, Mapping
 
 import yaml
 
+from .fs.atomic import atomic_write_text
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "amon": {
@@ -81,7 +82,7 @@ def read_yaml(path: Path) -> dict[str, Any]:
 
 def write_yaml(path: Path, data: dict[str, Any]) -> None:
     try:
-        path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        atomic_write_text(path, yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
     except OSError as exc:
         raise RuntimeError(f"寫入設定檔失敗：{path}") from exc
 

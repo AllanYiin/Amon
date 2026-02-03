@@ -9,6 +9,7 @@ from pathlib import Path
 
 from ..logging import log_event
 from ..logging_utils import setup_logger
+from .atomic import atomic_write_text
 
 
 def trash_move(path: Path, trash_root: Path, original_root: Path) -> str:
@@ -35,7 +36,7 @@ def trash_move(path: Path, trash_root: Path, original_root: Path) -> str:
     }
     manifest_path = trash_dir / "manifest.json"
     try:
-        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_text(manifest_path, json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     except OSError as exc:
         logger.error("寫入回收桶清單失敗：%s", exc, exc_info=True)
         raise
@@ -78,7 +79,7 @@ def trash_restore(trash_id: str, trash_root: Path) -> Path:
         raise
     manifest["restored_at"] = datetime.now().isoformat(timespec="seconds")
     try:
-        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_text(manifest_path, json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     except OSError as exc:
         logger.error("更新回收桶清單失敗：%s", exc, exc_info=True)
         raise
