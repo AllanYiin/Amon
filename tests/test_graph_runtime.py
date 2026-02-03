@@ -36,7 +36,7 @@ class GraphRuntimeTests(unittest.TestCase):
                         {
                             "id": "write",
                             "type": "write_file",
-                            "path": "output.txt",
+                            "path": "docs/output.txt",
                             "content": "Hello ${name}",
                         },
                         {
@@ -70,7 +70,7 @@ class GraphRuntimeTests(unittest.TestCase):
             self.assertEqual(state["nodes"]["write"]["status"], "completed")
             self.assertEqual(state["nodes"]["agent"]["status"], "completed")
 
-            output_path = project_path / "output.txt"
+            output_path = project_path / "docs" / "output.txt"
             self.assertTrue(output_path.exists())
             self.assertEqual(output_path.read_text(encoding="utf-8"), "Hello Amon")
 
@@ -99,7 +99,7 @@ class GraphRuntimeTests(unittest.TestCase):
                         {
                             "id": "write",
                             "type": "write_file",
-                            "path": "output.txt",
+                            "path": "docs/output.txt",
                             "content": "Tesla",
                         }
                     ],
@@ -126,7 +126,7 @@ class GraphRuntimeTests(unittest.TestCase):
             finally:
                 os.environ.pop("AMON_HOME", None)
 
-            output_path = project_path / "output.txt"
+            output_path = project_path / "docs" / "output.txt"
             self.assertTrue(output_path.exists())
             self.assertEqual(output_path.read_text(encoding="utf-8"), "Amon")
             self.assertNotEqual(run_result.run_id, template_run.run_id)
