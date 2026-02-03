@@ -51,7 +51,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "allowed_tools": [],
         "denied_tools": [],
     },
-    "billing": {"enabled": True, "currency": "USD"},
+    "billing": {
+        "enabled": True,
+        "currency": "USD",
+        "daily_budget": None,
+        "per_project_budget": None,
+    },
 }
 
 

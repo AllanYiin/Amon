@@ -115,6 +115,13 @@ def build_parser() -> argparse.ArgumentParser:
     fs_restore = fs_sub.add_parser("restore", help="從回收桶還原")
     fs_restore.add_argument("trash_id", help="回收桶 ID")
 
+    export_parser = subparsers.add_parser("export", help="匯出專案資料")
+    export_parser.add_argument("--project", required=True, help="專案 ID")
+    export_parser.add_argument("--out", required=True, help="輸出檔案路徑（zip）")
+
+    eval_parser = subparsers.add_parser("eval", help="執行簡易回歸評測")
+    eval_parser.add_argument("--suite", default="basic", help="評測套件（預設 basic）")
+
     return parser
 
 
@@ -150,6 +157,10 @@ def main() -> None:
             _handle_ui(args)
         elif args.command == "fs":
             _handle_fs(core, args)
+        elif args.command == "export":
+            _handle_export(core, args)
+        elif args.command == "eval":
+            _handle_eval(core, args)
         else:
             parser.print_help()
     except Exception as exc:  # noqa: BLE001
@@ -359,3 +370,13 @@ def _handle_fs(core: AmonCore, args: argparse.Namespace) -> None:
         print(f"已還原到：{restored_path}")
         return
     raise ValueError("請指定 fs 指令")
+
+
+def _handle_export(core: AmonCore, args: argparse.Namespace) -> None:
+    output_path = core.export_project(args.project, Path(args.out))
+    print(f"已匯出專案：{output_path}")
+
+
+def _handle_eval(core: AmonCore, args: argparse.Namespace) -> None:
+    result = core.run_eval(suite=args.suite)
+    print(yaml.safe_dump(result, allow_unicode=True, sort_keys=False))
