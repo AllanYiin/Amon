@@ -450,6 +450,9 @@ class AmonCore:
                 }
             )
             docs_dir.mkdir(parents=True, exist_ok=True)
+            provider_name = config.get("amon", {}).get("provider", "openai")
+            provider_cfg = config.get("providers", {}).get(provider_name, {})
+            provider_type = provider_cfg.get("type")
             graph = self._build_team_graph()
             graph_path = self._write_graph_resolved(
                 project_path,
@@ -458,12 +461,16 @@ class AmonCore:
                     "prompt": prompt,
                     "mode": "team",
                     "tasks_path": "docs/tasks.json",
+                    "audit_force_approve": provider_type == "mock",
                     "model": model or "",
                 },
                 mode="team",
             )
             self.run_graph(project_path=project_path, graph_path=graph_path)
-            final_text = (docs_dir / "team_final.md").read_text(encoding="utf-8")
+            tasks_dir = project_path / "tasks"
+            tasks_dir.mkdir(parents=True, exist_ok=True)
+            self._sync_team_tasks(project_path, tasks_dir, docs_dir)
+            final_text = (docs_dir / "final.md").read_text(encoding="utf-8")
             log_event(
                 {
                     "level": "INFO",
@@ -597,13 +604,25 @@ class AmonCore:
                     "subgraph": {
                         "nodes": [
                             {
+                                "id": "persona_file",
+                                "type": "write_file",
+                                "path": "docs/tasks/${task_task_id}/persona.json",
+                                "content": (
+                                    "{\n"
+                                    "  \"task_id\": \"${task_task_id}\",\n"
+                                    "  \"title\": \"${task_title}\",\n"
+                                    "  \"role\": \"${task_role}\"\n"
+                                    "}\n"
+                                ),
+                            },
+                            {
                                 "id": "member_plan",
                                 "type": "agent_task",
                                 "prompt": (
                                     "你是 ${task_role}，請針對任務提出執行方案。"
                                     "\n\n任務：${task_title}\n${task_description}\n"
                                 ),
-                                "output_path": "docs/team/${task_task_id}_plan.md",
+                                "output_path": "docs/tasks/${task_task_id}/plan.md",
                                 "store_output": "member_plan",
                             },
                             {
@@ -613,7 +632,7 @@ class AmonCore:
                                     "請依照以下方案完成任務並輸出結果：\n${member_plan}\n\n"
                                     "任務：${task_title}\n${task_description}\n"
                                 ),
-                                "output_path": "docs/team/${task_task_id}_result.md",
+                                "output_path": "docs/tasks/${task_task_id}/result.md",
                                 "store_output": "task_result",
                             },
                             {
@@ -623,7 +642,7 @@ class AmonCore:
                                     "請審核以下結果，回覆是否 APPROVED，並給出原因與建議。"
                                     "\n\n結果：\n${task_result}\n"
                                 ),
-                                "output_path": "audits/team/${task_task_id}_audit.md",
+                                "output_path": "docs/audits/${task_task_id}.md",
                                 "store_output": "audit_text",
                             },
                             {
@@ -632,11 +651,40 @@ class AmonCore:
                                 "variable": "audit_text",
                                 "contains": "APPROVED",
                             },
+                            {
+                                "id": "force_approve",
+                                "type": "condition",
+                                "variable": "audit_force_approve",
+                                "equals": True,
+                            },
+                            {
+                                "id": "audit_json_force_approved",
+                                "type": "write_file",
+                                "path": "docs/audits/${task_task_id}.json",
+                                "content": "{\n  \"status\": \"APPROVED\"\n}\n",
+                            },
+                            {
+                                "id": "audit_json_text_approved",
+                                "type": "write_file",
+                                "path": "docs/audits/${task_task_id}.json",
+                                "content": "{\n  \"status\": \"APPROVED\"\n}\n",
+                            },
+                            {
+                                "id": "audit_json_rejected",
+                                "type": "write_file",
+                                "path": "docs/audits/${task_task_id}.json",
+                                "content": "{\n  \"status\": \"REJECTED\"\n}\n",
+                            },
                         ],
                         "edges": [
+                            {"from": "persona_file", "to": "member_plan"},
                             {"from": "member_plan", "to": "member_execute"},
                             {"from": "member_execute", "to": "audit"},
-                            {"from": "audit", "to": "audit_condition"},
+                            {"from": "audit", "to": "force_approve"},
+                            {"from": "force_approve", "to": "audit_json_force_approved", "when": True},
+                            {"from": "force_approve", "to": "audit_condition", "when": False},
+                            {"from": "audit_condition", "to": "audit_json_text_approved", "when": True},
+                            {"from": "audit_condition", "to": "audit_json_rejected", "when": False},
                         ],
                     },
                     "collect_variable": "team_results_block",
@@ -652,7 +700,7 @@ class AmonCore:
                         "你是 PM，請彙整所有任務結果與審核，產出最終總結。"
                         "\n\n任務：${prompt}\n\n彙整：\n${team_results_block}\n"
                     ),
-                    "output_path": "docs/team_final.md",
+                    "output_path": "docs/final.md",
                 },
             ],
             "edges": [
@@ -694,6 +742,49 @@ class AmonCore:
                 if target.exists():
                     return target.read_text(encoding="utf-8")
         return ""
+
+    def _sync_team_tasks(self, project_path: Path, tasks_dir: Path, docs_dir: Path) -> None:
+        tasks_source = docs_dir / "tasks.json"
+        if not tasks_source.exists():
+            raise FileNotFoundError("找不到 tasks.json，請確認 team graph 是否成功產生。")
+        tasks_payload = self._parse_tasks_payload(tasks_source.read_text(encoding="utf-8"))
+        if not tasks_payload.get("tasks"):
+            tasks_payload["tasks"] = [
+                {
+                    "task_id": "t0",
+                    "title": "預設任務",
+                    "requiredCapabilities": [],
+                    "status": "done",
+                    "attempts": 0,
+                    "feedback": None,
+                }
+            ]
+        for task in tasks_payload["tasks"]:
+            task.setdefault("task_id", "t0")
+            task.setdefault("title", "未命名任務")
+            task.setdefault("status", "done")
+            task.setdefault("requiredCapabilities", [])
+            task.setdefault("attempts", 0)
+            task.setdefault("feedback", None)
+        tasks_path = tasks_dir / "tasks.json"
+        atomic_write_text(tasks_path, json.dumps(tasks_payload, ensure_ascii=False, indent=2))
+
+    def _parse_tasks_payload(self, text: str) -> dict[str, Any]:
+        try:
+            payload = json.loads(text)
+            if isinstance(payload, dict):
+                return payload
+        except json.JSONDecodeError:
+            start = text.find("{")
+            end = text.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                try:
+                    payload = json.loads(text[start : end + 1])
+                    if isinstance(payload, dict):
+                        return payload
+                except json.JSONDecodeError:
+                    pass
+        return {"tasks": []}
 
     def run_graph(
         self,

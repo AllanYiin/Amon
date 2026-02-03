@@ -372,8 +372,8 @@ class GraphRuntime:
                 if incoming[target] == 0:
                     ready.append(target)
 
-        if len(completed) != len(nodes):
-            pending = [node_id for node_id in indexed if node_id not in completed]
+        if len(completed) + len(skipped) != len(nodes):
+            pending = [node_id for node_id in indexed if node_id not in completed and node_id not in skipped]
             raise RuntimeError(f"Map 子圖無法完成，仍有節點未執行：{pending}")
         return results
 
@@ -388,7 +388,7 @@ class GraphRuntime:
             if not target_path.is_absolute():
                 target_path = self.project_path / target_path
             safe_path = canonicalize_path(target_path, [self.project_path])
-            payload = json.loads(safe_path.read_text(encoding="utf-8"))
+            payload = self._parse_json_payload(safe_path.read_text(encoding="utf-8"))
             query = items_cfg.get("query")
             if query:
                 payload = payload.get(query, [])
@@ -495,6 +495,24 @@ class GraphRuntime:
         if isinstance(value, str):
             return value.strip().lower() in {"true", "1", "yes", "y"}
         return bool(value)
+
+    def _parse_json_payload(self, text: str) -> dict[str, Any]:
+        try:
+            payload = json.loads(text)
+            if isinstance(payload, dict):
+                return payload
+            return {}
+        except json.JSONDecodeError:
+            start = text.find("{")
+            end = text.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                try:
+                    payload = json.loads(text[start : end + 1])
+                    if isinstance(payload, dict):
+                        return payload
+                except json.JSONDecodeError:
+                    pass
+            return {}
 
     def _now_iso(self) -> str:
         return datetime.now().astimezone().isoformat(timespec="seconds")
