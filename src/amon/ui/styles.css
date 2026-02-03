@@ -196,6 +196,20 @@ body {
   color: var(--title);
 }
 
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.panel-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
 .task-item,
 .doc-item {
   border: 1px solid var(--stroke);
@@ -321,4 +335,137 @@ body {
   font-size: 12px;
   color: var(--muted);
   line-height: 1.6;
+}
+
+.graph-section {
+  margin-top: 20px;
+}
+
+.graph-panel {
+  min-height: auto;
+}
+
+.graph-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 20px;
+}
+
+.graph-config {
+  display: grid;
+  gap: 12px;
+}
+
+.field-label {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.code-box {
+  border: 1px solid var(--stroke);
+  border-radius: 12px;
+  padding: 12px;
+  background: var(--card-muted);
+  font-size: 12px;
+  color: var(--title);
+  line-height: 1.6;
+  font-family: "JetBrains Mono", "Noto Sans TC", monospace;
+}
+
+.code-box.muted {
+  background: #f8fafc;
+  color: var(--muted);
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  background: var(--highlight);
+  color: var(--primary);
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.chip.muted {
+  background: var(--card-muted);
+  color: var(--muted);
+}
+
+.graph-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.secondary-btn {
+  border: 1px solid var(--stroke);
+  background: var(--card);
+  color: var(--title);
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.primary-btn.small {
+  padding: 8px 14px;
+  font-size: 12px;
+}
+
+.graph-progress {
+  height: 6px;
+}
+
+.graph-progress > span {
+  width: 42%;
+}
+
+.graph-visual {
+  border: 1px solid var(--stroke);
+  border-radius: 14px;
+  padding: 14px;
+  background: var(--bg);
+  display: grid;
+  gap: 10px;
+}
+
+.graph-canvas {
+  background: var(--card);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.graph-canvas svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.graph-legend {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--muted);
+  flex-wrap: wrap;
+}
+
+.legend-dot {
+  display: inline-flex;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 6px;
+}
+
+.badge-soft {
+  background: var(--card-muted);
+  color: var(--primary);
 }
