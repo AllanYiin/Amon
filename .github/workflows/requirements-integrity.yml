@@ -19,7 +19,7 @@ jobs:
           from pathlib import Path
           import tomllib
 
-          pyproject = tomllib.loads(Path("pyproject.toml").read_bytes())
+          pyproject = tomllib.loads(Path("pyproject.toml").read_text())
           deps = set(pyproject.get("project", {}).get("dependencies", []))
           requirements_path = Path("requirements.txt")
           if not requirements_path.exists():
