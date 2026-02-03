@@ -532,15 +532,378 @@ Amon 在收到任務後先做「任務分類」：
 
 ---
 
-### 6) Skills 系統（Claude 相容 + Amon 微調）
+### 6) Memory System（已整合）
 
-#### 6.1 Skill 結構（必須一致）
+> 本段目的：**把「記憶模組」正式補進 Amon 的「總規格」中**，讓它不再是外掛，而是
+>
+> * 任務執行（Graph Runtime）
+> * Agent 協作
+> * Skills / Tools
+> * 檢索與再利用
+>
+> 的**共同基礎層**。
+>
+> 以下內容是「**規格補丁（Spec Addendum）**」，已與你前面所有決策完全對齊（Graph-first、文件導向、Tool Maker、Scheduler）。
+
+#### 一、在 Amon 中，Memory 是什麼（正式定義）
+
+##### 1.1 定位（非常重要）
+
+在 Amon 裡：
+
+> **Memory 不是聊天記錄，也不是向量庫而已，而是：
+> 「所有任務、文件、Agent 行為、工具輸出，經過結構化與消歧後，可被圖（Graph）與 Agent 再利用的知識層。」**
+
+因此 Memory 必須：
+
+* 可追溯（traceable to source）
+* 可結構化（人事時地物）
+* 可關聯（Knowledge Graph）
+* 可檢索（Hybrid: structure + vector）
+* 可被 Graph node 當 input 使用
+
+---
+
+#### 二、Memory 在整體架構中的位置（總覽）
+
+```
+┌─────────────┐
+│  Graph Run  │  ← single / self_critique / team / schedule
+└──────┬──────┘
+       │ produces
+       ▼
+┌─────────────────────┐
+│  Artifacts Layer    │  docs / tasks / sessions / tool outputs
+└──────┬──────────────┘
+       │ ingest
+       ▼
+┌─────────────────────────────────────────┐
+│           Memory Ingestion Pipeline      │
+│  chunk → normalize → disambiguate → tag  │
+│            → embed → graph-link          │
+└──────┬──────────────────────────────────┘
+       │ indexed as
+       ▼
+┌─────────────────────────────────────────┐
+│ Memory Store                             │
+│ - chunks.jsonl                           │
+│ - normalized.jsonl                      │
+│ - entities.jsonl                        │
+│ - tags.jsonl                            │
+│ - triples.jsonl (Knowledge Graph)       │
+│ - vector index                          │
+└──────┬──────────────────────────────────┘
+       │ queried by
+       ▼
+┌─────────────────────────────────────────┐
+│ Agents / Graph Nodes / Tools / Scheduler │
+└─────────────────────────────────────────┘
+```
+
+👉 **關鍵結論**：
+
+* 每一次 Graph Run **結束後必定觸發 Memory Ingestion**
+* Memory 是 **Graph 的副產品 + 下次 Graph 的燃料**
+
+---
+
+#### 三、Memory 落地結構（正式納入總規格）
+
+```
+~/.amon/projects/<project_id>/
+  memory/
+    chunks.jsonl          # 原始切片
+    normalized.jsonl      # 日期 / 地點標準化
+    entities.jsonl        # 人名 / 組織 / 物件 + 指代消歧
+    tags.jsonl            # tags_markdown + embedding_text
+    triples.jsonl         # Knowledge Graph (S-P-O)
+    index/
+      vectors/            # 向量索引（faiss / sqlite / other）
+      metadata.db         # 結構化索引（time / geo / entity）
+```
+
+> ⚠️ **這是強制結構（MUST）**，不是建議。
+
+---
+
+#### 四、Memory Ingestion Pipeline（正式規格）
+
+每次 Graph Run 結束後，Runtime **必須**執行以下 pipeline（可非同步，但不可略過）：
+
+##### Stage 0：來源蒐集（Extract）
+
+來源包含：
+
+* `sessions/<run_id>.jsonl`
+* `docs/**/*.md`
+* `tasks/tasks.json`
+* 工具輸出（tool stdout artifacts）
+
+切成 **MemoryChunk**（最小可索引單元）
+
+###### MemoryChunk schema
+
+```json
+{
+  "chunk_id": "c_20260203_0001",
+  "project_id": "p001",
+  "run_id": "r001",
+  "node_id": "n2_draft",
+  "source_type": "session|doc|task|tool",
+  "source_path": "docs/draft.md",
+  "text": "原始內容文字",
+  "created_at": "2026-02-03T10:20:30+08:00",
+  "lang": "zh-TW"
+}
+```
+
+---
+
+##### Stage 1：日期標準化（Date Normalization）✅（你指定）
+
+**規則（納入總規格）**
+
+* 所有時間解析必須以：
+
+  * `chunk.created_at`
+  * project timezone（default: Asia/Taipei）
+* 輸出 ISO-8601
+* 保留 raw + confidence
+
+```json
+"time": {
+  "mentions": [
+    {
+      "raw": "昨天",
+      "resolved_date": "2026-02-02",
+      "confidence": 0.78,
+      "timezone": "Asia/Taipei"
+    }
+  ]
+}
+```
+
+---
+
+##### Stage 2：地理資訊標準化（Geo Normalization）✅
+
+* 同義地名需 canonicalize（台北 / 臺北 / Taipei）
+* 每個地點需有 stable `geocode_id`
+* 可先用離線字典（v1）
+
+```json
+"geo": {
+  "mentions": [
+    {
+      "raw": "台北",
+      "normalized": "Taipei City, Taiwan",
+      "geocode_id": "geo:tw-tpe",
+      "lat": 25.0375,
+      "lon": 121.5637,
+      "confidence": 0.85
+    }
+  ]
+}
+```
+
+---
+
+##### Stage 3：指代消歧（Coreference & Entity Resolution）✅
+
+**納入總規格的安全原則**
+
+* ❌ 不可憑空創造實體
+* ❌ 低信心不可強行 resolve
+* ✔ 可回溯來源 chunk
+
+```json
+{
+  "mention": "他",
+  "type": "person",
+  "resolved_to": "王小明",
+  "entity_id": "person:wang_xiaoming",
+  "confidence": 0.66
+}
+```
+
+---
+
+##### Stage 4：人事時地物抽取（NER + Events）
+
+統一類型（MUST）：
+
+* Person
+* Organization / Product
+* Event
+* Object
+* Time
+* Geo
+
+---
+
+##### Stage 5：**tags_markdown 產生（你要求，正式入規格）**
+
+###### 5.1 產生規則（MUST）
+
+* 來源：`normalized.jsonl + entities.jsonl`
+* 固定標頭（不可改）：
+
+  ```md
+  ## AMON_MEMORY_TAGS
+  ```
+* 僅能是「資料描述」
+* ❌ 不得包含：
+
+  * system / developer 指令
+  * prompt 語言
+  * 可執行內容
+  * markdown code block
+
+###### 5.2 tags_markdown 範例
+
+```md
+## AMON_MEMORY_TAGS
+- 人物(Person): 王小明 (entity_id=person:wang_xiaoming)
+- 組織/產品(Org/Product): Amon
+- 事件(Event): 專案會議 (event_id=event:project_meeting)
+- 時間(Time): 2026-02-02 ~ 2026-02-03 (Asia/Taipei)
+- 地點(Geo): Taipei City, Taiwan (geo:tw-tpe)
+- 來源(Source): docs/draft.md
+```
+
+---
+
+##### Stage 6：Embedding Text 組合（正式規範）
+
+> **這是你特別要求、並且寫入總規格的核心規則**
+
+```text
+embedding_text =
+  <original chunk text>
+  + "\n\n"
+  + <tags_markdown>
+```
+
+###### tags.jsonl schema
+
+```json
+{
+  "chunk_id": "c_...",
+  "tags_markdown": "## AMON_MEMORY_TAGS
+- ...",
+  "embedding_text": "原文...\n\n## AMON_MEMORY_TAGS\n- ..."
+}
+```
+
+✅ **驗收條件（寫入 AC）**
+
+* embedding_text 必須同時包含：
+
+  * 原文
+  * `## AMON_MEMORY_TAGS` 區塊
+
+---
+
+##### Stage 7：Knowledge Graph 關聯（KG）
+
+###### Triple schema
+
+```json
+{
+  "subj": "person:wang_xiaoming",
+  "pred": "participated_in",
+  "obj": "event:project_meeting",
+  "chunk_id": "c_..."
+}
+```
+
+**規則**
+
+* 所有 edge 必須能追溯 chunk_id
+* v1 先用 co-occurrence
+* 不允許 hallucinated edge
+
+---
+
+#### 五、Memory 與 Graph Runtime 的正式整合點
+
+##### 5.1 Graph Node 可宣告 Memory I/O
+
+```json
+{
+  "id": "n_research",
+  "type": "agent_task",
+  "memory": {
+    "query": {
+      "entities": ["person:wang_xiaoming"],
+      "time_range": "last_30_days",
+      "top_k": 5
+    },
+    "inject_as": "context"
+  }
+}
+```
+
+👉 Graph 不是只「寫檔」，而是能「吃記憶」。
+
+---
+
+##### 5.2 Scheduler 與 Memory
+
+* 排程任務可指定：
+
+  * 是否使用歷史 memory
+  * 是否只查某時間範圍
+* 排程 run 產生的新結果也會再次進入 memory（形成時間序列知識）
+
+---
+
+#### 六、驗收條件（Memory 已納入總 AC）
+
+##### Memory Pipeline
+
+* [ ] 每次 Graph Run 結束必觸發 Memory Ingestion
+* [ ] chunks / normalized / entities / tags / triples 都有落地
+* [ ] embedding_text 符合「原文 + AMON_MEMORY_TAGS」
+
+##### 檢索
+
+* [ ] 可用 entity + time + vector 查詢
+* [ ] 可用 KG 擴展關聯節點
+
+##### 安全
+
+* [ ] tags_markdown 不含任何指令或可執行內容
+* [ ] 所有記憶都可 trace 回 source_path + run_id + node_id
+
+---
+
+#### 七、總結（關鍵設計決策已鎖定）
+
+你現在的 Amon 架構，正式確立為：
+
+1. **Graph-first execution**
+2. **Document-first collaboration**
+3. **Memory as structured knowledge, not raw text**
+4. **Embedding = 原文 + 結構化語義標籤**
+5. **Knowledge Graph 是一等公民**
+6. **Memory 是 Graph 的輸入與輸出**
+
+這個設計已經**超過一般 Agent Framework**，本質上是：
+
+> **一個可重用、可排程、可學習的任務知識引擎**
+
+---
+
+### 7) Skills 系統（Claude 相容 + Amon 微調）
+
+#### 7.1 Skill 結構（必須一致）
 
 * 每個 skill 是資料夾
 * 入口檔 `SKILL.md` 必存在
 * `SKILL.md` 由 YAML frontmatter + Markdown 指令組成；其他支援檔可放在 skill 資料夾內（examples/templates/scripts 等）。([Claude Code][1])
 
-#### 6.2 Skill discovery（索引化 + 按需載入）
+#### 7.2 Skill discovery（索引化 + 按需載入）
 
 * 啟動或開專案時：
 
@@ -554,7 +917,7 @@ Amon 在收到任務後先做「任務分類」：
   * 只有在需要時才載入完整 `SKILL.md` 內容（節省上下文）
   * 支援 `/skill-name` 手動觸發（Slash command）
 
-#### 6.3 Amon 微調方向（不破壞結構）
+#### 7.3 Amon 微調方向（不破壞結構）
 
 * 保留 Claude frontmatter 欄位（至少：name/description/disable-model-invocation/user-invocable/allowed-tools/model/context/agent）。([Claude Code][1])
 * 新增 Amon 自有欄位（放在 frontmatter 也可）例如：
@@ -565,16 +928,16 @@ Amon 在收到任務後先做「任務分類」：
 
 ---
 
-### 7) MCP 工具層（Tool Gateway）
+### 8) MCP 工具層（Tool Gateway）
 
-#### 7.1 角色
+#### 8.1 角色
 
 Amon 作為 MCP Client：
 
 * 連接多個 MCP servers（stdio / http / sse / streamable http）
 * 動態列出 tools，並可接收 tools 列表變更通知。([modelcontextprotocol.info][5])
 
-#### 7.2 工具權限與安全
+#### 8.2 工具權限與安全
 
 **必做：**
 
@@ -592,16 +955,16 @@ Amon 作為 MCP Client：
 
 ---
 
-### 8) 文件導向協作（Document-first）
+### 9) 文件導向協作（Document-first）
 
-#### 8.1 文件分類
+#### 9.1 文件分類
 
 * `docs/draft.md`、`docs/final.md`
 * `docs/tasks/<task_id>/*.md`
 * `docs/reviews/*.md`
 * `docs/audits/<task_id>.json`
 
-#### 8.2 文件格式規範
+#### 9.2 文件格式規範
 
 * Markdown：標題層級清晰；每份文件有固定 frontmatter（可選）
 * JSON：稽核輸出固定 schema
@@ -619,29 +982,29 @@ Amon 作為 MCP Client：
 
 ---
 
-### 9) Logging 與 Billing（強制）
+### 10) Logging 與 Billing（強制）
 
-#### 9.1 log 分流
+#### 10.1 log 分流
 
 * `logs/amon.log`：操作/錯誤/工具呼叫/狀態遷移（JSONL）
 * `logs/billing.log`：token 用量與成本（JSONL，獨立檔）
 
-#### 9.2 billing.log（JSONL 範例）
+#### 10.2 billing.log（JSONL 範例）
 
 ```json
 {"ts":"2026-02-01T12:00:01+08:00","project_id":"p001","session_id":"s001","agent":"PM","provider":"openai","model":"gpt-5","prompt_tokens":1200,"output_tokens":800,"total_tokens":2000,"cost_usd":0.00}
 ```
 
-#### 9.3 成本計算策略
+#### 10.3 成本計算策略
 
 * v1：由 config 的 `price_table` 計算（可允許未知價格 → cost 記 0，但 token 一定要記）
 * 每日/每專案 budget 超過 → 自動停止高成本模式（例如 team/committee）並提示切換
 
 ---
 
-### 10) UI/UX（技術面規格）
+### 11) UI/UX（技術面規格）
 
-#### 10.1 主要頁面
+#### 11.1 主要頁面
 
 1. Project List（管理/搜尋/建立/刪除/還原）
 2. Project Workspace（Chat + Tasks + Documents）
@@ -649,14 +1012,14 @@ Amon 作為 MCP Client：
 4. Tools Registry（已連線 MCP servers + tools、權限）
 5. Usage & Billing（按 project/session/agent 統計）
 
-#### 10.2 File preview（強制）
+#### 11.2 File preview（強制）
 
 任何檔案被「引入」或「即將被改寫」時：
 
 * 顯示預覽（文本前 N 行、圖片縮圖、PDF 頁面縮圖…）
 * 預覽縮放必須維持原始寬高比（Aspect Ratio）
 
-#### 10.3 LLM 輸出（強制 Streaming）
+#### 11.3 LLM 輸出（強制 Streaming）
 
 * Chat 與文件產生都以 streaming 方式逐段輸出
 * 中途可取消（cancel）
@@ -664,12 +1027,12 @@ Amon 作為 MCP Client：
 
 ---
 
-### 11) API（本機服務介面，便於 UI/CLI 分離）
+### 12) API（本機服務介面，便於 UI/CLI 分離）
 
 > v1 建議：Amon Core 提供本機 HTTP API（localhost only），CLI 與 Web UI 都走同一套 API。
 > 若你偏好純 CLI，也可先保留 internal API，再逐步補 UI。
 
-#### 11.1 主要 endpoints（示意）
+#### 12.1 主要 endpoints（示意）
 
 * `POST /v1/projects` 建立專案
 * `GET /v1/projects` 列表
@@ -683,9 +1046,9 @@ Amon 作為 MCP Client：
 
 ---
 
-### 12) 錯誤處理（Error logic）
+### 13) 錯誤處理（Error logic）
 
-#### 12.1 常見錯誤類型
+#### 13.1 常見錯誤類型
 
 * `CONFIG_INVALID`：設定檔欄位缺失/格式錯
 * `MODEL_AUTH_FAILED`：金鑰錯/過期
@@ -695,7 +1058,7 @@ Amon 作為 MCP Client：
 * `BUDGET_EXCEEDED`：費用超過上限
 * `SKILL_PARSE_FAILED`：SKILL.md frontmatter 解析失敗
 
-#### 12.2 失敗回復策略
+#### 13.2 失敗回復策略
 
 * 工具改檔前：自動備份/進 trash
 * 任務中斷：保留已完成 docs + logs
@@ -703,7 +1066,7 @@ Amon 作為 MCP Client：
 
 ---
 
-### 13) Edge cases / Abuse cases（必補）
+### 14) Edge cases / Abuse cases（必補）
 
 1. **提示注入（tool output / file content）**
 
@@ -726,7 +1089,7 @@ Amon 作為 MCP Client：
 
 ---
 
-### 14) 驗收條件（Acceptance Criteria）
+### 15) 驗收條件（Acceptance Criteria）
 
 #### A. 專案與持久化
 
@@ -759,7 +1122,7 @@ Amon 作為 MCP Client：
 
 ---
 
-### 15) 測試案例（含 Gherkin/BDD）
+### 16) 測試案例（含 Gherkin/BDD）
 
 ```gherkin
 Feature: Project persistence
@@ -808,7 +1171,7 @@ Feature: MCP tool permission
 
 ---
 
-### 16) 我建議你補充的功能（技術版）
+### 17) 我建議你補充的功能（技術版）
 
 1. **變更計畫（Change Plan）機制**：任何會改檔的任務先產出 `docs/change_plan.md`，列出「將修改哪些檔案、每個檔案改什麼」，再執行。
 2. **Git 整合（可選）**：專案若是 git repo，改動前自動建立 branch 或 commit，方便回滾。
