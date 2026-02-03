@@ -1,0 +1,44 @@
+name: Requirements Integrity
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  requirements-integrity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Verify requirements.txt matches pyproject dependencies
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import tomllib
+
+          pyproject = tomllib.loads(Path("pyproject.toml").read_text())
+          deps = set(pyproject.get("project", {}).get("dependencies", []))
+          requirements_path = Path("requirements.txt")
+          if not requirements_path.exists():
+              raise SystemExit("requirements.txt is missing")
+          reqs = set(
+              line.strip()
+              for line in requirements_path.read_text().splitlines()
+              if line.strip() and not line.strip().startswith("#")
+          )
+
+          missing = deps - reqs
+          extra = reqs - deps
+
+          if missing or extra:
+              print("requirements.txt does not match pyproject.toml")
+              if missing:
+                  print("Missing:", sorted(missing))
+              if extra:
+                  print("Extra:", sorted(extra))
+              raise SystemExit(1)
+          print("requirements.txt matches pyproject.toml")
+          PY
