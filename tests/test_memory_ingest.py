@@ -161,6 +161,39 @@ class MemoryIngestTests(unittest.TestCase):
             self.assertEqual(mention["pronoun"], "他")
             self.assertEqual(mention["resolved_to"], "王小明")
 
+    def test_memory_triples_include_event_geo_time(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            project_path = Path(temp_dir) / "project"
+            memory_dir = project_path / "memory"
+            memory_dir.mkdir(parents=True, exist_ok=True)
+            chunks_path = memory_dir / "chunks.jsonl"
+
+            chunk = {
+                "chunk_id": "chunk-triple-1",
+                "project_id": "proj-triple-1",
+                "session_id": "session-triple-1",
+                "source_path": "sessions/session-triple-1.jsonl",
+                "text": "王小明昨天在台北參加會議。",
+                "created_at": "2026-02-03T10:00:00+08:00",
+                "lang": "zh-TW",
+            }
+            with chunks_path.open("w", encoding="utf-8") as handle:
+                handle.write(json.dumps(chunk, ensure_ascii=False))
+                handle.write("\n")
+
+            core = AmonCore(data_dir=data_dir)
+            core.normalize_memory_dates(project_path)
+
+            triples_path = memory_dir / "triples.jsonl"
+            self.assertTrue(triples_path.exists())
+            triples = [json.loads(line) for line in triples_path.read_text(encoding="utf-8").splitlines()]
+            self.assertGreaterEqual(len(triples), 3)
+            predicates = {triple["predicate"] for triple in triples}
+            self.assertTrue({"participated_in", "occurred_at", "occurred_on"}.issubset(predicates))
+            for triple in triples:
+                self.assertEqual(triple["chunk_id"], "chunk-triple-1")
+
 
 if __name__ == "__main__":
     unittest.main()

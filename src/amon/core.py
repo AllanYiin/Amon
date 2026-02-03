@@ -1849,6 +1849,27 @@ class AmonCore:
             )
         return sorted(mentions, key=lambda item: item["start"])
 
+    def _extract_event_mentions(self, text: str) -> list[dict[str, Any]]:
+        patterns = [
+            r"會議",
+            r"開會",
+            r"活動",
+            r"發布會",
+            r"討論會",
+        ]
+        mentions: list[dict[str, Any]] = []
+        for pattern in patterns:
+            for match in re.finditer(pattern, text):
+                mentions.append(
+                    {
+                        "name": match.group(0),
+                        "type": "event",
+                        "start": match.start(),
+                        "end": match.end(),
+                    }
+                )
+        return sorted(mentions, key=lambda item: item["start"])
+
     def _extract_pronoun_mentions(self, text: str) -> list[dict[str, Any]]:
         pronouns = ["他們", "她們", "他", "她", "這家公司", "該公司", "這個公司", "該企業", "該組織"]
         pattern = "|".join(re.escape(pronoun) for pronoun in pronouns)
@@ -1897,6 +1918,60 @@ class AmonCore:
                 }
             )
         return mentions, last_entity
+
+    def _build_memory_triples(
+        self,
+        chunk: dict[str, Any],
+        entities: list[dict[str, Any]],
+        events: list[dict[str, Any]],
+        geo_mentions: list[dict[str, Any]],
+        time_mentions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        triples: list[dict[str, Any]] = []
+        chunk_id = chunk.get("chunk_id")
+        base = {
+            "chunk_id": chunk_id,
+            "project_id": chunk.get("project_id"),
+            "session_id": chunk.get("session_id"),
+            "source_path": chunk.get("source_path"),
+        }
+        for entity in entities:
+            for event in events:
+                triples.append(
+                    {
+                        **base,
+                        "subject": {"name": entity.get("name"), "type": entity.get("type")},
+                        "predicate": "participated_in",
+                        "object": {"name": event.get("name"), "type": "event"},
+                    }
+                )
+        for event in events:
+            for geo in geo_mentions:
+                triples.append(
+                    {
+                        **base,
+                        "subject": {"name": event.get("name"), "type": "event"},
+                        "predicate": "occurred_at",
+                        "object": {
+                            "name": geo.get("normalized_name") or geo.get("raw"),
+                            "type": "geo",
+                            "geocode_id": geo.get("geocode_id"),
+                        },
+                    }
+                )
+            for time in time_mentions:
+                triples.append(
+                    {
+                        **base,
+                        "subject": {"name": event.get("name"), "type": "event"},
+                        "predicate": "occurred_on",
+                        "object": {
+                            "name": time.get("resolved_date") or time.get("raw"),
+                            "type": "time",
+                        },
+                    }
+                )
+        return triples
 
     def ingest_session_memory(
         self,
@@ -1960,6 +2035,7 @@ class AmonCore:
         chunks_path = memory_dir / "chunks.jsonl"
         normalized_path = memory_dir / "normalized.jsonl"
         entities_path = memory_dir / "entities.jsonl"
+        triples_path = memory_dir / "triples.jsonl"
         if not chunks_path.exists():
             self.logger.error("找不到 memory chunks 檔案：%s", chunks_path)
             raise FileNotFoundError(f"找不到 memory chunks 檔案：{chunks_path}")
@@ -1970,6 +2046,7 @@ class AmonCore:
                 chunks_path.open("r", encoding="utf-8") as handle,
                 normalized_path.open("w", encoding="utf-8") as out_handle,
                 entities_path.open("w", encoding="utf-8") as entity_handle,
+                triples_path.open("w", encoding="utf-8") as triple_handle,
             ):
                 for line in handle:
                     payload = line.strip()
@@ -1984,6 +2061,8 @@ class AmonCore:
                     created_at = str(chunk.get("created_at") or "")
                     mentions = self._extract_time_mentions(text, created_at)
                     geo_mentions = self._extract_geo_mentions(text)
+                    entity_mentions = self._extract_explicit_entities(text)
+                    event_mentions = self._extract_event_mentions(text)
                     session_id = str(chunk.get("session_id") or "")
                     last_entity = session_last_entity.get(session_id)
                     pronoun_mentions, last_entity = self._resolve_pronouns_in_text(text, last_entity)
@@ -1993,6 +2072,16 @@ class AmonCore:
                     normalized["geo"] = {"mentions": geo_mentions}
                     out_handle.write(json.dumps(normalized, ensure_ascii=False))
                     out_handle.write("\n")
+                    triples = self._build_memory_triples(
+                        chunk,
+                        entity_mentions,
+                        event_mentions,
+                        geo_mentions,
+                        mentions,
+                    )
+                    for triple in triples:
+                        triple_handle.write(json.dumps(triple, ensure_ascii=False))
+                        triple_handle.write("\n")
                     for mention in pronoun_mentions:
                         entity_record = {
                             "chunk_id": chunk.get("chunk_id"),
