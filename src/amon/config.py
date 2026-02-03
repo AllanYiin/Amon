@@ -47,6 +47,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "global_dir": "~/.amon/skills",
         "project_dir_rel": ".claude/skills",
     },
+    "tools": {
+        "global_dir": "~/.amon/tools",
+        "project_dir_rel": "tools",
+        "allowed_paths": ["workspace"],
+    },
     "mcp": {
         "servers": {},
         "allowed_tools": [],

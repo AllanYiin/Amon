@@ -7,6 +7,8 @@ import os
 import re
 import shlex
 import shutil
+import subprocess
+import sys
 import tempfile
 import uuid
 import zipfile
@@ -33,6 +35,17 @@ from .logging_utils import setup_logger
 from .mcp_client import MCPClientError, MCPServerConfig, MCPStdioClient
 from .models import ProviderError, build_provider
 from .graph_runtime import GraphRuntime, GraphRunResult
+from .tooling import (
+    ToolingError,
+    build_confirm_plan,
+    build_tool_env,
+    ensure_tool_name,
+    format_registry_entry,
+    load_tool_spec,
+    resolve_allowed_paths,
+    run_tool_process,
+    write_tool_spec,
+)
 
 
 @dataclass
@@ -103,6 +116,13 @@ class AmonCore:
                 )
             except OSError as exc:
                 self.logger.error("建立回收桶清單失敗：%s", exc, exc_info=True)
+                raise
+        registry_path = self.cache_dir / "tool_registry.json"
+        if not registry_path.exists():
+            try:
+                self._atomic_write_text(registry_path, json.dumps({"tools": []}, ensure_ascii=False, indent=2))
+            except OSError as exc:
+                self.logger.error("建立工具 registry 失敗：%s", exc, exc_info=True)
                 raise
 
     def initialize(self) -> None:
@@ -1680,6 +1700,294 @@ class AmonCore:
         )
         return {"tool": full_tool, "data": result, "data_prompt": data_prompt}
 
+    def forge_tool(self, project_id: str, tool_name: str, spec: str) -> Path:
+        self.ensure_base_structure()
+        ensure_tool_name(tool_name)
+        record = self.get_project(project_id)
+        project_path = Path(record.path)
+        tool_dir = project_path / "tools" / tool_name
+        if tool_dir.exists():
+            raise FileExistsError(f"工具已存在：{tool_name}")
+        tool_dir.mkdir(parents=True, exist_ok=True)
+        tests_dir = tool_dir / "tests"
+        tests_dir.mkdir(parents=True, exist_ok=True)
+        tool_yaml = {
+            "name": tool_name,
+            "version": "0.1.0",
+            "inputs_schema": {
+                "type": "object",
+                "properties": {"text": {"type": "string", "description": "要處理的文字"}},
+                "required": ["text"],
+            },
+            "outputs_schema": {
+                "type": "object",
+                "properties": {"result": {"type": "string"}},
+                "required": ["result"],
+            },
+            "risk_level": "low",
+            "allowed_paths": ["workspace"],
+        }
+        tool_py = self._render_tool_template(tool_name, spec)
+        readme = self._render_tool_readme(tool_name, spec)
+        test_py = self._render_tool_test(tool_name)
+        try:
+            (tool_dir / "tool.py").write_text(tool_py, encoding="utf-8")
+            write_tool_spec(tool_dir / "tool.yaml", tool_yaml)
+            (tool_dir / "README.md").write_text(readme, encoding="utf-8")
+            (tests_dir / "test_tool.py").write_text(test_py, encoding="utf-8")
+        except OSError as exc:
+            self.logger.error("建立工具失敗：%s", exc, exc_info=True)
+            raise
+        log_event(
+            {
+                "level": "INFO",
+                "event": "tool_forge",
+                "project_id": project_id,
+                "tool_name": tool_name,
+            }
+        )
+        return tool_dir
+
+    def list_tools(self, project_id: str | None = None) -> list[dict[str, Any]]:
+        self.ensure_base_structure()
+        project_path = Path(self.get_project(project_id).path) if project_id else None
+        tools: dict[str, dict[str, Any]] = {}
+        for scope, base in self._tool_base_dirs(project_path):
+            if not base.exists():
+                continue
+            for entry in sorted(base.iterdir()):
+                if not entry.is_dir():
+                    continue
+                try:
+                    spec = load_tool_spec(entry)
+                except ToolingError:
+                    continue
+                tools[spec.name] = {
+                    "name": spec.name,
+                    "version": spec.version,
+                    "risk_level": spec.risk_level,
+                    "path": str(entry),
+                    "scope": scope,
+                }
+        return sorted(tools.values(), key=lambda item: item["name"])
+
+    def run_tool(self, tool_name: str, payload: dict[str, Any], project_id: str | None = None) -> dict[str, Any]:
+        self.ensure_base_structure()
+        tool_dir, scope, project_path = self._resolve_tool_dir(tool_name, project_id)
+        spec = load_tool_spec(tool_dir)
+        project_allowed = self._resolve_project_allowed_paths(project_path)
+        resolved_allowed = resolve_allowed_paths(spec.allowed_paths, project_path, project_allowed)
+        if spec.risk_level.lower() == "high":
+            plan = build_confirm_plan(tool_name, spec.risk_level)
+            if not require_confirm(plan):
+                raise RuntimeError("已取消執行工具")
+        env = build_tool_env(self.logs_dir if not project_path else project_path / "logs", resolved_allowed, project_path)
+        output = run_tool_process(tool_dir / "tool.py", payload, env=env, cwd=project_path)
+        log_event(
+            {
+                "level": "INFO",
+                "event": "tool_run",
+                "tool_name": tool_name,
+                "scope": scope,
+                "project_id": project_path.name if project_path else None,
+            }
+        )
+        return output
+
+    def test_tool(self, tool_name: str, project_id: str | None = None) -> None:
+        self.ensure_base_structure()
+        tool_dir, _, project_path = self._resolve_tool_dir(tool_name, project_id)
+        spec = load_tool_spec(tool_dir)
+        project_allowed = self._resolve_project_allowed_paths(project_path)
+        resolved_allowed = resolve_allowed_paths(spec.allowed_paths, project_path, project_allowed)
+        env = build_tool_env(self.logs_dir if not project_path else project_path / "logs", resolved_allowed, project_path)
+        tests_dir = tool_dir / "tests"
+        if tests_dir.exists():
+            test_files = [path for path in sorted(tests_dir.iterdir()) if path.suffix == ".py"]
+        else:
+            test_files = []
+        if not test_files:
+            run_tool_process(tool_dir / "tool.py", {}, env=env, cwd=project_path)
+            return
+        for test_path in test_files:
+            try:
+                result = subprocess.run(
+                    [sys.executable, str(test_path)],
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    cwd=str(tool_dir),
+                    check=False,
+                )
+            except (OSError, subprocess.SubprocessError) as exc:
+                self.logger.error("執行測試失敗：%s", exc, exc_info=True)
+                raise
+            if result.returncode != 0:
+                self.logger.error("工具測試失敗：%s", result.stderr.strip())
+                raise RuntimeError("工具測試失敗")
+
+    def register_tool(self, tool_name: str, project_id: str | None = None) -> dict[str, Any]:
+        self.ensure_base_structure()
+        self.test_tool(tool_name, project_id=project_id)
+        tool_dir, scope, project_path = self._resolve_tool_dir(tool_name, project_id)
+        spec = load_tool_spec(tool_dir)
+        registry_path = self.cache_dir / "tool_registry.json"
+        entry = format_registry_entry(spec, tool_dir, scope, project_path.name if project_path else None)
+        try:
+            data = json.loads(registry_path.read_text(encoding="utf-8")) if registry_path.exists() else {"tools": []}
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.error("讀取工具 registry 失敗：%s", exc, exc_info=True)
+            raise
+        tools = [item for item in data.get("tools", []) if item.get("name") != tool_name or item.get("scope") != scope]
+        tools.append(entry)
+        data["tools"] = tools
+        try:
+            self._atomic_write_text(registry_path, json.dumps(data, ensure_ascii=False, indent=2))
+        except OSError as exc:
+            self.logger.error("寫入工具 registry 失敗：%s", exc, exc_info=True)
+            raise
+        log_event(
+            {
+                "level": "INFO",
+                "event": "tool_register",
+                "tool_name": tool_name,
+                "scope": scope,
+                "project_id": project_path.name if project_path else None,
+            }
+        )
+        return entry
+
+    def _tool_base_dirs(self, project_path: Path | None) -> list[tuple[str, Path]]:
+        config = self.load_config(project_path)
+        tools_cfg = config.get("tools", {})
+        global_dir = Path(tools_cfg.get("global_dir", self.tools_dir)).expanduser()
+        dirs: list[tuple[str, Path]] = [("global", global_dir)]
+        if project_path:
+            project_rel = tools_cfg.get("project_dir_rel", "tools")
+            dirs.insert(0, ("project", project_path / project_rel))
+        return dirs
+
+    def _resolve_tool_dir(self, tool_name: str, project_id: str | None) -> tuple[Path, str, Path | None]:
+        ensure_tool_name(tool_name)
+        project_path = Path(self.get_project(project_id).path) if project_id else None
+        for scope, base in self._tool_base_dirs(project_path):
+            candidate = base / tool_name
+            if (candidate / "tool.py").exists():
+                return candidate, scope, project_path
+        raise FileNotFoundError(f"找不到工具：{tool_name}")
+
+    def _resolve_project_allowed_paths(self, project_path: Path | None) -> list[Path]:
+        config = self.load_config(project_path)
+        allowed = config.get("tools", {}).get("allowed_paths", ["workspace"])
+        resolved: list[Path] = []
+        for entry in allowed:
+            path = Path(entry)
+            if not path.is_absolute() and project_path:
+                path = project_path / path
+            resolved.append(path.expanduser())
+        if project_path:
+            for target in resolved:
+                canonicalize_path(target, [project_path])
+        return resolved
+
+    def _render_tool_template(self, tool_name: str, spec: str) -> str:
+        if "大寫" in spec or "轉大寫" in spec:
+            body = "result = text.upper()"
+        else:
+            body = "result = text"
+        return f'''"""Amon tool: {tool_name}."""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from datetime import datetime
+from pathlib import Path
+
+
+def _log_error(message: str) -> None:
+    log_dir = Path(os.getenv("AMON_TOOL_LOG_DIR", ".")).expanduser()
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "{tool_name}.log"
+    timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+    log_path.write_text(f"[{{timestamp}}] ERROR {{message}}\\n", encoding="utf-8")
+
+
+def _load_payload() -> dict:
+    raw = sys.stdin.read().strip() or "{{}}"
+    return json.loads(raw)
+
+
+def main() -> None:
+    try:
+        payload = _load_payload()
+        text = payload.get("text", "")
+        if not isinstance(text, str):
+            raise ValueError("text 必須是字串")
+        {body}
+        output = {{"result": result}}
+        sys.stdout.write(json.dumps(output, ensure_ascii=False))
+    except Exception as exc:  # noqa: BLE001
+        _log_error(str(exc))
+        sys.stdout.write(json.dumps({{"error": "執行失敗", "detail": str(exc)}}, ensure_ascii=False))
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+    def _render_tool_readme(self, tool_name: str, spec: str) -> str:
+        return f"""# {tool_name}
+
+需求：{spec}
+
+## 使用方式
+
+```bash
+echo '{{"text": "hello"}}' | python tool.py
+```
+
+輸出：
+
+```json
+{{"result": "HELLO"}}
+```
+"""
+
+    def _render_tool_test(self, tool_name: str) -> str:
+        return f'''"""Tool test for {tool_name}."""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+
+def main() -> None:
+    tool_path = Path(__file__).resolve().parents[1] / "tool.py"
+    payload = {{"text": "hello"}}
+    result = subprocess.run(
+        [sys.executable, str(tool_path)],
+        input=json.dumps(payload, ensure_ascii=False),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise SystemExit(result.stderr)
+    output = json.loads(result.stdout or "{{}}")
+    if output.get("result") != "HELLO":
+        raise SystemExit("輸出不符合預期")
+
+
+if __name__ == "__main__":
+    main()
+'''
+
     @staticmethod
     def _format_mcp_result(tool_name: str, result: dict[str, Any]) -> str:
         payload = json.dumps(result, ensure_ascii=False, indent=2)
@@ -1758,6 +2066,7 @@ class AmonCore:
         (project_path / "logs").mkdir(parents=True, exist_ok=True)
         (project_path / ".claude" / "skills").mkdir(parents=True, exist_ok=True)
         (project_path / ".amon" / "locks").mkdir(parents=True, exist_ok=True)
+        (project_path / "tools").mkdir(parents=True, exist_ok=True)
 
         tasks_path = project_path / "tasks" / "tasks.json"
         if not tasks_path.exists():
@@ -1769,7 +2078,8 @@ class AmonCore:
             "amon": {
                 "project_name": name,
                 "mode": "auto",
-            }
+            },
+            "tools": {"allowed_paths": ["workspace"]},
         }
         self._write_yaml(config_path, config_data)
 
