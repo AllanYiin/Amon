@@ -8,6 +8,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from amon.core import AmonCore
+from amon.graph_runtime import GraphRuntime
+from amon.run.context import append_run_constraints
 
 
 class GraphRuntimeTests(unittest.TestCase):
@@ -187,6 +189,56 @@ class GraphRuntimeTests(unittest.TestCase):
             self.assertTrue(resolved_path.exists())
             resolved_payload = json.loads(resolved_path.read_text(encoding="utf-8"))
             self.assertEqual(resolved_payload["nodes"][0]["prompt"], "替換訊息")
+
+    def test_graph_runtime_injects_run_constraints(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("Run Context 專案")
+                project_path = Path(project.path)
+                core.set_config_value(
+                    "providers.mock",
+                    {
+                        "type": "mock",
+                        "default_model": "mock-model",
+                        "stream_chunks": ["OK"],
+                    },
+                    project_path=project_path,
+                )
+                core.set_config_value("amon.provider", "mock", project_path=project_path)
+
+                run_id = "run-context-test"
+                run_dir = project_path / ".amon" / "runs" / run_id
+                run_dir.mkdir(parents=True, exist_ok=True)
+                append_run_constraints(run_id, ["用繁體中文", "不要用付費"])
+
+                graph_path = project_path / "graph.json"
+                graph_path.write_text("{}", encoding="utf-8")
+                runtime = GraphRuntime(core=core, project_path=project_path, graph_path=graph_path)
+                runtime._execute_node(
+                    {"id": "agent", "type": "agent_task", "prompt": "你好"},
+                    {},
+                    run_id,
+                )
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+            sessions_dir = project_path / "sessions"
+            session_files = list(sessions_dir.glob("*.jsonl"))
+            self.assertEqual(len(session_files), 1)
+            session_payloads = [
+                json.loads(line)
+                for line in session_files[0].read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            prompt_events = [payload for payload in session_payloads if payload.get("event") == "prompt"]
+            self.assertEqual(len(prompt_events), 1)
+            content = prompt_events[0].get("content", "")
+            self.assertIn("```run_constraints", content)
+            self.assertIn("用繁體中文", content)
+            self.assertIn("不要用付費", content)
 
 
 if __name__ == "__main__":
