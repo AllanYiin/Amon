@@ -13,10 +13,10 @@
           <h1>Amon</h1>
           <button class="primary-btn" id="create-project">＋ 新增專案</button>
           <div class="nav-group">導覽</div>
-          <div class="nav-item">專案</div>
-          <div class="nav-item">技能</div>
-          <div class="nav-item">回收桶</div>
-          <div class="nav-item">用量/費用</div>
+          <button class="nav-item is-active" data-action="projects" type="button">專案</button>
+          <button class="nav-item" data-action="skills" type="button">技能</button>
+          <button class="nav-item" data-action="trash" type="button">回收桶</button>
+          <button class="nav-item" data-action="usage" type="button">用量/費用</button>
         </aside>
         <section class="main-card">
           <h2 class="main-title">專案列表</h2>
@@ -53,6 +53,7 @@
         createButton: document.getElementById("create-project"),
         searchInput: document.getElementById("project-search"),
         includeDeleted: document.getElementById("include-deleted"),
+        navButtons: document.querySelectorAll(".nav-item"),
       };
 
       function showToast(message) {
@@ -216,6 +217,27 @@
       elements.includeDeleted.addEventListener("change", (event) => {
         state.includeDeleted = event.target.checked;
         loadProjects();
+      });
+      elements.navButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          const action = button.dataset.action;
+          if (action === "projects") {
+            window.location.href = "index.html";
+            return;
+          }
+          if (action === "trash") {
+            state.includeDeleted = true;
+            elements.includeDeleted.checked = true;
+            loadProjects();
+            showToast("已切換到回收桶。");
+            return;
+          }
+          if (action === "skills") {
+            showToast("技能功能尚未開放。");
+            return;
+          }
+          showToast("用量/費用功能尚未開放。");
+        });
       });
 
       loadProjects();
