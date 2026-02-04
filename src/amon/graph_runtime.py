@@ -13,6 +13,7 @@ from typing import Any
 
 from .fs.atomic import atomic_write_text
 from .fs.safety import canonicalize_path
+from .run.context import get_effective_constraints
 
 
 @dataclass
@@ -211,6 +212,7 @@ class GraphRuntime:
         node_vars = {**variables, **node.get("variables", {})}
         if node_type == "agent_task":
             prompt = self._render_template(node.get("prompt", ""), node_vars)
+            prompt = self._inject_run_constraints(prompt, run_id)
             response = self.core.run_agent_task(
                 prompt,
                 project_path=self.project_path,
@@ -267,6 +269,13 @@ class GraphRuntime:
         if node_type == "map":
             return self._execute_map_node(node, variables, run_id)
         raise ValueError(f"不支援的 node type：{node_type}")
+
+    def _inject_run_constraints(self, prompt: str, run_id: str) -> str:
+        constraints = get_effective_constraints(run_id)
+        if not constraints:
+            return prompt
+        block = "\n".join(constraints)
+        return f"{prompt}\n\n```run_constraints\n{block}\n```"
 
     def _evaluate_condition(self, node: dict[str, Any], variables: dict[str, Any]) -> bool:
         if "expression" in node:
