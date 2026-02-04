@@ -10,6 +10,10 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from amon.chat.cli import _build_plan_from_message
+from amon.chat.router import route_intent
+from amon.chat.session_store import append_event, create_chat_session
+from amon.commands.executor import CommandPlan, execute
 from .core import AmonCore, ProjectRecord
 from .logging import log_event
 
@@ -45,11 +49,23 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
 
     def _handle_api_get(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/v1/chat/stream":
+            self._handle_chat_stream(parsed)
+            return
         if parsed.path == "/v1/projects":
             params = parse_qs(parsed.query)
             include_deleted = params.get("include_deleted", ["false"])[0].lower() == "true"
             records = self.core.list_projects(include_deleted=include_deleted)
             self._send_json(200, {"projects": [record.to_dict() for record in records]})
+            return
+        if parsed.path.endswith("/context") and parsed.path.startswith("/v1/projects/"):
+            project_id = parsed.path.split("/")[3]
+            try:
+                context = self._build_project_context(project_id)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, context)
             return
         if parsed.path.startswith("/v1/projects/"):
             project_id = parsed.path.split("/")[3]
@@ -64,6 +80,48 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
 
     def _handle_api_post(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/v1/chat/sessions":
+            payload = self._read_json()
+            project_id = str(payload.get("project_id", "")).strip()
+            if not project_id:
+                self._send_json(400, {"message": "請提供 project_id"})
+                return
+            try:
+                chat_id = create_chat_session(project_id)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(201, {"chat_id": chat_id})
+            return
+        if parsed.path == "/v1/chat/plan/confirm":
+            payload = self._read_json()
+            project_id = str(payload.get("project_id", "")).strip()
+            chat_id = str(payload.get("chat_id", "")).strip()
+            command = str(payload.get("command", "")).strip()
+            args = payload.get("args") or {}
+            confirmed = bool(payload.get("confirmed", False))
+            if not (project_id and chat_id and command):
+                self._send_json(400, {"message": "請提供 project_id、chat_id、command"})
+                return
+            if not isinstance(args, dict):
+                self._send_json(400, {"message": "args 需為物件"})
+                return
+            append_event(
+                chat_id,
+                {
+                    "type": "plan_confirm",
+                    "text": "confirmed" if confirmed else "cancelled",
+                    "project_id": project_id,
+                    "command": command,
+                },
+            )
+            if not confirmed:
+                self._send_json(200, {"status": "cancelled"})
+                return
+            plan = CommandPlan(name=command, args=args, project_id=project_id, chat_id=chat_id)
+            result = execute(plan, confirmed=True)
+            self._send_json(200, {"status": "ok", "result": result})
+            return
         if parsed.path == "/v1/projects":
             payload = self._read_json()
             name = str(payload.get("name", "")).strip()
@@ -161,6 +219,176 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             }
         )
         self._send_json(status, {"message": str(exc)})
+
+    def _handle_chat_stream(self, parsed) -> None:
+        params = parse_qs(parsed.query)
+        project_id = params.get("project_id", [""])[0].strip()
+        chat_id = params.get("chat_id", [""])[0].strip()
+        message = params.get("message", [""])[0].strip()
+
+        if not project_id or not message:
+            self.send_error(400, "缺少 project_id 或 message")
+            return
+        if not chat_id:
+            chat_id = create_chat_session(project_id)
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
+
+        def send_event(event: str, data: dict[str, Any] | str) -> None:
+            payload = data if isinstance(data, str) else json.dumps(data, ensure_ascii=False)
+            self.wfile.write(f"event: {event}\n".encode("utf-8"))
+            for line in payload.splitlines() or [""]:
+                self.wfile.write(f"data: {line}\n".encode("utf-8"))
+            self.wfile.write(b"\n")
+            self.wfile.flush()
+
+        append_event(chat_id, {"type": "user", "text": message, "project_id": project_id})
+
+        try:
+            router_result = route_intent(message, project_id=project_id)
+            append_event(
+                chat_id,
+                {
+                    "type": "router",
+                    "text": router_result.type,
+                    "project_id": project_id,
+                },
+            )
+            if router_result.type in {"command_plan", "graph_patch_plan"}:
+                command_name, args = _build_plan_from_message(message, router_result.type)
+                plan = CommandPlan(
+                    name=command_name,
+                    args=args,
+                    project_id=project_id,
+                    chat_id=chat_id,
+                    metadata={"plan_type": router_result.type},
+                )
+                append_event(
+                    chat_id,
+                    {
+                        "type": "plan_created",
+                        "text": command_name,
+                        "project_id": project_id,
+                    },
+                )
+                result = execute(plan, confirmed=False)
+                if result.get("status") == "confirm_required":
+                    plan_card = result.get("plan_card") or ""
+                    append_event(
+                        chat_id,
+                        {
+                            "type": "plan_card",
+                            "text": plan_card,
+                            "project_id": project_id,
+                            "command": command_name,
+                        },
+                    )
+                    send_event(
+                        "plan",
+                        {
+                            "plan_card": plan_card,
+                            "command": command_name,
+                            "args": args,
+                        },
+                    )
+                    send_event("done", {"status": "confirm_required", "chat_id": chat_id})
+                    return
+                send_event("result", result)
+                send_event("done", {"status": "ok", "chat_id": chat_id})
+                return
+            if router_result.type == "chat_response":
+                config = self.core.load_config(self.core.get_project_path(project_id))
+                provider_name = config.get("amon", {}).get("provider", "openai")
+                provider_cfg = config.get("providers", {}).get(provider_name, {})
+                if provider_cfg.get("type") == "mock":
+                    send_event("notice", {"text": "提醒：目前使用 mock provider，輸出為模擬結果。"})
+
+                def stream_handler(token: str) -> None:
+                    send_event("token", {"text": token})
+
+                result, response_text = self.core.run_single_stream(
+                    message,
+                    project_path=self.core.get_project_path(project_id),
+                    stream_handler=stream_handler,
+                )
+                append_event(chat_id, {"type": "assistant", "text": response_text, "project_id": project_id})
+                send_event(
+                    "done",
+                    {
+                        "status": "ok",
+                        "chat_id": chat_id,
+                        "run_id": result.run_id,
+                    },
+                )
+                return
+            send_event("done", {"status": "unsupported", "chat_id": chat_id})
+        except Exception as exc:  # noqa: BLE001
+            log_event(
+                {
+                    "level": "ERROR",
+                    "event": "ui_chat_stream_error",
+                    "message": str(exc),
+                    "stack": traceback.format_exc(),
+                }
+            )
+            append_event(chat_id, {"type": "error", "text": str(exc), "project_id": project_id})
+            send_event("error", {"message": str(exc)})
+            send_event("done", {"status": "failed", "chat_id": chat_id})
+
+    def _build_project_context(self, project_id: str) -> dict[str, Any]:
+        project_path = self.core.get_project_path(project_id)
+        graph = self._load_latest_graph(project_path)
+        docs = self._list_docs(project_path / "docs")
+        return {
+            "graph_mermaid": self._graph_to_mermaid(graph),
+            "docs": docs,
+        }
+
+    def _load_latest_graph(self, project_path: Path) -> dict[str, Any]:
+        runs_dir = project_path / ".amon" / "runs"
+        if runs_dir.exists():
+            run_dirs = [path for path in runs_dir.iterdir() if path.is_dir()]
+            if run_dirs:
+                latest = max(run_dirs, key=lambda path: path.stat().st_mtime)
+                resolved_path = latest / "graph.resolved.json"
+                if resolved_path.exists():
+                    return json.loads(resolved_path.read_text(encoding="utf-8"))
+        fallback = project_path / ".amon" / "graphs" / "single_graph.resolved.json"
+        if fallback.exists():
+            return json.loads(fallback.read_text(encoding="utf-8"))
+        return {"nodes": [], "edges": []}
+
+    def _list_docs(self, docs_dir: Path) -> list[str]:
+        if not docs_dir.exists():
+            return []
+        docs: list[str] = []
+        for path in docs_dir.rglob("*"):
+            if path.is_file():
+                docs.append(str(path.relative_to(docs_dir)))
+        return sorted(docs)
+
+    def _graph_to_mermaid(self, graph: dict[str, Any]) -> str:
+        nodes = graph.get("nodes") or []
+        edges = graph.get("edges") or []
+        if not nodes:
+            return "graph TD\n  empty[\"尚無 graph\"]"
+        lines = ["graph TD"]
+        id_map = {}
+        for node in nodes:
+            node_id = str(node.get("id", ""))
+            safe_id = node_id.replace("-", "_")
+            id_map[node_id] = safe_id
+            lines.append(f"  {safe_id}[\"{node_id}\"]")
+        for edge in edges:
+            source = id_map.get(str(edge.get("from", "")), str(edge.get("from", "")))
+            target = id_map.get(str(edge.get("to", "")), str(edge.get("to", "")))
+            if source and target:
+                lines.append(f"  {source} --> {target}")
+        return "\n".join(lines)
 
 
 def serve_ui(port: int = 8000) -> None:

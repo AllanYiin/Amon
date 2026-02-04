@@ -288,6 +288,7 @@ class AmonCore:
         project_path: Path | None,
         model: str | None = None,
         mode: str = "single",
+        stream_handler=None,
     ) -> str:
         config = self.load_config(project_path)
         project_id = project_path.name if project_path else None
@@ -345,6 +346,8 @@ class AmonCore:
             for index, token in enumerate(provider.generate_stream(messages, model=provider_model)):
                 print(token, end="", flush=True)
                 response_text += token
+                if stream_handler:
+                    stream_handler(token)
                 self._append_session_event(
                     session_path,
                     {
@@ -407,6 +410,32 @@ class AmonCore:
             )
             result = self.run_graph(project_path=project_path, graph_path=graph_path)
             return self._load_graph_primary_output(result.run_dir)
+
+    def run_single_stream(
+        self,
+        prompt: str,
+        project_path: Path,
+        model: str | None = None,
+        stream_handler=None,
+    ) -> tuple[GraphRunResult, str]:
+        if not project_path:
+            raise ValueError("執行 stream 需要指定專案")
+        lock_context = self._project_lock(project_path, "single") if project_path else nullcontext()
+        with lock_context:
+            graph = self._build_single_graph()
+            graph_path = self._write_graph_resolved(
+                project_path,
+                graph,
+                {"prompt": prompt, "mode": "single", "model": model or ""},
+                mode="single",
+            )
+            result = self.run_graph(
+                project_path=project_path,
+                graph_path=graph_path,
+                stream_handler=stream_handler,
+            )
+            response = self._load_graph_primary_output(result.run_dir)
+            return result, response
 
     def run_self_critique(self, prompt: str, project_path: Path | None = None, model: str | None = None) -> str:
         if not project_path:
@@ -813,6 +842,7 @@ class AmonCore:
         project_path: Path,
         graph_path: Path,
         variables: dict[str, Any] | None = None,
+        stream_handler=None,
     ) -> GraphRunResult:
         if not project_path:
             raise ValueError("執行 graph 需要指定專案")
@@ -821,6 +851,7 @@ class AmonCore:
             project_path=project_path,
             graph_path=graph_path,
             variables=variables,
+            stream_handler=stream_handler,
         )
         return runtime.run()
 
