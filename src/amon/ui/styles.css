@@ -75,6 +75,26 @@ body {
   margin-top: 10px;
   font-size: 13px;
   color: var(--title);
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.nav-item:hover {
+  background: var(--card-muted);
+  border-color: var(--stroke);
+}
+
+.nav-item.is-active {
+  background: var(--highlight);
+  border-color: var(--stroke);
+  color: var(--primary);
+  font-weight: 700;
 }
 
 .main-card {
