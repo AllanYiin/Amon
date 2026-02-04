@@ -10,21 +10,24 @@
     <main class="page">
       <div class="layout">
         <header class="topbar">
-          <div class="topbar-title">專案：2026Q1 市場研究</div>
-          <button class="dropdown-btn">切換模式 ▾</button>
+          <div class="topbar-title" id="project-title">專案：—</div>
+          <button class="dropdown-btn" disabled>切換模式 ▾</button>
         </header>
+        <div class="notice subtle">
+          此頁面目前僅顯示專案資訊，任務、對話、文件功能尚未開放（避免無效控制項）。
+        </div>
 
         <section class="workspace-grid">
           <div class="panel">
             <h3>任務清單</h3>
-            <div class="task-item">
+            <div class="task-item disabled">
               <div style="display: flex; align-items: center; gap: 8px;">
                 <span class="status-dot" style="background: var(--accent);"></span>
                 <span class="task-title">競品摘要</span>
               </div>
               <div class="task-meta">狀態：執行中</div>
             </div>
-            <div class="task-item secondary">
+            <div class="task-item secondary disabled">
               <div style="display: flex; align-items: center; gap: 8px;">
                 <span class="status-dot" style="background: var(--warning);"></span>
                 <span class="task-title">風險與限制</span>
@@ -40,22 +43,22 @@
               Amon：我會用「團隊模式」拆任務並產出文件。<br />
               接著我會先給你一份待辦清單供確認。
             </div>
-            <div class="chat-input">
+            <div class="chat-input disabled">
               <div class="field">輸入任務…</div>
-              <button class="send">送出</button>
+              <button class="send" disabled>送出</button>
             </div>
           </div>
 
           <div class="panel">
             <h3>文件</h3>
-            <div class="doc-item">
+            <div class="doc-item disabled">
               <div class="task-title">PM_整合報告.md</div>
               <div class="doc-meta" style="color: var(--success);">Final</div>
             </div>
-            <div class="doc-item secondary">
+            <div class="doc-item secondary disabled">
               <div class="task-title">競品摘要_成員A.md</div>
             </div>
-            <div class="doc-item secondary">
+            <div class="doc-item secondary disabled">
               <div class="task-title">稽核回饋.json</div>
             </div>
           </div>
@@ -89,8 +92,8 @@
                 </div>
 
                 <div class="graph-actions">
-                  <button class="secondary-btn">轉為變數範本</button>
-                  <button class="primary-btn small">視覺化</button>
+                  <button class="secondary-btn" disabled>轉為變數範本</button>
+                  <button class="primary-btn small" disabled>視覺化</button>
                 </div>
                 <div class="progress graph-progress"><span></span></div>
               </div>
@@ -124,5 +127,39 @@
         </section>
       </div>
     </main>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script>
+      const toast = document.getElementById("toast");
+      const titleEl = document.getElementById("project-title");
+
+      function showToast(message) {
+        toast.textContent = message;
+        toast.classList.add("visible");
+        window.clearTimeout(toast._timer);
+        toast._timer = window.setTimeout(() => toast.classList.remove("visible"), 8000);
+      }
+
+      async function loadProject() {
+        const params = new URLSearchParams(window.location.search);
+        const projectId = params.get("id");
+        if (!projectId) {
+          titleEl.textContent = "專案：未指定";
+          return;
+        }
+        try {
+          const response = await fetch(`/v1/projects/${projectId}`);
+          const payload = await response.json();
+          if (!response.ok) {
+            throw new Error(payload.message || "讀取專案失敗");
+          }
+          titleEl.textContent = `專案：${payload.project.name}`;
+        } catch (error) {
+          titleEl.textContent = "專案：讀取失敗";
+          showToast(`無法連線本機 API：${error.message}`);
+        }
+      }
+
+      loadProject();
+    </script>
   </body>
 </html>
