@@ -305,7 +305,11 @@ class AmonCore:
         provider_cfg = config.get("providers", {}).get(provider_name, {})
         provider_model = model or provider_cfg.get("default_model") or provider_cfg.get("model")
         provider = build_provider(provider_cfg, model=provider_model)
-        system_message = "你是 Amon 的專案助理，請用繁體中文回覆。"
+        system_message = (
+            "你是 Amon 的專案助理，請用繁體中文回覆。"
+            "請把使用者需求視為任務委託而非問答，主動釐清目標與限制，提出可執行方案並承擔完成責任。"
+            "若資訊不足，請先提出最少必要問題，其餘假設請明確說明。"
+        )
         skill_context = self._resolve_skill_context(prompt, project_path)
         if skill_context:
             system_message = f"{system_message}\n\n[Skill]\n{skill_context}"

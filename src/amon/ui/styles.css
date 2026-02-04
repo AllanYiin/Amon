@@ -370,14 +370,95 @@ body {
   display: flex;
   gap: 10px;
   margin-top: auto;
+  align-items: flex-end;
 }
 
-.chat-input .field {
+.chat-input__main {
   flex: 1;
-  border: 1px solid var(--stroke);
-  border-radius: 10px;
-  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chat-input textarea {
+  width: 100%;
+  min-height: 120px;
+  resize: vertical;
+  border: 1px solid #d0d5dd;
+  border-radius: 12px;
+  padding: 12px;
+  background: #f8fafc;
+  font-size: 13px;
+  color: var(--title);
+  font-family: inherit;
+}
+
+.chat-input__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.chat-input__hint {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.file-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   background: var(--card-muted);
+  border: 1px solid var(--stroke);
+  color: var(--title);
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.file-btn input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.attachment-preview {
+  display: grid;
+  gap: 10px;
+}
+
+.attachment-item {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--stroke);
+  border-radius: 12px;
+  padding: 10px;
+  background: #ffffff;
+}
+
+.attachment-item img,
+.attachment-item video,
+.attachment-item embed {
+  max-width: 100%;
+  border-radius: 10px;
+}
+
+.attachment-item img {
+  height: auto;
+}
+
+.attachment-item video,
+.attachment-item embed {
+  width: 100%;
+  max-height: 180px;
+}
+
+.attachment-info {
   font-size: 12px;
   color: var(--muted);
 }
@@ -742,6 +823,12 @@ body {
   padding: 12px;
   overflow-x: auto;
   border: 1px solid #e4e7ec;
+}
+
+.empty-context {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .graph-preview svg {
