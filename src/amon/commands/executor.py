@@ -108,6 +108,11 @@ def _ensure_default_commands() -> None:
         _handle_graph_template_parametrize,
     )
     register_command(
+        "graph.patch",
+        {"inputs": {"message": "string"}, "requires_confirm": True},
+        _handle_graph_patch,
+    )
+    register_command(
         "schedule.add",
         {"inputs": {"template_id": "string", "cron": "string", "vars": "object"}, "requires_confirm": True},
         _handle_schedule_add,
@@ -227,6 +232,17 @@ def _handle_graph_template_parametrize(core: AmonCore, plan: CommandPlan) -> dic
         "template_id": result["template_id"],
         "path": result["path"],
         "schema_path": result["schema_path"],
+    }
+
+
+def _handle_graph_patch(core: AmonCore, plan: CommandPlan) -> dict[str, Any]:
+    message = str(plan.args.get("message", "")).strip()
+    if not message:
+        raise ValueError("message 不可為空")
+    return {
+        "status": "stub",
+        "note": "graph_patch_plan 尚未實作，先記錄需求。",
+        "message": message,
     }
 
 

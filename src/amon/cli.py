@@ -164,6 +164,9 @@ def build_parser() -> argparse.ArgumentParser:
     template_param.add_argument("--path", required=True, help="JSONPath")
     template_param.add_argument("--var_name", required=True, help="變數名稱")
 
+    chat_parser = subparsers.add_parser("chat", help="互動式 Chat")
+    chat_parser.add_argument("--project", required=True, help="指定專案 ID")
+
     return parser
 
 
@@ -207,6 +210,8 @@ def main() -> None:
             _handle_doctor(core)
         elif args.command == "graph":
             _handle_graph(core, args)
+        elif args.command == "chat":
+            _handle_chat(core, args)
         else:
             parser.print_help()
     except Exception as exc:  # noqa: BLE001
@@ -496,6 +501,12 @@ def _handle_graph(core: AmonCore, args: argparse.Namespace) -> None:
             return
         raise ValueError("請指定 graph template 指令")
     raise ValueError("請指定 graph 指令")
+
+
+def _handle_chat(core: AmonCore, args: argparse.Namespace) -> None:
+    from .chat.cli import run_chat_repl
+
+    run_chat_repl(core, args.project)
 
 
 def _parse_vars(items: list[str]) -> dict[str, str]:
