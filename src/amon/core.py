@@ -824,7 +824,7 @@ class AmonCore:
         )
         return runtime.run()
 
-    def create_graph_template(self, project_id: str, run_id: str) -> dict[str, Any]:
+    def create_graph_template(self, project_id: str, run_id: str, name: str | None = None) -> dict[str, Any]:
         self.ensure_base_structure()
         project_path = self.get_project_path(project_id)
         resolved_path = project_path / ".amon" / "runs" / run_id / "graph.resolved.json"
@@ -838,19 +838,23 @@ class AmonCore:
         template_id = uuid.uuid4().hex
         template_dir = self.templates_dir / template_id
         template_dir.mkdir(parents=True, exist_ok=False)
+        template_schema = self._build_template_schema({})
         payload = {
             "template_id": template_id,
+            "name": name or f"{project_id}-{run_id}",
             "project_id": project_id,
             "source_run_id": run_id,
             "created_at": self._now(),
-            "variables_schema": {},
+            "variables_schema": template_schema,
             "nodes": resolved.get("nodes", []),
             "edges": resolved.get("edges", []),
             "variables": resolved.get("variables", {}),
         }
         template_path = template_dir / "graph.template.json"
+        schema_path = template_dir / "schema.json"
         self._atomic_write_text(template_path, json.dumps(payload, ensure_ascii=False, indent=2))
-        return {"template_id": template_id, "path": str(template_path)}
+        self._atomic_write_text(schema_path, json.dumps(template_schema, ensure_ascii=False, indent=2))
+        return {"template_id": template_id, "path": str(template_path), "schema_path": str(schema_path)}
 
     def parametrize_graph_template(self, template_id: str, json_path: str, var_name: str) -> dict[str, Any]:
         template_path = self._template_path(template_id)
@@ -859,6 +863,7 @@ class AmonCore:
         except (OSError, json.JSONDecodeError) as exc:
             self.logger.error("讀取 graph.template.json 失敗：%s", exc, exc_info=True)
             raise
+        schema = self._load_template_schema(template_path, payload)
         tokens = self._parse_json_path(json_path)
         parent, last_token = self._locate_json_target(payload, tokens)
         try:
@@ -867,10 +872,12 @@ class AmonCore:
             raise ValueError("JSONPath 指向的欄位不存在") from exc
         placeholder = f"{{{{{var_name}}}}}"
         parent[last_token] = placeholder
-        schema = payload.setdefault("variables_schema", {})
-        schema[var_name] = {"type": self._infer_schema_type(original_value)}
+        schema = self._merge_template_schema(schema, var_name, original_value)
+        payload["variables_schema"] = schema
+        schema_path = template_path.parent / "schema.json"
         self._atomic_write_text(template_path, json.dumps(payload, ensure_ascii=False, indent=2))
-        return {"template_id": template_id, "path": str(template_path)}
+        self._atomic_write_text(schema_path, json.dumps(schema, ensure_ascii=False, indent=2))
+        return {"template_id": template_id, "path": str(template_path), "schema_path": str(schema_path)}
 
     def run_graph_template(self, template_id: str, variables: dict[str, Any] | None = None) -> GraphRunResult:
         template_path = self._template_path(template_id)
@@ -882,11 +889,9 @@ class AmonCore:
         project_id = payload.get("project_id")
         if not project_id:
             raise ValueError("template 缺少 project_id")
-        schema = payload.get("variables_schema", {})
+        schema = self._load_template_schema(template_path, payload)
         variables = variables or {}
-        missing = [name for name in schema.keys() if name not in variables]
-        if missing:
-            raise ValueError(f"template 缺少變數：{', '.join(missing)}")
+        variables = self._apply_schema_defaults(schema, variables)
         graph = {
             "nodes": payload.get("nodes", []),
             "edges": payload.get("edges", []),
@@ -904,6 +909,59 @@ class AmonCore:
         if not template_path.exists():
             raise FileNotFoundError("找不到 graph.template.json")
         return template_path
+
+    def _build_template_schema(self, properties: dict[str, Any]) -> dict[str, Any]:
+        return {"type": "object", "required": [], "properties": properties}
+
+    def _normalize_template_schema(self, schema: dict[str, Any]) -> dict[str, Any]:
+        if "properties" in schema or "required" in schema:
+            schema.setdefault("type", "object")
+            schema.setdefault("properties", {})
+            schema.setdefault("required", [])
+            return schema
+        properties = {}
+        for name, entry in schema.items():
+            if isinstance(entry, dict):
+                properties[name] = entry
+            else:
+                properties[name] = {"type": entry}
+        required = list(properties.keys())
+        return {"type": "object", "required": required, "properties": properties}
+
+    def _merge_template_schema(self, schema: dict[str, Any], var_name: str, original_value: Any) -> dict[str, Any]:
+        schema = self._normalize_template_schema(schema)
+        properties = schema.setdefault("properties", {})
+        properties[var_name] = {
+            "type": self._infer_schema_type(original_value),
+            "default": original_value,
+        }
+        required = schema.setdefault("required", [])
+        if var_name not in required:
+            required.append(var_name)
+        return schema
+
+    def _load_template_schema(self, template_path: Path, payload: dict[str, Any]) -> dict[str, Any]:
+        schema_path = template_path.parent / "schema.json"
+        if schema_path.exists():
+            try:
+                schema_payload = json.loads(schema_path.read_text(encoding="utf-8"))
+                return self._normalize_template_schema(schema_payload)
+            except (OSError, json.JSONDecodeError) as exc:
+                self.logger.error("讀取 schema.json 失敗：%s", exc, exc_info=True)
+                raise
+        return self._normalize_template_schema(payload.get("variables_schema", {}))
+
+    def _apply_schema_defaults(self, schema: dict[str, Any], variables: dict[str, Any]) -> dict[str, Any]:
+        schema = self._normalize_template_schema(schema)
+        properties = schema.get("properties", {})
+        merged = dict(variables)
+        for name, entry in properties.items():
+            if name not in merged and isinstance(entry, dict) and "default" in entry:
+                merged[name] = entry["default"]
+        missing = [name for name in schema.get("required", []) if name not in merged]
+        if missing:
+            raise ValueError(f"template 缺少變數：{', '.join(missing)}")
+        return merged
 
     def _resolve_template_values(self, payload: Any, variables: dict[str, Any]) -> Any:
         if isinstance(payload, dict):

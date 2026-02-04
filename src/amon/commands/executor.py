@@ -98,6 +98,16 @@ def _ensure_default_commands() -> None:
         _handle_graph_show,
     )
     register_command(
+        "graph.template.create",
+        {"inputs": {"project_id": "string", "run_id": "string", "name": "string"}, "requires_confirm": True},
+        _handle_graph_template_create,
+    )
+    register_command(
+        "graph.template.parametrize",
+        {"inputs": {"template_id": "string", "jsonpath": "string", "var_name": "string"}, "requires_confirm": True},
+        _handle_graph_template_parametrize,
+    )
+    register_command(
         "schedule.add",
         {"inputs": {"template_id": "string", "cron": "string", "vars": "object"}, "requires_confirm": True},
         _handle_schedule_add,
@@ -182,6 +192,42 @@ def _handle_graph_show(core: AmonCore, plan: CommandPlan) -> dict[str, Any]:
         core.logger.error("讀取 state.json 失敗：%s", exc, exc_info=True)
         raise ValueError("state.json 讀取失敗") from exc
     return {"run_id": run_id, "state": state}
+
+
+def _handle_graph_template_create(core: AmonCore, plan: CommandPlan) -> dict[str, Any]:
+    project_id = str(plan.args.get("project_id") or plan.project_id).strip()
+    run_id = str(plan.args.get("run_id", "")).strip()
+    name = str(plan.args.get("name", "")).strip()
+    if not project_id:
+        raise ValueError("project_id 不可為空")
+    if not run_id:
+        raise ValueError("run_id 不可為空")
+    if not name:
+        raise ValueError("name 不可為空")
+    result = core.create_graph_template(project_id, run_id, name)
+    return {
+        "template_id": result["template_id"],
+        "path": result["path"],
+        "schema_path": result["schema_path"],
+    }
+
+
+def _handle_graph_template_parametrize(core: AmonCore, plan: CommandPlan) -> dict[str, Any]:
+    template_id = str(plan.args.get("template_id", "")).strip()
+    json_path = str(plan.args.get("jsonpath", "")).strip()
+    var_name = str(plan.args.get("var_name", "")).strip()
+    if not template_id:
+        raise ValueError("template_id 不可為空")
+    if not json_path:
+        raise ValueError("jsonpath 不可為空")
+    if not var_name:
+        raise ValueError("var_name 不可為空")
+    result = core.parametrize_graph_template(template_id, json_path, var_name)
+    return {
+        "template_id": result["template_id"],
+        "path": result["path"],
+        "schema_path": result["schema_path"],
+    }
 
 
 def _handle_schedule_add(core: AmonCore, plan: CommandPlan) -> dict[str, Any]:
