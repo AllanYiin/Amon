@@ -48,7 +48,17 @@
           </section>
 
           <form id="chat-form" class="chat-input">
-            <textarea id="chat-input" rows="2" placeholder="輸入你的需求，例如：建立專案 Amon Demo"></textarea>
+            <div class="chat-input__main">
+              <textarea id="chat-input" rows="4" placeholder="輸入你的需求，例如：建立專案 Amon Demo"></textarea>
+              <div class="chat-input__toolbar">
+                <label class="file-btn">
+                  加入附件
+                  <input id="chat-attachments" type="file" multiple accept="image/*,video/*,.pdf" />
+                </label>
+                <span class="chat-input__hint">支援圖片、PDF、影片；附件會以文字摘要送出。</span>
+              </div>
+              <div id="attachment-preview" class="attachment-preview"></div>
+            </div>
             <button type="submit" class="primary-btn">送出</button>
           </form>
         </section>
@@ -76,6 +86,7 @@
         projectId: null,
         plan: null,
         streaming: false,
+        attachments: [],
       };
 
       const elements = {
@@ -83,6 +94,8 @@
         timeline: document.getElementById("timeline"),
         chatForm: document.getElementById("chat-form"),
         chatInput: document.getElementById("chat-input"),
+        chatAttachments: document.getElementById("chat-attachments"),
+        attachmentPreview: document.getElementById("attachment-preview"),
         toast: document.getElementById("toast"),
         planCard: document.getElementById("plan-card"),
         planContent: document.getElementById("plan-content"),
@@ -142,23 +155,41 @@
         elements.planContent.textContent = "";
       }
 
+      function setProjectState(projectId) {
+        state.projectId = projectId || null;
+        elements.refreshContext.disabled = !state.projectId;
+        elements.projectSelect.value = projectId || "";
+        if (!state.projectId) {
+          state.chatId = null;
+          elements.graphPreview.innerHTML = "<p class=\"empty-context\">請先選擇專案</p>";
+          elements.graphCode.textContent = "";
+          renderDocs([]);
+        }
+      }
+
       async function loadProjects() {
         const payload = await apiFetch("/projects");
         const projects = payload.projects || [];
         elements.projectSelect.innerHTML = "";
+        const emptyOption = document.createElement("option");
+        emptyOption.value = "";
+        emptyOption.textContent = "不指定專案";
+        elements.projectSelect.appendChild(emptyOption);
         projects.forEach((project) => {
           const option = document.createElement("option");
           option.value = project.project_id;
           option.textContent = `${project.name}（${project.project_id}）`;
           elements.projectSelect.appendChild(option);
         });
-        if (!state.projectId && projects.length) {
-          state.projectId = projects[0].project_id;
-          elements.projectSelect.value = state.projectId;
+        const availableIds = new Set(projects.map((project) => project.project_id));
+        if (state.projectId && !availableIds.has(state.projectId)) {
+          state.projectId = null;
         }
+        elements.projectSelect.value = state.projectId || "";
         if (!projects.length) {
           showToast("尚無專案，請在聊天輸入：建立專案 <名稱>");
         }
+        elements.refreshContext.disabled = !state.projectId;
       }
 
       async function ensureChatSession() {
@@ -171,7 +202,10 @@
       }
 
       async function loadContext() {
-        if (!state.projectId) return;
+        if (!state.projectId) {
+          showToast("請先選擇專案。");
+          return;
+        }
         const payload = await apiFetch(`/projects/${state.projectId}/context`);
         elements.graphCode.textContent = payload.graph_mermaid || "";
         renderMermaid(payload.graph_mermaid || "");
@@ -182,7 +216,7 @@
         elements.docsList.innerHTML = "";
         if (!docs.length) {
           const item = document.createElement("li");
-          item.textContent = "尚無文件";
+          item.textContent = state.projectId ? "尚無文件" : "請先選擇專案";
           elements.docsList.appendChild(item);
           return;
         }
@@ -230,9 +264,18 @@
         }
       }
 
-      function startStream(message) {
+      function buildAttachmentSummary(attachments) {
+        if (!attachments || attachments.length === 0) return "";
+        const lines = attachments.map((file) => {
+          const sizeKb = Math.round(file.size / 1024);
+          return `- ${file.name} (${file.type || "未知格式"}, ${sizeKb} KB)`;
+        });
+        return `\n\n[附件摘要]\n${lines.join("\n")}`;
+      }
+
+      function startStream(message, attachments = []) {
         if (!state.projectId) {
-          showToast("請先選擇專案。若尚未建立專案，請先建立。 ");
+          showToast("請先選擇專案。若尚未建立專案，請先建立。");
           return;
         }
         if (!state.chatId) {
@@ -240,14 +283,15 @@
           return;
         }
         resetPlanCard();
-        appendMessage("user", `你：${message}`);
+        const finalMessage = `${message}${buildAttachmentSummary(attachments)}`;
+        appendMessage("user", `你：${finalMessage}`);
         const agentBubble = appendMessage("agent", "Amon：");
         setStreaming(true);
 
         const query = new URLSearchParams({
           project_id: state.projectId,
           chat_id: state.chatId,
-          message,
+          message: finalMessage,
         });
         const source = new EventSource(`/v1/chat/stream?${query.toString()}`);
         let buffer = "";
@@ -289,7 +333,41 @@
         source.addEventListener("done", async () => {
           source.close();
           setStreaming(false);
+          await loadProjects();
           await loadContext();
+        });
+      }
+
+      function renderAttachmentPreview() {
+        elements.attachmentPreview.innerHTML = "";
+        if (!state.attachments || state.attachments.length === 0) return;
+        state.attachments.forEach((file) => {
+          const item = document.createElement("div");
+          item.className = "attachment-item";
+          const info = document.createElement("div");
+          info.className = "attachment-info";
+          info.textContent = `${file.name} (${Math.round(file.size / 1024)} KB)`;
+          if (file.type.startsWith("image/")) {
+            const img = document.createElement("img");
+            img.alt = file.name;
+            img.src = URL.createObjectURL(file);
+            img.onload = () => URL.revokeObjectURL(img.src);
+            item.appendChild(img);
+          } else if (file.type.startsWith("video/")) {
+            const video = document.createElement("video");
+            video.src = URL.createObjectURL(file);
+            video.controls = true;
+            video.onloadeddata = () => URL.revokeObjectURL(video.src);
+            item.appendChild(video);
+          } else if (file.type === "application/pdf") {
+            const embed = document.createElement("embed");
+            embed.src = URL.createObjectURL(file);
+            embed.type = "application/pdf";
+            embed.onload = () => URL.revokeObjectURL(embed.src);
+            item.appendChild(embed);
+          }
+          item.appendChild(info);
+          elements.attachmentPreview.appendChild(item);
         });
       }
 
@@ -297,25 +375,39 @@
         event.preventDefault();
         const message = elements.chatInput.value.trim();
         if (!message) return;
+        const attachments = [...state.attachments];
         elements.chatInput.value = "";
-        startStream(message);
+        elements.chatAttachments.value = "";
+        state.attachments = [];
+        renderAttachmentPreview();
+        startStream(message, attachments);
       });
 
       elements.projectSelect.addEventListener("change", async (event) => {
-        state.projectId = event.target.value;
-        await ensureChatSession();
-        await loadContext();
+        const selectedProject = event.target.value;
+        setProjectState(selectedProject);
+        if (state.projectId) {
+          await ensureChatSession();
+          await loadContext();
+        }
       });
 
       elements.refreshContext.addEventListener("click", loadContext);
       elements.planConfirm.addEventListener("click", () => confirmPlan(true));
       elements.planCancel.addEventListener("click", () => confirmPlan(false));
+      elements.chatAttachments.addEventListener("change", (event) => {
+        state.attachments = Array.from(event.target.files || []);
+        renderAttachmentPreview();
+      });
 
       (async () => {
         try {
           await loadProjects();
-          await ensureChatSession();
-          await loadContext();
+          setProjectState(state.projectId);
+          if (state.projectId) {
+            await ensureChatSession();
+            await loadContext();
+          }
         } catch (error) {
           showToast(`初始化失敗：${error.message}`);
         }
