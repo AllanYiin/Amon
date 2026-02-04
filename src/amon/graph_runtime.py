@@ -30,11 +30,13 @@ class GraphRuntime:
         project_path: Path,
         graph_path: Path,
         variables: dict[str, Any] | None = None,
+        stream_handler=None,
     ) -> None:
         self.core = core
         self.project_path = project_path
         self.graph_path = graph_path
         self.variables = variables or {}
+        self.stream_handler = stream_handler
         self.logger = core.logger
 
     def run(self) -> GraphRunResult:
@@ -218,6 +220,7 @@ class GraphRuntime:
                 project_path=self.project_path,
                 model=node_vars.get("model") or node.get("model"),
                 mode=node_vars.get("mode", "single"),
+                stream_handler=self.stream_handler,
             )
             output_path = self._resolve_output_path(
                 node,
