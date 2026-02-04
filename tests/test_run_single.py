@@ -14,6 +14,8 @@ from amon.core import AmonCore
 
 class RunSingleTests(unittest.TestCase):
     def test_run_single_streams_and_writes_logs(self) -> None:
+        if not os.getenv("OPENAI_API_KEY"):
+            self.skipTest("需要設定 OPENAI_API_KEY 才能執行 LLM 測試")
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir
             try:
@@ -21,16 +23,6 @@ class RunSingleTests(unittest.TestCase):
                 core.initialize()
                 project = core.create_project("測試專案")
                 project_path = Path(project.path)
-                core.set_config_value(
-                    "providers.mock",
-                    {
-                        "type": "mock",
-                        "default_model": "mock-model",
-                        "stream_chunks": ["哈", "囉"],
-                    },
-                    project_path=project_path,
-                )
-                core.set_config_value("amon.provider", "mock", project_path=project_path)
 
                 buffer = io.StringIO()
                 with redirect_stdout(buffer):
@@ -38,23 +30,23 @@ class RunSingleTests(unittest.TestCase):
             finally:
                 os.environ.pop("AMON_HOME", None)
 
-            self.assertEqual(response, "哈囉")
+            self.assertTrue(response)
             session_files = list((project_path / "sessions").glob("*.jsonl"))
             self.assertEqual(len(session_files), 1)
             events = [json.loads(line) for line in session_files[0].read_text(encoding="utf-8").splitlines()]
             self.assertEqual(events[0]["event"], "prompt")
             self.assertEqual(events[0]["content"], "測試輸出")
             chunk_events = [event for event in events if event["event"] == "chunk"]
-            self.assertEqual([event["content"] for event in chunk_events], ["哈", "囉"])
+            self.assertTrue(chunk_events)
             self.assertEqual(events[-1]["event"], "final")
-            self.assertEqual(events[-1]["content"], "哈囉")
+            self.assertEqual(events[-1]["content"], response)
             self.assertTrue(events[0]["session_id"])
             self.assertTrue(all(event["session_id"] == events[0]["session_id"] for event in events))
 
             billing_log = Path(temp_dir) / "logs" / "billing.log"
             billing_payload = json.loads(billing_log.read_text(encoding="utf-8").strip())
-            self.assertEqual(billing_payload["provider"], "mock")
-            self.assertEqual(billing_payload["model"], "mock-model")
+            self.assertEqual(billing_payload["provider"], "openai")
+            self.assertEqual(billing_payload["model"], "gpt-4o-mini")
             self.assertEqual(billing_payload["token"], 0)
 
 

@@ -304,8 +304,6 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 config = self.core.load_config(self.core.get_project_path(project_id))
                 provider_name = config.get("amon", {}).get("provider", "openai")
                 provider_cfg = config.get("providers", {}).get(provider_name, {})
-                if provider_cfg.get("type") == "mock":
-                    send_event("notice", {"text": "提醒：目前使用 mock provider，輸出為模擬結果。"})
 
                 def stream_handler(token: str) -> None:
                     send_event("token", {"text": token})

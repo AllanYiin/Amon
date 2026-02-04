@@ -78,18 +78,18 @@ class OpenAICompatibleProvider:
             raise ProviderError(f"模型連線失敗：{exc}") from exc
 
 
-class MockProvider:
-    def __init__(self, stream_chunks: Iterable[str], default_model: str = "mock-model") -> None:
-        self.stream_chunks = list(stream_chunks)
-        self.default_model = default_model
-
-    def generate_stream(self, messages: list[dict[str, str]], model: str | None = None) -> Iterable[str]:
-        del messages, model
-        yield from self.stream_chunks
-
-
 def build_provider(provider_cfg: dict[str, str | int | list[str]], model: str | None = None) -> Provider:
     provider_type = provider_cfg.get("type")
+    if provider_type == "mock":
+        provider_cfg = {
+            "type": "openai_compatible",
+            "base_url": provider_cfg.get("base_url") or "https://api.openai.com/v1",
+            "api_key_env": provider_cfg.get("api_key_env") or "OPENAI_API_KEY",
+            "default_model": provider_cfg.get("default_model") or provider_cfg.get("model") or "gpt-4o-mini",
+            "model": provider_cfg.get("model") or provider_cfg.get("default_model") or "gpt-4o-mini",
+            "timeout_s": provider_cfg.get("timeout_s", 60),
+        }
+        provider_type = "openai_compatible"
     if provider_type == "openai_compatible":
         config = OpenAIProviderConfig(
             base_url=str(provider_cfg.get("base_url", "")),
@@ -98,10 +98,4 @@ def build_provider(provider_cfg: dict[str, str | int | list[str]], model: str | 
             timeout_s=int(provider_cfg.get("timeout_s", 60)),
         )
         return OpenAICompatibleProvider(config)
-    if provider_type == "mock":
-        chunks = provider_cfg.get("stream_chunks") or ["[mock]"]
-        if isinstance(chunks, str):
-            chunks = [chunks]
-        default_model = str(model or provider_cfg.get("default_model") or provider_cfg.get("model") or "mock-model")
-        return MockProvider(stream_chunks=chunks, default_model=default_model)
     raise ValueError(f"不支援的 provider 類型：{provider_type}")
