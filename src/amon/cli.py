@@ -158,6 +158,7 @@ def build_parser() -> argparse.ArgumentParser:
     template_create = graph_template_sub.add_parser("create", help="建立 graph template")
     template_create.add_argument("--project", required=True, help="指定專案 ID")
     template_create.add_argument("--run", required=True, help="graph run ID")
+    template_create.add_argument("--name", help="template 名稱")
     template_param = graph_template_sub.add_parser("parametrize", help="參數化 template")
     template_param.add_argument("--template", required=True, help="template ID")
     template_param.add_argument("--path", required=True, help="JSONPath")
@@ -484,7 +485,7 @@ def _handle_graph(core: AmonCore, args: argparse.Namespace) -> None:
         return
     if args.graph_command == "template":
         if args.template_command == "create":
-            result = core.create_graph_template(args.project, args.run)
+            result = core.create_graph_template(args.project, args.run, args.name)
             print(f"已建立 graph template：{result['template_id']}")
             print(f"template 路徑：{result['path']}")
             return
