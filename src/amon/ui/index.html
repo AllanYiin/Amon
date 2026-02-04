@@ -11,7 +11,7 @@
       <div class="layout" style="grid-template-columns: 220px 1fr;">
         <aside class="sidebar">
           <h1>Amon</h1>
-          <button class="primary-btn">＋ 新增專案</button>
+          <button class="primary-btn" id="create-project">＋ 新增專案</button>
           <div class="nav-group">導覽</div>
           <div class="nav-item">專案</div>
           <div class="nav-item">技能</div>
@@ -20,29 +20,205 @@
         </aside>
         <section class="main-card">
           <h2 class="main-title">專案列表</h2>
-          <div class="search">搜尋專案…</div>
-
-          <div class="project-card">
-            <div class="project-info">
-              <h3>2026Q1 市場研究</h3>
-              <p>最後更新：今天 14:20 ｜ 模式：團隊</p>
-            </div>
-            <button class="action-btn">開啟</button>
+          <div class="search">
+            <input id="project-search" type="search" placeholder="搜尋專案…" />
+            <label class="checkbox">
+              <input id="include-deleted" type="checkbox" />
+              <span>顯示回收桶</span>
+            </label>
           </div>
 
-          <div class="project-card secondary">
-            <div class="project-info">
-              <h3>產品規格整理</h3>
-              <p>最後更新：昨天 ｜ 模式：自我挑剔</p>
-            </div>
-            <button class="action-btn">開啟</button>
-          </div>
+          <div id="project-list" class="project-list"></div>
+          <div id="empty-state" class="empty-state">目前沒有專案，請先建立一個。</div>
 
           <div class="footer-hint">
-            提示：刪除的檔案會先進回收桶，可還原；用量/費用在「用量/費用」頁查看
+            提示：刪除的專案會先進回收桶，可還原；目前 UI 已與本機 API 對齊（/v1/projects）。
           </div>
         </section>
       </div>
     </main>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script>
+      const state = {
+        includeDeleted: false,
+        keyword: "",
+        projects: [],
+        connected: true,
+      };
+
+      const elements = {
+        list: document.getElementById("project-list"),
+        empty: document.getElementById("empty-state"),
+        toast: document.getElementById("toast"),
+        createButton: document.getElementById("create-project"),
+        searchInput: document.getElementById("project-search"),
+        includeDeleted: document.getElementById("include-deleted"),
+      };
+
+      function showToast(message) {
+        elements.toast.textContent = message;
+        elements.toast.classList.add("visible");
+        window.clearTimeout(elements.toast._timer);
+        elements.toast._timer = window.setTimeout(() => {
+          elements.toast.classList.remove("visible");
+        }, 8000);
+      }
+
+      async function apiFetch(path, options = {}) {
+        const response = await fetch(`/v1${path}`, {
+          headers: { "Content-Type": "application/json" },
+          ...options,
+        });
+        let payload = {};
+        try {
+          payload = await response.json();
+        } catch (error) {
+          payload = {};
+        }
+        if (!response.ok) {
+          throw new Error(payload.message || "API 發生錯誤");
+        }
+        return payload;
+      }
+
+      function formatDate(value) {
+        if (!value) return "未知";
+        return value.replace("T", " ").slice(0, 16);
+      }
+
+      function renderProjects() {
+        const keyword = state.keyword.trim().toLowerCase();
+        const filtered = state.projects.filter((project) => {
+          if (!keyword) return true;
+          return project.name.toLowerCase().includes(keyword) || project.project_id.toLowerCase().includes(keyword);
+        });
+        elements.list.innerHTML = "";
+        if (!filtered.length) {
+          elements.empty.style.display = "block";
+          return;
+        }
+        elements.empty.style.display = "none";
+        filtered.forEach((project) => {
+          const card = document.createElement("div");
+          card.className = project.status === "deleted" ? "project-card secondary" : "project-card";
+
+          const info = document.createElement("div");
+          info.className = "project-info";
+          info.innerHTML = `
+            <h3>${project.name}</h3>
+            <p>更新時間：${formatDate(project.updated_at)} ｜ ID：${project.project_id}</p>
+          `;
+
+          const actions = document.createElement("div");
+          actions.className = "project-actions";
+
+          const renameButton = document.createElement("button");
+          renameButton.className = "secondary-btn small";
+          renameButton.textContent = "重新命名";
+          renameButton.disabled = project.status === "deleted";
+          renameButton.addEventListener("click", () => renameProject(project));
+
+          const deleteButton = document.createElement("button");
+          deleteButton.className = "danger-btn small";
+          deleteButton.textContent = "刪除";
+          deleteButton.disabled = project.status === "deleted";
+          deleteButton.addEventListener("click", () => deleteProject(project));
+
+          const restoreButton = document.createElement("button");
+          restoreButton.className = "secondary-btn small";
+          restoreButton.textContent = "還原";
+          restoreButton.style.display = project.status === "deleted" ? "inline-flex" : "none";
+          restoreButton.addEventListener("click", () => restoreProject(project));
+
+          actions.append(renameButton, deleteButton, restoreButton);
+          card.append(info, actions);
+          elements.list.appendChild(card);
+        });
+      }
+
+      async function loadProjects() {
+        try {
+          const payload = await apiFetch(`/projects?include_deleted=${state.includeDeleted}`);
+          state.projects = payload.projects || [];
+          state.connected = true;
+          elements.createButton.disabled = false;
+          renderProjects();
+        } catch (error) {
+          state.connected = false;
+          elements.createButton.disabled = true;
+          showToast(`無法連線本機 API：${error.message}`);
+          elements.list.innerHTML = "";
+          elements.empty.style.display = "block";
+          elements.empty.textContent = "無法讀取專案，請確認後端是否啟動。";
+        }
+      }
+
+      async function createProject() {
+        const name = window.prompt("請輸入新專案名稱");
+        if (!name) return;
+        try {
+          await apiFetch("/projects", { method: "POST", body: JSON.stringify({ name }) });
+          await loadProjects();
+          showToast("已建立專案。");
+        } catch (error) {
+          showToast(`建立失敗：${error.message}`);
+        }
+      }
+
+      async function renameProject(project) {
+        const name = window.prompt("請輸入新的專案名稱", project.name);
+        if (!name || name === project.name) return;
+        try {
+          await apiFetch(`/projects/${project.project_id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ name }),
+          });
+          await loadProjects();
+          showToast("已更新專案名稱。");
+        } catch (error) {
+          showToast(`更新失敗：${error.message}`);
+        }
+      }
+
+      async function deleteProject(project) {
+        const confirmed = window.confirm(`確定要刪除「${project.name}」？`);
+        if (!confirmed) return;
+        try {
+          await apiFetch(`/projects/${project.project_id}`, { method: "DELETE" });
+          await loadProjects();
+          showToast("已移至回收桶。");
+        } catch (error) {
+          showToast(`刪除失敗：${error.message}`);
+        }
+      }
+
+      async function restoreProject(project) {
+        try {
+          await apiFetch(`/projects/${project.project_id}/restore`, { method: "POST" });
+          await loadProjects();
+          showToast("已還原專案。");
+        } catch (error) {
+          showToast(`還原失敗：${error.message}`);
+        }
+      }
+
+      elements.createButton.addEventListener("click", () => {
+        if (!state.connected) {
+          showToast("尚未連線到後端 API。");
+          return;
+        }
+        createProject();
+      });
+      elements.searchInput.addEventListener("input", (event) => {
+        state.keyword = event.target.value;
+        renderProjects();
+      });
+      elements.includeDeleted.addEventListener("change", (event) => {
+        state.includeDeleted = event.target.checked;
+        loadProjects();
+      });
+
+      loadProjects();
+    </script>
   </body>
 </html>
