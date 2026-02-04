@@ -303,7 +303,6 @@ class AmonCore:
                 raise RuntimeError(f"已超過用量上限，拒絕執行 {mode}")
         provider_name = config.get("amon", {}).get("provider", "openai")
         provider_cfg = config.get("providers", {}).get(provider_name, {})
-        provider_type = provider_cfg.get("type")
         provider_model = model or provider_cfg.get("default_model") or provider_cfg.get("model")
         provider = build_provider(provider_cfg, model=provider_model)
         system_message = "你是 Amon 的專案助理，請用繁體中文回覆。"
@@ -340,8 +339,6 @@ class AmonCore:
             },
             session_id=session_id,
         )
-        if provider_type == "mock":
-            print("提醒：目前使用 mock provider，輸出為模擬結果。")
         try:
             for index, token in enumerate(provider.generate_stream(messages, model=provider_model)):
                 print(token, end="", flush=True)
@@ -503,7 +500,6 @@ class AmonCore:
             docs_dir.mkdir(parents=True, exist_ok=True)
             provider_name = config.get("amon", {}).get("provider", "openai")
             provider_cfg = config.get("providers", {}).get(provider_name, {})
-            provider_type = provider_cfg.get("type")
             graph = self._build_team_graph()
             graph_path = self._write_graph_resolved(
                 project_path,
@@ -512,7 +508,7 @@ class AmonCore:
                     "prompt": prompt,
                     "mode": "team",
                     "tasks_path": "docs/tasks.json",
-                    "audit_force_approve": provider_type == "mock",
+                    "audit_force_approve": False,
                     "model": model or "",
                 },
                 mode="team",
@@ -1087,16 +1083,7 @@ class AmonCore:
         project_name = f"eval-basic-{datetime.now().strftime('%Y%m%d%H%M%S')}"
         project = self.create_project(project_name)
         project_path = Path(project.path)
-        self.set_config_value(
-            "providers.mock",
-            {
-                "type": "mock",
-                "default_model": "mock-model",
-                "stream_chunks": ["[mock]"],
-            },
-            project_path=project_path,
-        )
-        self.set_config_value("amon.provider", "mock", project_path=project_path)
+        self.set_config_value("amon.provider", "openai", project_path=project_path)
         log_event(
             {
                 "level": "INFO",
@@ -1191,7 +1178,12 @@ class AmonCore:
             provider_cfg = config.get("providers", {}).get(provider_name, {})
             provider_type = provider_cfg.get("type")
             if provider_type == "mock":
-                return {"status": "warning", "message": "目前使用 mock provider，未檢查實際連線"}
+                provider_cfg = {
+                    "type": "openai_compatible",
+                    "base_url": provider_cfg.get("base_url") or "https://api.openai.com/v1",
+                    "api_key_env": provider_cfg.get("api_key_env") or "OPENAI_API_KEY",
+                }
+                provider_type = "openai_compatible"
             if provider_type != "openai_compatible":
                 return {"status": "error", "message": f"不支援的 provider 類型：{provider_type}"}
             base_url = str(provider_cfg.get("base_url", ""))
@@ -1269,8 +1261,6 @@ class AmonCore:
             {"role": "system", "content": system_message},
             {"role": "user", "content": user_message},
         ]
-        if provider_type == "mock":
-            print("提醒：目前使用 mock provider，輸出為模擬結果。")
         response_text = self._stream_and_collect(
             provider=provider,
             provider_name=provider_name,
@@ -1334,8 +1324,6 @@ class AmonCore:
             {"role": "system", "content": system_message},
             {"role": "user", "content": user_message},
         ]
-        if provider_type == "mock":
-            print("提醒：目前使用 mock provider，輸出為模擬結果。")
         response_text = self._stream_and_collect(
             provider=provider,
             provider_name=provider_name,
@@ -1459,8 +1447,6 @@ class AmonCore:
             {"role": "system", "content": system_message},
             {"role": "user", "content": user_message},
         ]
-        if provider_type == "mock":
-            print("提醒：目前使用 mock provider，輸出為模擬結果。")
         response_text = self._stream_and_collect(
             provider=provider,
             provider_name=provider_name,
@@ -3180,8 +3166,6 @@ if __name__ == "__main__":
             {"role": "system", "content": role_factory_system},
             {"role": "user", "content": f"任務：{prompt}\n\n請輸出 10 位 reviewer personas。"},
         ]
-        if provider_type == "mock":
-            print("提醒：目前使用 mock provider，輸出為模擬結果。")
         raw = self._stream_and_collect(
             provider=provider,
             provider_name=provider_name,
@@ -3288,8 +3272,6 @@ if __name__ == "__main__":
         project_id: str | None,
     ) -> str:
         response_text = ""
-        if provider_type == "mock":
-            print("提醒：目前使用 mock provider，輸出為模擬結果。")
         try:
             self._append_session_event(
                 session_path,

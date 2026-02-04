@@ -12,6 +12,8 @@ from amon.core import AmonCore
 
 class SelfCritiqueTests(unittest.TestCase):
     def test_self_critique_creates_docs(self) -> None:
+        if not os.getenv("OPENAI_API_KEY"):
+            self.skipTest("需要設定 OPENAI_API_KEY 才能執行 LLM 測試")
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir
             try:
@@ -19,16 +21,6 @@ class SelfCritiqueTests(unittest.TestCase):
                 core.initialize()
                 project = core.create_project("測試專案")
                 project_path = Path(project.path)
-                core.set_config_value(
-                    "providers.mock",
-                    {
-                        "type": "mock",
-                        "default_model": "mock-model",
-                        "stream_chunks": ["草", "稿"],
-                    },
-                    project_path=project_path,
-                )
-                core.set_config_value("amon.provider", "mock", project_path=project_path)
 
                 core.run_self_critique("測試 self critique", project_path=project_path)
             finally:

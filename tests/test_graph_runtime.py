@@ -14,6 +14,8 @@ from amon.run.context import append_run_constraints
 
 class GraphRuntimeTests(unittest.TestCase):
     def test_graph_run_creates_state_and_outputs(self) -> None:
+        if not os.getenv("OPENAI_API_KEY"):
+            self.skipTest("需要設定 OPENAI_API_KEY 才能執行 LLM 測試")
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir
             try:
@@ -21,16 +23,6 @@ class GraphRuntimeTests(unittest.TestCase):
                 core.initialize()
                 project = core.create_project("Graph 專案")
                 project_path = Path(project.path)
-                core.set_config_value(
-                    "providers.mock",
-                    {
-                        "type": "mock",
-                        "default_model": "mock-model",
-                        "stream_chunks": ["OK"],
-                    },
-                    project_path=project_path,
-                )
-                core.set_config_value("amon.provider", "mock", project_path=project_path)
 
                 graph = {
                     "variables": {"name": "Amon"},
@@ -84,16 +76,6 @@ class GraphRuntimeTests(unittest.TestCase):
                 core.initialize()
                 project = core.create_project("Template 專案")
                 project_path = Path(project.path)
-                core.set_config_value(
-                    "providers.mock",
-                    {
-                        "type": "mock",
-                        "default_model": "mock-model",
-                        "stream_chunks": ["OK"],
-                    },
-                    project_path=project_path,
-                )
-                core.set_config_value("amon.provider", "mock", project_path=project_path)
 
                 graph = {
                     "variables": {},
@@ -138,6 +120,8 @@ class GraphRuntimeTests(unittest.TestCase):
             self.assertNotEqual(run_result.run_id, template_run.run_id)
 
     def test_graph_template_parametrize_prompt_and_run(self) -> None:
+        if not os.getenv("OPENAI_API_KEY"):
+            self.skipTest("需要設定 OPENAI_API_KEY 才能執行 LLM 測試")
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir
             try:
@@ -145,16 +129,6 @@ class GraphRuntimeTests(unittest.TestCase):
                 core.initialize()
                 project = core.create_project("Prompt 範本專案")
                 project_path = Path(project.path)
-                core.set_config_value(
-                    "providers.mock",
-                    {
-                        "type": "mock",
-                        "default_model": "mock-model",
-                        "stream_chunks": ["OK"],
-                    },
-                    project_path=project_path,
-                )
-                core.set_config_value("amon.provider", "mock", project_path=project_path)
 
                 graph = {
                     "variables": {},
@@ -191,6 +165,8 @@ class GraphRuntimeTests(unittest.TestCase):
             self.assertEqual(resolved_payload["nodes"][0]["prompt"], "替換訊息")
 
     def test_graph_runtime_injects_run_constraints(self) -> None:
+        if not os.getenv("OPENAI_API_KEY"):
+            self.skipTest("需要設定 OPENAI_API_KEY 才能執行 LLM 測試")
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir
             try:
@@ -198,16 +174,6 @@ class GraphRuntimeTests(unittest.TestCase):
                 core.initialize()
                 project = core.create_project("Run Context 專案")
                 project_path = Path(project.path)
-                core.set_config_value(
-                    "providers.mock",
-                    {
-                        "type": "mock",
-                        "default_model": "mock-model",
-                        "stream_chunks": ["OK"],
-                    },
-                    project_path=project_path,
-                )
-                core.set_config_value("amon.provider", "mock", project_path=project_path)
 
                 run_id = "run-context-test"
                 run_dir = project_path / ".amon" / "runs" / run_id

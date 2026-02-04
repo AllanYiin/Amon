@@ -14,6 +14,8 @@ from amon.core import AmonCore
 
 class BudgetTests(unittest.TestCase):
     def test_budget_blocks_team_and_self_critique(self) -> None:
+        if not os.getenv("OPENAI_API_KEY"):
+            self.skipTest("需要設定 OPENAI_API_KEY 才能執行 LLM 測試")
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir
             try:
@@ -21,16 +23,6 @@ class BudgetTests(unittest.TestCase):
                 core.initialize()
                 project = core.create_project("測試專案")
                 project_path = Path(project.path)
-                core.set_config_value(
-                    "providers.mock",
-                    {
-                        "type": "mock",
-                        "default_model": "mock-model",
-                        "stream_chunks": ["測", "試"],
-                    },
-                    project_path=project_path,
-                )
-                core.set_config_value("amon.provider", "mock", project_path=project_path)
                 core.set_config_value("billing.daily_budget", 1, project_path=project_path)
 
                 core.run_single("測試用量", project_path=project_path)
