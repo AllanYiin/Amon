@@ -893,6 +893,7 @@ class AmonCore:
         graph_path: Path,
         variables: dict[str, Any] | None = None,
         stream_handler=None,
+        run_id: str | None = None,
     ) -> GraphRunResult:
         if not project_path:
             raise ValueError("執行 graph 需要指定專案")
@@ -902,6 +903,7 @@ class AmonCore:
             graph_path=graph_path,
             variables=variables,
             stream_handler=stream_handler,
+            run_id=run_id,
         )
         return runtime.run()
 
