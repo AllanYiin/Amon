@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import uuid
 import zipfile
 from collections import Counter
@@ -79,6 +80,7 @@ class AmonCore:
         self.projects_dir = self.data_dir / "projects"
         self.trash_dir = self.data_dir / "trash"
         self.skills_dir = self.data_dir / "skills"
+        self.tools_dir = self.data_dir / "tools"
         self.templates_dir = self.data_dir / "templates"
         self.schedules_dir = self.data_dir / "schedules"
         self.python_env_dir = self.data_dir / "python_env"
@@ -94,6 +96,7 @@ class AmonCore:
             self.projects_dir,
             self.trash_dir,
             self.skills_dir,
+            self.tools_dir,
             self.templates_dir,
             self.schedules_dir,
             self.python_env_dir,
@@ -1902,7 +1905,15 @@ class AmonCore:
                 }
         return sorted(tools.values(), key=lambda item: item["name"])
 
-    def run_tool(self, tool_name: str, payload: dict[str, Any], project_id: str | None = None) -> dict[str, Any]:
+    def run_tool(
+        self,
+        tool_name: str,
+        payload: dict[str, Any],
+        project_id: str | None = None,
+        *,
+        timeout_s: int | None = None,
+        cancel_event: threading.Event | None = None,
+    ) -> dict[str, Any]:
         self.ensure_base_structure()
         tool_dir, scope, project_path = self._resolve_tool_dir(tool_name, project_id)
         spec = load_tool_spec(tool_dir)
@@ -1913,7 +1924,14 @@ class AmonCore:
             if not require_confirm(plan):
                 raise RuntimeError("已取消執行工具")
         env = build_tool_env(self.logs_dir if not project_path else project_path / "logs", resolved_allowed, project_path)
-        output = run_tool_process(tool_dir / "tool.py", payload, env=env, cwd=project_path)
+        output = run_tool_process(
+            tool_dir / "tool.py",
+            payload,
+            env=env,
+            cwd=project_path,
+            timeout_s=timeout_s or 60,
+            cancel_event=cancel_event,
+        )
         log_event(
             {
                 "level": "INFO",
