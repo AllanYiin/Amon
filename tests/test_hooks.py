@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import yaml
 
+from amon.daemon.queue import configure_action_queue
 from amon.hooks.runner import process_event
 
 
@@ -59,9 +60,14 @@ class HookRunnerTests(unittest.TestCase):
                     "risk": "low",
                 }
 
-                results = process_event(event, tool_executor=fake_executor, now=datetime.now(timezone.utc))
+                action_queue = configure_action_queue(tool_executor=fake_executor, data_dir=Path(temp_dir))
+                try:
+                    results = process_event(event, tool_executor=fake_executor, now=datetime.now(timezone.utc))
+                    action_queue.wait_for_idle(timeout=5)
+                finally:
+                    action_queue.stop()
                 self.assertEqual(len(results), 1)
-                self.assertEqual(results[0]["status"], "executed")
+                self.assertEqual(results[0]["status"], "queued")
                 self.assertEqual(len(calls), 1)
                 tool_name, args, project_id = calls[0]
                 self.assertEqual(tool_name, "echoer")
@@ -111,8 +117,13 @@ class HookRunnerTests(unittest.TestCase):
                 }
 
                 start = datetime(2024, 1, 1, tzinfo=timezone.utc)
-                process_event(event, tool_executor=fake_executor, now=start)
-                process_event(event, tool_executor=fake_executor, now=start + timedelta(seconds=100))
+                action_queue = configure_action_queue(tool_executor=fake_executor, data_dir=Path(temp_dir))
+                try:
+                    process_event(event, tool_executor=fake_executor, now=start)
+                    process_event(event, tool_executor=fake_executor, now=start + timedelta(seconds=100))
+                    action_queue.wait_for_idle(timeout=5)
+                finally:
+                    action_queue.stop()
                 self.assertEqual(len(calls), 1)
             finally:
                 os.environ.pop("AMON_HOME", None)
@@ -180,7 +191,12 @@ class HookRunnerTests(unittest.TestCase):
                     "risk": "low",
                 }
 
-                results = process_event(event, tool_executor=fake_executor, now=datetime.now(timezone.utc))
+                action_queue = configure_action_queue(tool_executor=fake_executor, data_dir=Path(temp_dir))
+                try:
+                    results = process_event(event, tool_executor=fake_executor, now=datetime.now(timezone.utc))
+                    action_queue.wait_for_idle(timeout=2)
+                finally:
+                    action_queue.stop()
                 self.assertEqual(results[0]["status"], "failed")
                 self.assertEqual(len(calls), 0)
                 events_path = Path(temp_dir) / "events" / "events.jsonl"
@@ -253,8 +269,13 @@ class HookRunnerTests(unittest.TestCase):
                     "risk": "low",
                 }
 
-                results = process_event(event, tool_executor=fake_executor, now=datetime.now(timezone.utc))
-                self.assertEqual(results[0]["status"], "executed")
+                action_queue = configure_action_queue(tool_executor=fake_executor, data_dir=Path(temp_dir))
+                try:
+                    results = process_event(event, tool_executor=fake_executor, now=datetime.now(timezone.utc))
+                    action_queue.wait_for_idle(timeout=5)
+                finally:
+                    action_queue.stop()
+                self.assertEqual(results[0]["status"], "queued")
                 self.assertEqual(len(calls), 1)
             finally:
                 os.environ.pop("AMON_HOME", None)
