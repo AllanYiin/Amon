@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Callable
 
-from amon.chat.router import route_intent
+from amon.chat.router import RouterResult, route_intent
 from amon.chat.session_store import append_event, create_chat_session
 from amon.commands.executor import CommandPlan, execute
 from amon.core import AmonCore
@@ -42,7 +42,10 @@ def run_chat_repl(
             break
 
         try:
-            router_result = route_intent(message, project_id=project_id, run_id=last_run_id)
+            if message.startswith("/"):
+                router_result = RouterResult(type="command_plan")
+            else:
+                router_result = route_intent(message, project_id=project_id, run_id=last_run_id)
             append_event(
                 chat_id,
                 {
