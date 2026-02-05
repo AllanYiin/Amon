@@ -64,7 +64,7 @@ class HookRunnerTests(unittest.TestCase):
                 self.assertEqual(tool_name, "echoer")
                 self.assertEqual(project_id, "proj-1")
                 self.assertEqual(args["path"], "docs/readme.txt")
-                self.assertEqual(args["size"], 12)
+                self.assertEqual(args["size"], "12")
             finally:
                 os.environ.pop("AMON_HOME", None)
 

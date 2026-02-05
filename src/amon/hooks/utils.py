@@ -30,7 +30,7 @@ def render_template(value: Any, event: dict[str, Any]) -> Any:
     if not matches:
         return value
     if len(matches) == 1 and matches[0].span() == (0, len(value)):
-        return resolve_event_path(event, matches[0].group(1))
+        return str(resolve_event_path(event, matches[0].group(1)))
 
     rendered = value
     for match in matches:
