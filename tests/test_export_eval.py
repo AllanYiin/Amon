@@ -36,6 +36,8 @@ class ExportEvalTests(unittest.TestCase):
             self.assertIn(f"{base_prefix}/tasks/tasks.json", names)
 
     def test_eval_basic_runs(self) -> None:
+        if not os.getenv("OPENAI_API_KEY"):
+            self.skipTest("需要設定 OPENAI_API_KEY 才能執行 LLM 評測")
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir
             try:
