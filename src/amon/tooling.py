@@ -55,6 +55,48 @@ def load_tool_spec(tool_dir: Path) -> ToolSpec:
     )
 
 
+def validate_inputs_schema(schema: dict[str, Any], payload: dict[str, Any]) -> list[str]:
+    if not isinstance(schema, dict):
+        return []
+    if not isinstance(payload, dict):
+        return ["payload 必須為物件"]
+    schema_type = schema.get("type")
+    if schema_type and schema_type != "object":
+        return [f"inputs_schema type 不支援：{schema_type}"]
+    errors: list[str] = []
+    required = schema.get("required") or []
+    if isinstance(required, list):
+        for key in required:
+            if key not in payload:
+                errors.append(f"缺少必要欄位：{key}")
+    properties = schema.get("properties") or {}
+    if isinstance(properties, dict):
+        for key, definition in properties.items():
+            if key not in payload:
+                continue
+            expected = definition.get("type") if isinstance(definition, dict) else None
+            if expected:
+                if not _matches_type(payload[key], expected):
+                    errors.append(f"欄位型別錯誤：{key} 需為 {expected}")
+    return errors
+
+
+def _matches_type(value: Any, expected: str) -> bool:
+    if expected == "string":
+        return isinstance(value, str)
+    if expected == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if expected == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if expected == "boolean":
+        return isinstance(value, bool)
+    if expected == "array":
+        return isinstance(value, list)
+    if expected == "object":
+        return isinstance(value, dict)
+    return True
+
+
 def ensure_tool_name(name: str) -> None:
     if not TOOL_NAME_RE.match(name):
         raise ToolingError("工具名稱僅允許英數、底線、連字號，且需 2-64 字元")

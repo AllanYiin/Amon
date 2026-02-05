@@ -30,6 +30,7 @@ class JobStatus:
     status: str
     last_heartbeat_ts: str | None
     last_error: str | None
+    last_event_id: str | None
 
 
 @dataclass
@@ -42,6 +43,7 @@ class _JobHandle:
     heartbeat_interval_seconds: int
     data_dir: Path
     event_emitter: EventEmitter
+    last_event_id: str | None
 
 
 _JOB_REGISTRY: dict[str, _JobHandle] = {}
@@ -75,6 +77,7 @@ def start_job(
         heartbeat_interval_seconds=heartbeat_interval_seconds,
         data_dir=resolved_data_dir,
         event_emitter=event_emitter or emit_event,
+        last_event_id=None,
     )
     _JOB_REGISTRY[job_id] = handle
 
@@ -138,6 +141,7 @@ def status_job(job_id: str, *, data_dir: Path | None = None) -> JobStatus:
             status=handle.status,
             last_heartbeat_ts=last_heartbeat,
             last_error=handle.last_error,
+            last_event_id=handle.last_event_id,
         )
     return _read_state(job_id, resolved_data_dir)
 
@@ -277,7 +281,7 @@ def _emit_fs_event(
 
 
 def _emit_job_event(emitter: EventEmitter, job_id: str, event_type: str, payload: dict[str, Any]) -> None:
-    emitter(
+    event_id = emitter(
         {
             "type": event_type,
             "scope": "job",
@@ -286,6 +290,10 @@ def _emit_job_event(emitter: EventEmitter, job_id: str, event_type: str, payload
             "risk": "low",
         }
     )
+    handle = _JOB_REGISTRY.get(job_id)
+    if handle:
+        handle.last_event_id = event_id
+        _write_state(handle)
 
 
 def _write_state(handle: _JobHandle) -> None:
@@ -296,6 +304,7 @@ def _write_state(handle: _JobHandle) -> None:
         "status": handle.status,
         "last_heartbeat_ts": datetime.now().astimezone().isoformat(timespec="seconds"),
         "last_error": handle.last_error,
+        "last_event_id": handle.last_event_id,
     }
     state_path = state_dir / f"{handle.job_id}.json"
     try:
@@ -322,6 +331,7 @@ def _read_state(job_id: str, data_dir: Path) -> JobStatus:
         status=str(state.get("status") or "STOPPED"),
         last_heartbeat_ts=state.get("last_heartbeat_ts"),
         last_error=state.get("last_error"),
+        last_event_id=state.get("last_event_id"),
     )
 
 
