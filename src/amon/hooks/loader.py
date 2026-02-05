@@ -33,6 +33,7 @@ def _ensure_list(value: Any) -> list[str]:
 
 
 def _validate_hook(hook_id: str, payload: dict[str, Any]) -> Hook:
+    enabled = bool(payload.get("enabled", True))
     event_types = _ensure_list(payload.get("event_types"))
     if not event_types:
         raise ValueError("event_types 不可為空")
@@ -100,6 +101,7 @@ def _validate_hook(hook_id: str, payload: dict[str, Any]) -> Hook:
         filters=filters,
         action=HookAction(type=str(action_type), tool=str(tool_name) if tool_name else None, args=action_args),
         policy=policy,
+        enabled=enabled,
         dedupe_key=str(dedupe_key) if dedupe_key is not None else None,
         cooldown_seconds=cooldown_seconds,
         max_concurrency=max_concurrency,

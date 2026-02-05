@@ -70,7 +70,7 @@ def start_job(
         job_id=job_id,
         stop_event=stop_event,
         threads=[],
-        status="running",
+        status="RUNNING",
         last_error=None,
         heartbeat_interval_seconds=heartbeat_interval_seconds,
         data_dir=resolved_data_dir,
@@ -119,7 +119,7 @@ def stop_job(job_id: str, *, data_dir: Path | None = None) -> JobStatus:
     if not handle:
         return _read_state(job_id, resolved_data_dir)
 
-    handle.status = "stopped"
+    handle.status = "STOPPED"
     handle.stop_event.set()
     for thread in handle.threads:
         thread.join(timeout=5)
@@ -319,7 +319,7 @@ def _read_state(job_id: str, data_dir: Path) -> JobStatus:
     state = _read_state_file(job_id, data_dir)
     return JobStatus(
         job_id=job_id,
-        status=str(state.get("status") or "stopped"),
+        status=str(state.get("status") or "STOPPED"),
         last_heartbeat_ts=state.get("last_heartbeat_ts"),
         last_error=state.get("last_error"),
     )

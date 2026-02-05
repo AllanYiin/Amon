@@ -1,6 +1,8 @@
+import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -53,6 +55,65 @@ class CommandExecutorTests(unittest.TestCase):
         self.assertEqual(result["status"], "confirm_required")
         refreshed = self.core.get_project(record.project_id)
         self.assertEqual(refreshed.status, "active")
+
+    def test_schedules_add_updates_schedule_file(self) -> None:
+        record = self.core.create_project("排程專案")
+        chat_id = create_chat_session(record.project_id)
+        plan = CommandPlan(
+            name="schedules.add",
+            args={
+                "template_id": "tpl_123",
+                "cron": "*/5 * * * *",
+                "vars": {"name": "測試"},
+            },
+            project_id=record.project_id,
+            chat_id=chat_id,
+        )
+
+        result = execute(plan, confirmed=True)
+
+        self.assertEqual(result["status"], "ok")
+        schedules_path = self.core.data_dir / "schedules" / "schedules.json"
+        payload = json.loads(schedules_path.read_text(encoding="utf-8"))
+        schedule_ids = [item.get("schedule_id") for item in payload.get("schedules", [])]
+        self.assertIn(result["result"]["schedule"]["schedule_id"], schedule_ids)
+
+    def test_jobs_start_updates_state_file(self) -> None:
+        record = self.core.create_project("任務專案")
+        chat_id = create_chat_session(record.project_id)
+        jobs_dir = self.core.data_dir / "jobs"
+        jobs_dir.mkdir(parents=True, exist_ok=True)
+        job_id = "sample-job"
+        config_path = jobs_dir / f"{job_id}.yaml"
+        config_path.write_text("{}", encoding="utf-8")
+        plan = CommandPlan(
+            name="jobs.start",
+            args={"job_id": job_id},
+            project_id=record.project_id,
+            chat_id=chat_id,
+        )
+
+        try:
+            result = execute(plan, confirmed=True)
+            self.assertEqual(result["status"], "ok")
+            state_path = self.core.data_dir / "jobs" / "state" / f"{job_id}.json"
+            for _ in range(30):
+                if state_path.exists():
+                    break
+                time.sleep(0.1)
+            self.assertTrue(state_path.exists())
+            payload = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload.get("status"), "RUNNING")
+        finally:
+            execute(
+                CommandPlan(
+                    name="jobs.stop",
+                    args={"job_id": job_id},
+                    project_id=record.project_id,
+                    chat_id=chat_id,
+                ),
+                confirmed=True,
+            )
 
 
 if __name__ == "__main__":
