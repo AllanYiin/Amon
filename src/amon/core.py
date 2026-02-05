@@ -30,6 +30,7 @@ from .config import DEFAULT_CONFIG, deep_merge, get_config_value, read_yaml, set
 from .fs.atomic import atomic_write_text
 from .fs.safety import canonicalize_path, make_change_plan, require_confirm
 from .fs.trash import trash_move, trash_restore
+from .events import emit_event
 from .logging import log_billing, log_event
 from .logging_utils import setup_logger
 from .mcp_client import MCPClientError, MCPServerConfig, MCPStdioClient
@@ -165,6 +166,16 @@ class AmonCore:
                 "project_name": name,
             }
         )
+        emit_event(
+            {
+                "type": "project.create",
+                "scope": "project",
+                "project_id": project_id,
+                "actor": "system",
+                "payload": {"project_name": name},
+                "risk": "low",
+            }
+        )
         self.logger.info("已建立專案 %s (%s)", name, project_id)
         return record
 
@@ -204,6 +215,16 @@ class AmonCore:
                         "project_name": new_name,
                     }
                 )
+                emit_event(
+                    {
+                        "type": "project.update",
+                        "scope": "project",
+                        "project_id": project_id,
+                        "actor": "system",
+                        "payload": {"project_name": new_name},
+                        "risk": "low",
+                    }
+                )
                 self.logger.info("已更新專案名稱 %s (%s)", new_name, project_id)
                 return record
         raise KeyError(f"找不到專案：{project_id}")
@@ -229,6 +250,16 @@ class AmonCore:
                         "project_id": project_id,
                         "project_name": record.name,
                         "trash_path": str(trash_path),
+                    }
+                )
+                emit_event(
+                    {
+                        "type": "project.delete",
+                        "scope": "project",
+                        "project_id": project_id,
+                        "actor": "system",
+                        "payload": {"project_name": record.name, "trash_path": str(trash_path)},
+                        "risk": "medium",
                     }
                 )
                 self.logger.info("已刪除專案 %s (%s)", record.name, project_id)
@@ -257,6 +288,16 @@ class AmonCore:
                         "event": "project_restore",
                         "project_id": project_id,
                         "project_name": record.name,
+                    }
+                )
+                emit_event(
+                    {
+                        "type": "project.restore",
+                        "scope": "project",
+                        "project_id": project_id,
+                        "actor": "system",
+                        "payload": {"project_name": record.name},
+                        "risk": "low",
                     }
                 )
                 self.logger.info("已還原專案 %s (%s)", record.name, project_id)
