@@ -2,37 +2,44 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from typing import Any
+
+from amon.commands.registry import list_commands
+from amon.config import ConfigLoader
+
+from .policy_guard import apply_policy_guard
+from .router_llm import LLMClient, route_with_llm
+from .router_types import RouterResult
 
 
-@dataclass(frozen=True)
-class RouterResult:
-    type: str
-
-    def to_dict(self) -> dict[str, str]:
-        return {"type": self.type}
-
-
-def route_intent(message: str, project_id: str | None = None, run_id: str | None = None) -> RouterResult:
+def route_intent(
+    message: str,
+    project_id: str | None = None,
+    run_id: str | None = None,
+    context: dict[str, Any] | None = None,
+    llm_client: LLMClient | None = None,
+) -> RouterResult:
     if message is None:
         message = ""
 
-    text = message.strip()
-    _ = project_id
+    merged_context = dict(context or {})
+    if project_id:
+        merged_context.setdefault("project_id", project_id)
+    if run_id:
+        merged_context.setdefault("run_id", run_id)
 
-    if text.startswith("/"):
-        return RouterResult(type="command_plan")
-
-    command_keywords = ["建立專案", "列出專案", "刪除", "還原", "排程", "跑範本"]
-    if any(keyword in text for keyword in command_keywords):
-        return RouterResult(type="command_plan")
-
-    graph_patch_keywords = ["把這次任務存成範本", "抽成變數", "改圖"]
-    if any(keyword in text for keyword in graph_patch_keywords):
-        return RouterResult(type="graph_patch_plan")
-
-    run_context_keywords = ["請改成", "限制", "不要", "用繁中", "不要用付費"]
-    if run_id and any(keyword in text for keyword in run_context_keywords):
-        return RouterResult(type="run_context_update")
-
-    return RouterResult(type="chat_response")
+    commands_registry = list_commands()
+    llm_result = route_with_llm(
+        message,
+        context=merged_context,
+        commands_registry=commands_registry,
+        project_id=project_id,
+        llm_client=llm_client,
+    )
+    config = ConfigLoader().resolve(project_id=project_id).effective
+    allowed_paths = config.get("tools", {}).get("allowed_paths", [])
+    return apply_policy_guard(
+        llm_result,
+        commands_registry=commands_registry,
+        allowed_paths=allowed_paths,
+    )
