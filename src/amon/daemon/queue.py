@@ -80,6 +80,9 @@ class ActionQueue:
                 return False
             time.sleep(0.05)
 
+    def get_depth(self) -> int:
+        return self._queue.qsize()
+
     def _worker_loop(self) -> None:
         while True:
             if self._stop_event.is_set() and self._queue.empty():
@@ -148,3 +151,7 @@ def enqueue_action(action: dict[str, Any]) -> str:
 
 def cancel_action(action_id: str) -> bool:
     return get_action_queue().cancel_action(action_id)
+
+
+def get_queue_depth() -> int:
+    return get_action_queue().get_depth()

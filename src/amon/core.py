@@ -910,6 +910,32 @@ class AmonCore:
         )
         return runtime.run()
 
+    def get_run_status(self, project_path: Path, run_id: str) -> dict[str, Any]:
+        if not project_path:
+            raise ValueError("查詢 run 狀態需要指定專案")
+        run_dir = project_path / ".amon" / "runs" / run_id
+        state_path = run_dir / "state.json"
+        if not state_path.exists():
+            return {"run_id": run_id, "status": "not_found"}
+        try:
+            payload = json.loads(state_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.error("讀取 run 狀態失敗：%s", exc, exc_info=True)
+            raise
+        return payload
+
+    def get_job_status(self, job_id: str) -> dict[str, Any]:
+        from amon.jobs.runner import status_job
+
+        status = status_job(job_id, data_dir=self.data_dir)
+        return {
+            "job_id": status.job_id,
+            "status": status.status,
+            "last_heartbeat_ts": status.last_heartbeat_ts,
+            "last_error": status.last_error,
+            "last_event_id": status.last_event_id,
+        }
+
     def create_graph_template(self, project_id: str, run_id: str, name: str | None = None) -> dict[str, Any]:
         self.ensure_base_structure()
         project_path = self.get_project_path(project_id)
