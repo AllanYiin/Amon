@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import functools
 import json
+import threading
 import traceback
+import uuid
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -14,8 +16,166 @@ from amon.chat.cli import _build_plan_from_message
 from amon.chat.router import route_intent
 from amon.chat.session_store import append_event, create_chat_session
 from amon.commands.executor import CommandPlan, execute
+from amon.daemon.queue import get_queue_depth
+from amon.events import emit_event
+from amon.jobs.runner import start_job
 from .core import AmonCore, ProjectRecord
 from .logging import log_event
+
+
+class _TaskManager:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._tasks: dict[str, dict[str, Any]] = {}
+        self._run_cancel: dict[str, threading.Event] = {}
+
+    def submit_run(
+        self,
+        *,
+        request_id: str | None,
+        core: AmonCore,
+        project_path: Path,
+        graph_path: str,
+        variables: dict[str, Any],
+        run_id: str,
+    ) -> str:
+        request_id = request_id or uuid.uuid4().hex
+        cancel_event = threading.Event()
+        with self._lock:
+            self._tasks[request_id] = {
+                "request_id": request_id,
+                "status": "queued",
+                "run_id": run_id,
+                "type": "run",
+            }
+            self._run_cancel[run_id] = cancel_event
+
+        def _run() -> None:
+            try:
+                with self._lock:
+                    self._tasks[request_id]["status"] = "running"
+                resolved_graph_path = Path(graph_path)
+                if not resolved_graph_path.is_absolute():
+                    resolved_graph_path = project_path / resolved_graph_path
+                core.run_graph(
+                    project_path=project_path,
+                    graph_path=resolved_graph_path,
+                    variables=variables,
+                    run_id=run_id,
+                )
+                with self._lock:
+                    self._tasks[request_id]["status"] = "completed"
+            except Exception as exc:  # noqa: BLE001
+                with self._lock:
+                    self._tasks[request_id]["status"] = "failed"
+                    self._tasks[request_id]["error"] = str(exc)
+
+        threading.Thread(target=_run, daemon=True).start()
+        return request_id
+
+    def submit_tool(
+        self,
+        *,
+        request_id: str | None,
+        core: AmonCore,
+        tool_name: str,
+        args: dict[str, Any],
+        project_id: str | None,
+    ) -> str:
+        request_id = request_id or uuid.uuid4().hex
+        with self._lock:
+            self._tasks[request_id] = {
+                "request_id": request_id,
+                "status": "queued",
+                "type": "tool",
+            }
+
+        def _run() -> None:
+            try:
+                with self._lock:
+                    self._tasks[request_id]["status"] = "running"
+                result = core.run_tool(tool_name, args, project_id=project_id)
+                with self._lock:
+                    self._tasks[request_id]["status"] = "completed"
+                    self._tasks[request_id]["result"] = result
+            except Exception as exc:  # noqa: BLE001
+                with self._lock:
+                    self._tasks[request_id]["status"] = "failed"
+                    self._tasks[request_id]["error"] = str(exc)
+
+        threading.Thread(target=_run, daemon=True).start()
+        return request_id
+
+    def submit_job(
+        self,
+        *,
+        request_id: str | None,
+        core: AmonCore,
+        job_id: str,
+    ) -> str:
+        request_id = request_id or uuid.uuid4().hex
+        with self._lock:
+            self._tasks[request_id] = {
+                "request_id": request_id,
+                "status": "queued",
+                "type": "job",
+                "job_id": job_id,
+            }
+
+        def _run() -> None:
+            try:
+                with self._lock:
+                    self._tasks[request_id]["status"] = "running"
+                start_job(job_id, data_dir=core.data_dir)
+                with self._lock:
+                    self._tasks[request_id]["status"] = "completed"
+            except Exception as exc:  # noqa: BLE001
+                with self._lock:
+                    self._tasks[request_id]["status"] = "failed"
+                    self._tasks[request_id]["error"] = str(exc)
+
+        threading.Thread(target=_run, daemon=True).start()
+        return request_id
+
+    def submit_schedule_tick(self, *, request_id: str | None, core: AmonCore) -> str:
+        request_id = request_id or uuid.uuid4().hex
+        with self._lock:
+            self._tasks[request_id] = {
+                "request_id": request_id,
+                "status": "queued",
+                "type": "schedule",
+            }
+
+        def _run() -> None:
+            try:
+                from amon.scheduler.engine import tick
+
+                with self._lock:
+                    self._tasks[request_id]["status"] = "running"
+                tick(data_dir=core.data_dir)
+                with self._lock:
+                    self._tasks[request_id]["status"] = "completed"
+            except Exception as exc:  # noqa: BLE001
+                with self._lock:
+                    self._tasks[request_id]["status"] = "failed"
+                    self._tasks[request_id]["error"] = str(exc)
+
+        threading.Thread(target=_run, daemon=True).start()
+        return request_id
+
+    def get_status(self, request_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            status = self._tasks.get(request_id)
+            return dict(status) if status else None
+
+    def cancel_run(self, run_id: str) -> None:
+        with self._lock:
+            cancel_event = self._run_cancel.get(run_id)
+        if cancel_event:
+            cancel_event.set()
+
+
+_TASK_MANAGER = _TaskManager()
 
 
 class AmonUIHandler(SimpleHTTPRequestHandler):
@@ -49,6 +209,41 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
 
     def _handle_api_get(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/v1/queue/depth":
+            self._send_json(200, {"depth": get_queue_depth()})
+            return
+        if parsed.path.startswith("/v1/runs/") and parsed.path.endswith("/status"):
+            run_id = parsed.path.split("/")[3]
+            params = parse_qs(parsed.query)
+            project_id = params.get("project_id", [""])[0].strip()
+            if not project_id:
+                self._send_json(400, {"message": "請提供 project_id"})
+                return
+            try:
+                project_path = self.core.get_project_path(project_id)
+                status = self.core.get_run_status(project_path, run_id)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, {"run": status})
+            return
+        if parsed.path.startswith("/v1/jobs/") and parsed.path.endswith("/status"):
+            job_id = parsed.path.split("/")[3]
+            try:
+                status = self.core.get_job_status(job_id)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, {"job": status})
+            return
+        if parsed.path.startswith("/v1/requests/") and parsed.path.endswith("/status"):
+            request_id = parsed.path.split("/")[3]
+            status = _TASK_MANAGER.get_status(request_id)
+            if not status:
+                self._send_json(404, {"message": "找不到 request"})
+                return
+            self._send_json(200, {"request": status})
+            return
         if parsed.path == "/v1/chat/stream":
             self._handle_chat_stream(parsed)
             return
@@ -80,6 +275,96 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
 
     def _handle_api_post(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/v1/runs":
+            payload = self._read_json()
+            project_id = str(payload.get("project_id", "")).strip()
+            graph_path = str(payload.get("graph_path", "")).strip()
+            variables = payload.get("variables") or {}
+            if not project_id or not graph_path:
+                self._send_json(400, {"message": "請提供 project_id 與 graph_path"})
+                return
+            if not isinstance(variables, dict):
+                self._send_json(400, {"message": "variables 需為物件"})
+                return
+            try:
+                project_path = self.core.get_project_path(project_id)
+            except KeyError as exc:
+                self._handle_error(exc, status=404)
+                return
+            run_id = payload.get("run_id") or uuid.uuid4().hex
+            request_id = _TASK_MANAGER.submit_run(
+                request_id=None,
+                core=self.core,
+                project_path=project_path,
+                graph_path=graph_path,
+                variables=variables,
+                run_id=run_id,
+            )
+            self._send_json(202, {"request_id": request_id, "run_id": run_id})
+            return
+        if parsed.path == "/v1/runs/cancel":
+            payload = self._read_json()
+            project_id = str(payload.get("project_id", "")).strip()
+            run_id = str(payload.get("run_id", "")).strip()
+            if not project_id or not run_id:
+                self._send_json(400, {"message": "請提供 project_id 與 run_id"})
+                return
+            try:
+                project_path = self.core.get_project_path(project_id)
+            except KeyError as exc:
+                self._handle_error(exc, status=404)
+                return
+            cancel_path = project_path / ".amon" / "runs" / run_id / "cancel.json"
+            cancel_path.parent.mkdir(parents=True, exist_ok=True)
+            cancel_path.write_text(json.dumps({"run_id": run_id}), encoding="utf-8")
+            _TASK_MANAGER.cancel_run(run_id)
+            self._send_json(200, {"status": "cancelled", "run_id": run_id})
+            return
+        if parsed.path == "/v1/tools/run":
+            payload = self._read_json()
+            tool_name = str(payload.get("tool_name", "")).strip()
+            project_id = str(payload.get("project_id", "")).strip() or None
+            args = payload.get("args") or {}
+            if not tool_name:
+                self._send_json(400, {"message": "請提供 tool_name"})
+                return
+            if not isinstance(args, dict):
+                self._send_json(400, {"message": "args 需為物件"})
+                return
+            request_id = _TASK_MANAGER.submit_tool(
+                request_id=None,
+                core=self.core,
+                tool_name=tool_name,
+                args=args,
+                project_id=project_id,
+            )
+            self._send_json(202, {"request_id": request_id})
+            return
+        if parsed.path == "/v1/jobs/start":
+            payload = self._read_json()
+            job_id = str(payload.get("job_id", "")).strip()
+            if not job_id:
+                self._send_json(400, {"message": "請提供 job_id"})
+                return
+            request_id = _TASK_MANAGER.submit_job(request_id=None, core=self.core, job_id=job_id)
+            self._send_json(202, {"request_id": request_id, "job_id": job_id})
+            return
+        if parsed.path == "/v1/hooks/dispatch":
+            payload = self._read_json()
+            if not isinstance(payload, dict):
+                self._send_json(400, {"message": "payload 需為物件"})
+                return
+            try:
+                event_id = emit_event(payload, dispatch_hooks=True)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(202, {"event_id": event_id})
+            return
+        if parsed.path == "/v1/schedules/tick":
+            request_id = _TASK_MANAGER.submit_schedule_tick(request_id=None, core=self.core)
+            self._send_json(202, {"request_id": request_id})
+            return
         if parsed.path == "/v1/chat/sessions":
             payload = self._read_json()
             project_id = str(payload.get("project_id", "")).strip()

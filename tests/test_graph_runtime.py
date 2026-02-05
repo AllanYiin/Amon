@@ -2,6 +2,8 @@ import json
 import os
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -187,6 +189,8 @@ class GraphRuntimeTests(unittest.TestCase):
                     {"id": "agent", "type": "agent_task", "prompt": "你好"},
                     {},
                     run_id,
+                    cancel_event=threading.Event(),
+                    timeout_s=60,
                 )
             finally:
                 os.environ.pop("AMON_HOME", None)
@@ -205,6 +209,134 @@ class GraphRuntimeTests(unittest.TestCase):
             self.assertIn("```run_constraints", content)
             self.assertIn("用繁體中文", content)
             self.assertIn("不要用付費", content)
+
+    def test_graph_runtime_concurrent_runs_with_slow_tool(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("Graph 工具專案")
+                project_path = Path(project.path)
+
+                tools_dir = Path(temp_dir) / "tools"
+                tools_dir.mkdir(parents=True, exist_ok=True)
+                config_path = Path(temp_dir) / "config.yaml"
+                config_path.write_text(
+                    json.dumps({"tools": {"global_dir": str(tools_dir)}}, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+
+                sleeper_dir = tools_dir / "sleeper"
+                sleeper_dir.mkdir(parents=True, exist_ok=True)
+                (sleeper_dir / "tool.py").write_text(
+                    "\n".join(
+                        [
+                            "import json",
+                            "import sys",
+                            "import time",
+                            "payload = json.loads(sys.stdin.read() or \"{}\")",
+                            "time.sleep(float(payload.get(\"sleep_s\", 2)))",
+                            "print(json.dumps({\"ok\": True}))",
+                        ]
+                    ),
+                    encoding="utf-8",
+                )
+                (sleeper_dir / "tool.yaml").write_text(
+                    json.dumps(
+                        {
+                            "name": "sleeper",
+                            "version": "0.1.0",
+                            "inputs_schema": {"type": "object"},
+                            "outputs_schema": {"type": "object"},
+                            "risk_level": "low",
+                            "allowed_paths": [],
+                        },
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+
+                fast_dir = tools_dir / "fast"
+                fast_dir.mkdir(parents=True, exist_ok=True)
+                (fast_dir / "tool.py").write_text(
+                    "\n".join(
+                        [
+                            "import json",
+                            "import sys",
+                            "json.loads(sys.stdin.read() or \"{}\")",
+                            "print(json.dumps({\"ok\": True}))",
+                        ]
+                    ),
+                    encoding="utf-8",
+                )
+                (fast_dir / "tool.yaml").write_text(
+                    json.dumps(
+                        {
+                            "name": "fast",
+                            "version": "0.1.0",
+                            "inputs_schema": {"type": "object"},
+                            "outputs_schema": {"type": "object"},
+                            "risk_level": "low",
+                            "allowed_paths": [],
+                        },
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+
+                slow_graph = {
+                    "nodes": [
+                        {
+                            "id": "slow",
+                            "type": "tool.call",
+                            "tool": "sleeper",
+                            "args": {"sleep_s": 2},
+                            "timeout_s": 10,
+                        }
+                    ],
+                    "edges": [],
+                }
+                fast_graph = {
+                    "nodes": [
+                        {
+                            "id": "fast",
+                            "type": "tool.call",
+                            "tool": "fast",
+                            "args": {},
+                            "timeout_s": 5,
+                        }
+                    ],
+                    "edges": [],
+                }
+                slow_graph_path = project_path / "graph_slow.json"
+                slow_graph_path.write_text(json.dumps(slow_graph, ensure_ascii=False), encoding="utf-8")
+                fast_graph_path = project_path / "graph_fast.json"
+                fast_graph_path.write_text(json.dumps(fast_graph, ensure_ascii=False), encoding="utf-8")
+
+                slow_runtime = GraphRuntime(
+                    core=core,
+                    project_path=project_path,
+                    graph_path=slow_graph_path,
+                    run_id="slow-run",
+                )
+                slow_thread = threading.Thread(target=slow_runtime.run, daemon=True)
+                slow_thread.start()
+
+                slow_events = project_path / ".amon" / "runs" / "slow-run" / "events.jsonl"
+                start_wait = time.monotonic()
+                while not slow_events.exists() and (time.monotonic() - start_wait) < 2:
+                    time.sleep(0.05)
+
+                fast_start = time.monotonic()
+                core.run_graph(project_path=project_path, graph_path=fast_graph_path, run_id="fast-run")
+                fast_elapsed = time.monotonic() - fast_start
+                self.assertLess(fast_elapsed, 2)
+                self.assertTrue(slow_thread.is_alive())
+                slow_thread.join(timeout=5)
+                self.assertFalse(slow_thread.is_alive())
+            finally:
+                os.environ.pop("AMON_HOME", None)
 
 
 if __name__ == "__main__":

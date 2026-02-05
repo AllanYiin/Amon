@@ -7,6 +7,8 @@ import os
 import re
 import subprocess
 import sys
+import time
+from threading import Event
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -114,25 +116,48 @@ def run_tool_process(
     payload: dict[str, Any],
     env: dict[str, str],
     cwd: Path | None,
-    timeout_s: int = 30,
+    timeout_s: int = 60,
+    cancel_event: Event | None = None,
 ) -> dict[str, Any]:
+    input_payload = json.dumps(payload, ensure_ascii=False)
     try:
-        result = subprocess.run(
+        process = subprocess.Popen(
             [sys.executable, str(tool_path)],
-            input=json.dumps(payload, ensure_ascii=False),
             text=True,
-            capture_output=True,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             env=env,
             cwd=str(cwd) if cwd else None,
-            timeout=timeout_s,
-            check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise ToolingError(f"執行工具失敗：{tool_path}") from exc
-    if result.returncode != 0:
-        raise ToolingError(f"工具執行失敗：{result.stderr.strip()}")
+    start = time.monotonic()
+    stdout = ""
+    stderr = ""
+    remaining_input: str | None = input_payload
     try:
-        return json.loads(result.stdout or "{}")
+        while True:
+            try:
+                stdout, stderr = process.communicate(input=remaining_input, timeout=0.1)
+                break
+            except subprocess.TimeoutExpired:
+                remaining_input = None
+                if cancel_event and cancel_event.is_set():
+                    process.kill()
+                    stdout, stderr = process.communicate()
+                    raise ToolingError("工具執行已取消")
+                if timeout_s and (time.monotonic() - start) > timeout_s:
+                    process.kill()
+                    stdout, stderr = process.communicate()
+                    raise ToolingError("工具執行逾時")
+                continue
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ToolingError(f"執行工具失敗：{tool_path}") from exc
+    if process.returncode != 0:
+        raise ToolingError(f"工具執行失敗：{stderr.strip()}")
+    try:
+        return json.loads(stdout or "{}")
     except json.JSONDecodeError as exc:
         raise ToolingError("工具輸出非 JSON") from exc
 
