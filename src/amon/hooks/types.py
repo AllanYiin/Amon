@@ -33,6 +33,7 @@ class Hook:
     filters: HookFilter
     action: HookAction
     policy: HookPolicy
+    enabled: bool = True
     dedupe_key: str | None = None
     cooldown_seconds: int | None = None
     max_concurrency: int | None = None

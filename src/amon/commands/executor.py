@@ -9,7 +9,10 @@ from pathlib import Path
 from typing import Any
 
 from amon.chat.session_store import append_event
+from amon.config import read_yaml, write_yaml
 from amon.core import AmonCore
+from amon.hooks.loader import _validate_hook, load_hooks
+from amon.jobs.runner import JobStatus, start_job, status_job, stop_job
 from amon.scheduler.engine import load_schedules, write_schedules
 from amon.fs.safety import make_change_plan
 
@@ -134,6 +137,97 @@ def _ensure_default_commands() -> None:
         {"inputs": {"schedule_id": "string"}},
         _handle_schedule_run_now,
     )
+    _register_if_missing(
+        "hooks.list",
+        {"inputs": {}},
+        _handle_hooks_list,
+    )
+    _register_if_missing(
+        "hooks.create",
+        {"inputs": {"hook_id": "string", "hook": "object"}, "requires_confirm": True},
+        _handle_hooks_create,
+    )
+    _register_if_missing(
+        "hooks.enable",
+        {"inputs": {"hook_id": "string"}, "requires_confirm": True},
+        _handle_hooks_enable,
+    )
+    _register_if_missing(
+        "hooks.disable",
+        {"inputs": {"hook_id": "string"}, "requires_confirm": True},
+        _handle_hooks_disable,
+    )
+    _register_if_missing(
+        "hooks.delete",
+        {"inputs": {"hook_id": "string"}, "requires_confirm": True},
+        _handle_hooks_delete,
+    )
+    _register_if_missing(
+        "schedules.list",
+        {"inputs": {}},
+        _handle_schedules_list,
+    )
+    _register_if_missing(
+        "schedules.add",
+        {
+            "inputs": {
+                "template_id": "string",
+                "cron": "string",
+                "interval_seconds": "number",
+                "run_at": "string",
+                "vars": "object",
+                "misfire_grace_seconds": "number",
+                "jitter_seconds": "number",
+            },
+            "requires_confirm": True,
+        },
+        _handle_schedule_add,
+    )
+    _register_if_missing(
+        "schedules.enable",
+        {"inputs": {"schedule_id": "string"}, "requires_confirm": True},
+        _handle_schedules_enable,
+    )
+    _register_if_missing(
+        "schedules.disable",
+        {"inputs": {"schedule_id": "string"}, "requires_confirm": True},
+        _handle_schedules_disable,
+    )
+    _register_if_missing(
+        "schedules.delete",
+        {"inputs": {"schedule_id": "string"}, "requires_confirm": True},
+        _handle_schedules_delete,
+    )
+    _register_if_missing(
+        "schedules.run_now",
+        {"inputs": {"schedule_id": "string"}},
+        _handle_schedule_run_now,
+    )
+    _register_if_missing(
+        "jobs.list",
+        {"inputs": {}},
+        _handle_jobs_list,
+    )
+    _register_if_missing(
+        "jobs.start",
+        {"inputs": {"job_id": "string"}, "requires_confirm": True},
+        _handle_jobs_start,
+    )
+    _register_if_missing(
+        "jobs.stop",
+        {"inputs": {"job_id": "string"}, "requires_confirm": True},
+        _handle_jobs_stop,
+    )
+    _register_if_missing(
+        "jobs.restart",
+        {"inputs": {"job_id": "string"}, "requires_confirm": True},
+        _handle_jobs_restart,
+    )
+    _register_if_missing(
+        "jobs.status",
+        {"inputs": {"job_id": "string"}},
+        _handle_jobs_status,
+    )
 
     _DEFAULT_REGISTERED = True
 
@@ -156,6 +250,22 @@ def _has_default_commands() -> bool:
         "graph.patch",
         "schedule.add",
         "schedule.run_now",
+        "hooks.list",
+        "hooks.create",
+        "hooks.enable",
+        "hooks.disable",
+        "hooks.delete",
+        "schedules.list",
+        "schedules.add",
+        "schedules.enable",
+        "schedules.disable",
+        "schedules.delete",
+        "schedules.run_now",
+        "jobs.list",
+        "jobs.start",
+        "jobs.stop",
+        "jobs.restart",
+        "jobs.status",
     )
     return all(get_command(name) is not None for name in default_names)
 
@@ -331,6 +441,126 @@ def _handle_schedule_run_now(core: AmonCore, plan: CommandPlan) -> dict[str, Any
     return {"schedule_id": schedule_id, "run_id": result.run_id, "state": result.state}
 
 
+def _handle_hooks_list(core: AmonCore, plan: CommandPlan) -> dict[str, Any]:
+    hooks = load_hooks(data_dir=core.data_dir)
+    return {"hooks": [_serialize_hook(hook) for hook in hooks]}
+
+
+def _handle_hooks_create(core: AmonCore, plan: CommandPlan) -> dict[str, Any]:
+    hook_id = str(plan.args.get("hook_id", "")).strip()
+    hook_payload = plan.args.get("hook")
+    if not hook_id:
+        raise ValueError("hook_id 不可為空")
+    if not isinstance(hook_payload, dict):
+        raise ValueError("hook 必須為物件")
+    hook_payload.setdefault("enabled", True)
+    _validate_hook(hook_id, hook_payload)
+    hooks_dir = _resolve_hooks_dir(core)
+    hook_path = hooks_dir / f"{hook_id}.yaml"
+    if hook_path.exists():
+        raise FileExistsError("hook 已存在")
+    try:
+        write_yaml(hook_path, hook_payload)
+    except RuntimeError as exc:
+        core.logger.error("寫入 hook 失敗：%s", exc, exc_info=True)
+        raise
+    return {"hook": {"hook_id": hook_id, "path": str(hook_path), "enabled": hook_payload.get("enabled", True)}}
+
+
+def _handle_hooks_enable(core: AmonCore, plan: CommandPlan) -> dict[str, Any]:
+    return _toggle_hook(core, plan, enabled=True)
+
+
+def _handle_hooks_disable(core: AmonCore, plan: CommandPlan) -> dict[str, Any]:
+    return _toggle_hook(core, plan, enabled=False)
+
+
+def _handle_hooks_delete(core: AmonCore, plan: CommandPlan) -> dict[str, Any]:
+    hook_id = str(plan.args.get("hook_id", "")).strip()
+    if not hook_id:
+        raise ValueError("hook_id 不可為空")
+    hook_path = _resolve_hooks_dir(core) / f"{hook_id}.yaml"
+    if not hook_path.exists():
+        raise FileNotFoundError("找不到 hook")
+    try:
+        hook_path.unlink()
+    except OSError as exc:
+        core.logger.error("刪除 hook 失敗：%s", exc, exc_info=True)
+        raise
+    return {"hook_id": hook_id, "status": "deleted"}
+
+
+def _handle_schedules_list(core: AmonCore, plan: CommandPlan) -> dict[str, Any]:
+    schedules = _load_schedules(core)
+    return {"schedules": schedules.get("schedules", [])}
+
+
+def _handle_schedules_enable(core: AmonCore, plan: CommandPlan) -> dict[str, Any]:
+    return _toggle_schedule(core, plan, enabled=True)
+
+
+def _handle_schedules_disable(core: AmonCore, plan: CommandPlan) -> dict[str, Any]:
+    return _toggle_schedule(core, plan, enabled=False)
+
+
+def _handle_schedules_delete(core: AmonCore, plan: CommandPlan) -> dict[str, Any]:
+    schedule_id = str(plan.args.get("schedule_id", "")).strip()
+    if not schedule_id:
+        raise ValueError("schedule_id 不可為空")
+    schedules = _load_schedules(core)
+    items = schedules.get("schedules", [])
+    remaining = [item for item in items if item.get("schedule_id") != schedule_id]
+    if len(remaining) == len(items):
+        raise KeyError("找不到指定的排程")
+    schedules["schedules"] = remaining
+    _write_schedules(core, schedules)
+    return {"schedule_id": schedule_id, "status": "deleted"}
+
+
+def _handle_jobs_list(core: AmonCore, plan: CommandPlan) -> dict[str, Any]:
+    jobs_dir = core.data_dir / "jobs"
+    if not jobs_dir.exists():
+        return {"jobs": []}
+    jobs = []
+    for path in sorted(jobs_dir.glob("*.yaml")):
+        status = status_job(path.stem, data_dir=core.data_dir)
+        jobs.append(_serialize_job_status(status))
+    return {"jobs": jobs}
+
+
+def _handle_jobs_start(core: AmonCore, plan: CommandPlan) -> dict[str, Any]:
+    job_id = str(plan.args.get("job_id", "")).strip()
+    if not job_id:
+        raise ValueError("job_id 不可為空")
+    status = start_job(job_id, data_dir=core.data_dir)
+    return {"job": _serialize_job_status(status)}
+
+
+def _handle_jobs_stop(core: AmonCore, plan: CommandPlan) -> dict[str, Any]:
+    job_id = str(plan.args.get("job_id", "")).strip()
+    if not job_id:
+        raise ValueError("job_id 不可為空")
+    status = stop_job(job_id, data_dir=core.data_dir)
+    return {"job": _serialize_job_status(status)}
+
+
+def _handle_jobs_restart(core: AmonCore, plan: CommandPlan) -> dict[str, Any]:
+    job_id = str(plan.args.get("job_id", "")).strip()
+    if not job_id:
+        raise ValueError("job_id 不可為空")
+    stop_job(job_id, data_dir=core.data_dir)
+    status = start_job(job_id, data_dir=core.data_dir)
+    return {"job": _serialize_job_status(status)}
+
+
+def _handle_jobs_status(core: AmonCore, plan: CommandPlan) -> dict[str, Any]:
+    job_id = str(plan.args.get("job_id", "")).strip()
+    if not job_id:
+        raise ValueError("job_id 不可為空")
+    status = status_job(job_id, data_dir=core.data_dir)
+    return {"job": _serialize_job_status(status)}
+
+
 def _append_plan_event(
     plan: CommandPlan,
     event_type: str,
@@ -358,6 +588,66 @@ def _build_plan_card(command_name: str, args: dict[str, Any]) -> str:
             }
         ]
     )
+
+
+def _serialize_hook(hook: Any) -> dict[str, Any]:
+    payload = dict(hook.raw)
+    payload.setdefault("enabled", hook.enabled)
+    payload["hook_id"] = hook.hook_id
+    return payload
+
+
+def _resolve_hooks_dir(core: AmonCore) -> Path:
+    hooks_dir = core.data_dir / "hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    return hooks_dir
+
+
+def _toggle_hook(core: AmonCore, plan: CommandPlan, *, enabled: bool) -> dict[str, Any]:
+    hook_id = str(plan.args.get("hook_id", "")).strip()
+    if not hook_id:
+        raise ValueError("hook_id 不可為空")
+    hook_path = _resolve_hooks_dir(core) / f"{hook_id}.yaml"
+    if not hook_path.exists():
+        raise FileNotFoundError("找不到 hook")
+    payload = read_yaml(hook_path)
+    if not isinstance(payload, dict):
+        raise ValueError("hook 設定必須為物件")
+    payload["enabled"] = enabled
+    _validate_hook(hook_id, payload)
+    try:
+        write_yaml(hook_path, payload)
+    except RuntimeError as exc:
+        core.logger.error("更新 hook 狀態失敗：%s", exc, exc_info=True)
+        raise
+    return {"hook_id": hook_id, "enabled": enabled}
+
+
+def _toggle_schedule(core: AmonCore, plan: CommandPlan, *, enabled: bool) -> dict[str, Any]:
+    schedule_id = str(plan.args.get("schedule_id", "")).strip()
+    if not schedule_id:
+        raise ValueError("schedule_id 不可為空")
+    schedules = _load_schedules(core)
+    updated = None
+    for item in schedules.get("schedules", []):
+        if item.get("schedule_id") == schedule_id:
+            item["enabled"] = enabled
+            item["updated_at"] = core._now()
+            updated = item
+            break
+    if not updated:
+        raise KeyError("找不到指定的排程")
+    _write_schedules(core, schedules)
+    return {"schedule": updated}
+
+
+def _serialize_job_status(status: JobStatus) -> dict[str, Any]:
+    return {
+        "job_id": status.job_id,
+        "status": status.status,
+        "last_heartbeat_ts": status.last_heartbeat_ts,
+        "last_error": status.last_error,
+    }
 
 
 def _resolve_project_id_from_trash(core: AmonCore, trash_id: str) -> str:

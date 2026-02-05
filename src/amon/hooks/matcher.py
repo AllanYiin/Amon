@@ -84,6 +84,8 @@ def match(event: dict[str, Any], now: datetime | None = None, state_store: HookS
 
     event_type = event.get("type")
     for hook in hooks:
+        if not hook.enabled:
+            continue
         if event_type not in hook.event_types:
             continue
         if not _match_filters(hook, event):
