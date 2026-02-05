@@ -14,6 +14,7 @@ from amon.core import AmonCore
 from amon.fs.atomic import atomic_write_text
 from amon.events import emit_event
 from amon.logging import log_event
+from amon.tooling import load_tool_spec, validate_inputs_schema
 
 from .matcher import match
 from .state import HookStateStore
@@ -111,6 +112,7 @@ def process_event(
         if hook.action.type == "tool.call" and hook.action.tool:
             store.increment_inflight(hook.hook_id)
             try:
+                _validate_tool_args(hook.action.tool, args, event, hook.hook_id)
                 result = executor(hook.action.tool, args, event.get("project_id"))
                 results.append({"hook_id": hook.hook_id, "status": "executed", "result": result})
                 log_event(
@@ -200,6 +202,42 @@ def _guard_llm_policy(action_args: dict[str, Any], event: dict[str, Any]) -> Non
                 }
             )
             raise PermissionError("graph node 使用 LLM 需 allow_llm=true")
+
+
+def _validate_tool_args(tool_name: str, args: dict[str, Any], event: dict[str, Any], hook_id: str) -> None:
+    project_id = event.get("project_id")
+    core = AmonCore()
+    core.ensure_base_structure()
+    try:
+        tool_dir, _, _ = core._resolve_tool_dir(tool_name, project_id)
+    except Exception:
+        fallback_dir = core.data_dir / "tools" / tool_name
+        if (fallback_dir / "tool.py").exists():
+            tool_dir = fallback_dir
+        else:
+            return
+    try:
+        spec = load_tool_spec(tool_dir)
+    except Exception:
+        return
+    errors = validate_inputs_schema(spec.inputs_schema, args)
+    if errors:
+        emit_event(
+            {
+                "type": "tool.validation_failed",
+                "scope": "tool",
+                "project_id": project_id,
+                "actor": "system",
+                "payload": {
+                    "tool_name": tool_name,
+                    "hook_id": hook_id,
+                    "event_id": event.get("event_id"),
+                    "errors": errors,
+                },
+                "risk": "medium",
+            }
+        )
+        raise ValueError("工具參數驗證失敗")
 
 
 def _run_graph(
