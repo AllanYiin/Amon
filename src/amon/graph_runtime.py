@@ -13,6 +13,7 @@ from typing import Any
 
 from .fs.atomic import atomic_write_text
 from .fs.safety import canonicalize_path
+from .events import emit_event
 from .run.context import get_effective_constraints
 
 
@@ -56,6 +57,16 @@ class GraphRuntime:
             "nodes": {},
         }
         self._append_event(events_path, {"event": "run_start", "run_id": run_id})
+        emit_event(
+            {
+                "type": "graph.run_started",
+                "scope": "graph",
+                "project_id": self.project_path.name,
+                "actor": "system",
+                "payload": {"run_id": run_id, "graph_path": str(self.graph_path)},
+                "risk": "low",
+            }
+        )
 
         try:
             graph = self._load_graph()
@@ -147,6 +158,16 @@ class GraphRuntime:
             state["status"] = "completed"
             state["ended_at"] = self._now_iso()
             self._append_event(events_path, {"event": "run_complete", "run_id": run_id})
+            emit_event(
+                {
+                    "type": "graph.run_completed",
+                    "scope": "graph",
+                    "project_id": self.project_path.name,
+                    "actor": "system",
+                    "payload": {"run_id": run_id, "graph_path": str(self.graph_path)},
+                    "risk": "low",
+                }
+            )
         except Exception as exc:  # noqa: BLE001
             state["status"] = "failed"
             state["ended_at"] = self._now_iso()
