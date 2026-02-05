@@ -5,12 +5,15 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import yaml
 
 from .config import ConfigLoader
 from .core import AmonCore
+from .events import emit_event
+from .fs.safety import make_change_plan, require_confirm
 
 
 def _print_project(record) -> None:
@@ -170,6 +173,46 @@ def build_parser() -> argparse.ArgumentParser:
     chat_parser = subparsers.add_parser("chat", help="互動式 Chat")
     chat_parser.add_argument("--project", required=True, help="指定專案 ID")
 
+    hooks_parser = subparsers.add_parser("hooks", help="Hook 管理")
+    hooks_sub = hooks_parser.add_subparsers(dest="hooks_command")
+    hooks_sub.add_parser("list", help="列出 hooks")
+    hooks_add = hooks_sub.add_parser("add", help="新增 hook")
+    hooks_add.add_argument("hook_id", help="hook ID")
+    hooks_add.add_argument("--file", required=True, help="hook YAML 檔案路徑")
+    hooks_enable = hooks_sub.add_parser("enable", help="啟用 hook")
+    hooks_enable.add_argument("hook_id", help="hook ID")
+    hooks_disable = hooks_sub.add_parser("disable", help="停用 hook")
+    hooks_disable.add_argument("hook_id", help="hook ID")
+    hooks_delete = hooks_sub.add_parser("delete", help="刪除 hook")
+    hooks_delete.add_argument("hook_id", help="hook ID")
+
+    schedules_parser = subparsers.add_parser("schedules", help="排程管理")
+    schedules_sub = schedules_parser.add_subparsers(dest="schedules_command")
+    schedules_sub.add_parser("list", help="列出排程")
+    schedules_add = schedules_sub.add_parser("add", help="新增排程")
+    schedules_add.add_argument("--payload", required=True, help="JSON 格式的排程內容")
+    schedules_enable = schedules_sub.add_parser("enable", help="啟用排程")
+    schedules_enable.add_argument("schedule_id", help="排程 ID")
+    schedules_disable = schedules_sub.add_parser("disable", help="停用排程")
+    schedules_disable.add_argument("schedule_id", help="排程 ID")
+    schedules_delete = schedules_sub.add_parser("delete", help="刪除排程")
+    schedules_delete.add_argument("schedule_id", help="排程 ID")
+    schedules_run_now = schedules_sub.add_parser("run-now", help="排程立即執行")
+    schedules_run_now.add_argument("schedule_id", help="排程 ID")
+
+    jobs_parser = subparsers.add_parser("jobs", help="常駐工作管理")
+    jobs_sub = jobs_parser.add_subparsers(dest="jobs_command")
+    jobs_sub.add_parser("list", help="列出 jobs")
+    jobs_start = jobs_sub.add_parser("start", help="啟動 job")
+    jobs_start.add_argument("job_id", help="job ID")
+    jobs_start.add_argument("--heartbeat-interval", type=int, default=5, help="heartbeat 間隔秒數")
+    jobs_stop = jobs_sub.add_parser("stop", help="停止 job")
+    jobs_stop.add_argument("job_id", help="job ID")
+    jobs_restart = jobs_sub.add_parser("restart", help="重啟 job")
+    jobs_restart.add_argument("job_id", help="job ID")
+    jobs_status = jobs_sub.add_parser("status", help="查看 job 狀態")
+    jobs_status.add_argument("job_id", help="job ID")
+
     return parser
 
 
@@ -219,6 +262,12 @@ def main() -> None:
             _handle_graph(core, args)
         elif args.command == "chat":
             _handle_chat(core, args)
+        elif args.command == "hooks":
+            _handle_hooks(core, args)
+        elif args.command == "schedules":
+            _handle_schedules(core, args)
+        elif args.command == "jobs":
+            _handle_jobs(core, args)
         else:
             parser.print_help()
     except Exception as exc:  # noqa: BLE001
@@ -527,3 +576,223 @@ def _parse_vars(items: list[str]) -> dict[str, str]:
             raise ValueError("--var 鍵不可為空")
         variables[key] = value
     return variables
+
+
+def _handle_hooks(core: AmonCore, args: argparse.Namespace) -> None:
+    hooks_dir = core.data_dir / "hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    if args.hooks_command == "list":
+        hooks = sorted(path.stem for path in hooks_dir.glob("*.yaml"))
+        if not hooks:
+            print("目前沒有任何 hook。")
+            return
+        for hook_id in hooks:
+            print(hook_id)
+        return
+    if args.hooks_command == "add":
+        source_path = Path(args.file).expanduser()
+        payload = source_path.read_text(encoding="utf-8")
+        target_path = hooks_dir / f"{args.hook_id}.yaml"
+        target_path.write_text(payload, encoding="utf-8")
+        emit_event(
+            {
+                "type": "config.changed",
+                "scope": "config",
+                "actor": "system",
+                "payload": {"domain": "hooks", "hook_id": args.hook_id, "action": "add"},
+                "risk": "low",
+            }
+        )
+        print(f"已新增 hook：{args.hook_id}")
+        return
+    if args.hooks_command in {"enable", "disable"}:
+        target_path = hooks_dir / f"{args.hook_id}.yaml"
+        if not target_path.exists():
+            raise ValueError("找不到指定的 hook")
+        if args.hooks_command == "disable":
+            plan = make_change_plan([{"action": "停用 hook", "target": args.hook_id}])
+            if not require_confirm(plan):
+                print("已取消操作")
+                return
+        data = yaml.safe_load(target_path.read_text(encoding="utf-8")) or {}
+        data["enabled"] = args.hooks_command == "enable"
+        target_path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        emit_event(
+            {
+                "type": "config.changed",
+                "scope": "config",
+                "actor": "system",
+                "payload": {"domain": "hooks", "hook_id": args.hook_id, "action": args.hooks_command},
+                "risk": "low",
+            }
+        )
+        print(f"已更新 hook：{args.hook_id}")
+        return
+    if args.hooks_command == "delete":
+        target_path = hooks_dir / f"{args.hook_id}.yaml"
+        if not target_path.exists():
+            raise ValueError("找不到指定的 hook")
+        plan = make_change_plan([{"action": "刪除 hook", "target": args.hook_id}])
+        if not require_confirm(plan):
+            print("已取消操作")
+            return
+        target_path.unlink()
+        emit_event(
+            {
+                "type": "config.changed",
+                "scope": "config",
+                "actor": "system",
+                "payload": {"domain": "hooks", "hook_id": args.hook_id, "action": "delete"},
+                "risk": "medium",
+            }
+        )
+        print(f"已刪除 hook：{args.hook_id}")
+        return
+    raise ValueError("請指定 hooks 指令")
+
+
+def _handle_schedules(core: AmonCore, args: argparse.Namespace) -> None:
+    from .scheduler.engine import load_schedules, write_schedules
+
+    core.ensure_base_structure()
+    payload = load_schedules(data_dir=core.data_dir)
+    schedules = payload.get("schedules", [])
+    if args.schedules_command == "list":
+        if not schedules:
+            print("目前沒有任何排程。")
+            return
+        for schedule in schedules:
+            schedule_id = schedule.get("schedule_id", "")
+            enabled = schedule.get("enabled", True)
+            status = "啟用" if enabled else "停用"
+            print(f"{schedule_id}｜{status}")
+        return
+    if args.schedules_command == "add":
+        try:
+            schedule = json.loads(args.payload)
+        except json.JSONDecodeError as exc:
+            raise ValueError("payload 必須是 JSON 格式") from exc
+        schedule_id = schedule.get("schedule_id")
+        if not schedule_id:
+            raise ValueError("payload 需要 schedule_id")
+        schedules = [entry for entry in schedules if entry.get("schedule_id") != schedule_id]
+        schedules.append(schedule)
+        write_schedules({"schedules": schedules}, data_dir=core.data_dir)
+        emit_event(
+            {
+                "type": "config.changed",
+                "scope": "config",
+                "actor": "system",
+                "payload": {"domain": "schedules", "schedule_id": schedule_id, "action": "add"},
+                "risk": "low",
+            }
+        )
+        print(f"已新增排程：{schedule_id}")
+        return
+    if args.schedules_command in {"enable", "disable"}:
+        target = next((item for item in schedules if item.get("schedule_id") == args.schedule_id), None)
+        if not target:
+            raise ValueError("找不到指定的排程")
+        if args.schedules_command == "disable":
+            plan = make_change_plan([{"action": "停用排程", "target": args.schedule_id}])
+            if not require_confirm(plan):
+                print("已取消操作")
+                return
+        target["enabled"] = args.schedules_command == "enable"
+        write_schedules({"schedules": schedules}, data_dir=core.data_dir)
+        emit_event(
+            {
+                "type": "config.changed",
+                "scope": "config",
+                "actor": "system",
+                "payload": {"domain": "schedules", "schedule_id": args.schedule_id, "action": args.schedules_command},
+                "risk": "low",
+            }
+        )
+        print(f"已更新排程：{args.schedule_id}")
+        return
+    if args.schedules_command == "delete":
+        plan = make_change_plan([{"action": "刪除排程", "target": args.schedule_id}])
+        if not require_confirm(plan):
+            print("已取消操作")
+            return
+        schedules = [entry for entry in schedules if entry.get("schedule_id") != args.schedule_id]
+        write_schedules({"schedules": schedules}, data_dir=core.data_dir)
+        emit_event(
+            {
+                "type": "config.changed",
+                "scope": "config",
+                "actor": "system",
+                "payload": {"domain": "schedules", "schedule_id": args.schedule_id, "action": "delete"},
+                "risk": "medium",
+            }
+        )
+        print(f"已刪除排程：{args.schedule_id}")
+        return
+    if args.schedules_command == "run-now":
+        target = next((item for item in schedules if item.get("schedule_id") == args.schedule_id), None)
+        if not target:
+            raise ValueError("找不到指定的排程")
+        target["enabled"] = True
+        target["next_fire_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+        write_schedules({"schedules": schedules}, data_dir=core.data_dir)
+        emit_event(
+            {
+                "type": "config.changed",
+                "scope": "config",
+                "actor": "system",
+                "payload": {"domain": "schedules", "schedule_id": args.schedule_id, "action": "run-now"},
+                "risk": "low",
+            }
+        )
+        print(f"已安排立即執行：{args.schedule_id}")
+        return
+    raise ValueError("請指定 schedules 指令")
+
+
+def _handle_jobs(core: AmonCore, args: argparse.Namespace) -> None:
+    from .jobs.runner import start_job, status_job, stop_job
+
+    jobs_dir = core.data_dir / "jobs"
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    if args.jobs_command == "list":
+        jobs = sorted(path.stem for path in jobs_dir.glob("*.yaml"))
+        if not jobs:
+            print("目前沒有任何 job。")
+            return
+        for job_id in jobs:
+            print(job_id)
+        return
+    if args.jobs_command == "start":
+        config_path = jobs_dir / f"{args.job_id}.yaml"
+        if not config_path.exists():
+            config_path.write_text(yaml.safe_dump({}, allow_unicode=True), encoding="utf-8")
+        status = start_job(args.job_id, data_dir=core.data_dir, heartbeat_interval_seconds=args.heartbeat_interval)
+        print(f"已啟動 job：{status.job_id}｜{status.status}")
+        return
+    if args.jobs_command == "stop":
+        plan = make_change_plan([{"action": "停止 job", "target": args.job_id}])
+        if not require_confirm(plan):
+            print("已取消操作")
+            return
+        status = stop_job(args.job_id, data_dir=core.data_dir)
+        print(f"已停止 job：{status.job_id}｜{status.status}")
+        return
+    if args.jobs_command == "restart":
+        plan = make_change_plan([{"action": "重啟 job", "target": args.job_id}])
+        if not require_confirm(plan):
+            print("已取消操作")
+            return
+        stop_job(args.job_id, data_dir=core.data_dir)
+        status = start_job(args.job_id, data_dir=core.data_dir, heartbeat_interval_seconds=5)
+        print(f"已重啟 job：{status.job_id}｜{status.status}")
+        return
+    if args.jobs_command == "status":
+        status = status_job(args.job_id, data_dir=core.data_dir)
+        print(f"job_id：{status.job_id}")
+        print(f"狀態：{status.status}")
+        print(f"last_heartbeat_ts：{status.last_heartbeat_ts}")
+        print(f"last_error：{status.last_error}")
+        print(f"last_event_id：{status.last_event_id}")
+        return
+    raise ValueError("請指定 jobs 指令")
