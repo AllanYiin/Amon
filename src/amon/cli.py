@@ -143,6 +143,9 @@ def build_parser() -> argparse.ArgumentParser:
     eval_parser = subparsers.add_parser("eval", help="執行簡易回歸評測")
     eval_parser.add_argument("--suite", default="basic", help="評測套件（預設 basic）")
 
+    daemon_parser = subparsers.add_parser("daemon", help="啟動常駐服務")
+    daemon_parser.add_argument("--tick-interval", type=int, default=5, help="scheduler tick 間隔秒數")
+
     subparsers.add_parser("doctor", help="一鍵診斷系統狀態")
 
     graph_parser = subparsers.add_parser("graph", help="Graph 執行")
@@ -200,6 +203,10 @@ def main() -> None:
             _handle_tools(core, args)
         elif args.command == "ui":
             _handle_ui(args)
+        elif args.command == "daemon":
+            from .daemon import run_daemon
+
+            run_daemon(data_dir=data_dir, tick_interval_seconds=args.tick_interval)
         elif args.command == "fs":
             _handle_fs(core, args)
         elif args.command == "export":
