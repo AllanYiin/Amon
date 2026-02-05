@@ -21,6 +21,7 @@ from amon.logging_utils import setup_logger
 logger = logging.getLogger("amon.jobs")
 
 JobCallback = Callable[[dict[str, Any]], dict[str, Any] | None]
+EventEmitter = Callable[[dict[str, Any]], str]
 
 
 @dataclass
@@ -40,6 +41,7 @@ class _JobHandle:
     last_error: str | None
     heartbeat_interval_seconds: int
     data_dir: Path
+    event_emitter: EventEmitter
 
 
 _JOB_REGISTRY: dict[str, _JobHandle] = {}
@@ -51,6 +53,7 @@ def start_job(
     data_dir: Path | None = None,
     heartbeat_interval_seconds: int = 5,
     polling_callback: JobCallback | None = None,
+    event_emitter: EventEmitter | None = None,
 ) -> JobStatus:
     if not job_id.strip():
         raise ValueError("job_id 不可為空")
@@ -71,6 +74,7 @@ def start_job(
         last_error=None,
         heartbeat_interval_seconds=heartbeat_interval_seconds,
         data_dir=resolved_data_dir,
+        event_emitter=event_emitter or emit_event,
     )
     _JOB_REGISTRY[job_id] = handle
 
@@ -198,7 +202,7 @@ def _polling_job(
         try:
             extra_payload = callback(payload_base) if callback else {"message": "polling stub"}
             payload = {**payload_base, **(extra_payload or {})}
-            _emit_job_event(handle.job_id, event_type, payload)
+            _emit_job_event(handle.event_emitter, handle.job_id, event_type, payload)
         except Exception as exc:  # noqa: BLE001
             _record_error(handle, "polling callback 失敗", exc)
 
@@ -245,17 +249,18 @@ def _diff_snapshots(
     now = time.monotonic()
     for path, meta in new.items():
         if path not in old:
-            _emit_fs_event(handle.job_id, "doc.created", path, last_emitted, now, debounce_seconds)
+            _emit_fs_event(handle.event_emitter, handle.job_id, "doc.created", path, last_emitted, now, debounce_seconds)
             continue
         if old[path] != meta:
-            _emit_fs_event(handle.job_id, "doc.updated", path, last_emitted, now, debounce_seconds)
+            _emit_fs_event(handle.event_emitter, handle.job_id, "doc.updated", path, last_emitted, now, debounce_seconds)
 
     for path in old:
         if path not in new:
-            _emit_fs_event(handle.job_id, "doc.deleted", path, last_emitted, now, debounce_seconds)
+            _emit_fs_event(handle.event_emitter, handle.job_id, "doc.deleted", path, last_emitted, now, debounce_seconds)
 
 
 def _emit_fs_event(
+    emitter: EventEmitter,
     job_id: str,
     event_type: str,
     path: str,
@@ -268,11 +273,11 @@ def _emit_fs_event(
     if last_time is not None and (now - last_time) < debounce_seconds:
         return
     last_emitted[key] = now
-    _emit_job_event(job_id, event_type, {"job_id": job_id, "path": path})
+    _emit_job_event(emitter, job_id, event_type, {"job_id": job_id, "path": path})
 
 
-def _emit_job_event(job_id: str, event_type: str, payload: dict[str, Any]) -> None:
-    emit_event(
+def _emit_job_event(emitter: EventEmitter, job_id: str, event_type: str, payload: dict[str, Any]) -> None:
+    emitter(
         {
             "type": event_type,
             "scope": "job",

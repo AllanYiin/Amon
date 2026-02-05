@@ -14,7 +14,7 @@ from typing import Any
 REQUIRED_FIELDS = {"ts", "type", "scope", "actor", "payload", "risk"}
 
 
-def emit_event(event: dict[str, Any]) -> str:
+def emit_event(event: dict[str, Any], *, dispatch_hooks: bool | None = None) -> str:
     """Emit an event to the JSONL bus and return the event_id."""
     payload = dict(event or {})
     if not isinstance(payload, dict):
@@ -27,7 +27,10 @@ def emit_event(event: dict[str, Any]) -> str:
         payload["project_id"] = None
     payload.setdefault("event_id", _generate_event_id())
     _atomic_append_jsonl(_events_path(), payload)
-    _dispatch_hooks(payload)
+    if dispatch_hooks is None:
+        dispatch_hooks = os.environ.get("AMON_DISABLE_HOOK_DISPATCH") != "1"
+    if dispatch_hooks:
+        _dispatch_hooks(payload)
     return str(payload["event_id"])
 
 

@@ -8,8 +8,11 @@ import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
+from uuid import uuid4
 
 from amon.core import AmonCore
+from amon.fs.atomic import atomic_write_text
+from amon.logging import log_event
 
 from .matcher import match
 from .state import HookStateStore
@@ -20,6 +23,7 @@ from .utils import render_template
 logger = logging.getLogger(__name__)
 
 ToolExecutor = Callable[[str, dict[str, Any], str | None], dict[str, Any]]
+GraphRunner = Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]
 
 
 def _resolve_hooks_dir(data_dir: Path | None = None) -> Path:
@@ -58,6 +62,19 @@ def _default_tool_executor(tool_name: str, args: dict[str, Any], project_id: str
     return core.run_tool(tool_name, args, project_id=project_id)
 
 
+def _default_graph_runner(action_args: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
+    core = AmonCore()
+    core.ensure_base_structure()
+    project_id = action_args.get("project_id") or event.get("project_id")
+    if not project_id:
+        raise ValueError("graph.run 需要 project_id")
+    graph_path_value = action_args.get("graph_path") or action_args.get("path")
+    if not graph_path_value:
+        raise ValueError("graph.run 需要 graph_path")
+    variables = action_args.get("variables") or action_args.get("vars") or {}
+    return _run_graph(core, project_id, graph_path_value, variables, event, action_args)
+
+
 def _dedupe_key_for(hook: Hook, event: dict[str, Any]) -> str | None:
     if not hook.dedupe_key:
         return None
@@ -69,13 +86,16 @@ def process_event(
     event: dict[str, Any],
     *,
     tool_executor: ToolExecutor | None = None,
+    graph_runner: GraphRunner | None = None,
     now: datetime | None = None,
     state_store: HookStateStore | None = None,
     data_dir: Path | None = None,
+    allow_llm: bool = False,
 ) -> list[dict[str, Any]]:
     current_time = now or datetime.now().astimezone()
     store = state_store or HookStateStore(data_dir=data_dir)
     executor = tool_executor or _default_tool_executor
+    runner = graph_runner or _default_graph_runner
     results: list[dict[str, Any]] = []
 
     for hook in match(event, now=current_time, state_store=store):
@@ -92,13 +112,124 @@ def process_event(
             try:
                 result = executor(hook.action.tool, args, event.get("project_id"))
                 results.append({"hook_id": hook.hook_id, "status": "executed", "result": result})
+                log_event(
+                    {
+                        "event": "hook_action_executed",
+                        "hook_id": hook.hook_id,
+                        "action_type": hook.action.type,
+                        "event_id": event.get("event_id"),
+                    }
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.error("Hook %s 執行工具失敗：%s", hook.hook_id, exc, exc_info=True)
                 results.append({"hook_id": hook.hook_id, "status": "failed", "error": str(exc)})
             finally:
                 store.decrement_inflight(hook.hook_id)
                 store.record_trigger(hook.hook_id, current_time, dedupe_key)
+            continue
+
+        if hook.action.type == "graph.run":
+            store.increment_inflight(hook.hook_id)
+            try:
+                if not allow_llm:
+                    _guard_llm_policy(args, event)
+                result = runner(args, event)
+                results.append({"hook_id": hook.hook_id, "status": "executed", "result": result})
+                log_event(
+                    {
+                        "event": "hook_action_executed",
+                        "hook_id": hook.hook_id,
+                        "action_type": hook.action.type,
+                        "event_id": event.get("event_id"),
+                        "run_id": result.get("run_id"),
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Hook %s 執行 graph 失敗：%s", hook.hook_id, exc, exc_info=True)
+                results.append({"hook_id": hook.hook_id, "status": "failed", "error": str(exc)})
+            finally:
+                store.decrement_inflight(hook.hook_id)
+                store.record_trigger(hook.hook_id, current_time, dedupe_key)
+            continue
         else:
             results.append({"hook_id": hook.hook_id, "status": "skipped", "reason": "unsupported_action"})
 
     return results
+
+
+def _guard_llm_policy(action_args: dict[str, Any], event: dict[str, Any]) -> None:
+    project_id = action_args.get("project_id") or event.get("project_id")
+    graph_path_value = action_args.get("graph_path") or action_args.get("path")
+    if not project_id or not graph_path_value:
+        return
+    core = AmonCore()
+    core.ensure_base_structure()
+    project_path = core.get_project_path(project_id)
+    graph_path = (project_path / graph_path_value).expanduser() if not Path(graph_path_value).is_absolute() else Path(graph_path_value)
+    try:
+        graph_payload = json.loads(graph_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.error("讀取 graph 失敗：%s", exc, exc_info=True)
+        return
+    nodes = graph_payload.get("nodes", [])
+    for node in nodes:
+        if node.get("type") == "agent_task" and not bool(node.get("allow_llm", False)):
+            log_event(
+                {
+                    "level": "WARNING",
+                    "event": "policy.llm_blocked",
+                    "project_id": project_id,
+                    "hook_action": "graph.run",
+                    "graph_path": str(graph_path),
+                    "node_id": node.get("id"),
+                }
+            )
+            raise PermissionError("graph node 使用 LLM 需 allow_llm=true")
+
+
+def _run_graph(
+    core: AmonCore,
+    project_id: str,
+    graph_path_value: str,
+    variables: dict[str, Any],
+    event: dict[str, Any],
+    action_args: dict[str, Any],
+) -> dict[str, Any]:
+    project_path = core.get_project_path(project_id)
+    graph_path = (project_path / graph_path_value).expanduser() if not Path(graph_path_value).is_absolute() else Path(graph_path_value)
+    run_id = uuid4().hex
+    run_dir = project_path / ".amon" / "runs" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    trigger_payload = {
+        "run_id": run_id,
+        "hook_action": "graph.run",
+        "hook_args": action_args,
+        "event_id": event.get("event_id"),
+        "event_type": event.get("type"),
+        "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+    }
+    try:
+        atomic_write_text(run_dir / "trigger.json", json.dumps(trigger_payload, ensure_ascii=False, indent=2))
+    except OSError as exc:
+        logger.error("寫入 trigger metadata 失敗：%s", exc, exc_info=True)
+        raise
+    log_event(
+        {
+            "event": "graph_triggered",
+            "project_id": project_id,
+            "run_id": run_id,
+            "graph_path": str(graph_path),
+            "event_id": event.get("event_id"),
+        }
+    )
+    from amon.graph_runtime import GraphRuntime
+
+    runtime = GraphRuntime(
+        core=core,
+        project_path=project_path,
+        graph_path=graph_path,
+        variables=variables,
+        run_id=run_id,
+    )
+    result = runtime.run()
+    return {"run_id": result.run_id, "run_dir": str(result.run_dir)}

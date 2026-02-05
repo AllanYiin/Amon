@@ -32,16 +32,18 @@ class GraphRuntime:
         graph_path: Path,
         variables: dict[str, Any] | None = None,
         stream_handler=None,
+        run_id: str | None = None,
     ) -> None:
         self.core = core
         self.project_path = project_path
         self.graph_path = graph_path
         self.variables = variables or {}
         self.stream_handler = stream_handler
+        self.run_id = run_id
         self.logger = core.logger
 
     def run(self) -> GraphRunResult:
-        run_id = uuid.uuid4().hex
+        run_id = self.run_id or uuid.uuid4().hex
         run_dir = self.project_path / ".amon" / "runs" / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
         events_path = run_dir / "events.jsonl"
