@@ -903,7 +903,11 @@ embedding_text =
 
 ##### 1.1 目標（MUST）
 
-* 所有自動化（hook、排程、常駐監控）**都必須以 Graph Run 形式執行**（產生 run_id，交給 Graph Runtime）
+* 自動化（hook、排程、常駐監控）**必須是 deterministic、低成本、可測**，預設**不依賴 LLM**
+* 事件觸發、匹配、節流、去重、排程、心跳、重試等**不得使用 LLM**
+* 工具執行**直接走 Tool Executor**（MCP 或內建），不得經由 LLM 轉述/判斷
+* 只有在「內容理解 / 生成 / 需要語意推論」時才允許使用 LLM（例如：摘要/分類/標籤、整合寫作、推理與解釋）
+* 自動化觸發**必須產生 run_id**，交給 Graph Runtime（允許 tool-only graph node）
 * 使用者可在 **Chat UI** 以自然語言新增/管理 hook、排程、常駐任務（Router → CommandPlan → Plan Card → confirm）
 * 所有觸發與執行全程可追溯：events、runs、logs、billing、artifacts、memory ingestion
 
@@ -912,6 +916,25 @@ embedding_text =
 * **不得繞過安全層**：檔案 allowlist、工具權限、budget 上限、破壞性動作確認（confirm）
 * 支援 **常駐** + **可暫停/恢復/停止** + **重啟後可恢復**
 * 觸發風暴要可控：dedupe / cooldown / debounce / max_concurrency / backpressure
+* **Automation 專用 Budget**：`automation_budget_daily` 預設極低或 0
+* automation 觸發的 LLM node 必須 `allow_llm=true`（default false），否則 runtime 拒絕並記錄 `policy.llm_blocked`
+
+##### 1.3 自動化執行路徑（MUST）
+
+Hook / Schedule / Job 觸發後，只能走兩條路：
+
+**A. Tool-only path（優先，零 token）**
+
+* 事件 → Hook matcher（rule）→ 直接 tool call（MCP/內建）→ 落地 artifacts/logs
+* 適用：檔案搬移、索引更新、格式轉換、抓取、測試、打包、部署等「可程式化」工作
+
+**B. GraphRun path（可選，視 node type 決定是否用 LLM）**
+
+* 事件 → 產生 graph run → runtime 執行各 node
+* Graph node 必須標註 `execution_engine`：
+  * `tool`：只可用工具（零 token）
+  * `llm`：允許用模型（需受 budget gate）
+  * `hybrid`：先 tool 後 llm（需明確標註）
 
 ---
 
@@ -981,6 +1004,19 @@ policy:
   max_concurrency: 1
   dedupe_key: "{{event.type}}:{{event.payload.path}}"
   ignore_actors: ["system"]   # 避免自觸發迴圈
+```
+
+##### 3.2.1 Hook action（tool_call）範例（MUST）
+
+```yaml
+do:
+  action: tool.call
+  tool: "filesystem.copy"
+  args:
+    src: "{{event.payload.path}}"
+    dest: "workspace/archive/{{event.payload.basename}}"
+policy:
+  require_confirm: true
 ```
 
 ##### 3.3 Hook 執行規則（MUST）
@@ -1100,7 +1136,21 @@ policy:
 ```json
 {
   "run_id":"r123",
-  "trigger":{"kind":"hook|schedule|job|chat","id":"hk_doc_ingest_v1","event_id":"e_..."}
+  "trigger":{"kind":"hook|schedule|job|chat","id":"hk_doc_ingest_v1","event_id":"e_..."},
+  "policy":{"allow_llm": false}
+}
+```
+
+##### 7.3 Graph Node execution_engine（MUST）
+
+```json
+{
+  "id": "n_index_update",
+  "type": "tool_call",
+  "execution_engine": "tool",
+  "tool": "memory.index_update",
+  "args": {"project_id":"{{project_id}}"},
+  "outputs": {"doc":"docs/index_update.log"}
 }
 ```
 
