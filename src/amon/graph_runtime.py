@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
+import threading
+import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
@@ -33,6 +37,8 @@ class GraphRuntime:
         variables: dict[str, Any] | None = None,
         stream_handler=None,
         run_id: str | None = None,
+        cancel_event: threading.Event | None = None,
+        node_timeout_s: int | None = None,
     ) -> None:
         self.core = core
         self.project_path = project_path
@@ -41,6 +47,9 @@ class GraphRuntime:
         self.stream_handler = stream_handler
         self.run_id = run_id
         self.logger = core.logger
+        self.cancel_event = cancel_event or threading.Event()
+        self.node_timeout_s = node_timeout_s
+        self._cancel_path: Path | None = None
 
     def run(self) -> GraphRunResult:
         run_id = self.run_id or uuid.uuid4().hex
@@ -70,6 +79,9 @@ class GraphRuntime:
             }
         )
 
+        cancel_path = run_dir / "cancel.json"
+        self._cancel_path = cancel_path
+        executor = ThreadPoolExecutor(max_workers=1)
         try:
             graph = self._load_graph()
             merged_vars = {**graph.get("variables", {}), **self.variables, "run_id": run_id}
@@ -100,6 +112,12 @@ class GraphRuntime:
             skipped: set[str] = set()
 
             while ready:
+                if self._refresh_cancel(cancel_path):
+                    self._append_event(events_path, {"event": "run_canceled", "run_id": run_id})
+                    state["status"] = "canceled"
+                    state["ended_at"] = self._now_iso()
+                    self._mark_pending_as_canceled(state, nodes, completed, skipped)
+                    break
                 node_id = ready.popleft()
                 if node_id in skipped:
                     completed.add(node_id)
@@ -110,7 +128,29 @@ class GraphRuntime:
                 self._append_event(events_path, {"event": "node_start", "node_id": node_id})
 
                 try:
-                    result = self._execute_node(node, merged_vars, run_id)
+                    result = self._execute_node_with_timeout(
+                        node,
+                        merged_vars,
+                        run_id,
+                        events_path=events_path,
+                        executor=executor,
+                    )
+                except _NodeCanceledError:
+                    state["nodes"][node_id]["status"] = "canceled"
+                    state["nodes"][node_id]["ended_at"] = self._now_iso()
+                    state["nodes"][node_id]["error"] = "node canceled"
+                    self._append_event(events_path, {"event": "node_canceled", "node_id": node_id})
+                    self._append_event(events_path, {"event": "run_canceled", "run_id": run_id})
+                    state["status"] = "canceled"
+                    state["ended_at"] = self._now_iso()
+                    self._mark_pending_as_canceled(state, nodes, completed, skipped)
+                    break
+                except _NodeTimeoutError:
+                    state["nodes"][node_id]["status"] = "failed"
+                    state["nodes"][node_id]["ended_at"] = self._now_iso()
+                    state["nodes"][node_id]["error"] = "node timeout"
+                    self._append_event(events_path, {"event": "node_timeout", "node_id": node_id})
+                    raise RuntimeError("node timeout")
                 except Exception as exc:  # noqa: BLE001
                     self.logger.error("Graph node 執行失敗：%s", exc, exc_info=True)
                     state["nodes"][node_id]["status"] = "failed"
@@ -157,27 +197,30 @@ class GraphRuntime:
                 pending = [node_id for node_id in nodes if node_id not in completed and node_id not in skipped]
                 raise RuntimeError(f"Graph 無法完成，仍有節點未執行：{pending}")
 
-            state["status"] = "completed"
-            state["ended_at"] = self._now_iso()
-            self._append_event(events_path, {"event": "run_complete", "run_id": run_id})
-            emit_event(
-                {
-                    "type": "run.completed",
-                    "scope": "graph",
-                    "project_id": self.project_path.name,
-                    "actor": "system",
-                    "payload": {"run_id": run_id, "graph_path": str(self.graph_path)},
-                    "risk": "low",
-                }
-            )
+            if state["status"] == "running":
+                state["status"] = "completed"
+                state["ended_at"] = self._now_iso()
+                self._append_event(events_path, {"event": "run_complete", "run_id": run_id})
+                emit_event(
+                    {
+                        "type": "run.completed",
+                        "scope": "graph",
+                        "project_id": self.project_path.name,
+                        "actor": "system",
+                        "payload": {"run_id": run_id, "graph_path": str(self.graph_path)},
+                        "risk": "low",
+                    }
+                )
         except Exception as exc:  # noqa: BLE001
-            state["status"] = "failed"
-            state["ended_at"] = self._now_iso()
-            state["error"] = str(exc)
-            self._append_event(events_path, {"event": "run_failed", "run_id": run_id, "error": str(exc)})
-            self.logger.error("Graph 執行失敗：%s", exc, exc_info=True)
-            raise
+            if state["status"] not in {"canceled"}:
+                state["status"] = "failed"
+                state["ended_at"] = self._now_iso()
+                state["error"] = str(exc)
+                self._append_event(events_path, {"event": "run_failed", "run_id": run_id, "error": str(exc)})
+                self.logger.error("Graph 執行失敗：%s", exc, exc_info=True)
+                raise
         finally:
+            executor.shutdown(wait=True)
             self._write_json(state_path, state)
 
         return GraphRunResult(run_id=run_id, state=state, run_dir=run_dir)
@@ -232,7 +275,12 @@ class GraphRuntime:
         node: dict[str, Any],
         variables: dict[str, Any],
         run_id: str,
+        *,
+        cancel_event: threading.Event | None = None,
+        timeout_s: int | None = None,
     ) -> dict[str, Any]:
+        if cancel_event and cancel_event.is_set():
+            raise _NodeCanceledError()
         node_type = node.get("type")
         node_vars = {**variables, **node.get("variables", {})}
         if node_type == "agent_task":
@@ -293,7 +341,22 @@ class GraphRuntime:
             )
             return {"result": result, "output_path": str(output_path.relative_to(self.project_path))}
         if node_type == "map":
-            return self._execute_map_node(node, variables, run_id)
+            return self._execute_map_node(node, variables, run_id, cancel_event=cancel_event)
+        if node_type in {"tool.call", "tool_call"}:
+            tool_name = str(node.get("tool") or "")
+            if not tool_name:
+                raise ValueError("tool.call node 缺少 tool")
+            args = self._render_payload(node.get("args") or {}, node_vars)
+            result = self.core.run_tool(
+                tool_name,
+                args,
+                project_id=self.project_path.name,
+                timeout_s=timeout_s,
+                cancel_event=cancel_event,
+            )
+            if store_key := node.get("store_output"):
+                variables[store_key] = result
+            return {"result": result}
         raise ValueError(f"不支援的 node type：{node_type}")
 
     def _inject_run_constraints(self, prompt: str, run_id: str) -> str:
@@ -329,6 +392,8 @@ class GraphRuntime:
         node: dict[str, Any],
         variables: dict[str, Any],
         run_id: str,
+        *,
+        cancel_event: threading.Event | None = None,
     ) -> dict[str, Any]:
         items = self._resolve_map_items(node, variables)
         subgraph = node.get("subgraph", {})
@@ -338,8 +403,10 @@ class GraphRuntime:
         collected_blocks: list[str] = []
 
         for index, item in enumerate(items, start=1):
+            if cancel_event and cancel_event.is_set():
+                raise _NodeCanceledError()
             local_vars = {**variables, **self._flatten_item_vars(item_var, item, index)}
-            results = self._run_subgraph(sub_nodes, sub_edges, local_vars, run_id)
+            results = self._run_subgraph(sub_nodes, sub_edges, local_vars, run_id, cancel_event=cancel_event)
             collect_variable = node.get("collect_variable")
             collect_template = node.get("collect_template")
             if collect_variable and collect_template:
@@ -378,6 +445,8 @@ class GraphRuntime:
         edges: list[dict[str, Any]],
         variables: dict[str, Any],
         run_id: str,
+        *,
+        cancel_event: threading.Event | None = None,
     ) -> dict[str, dict[str, Any]]:
         indexed = self._index_nodes(nodes)
         adjacency, incoming = self._build_graph(indexed, edges)
@@ -387,11 +456,14 @@ class GraphRuntime:
         results: dict[str, dict[str, Any]] = {}
 
         while ready:
+            if cancel_event and cancel_event.is_set():
+                raise _NodeCanceledError()
             node_id = ready.popleft()
             if node_id in skipped:
                 completed.add(node_id)
                 continue
-            result = self._execute_node(indexed[node_id], variables, run_id)
+            timeout_s = self._resolve_node_timeout(indexed[node_id])
+            result = self._execute_node(indexed[node_id], variables, run_id, cancel_event=cancel_event, timeout_s=timeout_s)
             results[node_id] = result
             completed.add(node_id)
             for edge in adjacency.get(node_id, []):
@@ -479,6 +551,87 @@ class GraphRuntime:
             raise ValueError("node 輸出必須落在 docs/ 或 audits/")
         return safe_path
 
+    def _execute_node_with_timeout(
+        self,
+        node: dict[str, Any],
+        variables: dict[str, Any],
+        run_id: str,
+        *,
+        events_path: Path,
+        executor: ThreadPoolExecutor,
+    ) -> dict[str, Any]:
+        timeout_s = self._resolve_node_timeout(node)
+        node_cancel = threading.Event()
+        start = time.monotonic()
+        future = executor.submit(
+            self._execute_node,
+            node,
+            variables,
+            run_id,
+            cancel_event=node_cancel,
+            timeout_s=timeout_s,
+        )
+        while True:
+            if self._refresh_cancel(None):
+                node_cancel.set()
+            try:
+                result = future.result(timeout=0.1)
+                if self.cancel_event.is_set():
+                    raise _NodeCanceledError()
+                return result
+            except FutureTimeoutError:
+                if self.cancel_event.is_set():
+                    node_cancel.set()
+                if node_cancel.is_set() and future.done():
+                    raise _NodeCanceledError()
+                if timeout_s and (time.monotonic() - start) > timeout_s:
+                    node_cancel.set()
+                    self._append_event(events_path, {"event": "node_timeout_pending", "node_id": node.get("id")})
+                    raise _NodeTimeoutError()
+                continue
+
+    def _resolve_node_timeout(self, node: dict[str, Any]) -> int:
+        raw = node.get("timeout_s") or node.get("timeout_seconds") or self.node_timeout_s
+        if raw is None:
+            raw = os.environ.get("AMON_GRAPH_NODE_TIMEOUT") or 60
+        try:
+            timeout = int(raw)
+        except (TypeError, ValueError):
+            timeout = 60
+        return max(timeout, 1)
+
+    def _refresh_cancel(self, cancel_path: Path | None = None) -> bool:
+        if self.cancel_event.is_set():
+            return True
+        target_path = cancel_path or self._cancel_path
+        if target_path and target_path.exists():
+            self.cancel_event.set()
+            return True
+        return False
+
+    def _mark_pending_as_canceled(
+        self,
+        state: dict[str, Any],
+        nodes: dict[str, dict[str, Any]],
+        completed: set[str],
+        skipped: set[str],
+    ) -> None:
+        for node_id in nodes:
+            if node_id in completed or node_id in skipped:
+                continue
+            state["nodes"][node_id]["status"] = "canceled"
+            state["nodes"][node_id]["ended_at"] = self._now_iso()
+
+    def _render_payload(self, payload: Any, variables: dict[str, Any]) -> Any:
+        if isinstance(payload, dict):
+            return {key: self._render_payload(value, variables) for key, value in payload.items()}
+        if isinstance(payload, list):
+            return [self._render_payload(value, variables) for value in payload]
+        if isinstance(payload, str):
+            return self._render_template(payload, variables)
+        return payload
+
+
     def _append_event(self, path: Path, payload: dict[str, Any]) -> None:
         payload = {**payload, "ts": self._now_iso()}
         with path.open("a", encoding="utf-8") as handle:
@@ -551,3 +704,11 @@ class GraphRuntime:
 
     def _now_iso(self) -> str:
         return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+class _NodeTimeoutError(RuntimeError):
+    """Node execution timeout."""
+
+
+class _NodeCanceledError(RuntimeError):
+    """Node execution canceled."""

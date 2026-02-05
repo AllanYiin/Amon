@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -195,6 +196,50 @@ class MemoryIngestTests(unittest.TestCase):
             embedding_text = record["embedding_text"]
             self.assertIn("昨天到台北開會。", embedding_text)
             self.assertIn("## AMON_MEMORY_TAGS", embedding_text)
+
+    def test_memory_ingest_pipeline_batches_and_resume(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            project_path = Path(temp_dir) / "project"
+            memory_dir = project_path / "memory"
+            memory_dir.mkdir(parents=True, exist_ok=True)
+            chunks_path = memory_dir / "chunks.jsonl"
+            os.environ["AMON_HOME"] = str(data_dir)
+            try:
+                total_chunks = 1200
+                with chunks_path.open("w", encoding="utf-8") as handle:
+                    for index in range(total_chunks):
+                        chunk = {
+                            "chunk_id": f"chunk-{index}",
+                            "project_id": "proj-batch",
+                            "session_id": "session-batch",
+                            "source_path": "sessions/session-batch.jsonl",
+                            "text": f"內容 {index}",
+                            "created_at": "2026-02-03T10:00:00+08:00",
+                            "lang": "zh-TW",
+                        }
+                        handle.write(json.dumps(chunk, ensure_ascii=False))
+                        handle.write("\n")
+
+                core = AmonCore(data_dir=data_dir)
+                first = core.run_memory_ingest_pipeline(project_path, batch_size=50, max_queue_size=2000)
+                self.assertEqual(first["status"], "ok")
+                normalized_path = memory_dir / "normalized.jsonl"
+                self.assertTrue(normalized_path.exists())
+                self.assertEqual(len(normalized_path.read_text(encoding="utf-8").splitlines()), 50)
+
+                second = core.run_memory_ingest_pipeline(project_path, batch_size=50, max_queue_size=2000)
+                self.assertEqual(second["status"], "ok")
+                self.assertEqual(len(normalized_path.read_text(encoding="utf-8").splitlines()), 100)
+
+                backpressure = core.run_memory_ingest_pipeline(project_path, batch_size=50, max_queue_size=10)
+                self.assertEqual(backpressure["status"], "backpressure")
+                events_path = data_dir / "events" / "events.jsonl"
+                self.assertTrue(events_path.exists())
+                events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+                self.assertTrue(any(event.get("type") == "system.backpressure" for event in events))
+            finally:
+                os.environ.pop("AMON_HOME", None)
 
 
 if __name__ == "__main__":

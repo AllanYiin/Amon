@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import uuid
 import zipfile
 from collections import Counter
@@ -79,6 +80,7 @@ class AmonCore:
         self.projects_dir = self.data_dir / "projects"
         self.trash_dir = self.data_dir / "trash"
         self.skills_dir = self.data_dir / "skills"
+        self.tools_dir = self.data_dir / "tools"
         self.templates_dir = self.data_dir / "templates"
         self.schedules_dir = self.data_dir / "schedules"
         self.python_env_dir = self.data_dir / "python_env"
@@ -94,6 +96,7 @@ class AmonCore:
             self.projects_dir,
             self.trash_dir,
             self.skills_dir,
+            self.tools_dir,
             self.templates_dir,
             self.schedules_dir,
             self.python_env_dir,
@@ -1902,7 +1905,15 @@ class AmonCore:
                 }
         return sorted(tools.values(), key=lambda item: item["name"])
 
-    def run_tool(self, tool_name: str, payload: dict[str, Any], project_id: str | None = None) -> dict[str, Any]:
+    def run_tool(
+        self,
+        tool_name: str,
+        payload: dict[str, Any],
+        project_id: str | None = None,
+        *,
+        timeout_s: int | None = None,
+        cancel_event: threading.Event | None = None,
+    ) -> dict[str, Any]:
         self.ensure_base_structure()
         tool_dir, scope, project_path = self._resolve_tool_dir(tool_name, project_id)
         spec = load_tool_spec(tool_dir)
@@ -1913,7 +1924,14 @@ class AmonCore:
             if not require_confirm(plan):
                 raise RuntimeError("已取消執行工具")
         env = build_tool_env(self.logs_dir if not project_path else project_path / "logs", resolved_allowed, project_path)
-        output = run_tool_process(tool_dir / "tool.py", payload, env=env, cwd=project_path)
+        output = run_tool_process(
+            tool_dir / "tool.py",
+            payload,
+            env=env,
+            cwd=project_path,
+            timeout_s=timeout_s or 60,
+            cancel_event=cancel_event,
+        )
         log_event(
             {
                 "level": "INFO",
@@ -3023,11 +3041,384 @@ if __name__ == "__main__":
             self.logger.error("寫入 memory chunk 失敗：%s", exc, exc_info=True)
             raise
         try:
-            self.normalize_memory_dates(project_path)
+            self.run_memory_ingest_pipeline(project_path, batch_size=50)
         except Exception as exc:  # noqa: BLE001
-            self.logger.error("日期標準化失敗：%s", exc, exc_info=True)
+            self.logger.error("Memory ingest pipeline 失敗：%s", exc, exc_info=True)
             raise
         return chunk_count
+
+    def run_memory_ingest_pipeline(
+        self,
+        project_path: Path,
+        *,
+        batch_size: int = 50,
+        max_queue_size: int = 1000,
+    ) -> dict[str, Any]:
+        if not project_path:
+            raise ValueError("執行 memory pipeline 需要指定專案")
+        memory_dir = self._prepare_memory_dir(project_path)
+        chunks_path = memory_dir / "chunks.jsonl"
+        if not chunks_path.exists():
+            self.logger.error("找不到 memory chunks 檔案：%s", chunks_path)
+            raise FileNotFoundError(f"找不到 memory chunks 檔案：{chunks_path}")
+        state = self._load_memory_ingest_state(memory_dir)
+        pending_chunks = self._count_pending_chunks(chunks_path, state.get("stages", {}).get("normalized", {}))
+        if pending_chunks > max_queue_size:
+            emit_event(
+                {
+                    "type": "system.backpressure",
+                    "scope": "system",
+                    "project_id": project_path.name,
+                    "actor": "system",
+                    "payload": {
+                        "pipeline": "memory_ingest",
+                        "pending_chunks": pending_chunks,
+                        "max_queue_size": max_queue_size,
+                    },
+                    "risk": "low",
+                }
+            )
+            return {"status": "backpressure", "pending_chunks": pending_chunks}
+
+        processed: dict[str, int] = {}
+        processed["normalized"] = self._process_memory_normalized(project_path, memory_dir, state, batch_size)
+        processed["entities"] = self._process_memory_entities(project_path, memory_dir, state, batch_size)
+        processed["tags"] = self._process_memory_tags(project_path, memory_dir, state, batch_size)
+        processed["embed"] = self._process_memory_embed(project_path, memory_dir, state, batch_size)
+        processed["index"] = self._process_memory_index(project_path, memory_dir, state, batch_size)
+        self._save_memory_ingest_state(memory_dir, state)
+        return {"status": "ok", "processed": processed, "pending_chunks": pending_chunks}
+
+    def _process_memory_normalized(
+        self,
+        project_path: Path,
+        memory_dir: Path,
+        state: dict[str, Any],
+        batch_size: int,
+    ) -> int:
+        chunks_path = memory_dir / "chunks.jsonl"
+        normalized_path = memory_dir / "normalized.jsonl"
+        stages = state.setdefault("stages", {})
+        cursor = stages.setdefault("normalized", {"last_chunk_id": None, "processed": 0})
+        last_chunk_id = cursor.get("last_chunk_id")
+        processed = 0
+        try:
+            with chunks_path.open("r", encoding="utf-8") as handle, normalized_path.open("a", encoding="utf-8") as out_handle:
+                seen_last = last_chunk_id is None
+                for line in handle:
+                    payload = line.strip()
+                    if not payload:
+                        continue
+                    chunk = json.loads(payload)
+                    chunk_id = str(chunk.get("chunk_id") or "")
+                    if not seen_last:
+                        if chunk_id == last_chunk_id:
+                            seen_last = True
+                        continue
+                    text = str(chunk.get("text") or "")
+                    created_at = str(chunk.get("created_at") or "")
+                    mentions = self._extract_time_mentions(text, created_at)
+                    geo_mentions = self._extract_geo_mentions(text)
+                    normalized = dict(chunk)
+                    normalized["time"] = {"mentions": mentions}
+                    normalized["geo"] = {"mentions": geo_mentions}
+                    out_handle.write(json.dumps(normalized, ensure_ascii=False))
+                    out_handle.write("\n")
+                    cursor["last_chunk_id"] = chunk_id
+                    cursor["processed"] = int(cursor.get("processed", 0)) + 1
+                    processed += 1
+                    if processed >= batch_size:
+                        break
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.error("寫入 memory normalized 失敗：%s", exc, exc_info=True)
+            raise
+        return processed
+
+    def _process_memory_entities(
+        self,
+        project_path: Path,
+        memory_dir: Path,
+        state: dict[str, Any],
+        batch_size: int,
+    ) -> int:
+        normalized_path = memory_dir / "normalized.jsonl"
+        entities_path = memory_dir / "entities.jsonl"
+        stages = state.setdefault("stages", {})
+        cursor = stages.setdefault("entities", {"last_chunk_id": None, "processed": 0})
+        last_chunk_id = cursor.get("last_chunk_id")
+        processed = 0
+        session_last_entity = state.setdefault("session_last_entity", {})
+        alias_state = self._load_entity_aliases(memory_dir)
+        try:
+            with normalized_path.open("r", encoding="utf-8") as handle, entities_path.open("a", encoding="utf-8") as out_handle:
+                seen_last = last_chunk_id is None
+                for line in handle:
+                    payload = line.strip()
+                    if not payload:
+                        continue
+                    normalized = json.loads(payload)
+                    chunk_id = str(normalized.get("chunk_id") or "")
+                    if not seen_last:
+                        if chunk_id == last_chunk_id:
+                            seen_last = True
+                        continue
+                    text = str(normalized.get("text") or "")
+                    session_id = str(normalized.get("session_id") or "")
+                    last_entity = session_last_entity.get(session_id)
+                    pronoun_mentions, last_entity = self._resolve_pronouns_in_text(text, last_entity)
+                    session_last_entity[session_id] = last_entity
+                    explicit_entities = self._extract_explicit_entities(text)
+                    for entity in explicit_entities:
+                        name = str(entity.get("name") or "")
+                        entity_type = str(entity.get("type") or "")
+                        canonical_id = self._resolve_entity_canonical_id(name, entity_type, alias_state)
+                        entity_record = {
+                            "chunk_id": chunk_id,
+                            "project_id": normalized.get("project_id"),
+                            "session_id": session_id,
+                            "source_path": normalized.get("source_path"),
+                            "text": text,
+                            "mention": {
+                                "name": name,
+                                "entity_type": entity_type,
+                                "canonical_id": canonical_id,
+                                "confidence": 1.0,
+                                "needs_review": False,
+                                "rule": "explicit_name",
+                            },
+                        }
+                        out_handle.write(json.dumps(entity_record, ensure_ascii=False))
+                        out_handle.write("\n")
+                    for mention in pronoun_mentions:
+                        resolved_to = mention.get("resolved_to")
+                        entity_type = mention.get("entity_type") or ""
+                        resolved_canonical_id = (
+                            self._resolve_entity_canonical_id(str(resolved_to), entity_type, alias_state)
+                            if resolved_to
+                            else None
+                        )
+                        mention["resolved_to_canonical_id"] = resolved_canonical_id
+                        entity_record = {
+                            "chunk_id": chunk_id,
+                            "project_id": normalized.get("project_id"),
+                            "session_id": session_id,
+                            "source_path": normalized.get("source_path"),
+                            "text": text,
+                            "mention": mention,
+                        }
+                        out_handle.write(json.dumps(entity_record, ensure_ascii=False))
+                        out_handle.write("\n")
+                    cursor["last_chunk_id"] = chunk_id
+                    cursor["processed"] = int(cursor.get("processed", 0)) + 1
+                    processed += 1
+                    if processed >= batch_size:
+                        break
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.error("寫入 memory entities 失敗：%s", exc, exc_info=True)
+            raise
+        self._save_entity_aliases(memory_dir, alias_state)
+        return processed
+
+    def _process_memory_tags(
+        self,
+        project_path: Path,
+        memory_dir: Path,
+        state: dict[str, Any],
+        batch_size: int,
+    ) -> int:
+        normalized_path = memory_dir / "normalized.jsonl"
+        entities_path = memory_dir / "entities.jsonl"
+        tags_path = memory_dir / "tags.jsonl"
+        stages = state.setdefault("stages", {})
+        cursor = stages.setdefault("tags", {"last_chunk_id": None, "processed": 0})
+        last_chunk_id = cursor.get("last_chunk_id")
+        processed = 0
+        entity_map = self._load_entity_mentions(entities_path)
+        try:
+            with normalized_path.open("r", encoding="utf-8") as handle, tags_path.open("a", encoding="utf-8") as tags_handle:
+                seen_last = last_chunk_id is None
+                for line in handle:
+                    payload = line.strip()
+                    if not payload:
+                        continue
+                    normalized = json.loads(payload)
+                    chunk_id = str(normalized.get("chunk_id") or "")
+                    if not seen_last:
+                        if chunk_id == last_chunk_id:
+                            seen_last = True
+                        continue
+                    text = str(normalized.get("text") or "")
+                    entity_mentions = entity_map.get(chunk_id, [])
+                    tags_markdown = self._build_tags_markdown(normalized, entity_mentions)
+                    embedding_text = f"{text}\n\n{tags_markdown}"
+                    record = {
+                        "chunk_id": chunk_id,
+                        "tags_markdown": tags_markdown,
+                        "embedding_text": embedding_text,
+                    }
+                    tags_handle.write(json.dumps(record, ensure_ascii=False))
+                    tags_handle.write("\n")
+                    cursor["last_chunk_id"] = chunk_id
+                    cursor["processed"] = int(cursor.get("processed", 0)) + 1
+                    processed += 1
+                    if processed >= batch_size:
+                        break
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.error("寫入 memory tags 失敗：%s", exc, exc_info=True)
+            raise
+        return processed
+
+    def _process_memory_embed(
+        self,
+        project_path: Path,
+        memory_dir: Path,
+        state: dict[str, Any],
+        batch_size: int,
+    ) -> int:
+        tags_path = memory_dir / "tags.jsonl"
+        embed_path = memory_dir / "embed.jsonl"
+        stages = state.setdefault("stages", {})
+        cursor = stages.setdefault("embed", {"last_chunk_id": None, "processed": 0})
+        last_chunk_id = cursor.get("last_chunk_id")
+        processed = 0
+        try:
+            with tags_path.open("r", encoding="utf-8") as handle, embed_path.open("a", encoding="utf-8") as embed_handle:
+                seen_last = last_chunk_id is None
+                for line in handle:
+                    payload = line.strip()
+                    if not payload:
+                        continue
+                    record = json.loads(payload)
+                    chunk_id = str(record.get("chunk_id") or "")
+                    if not seen_last:
+                        if chunk_id == last_chunk_id:
+                            seen_last = True
+                        continue
+                    embedding_text = str(record.get("embedding_text") or "")
+                    vector = self._vectorize_text(embedding_text)
+                    embed_handle.write(
+                        json.dumps(
+                            {
+                                "chunk_id": chunk_id,
+                                "embedding_text": embedding_text,
+                                "vector": dict(vector),
+                            },
+                            ensure_ascii=False,
+                        )
+                    )
+                    embed_handle.write("\n")
+                    cursor["last_chunk_id"] = chunk_id
+                    cursor["processed"] = int(cursor.get("processed", 0)) + 1
+                    processed += 1
+                    if processed >= batch_size:
+                        break
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.error("寫入 memory embed 失敗：%s", exc, exc_info=True)
+            raise
+        return processed
+
+    def _process_memory_index(
+        self,
+        project_path: Path,
+        memory_dir: Path,
+        state: dict[str, Any],
+        batch_size: int,
+    ) -> int:
+        embed_path = memory_dir / "embed.jsonl"
+        index_path = memory_dir / "index.jsonl"
+        stages = state.setdefault("stages", {})
+        cursor = stages.setdefault("index", {"last_chunk_id": None, "processed": 0})
+        last_chunk_id = cursor.get("last_chunk_id")
+        processed = 0
+        try:
+            with embed_path.open("r", encoding="utf-8") as handle, index_path.open("a", encoding="utf-8") as index_handle:
+                seen_last = last_chunk_id is None
+                for line in handle:
+                    payload = line.strip()
+                    if not payload:
+                        continue
+                    record = json.loads(payload)
+                    chunk_id = str(record.get("chunk_id") or "")
+                    if not seen_last:
+                        if chunk_id == last_chunk_id:
+                            seen_last = True
+                        continue
+                    index_handle.write(
+                        json.dumps(
+                            {
+                                "chunk_id": chunk_id,
+                                "vector": record.get("vector"),
+                            },
+                            ensure_ascii=False,
+                        )
+                    )
+                    index_handle.write("\n")
+                    cursor["last_chunk_id"] = chunk_id
+                    cursor["processed"] = int(cursor.get("processed", 0)) + 1
+                    processed += 1
+                    if processed >= batch_size:
+                        break
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.error("寫入 memory index 失敗：%s", exc, exc_info=True)
+            raise
+        return processed
+
+    def _load_entity_mentions(self, entities_path: Path) -> dict[str, list[dict[str, Any]]]:
+        if not entities_path.exists():
+            return {}
+        entity_map: dict[str, list[dict[str, Any]]] = {}
+        try:
+            with entities_path.open("r", encoding="utf-8") as entity_handle:
+                for line in entity_handle:
+                    payload = line.strip()
+                    if not payload:
+                        continue
+                    record = json.loads(payload)
+                    chunk_id = str(record.get("chunk_id") or "")
+                    if not chunk_id:
+                        continue
+                    mention = record.get("mention") or {}
+                    entity_map.setdefault(chunk_id, []).append(mention)
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.error("讀取 memory entities 失敗：%s", exc, exc_info=True)
+            raise
+        return entity_map
+
+    def _load_memory_ingest_state(self, memory_dir: Path) -> dict[str, Any]:
+        state_path = memory_dir / "ingest_state.json"
+        if not state_path.exists():
+            return {"stages": {}, "session_last_entity": {}}
+        try:
+            payload = json.loads(state_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.error("讀取 memory ingest state 失敗：%s", exc, exc_info=True)
+            raise
+        if not isinstance(payload, dict):
+            return {"stages": {}, "session_last_entity": {}}
+        payload.setdefault("stages", {})
+        payload.setdefault("session_last_entity", {})
+        return payload
+
+    def _save_memory_ingest_state(self, memory_dir: Path, state: dict[str, Any]) -> None:
+        state_path = memory_dir / "ingest_state.json"
+        try:
+            atomic_write_text(state_path, json.dumps(state, ensure_ascii=False, indent=2))
+        except OSError as exc:
+            self.logger.error("寫入 memory ingest state 失敗：%s", exc, exc_info=True)
+            raise
+
+    def _count_pending_chunks(self, chunks_path: Path, stage_state: dict[str, Any]) -> int:
+        processed = int(stage_state.get("processed", 0))
+        total = 0
+        try:
+            with chunks_path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    if line.strip():
+                        total += 1
+        except OSError as exc:
+            self.logger.error("讀取 memory chunks 失敗：%s", exc, exc_info=True)
+            raise
+        return max(total - processed, 0)
 
     def normalize_memory_dates(self, project_path: Path) -> int:
         if not project_path:
