@@ -61,7 +61,7 @@ class GraphRuntime:
         self._append_event(events_path, {"event": "run_start", "run_id": run_id})
         emit_event(
             {
-                "type": "graph.run_started",
+                "type": "run.started",
                 "scope": "graph",
                 "project_id": self.project_path.name,
                 "actor": "system",
@@ -162,7 +162,7 @@ class GraphRuntime:
             self._append_event(events_path, {"event": "run_complete", "run_id": run_id})
             emit_event(
                 {
-                    "type": "graph.run_completed",
+                    "type": "run.completed",
                     "scope": "graph",
                     "project_id": self.project_path.name,
                     "actor": "system",
