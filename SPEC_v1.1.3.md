@@ -895,7 +895,267 @@ embedding_text =
 
 ---
 
-### 7) Skills 系統（Claude 相容 + Amon 微調）
+### 7) Hook / Scheduler / Resident Jobs（常駐）
+
+> 本段目的：**把 Hook / 排程 / 任務常駐執行（Resident Jobs）正式納入 Amon「總規格」**，並與既有的 **Graph-first、Chat-as-UI、文件導向、Memory、Tool Maker、安全確認** 完全一致。
+
+#### 一、總規格新增：Hook / Scheduler / Resident Jobs（常駐）
+
+##### 1.1 目標（MUST）
+
+* 所有自動化（hook、排程、常駐監控）**都必須以 Graph Run 形式執行**（產生 run_id，交給 Graph Runtime）
+* 使用者可在 **Chat UI** 以自然語言新增/管理 hook、排程、常駐任務（Router → CommandPlan → Plan Card → confirm）
+* 所有觸發與執行全程可追溯：events、runs、logs、billing、artifacts、memory ingestion
+
+##### 1.2 重要原則（MUST）
+
+* **不得繞過安全層**：檔案 allowlist、工具權限、budget 上限、破壞性動作確認（confirm）
+* 支援 **常駐** + **可暫停/恢復/停止** + **重啟後可恢復**
+* 觸發風暴要可控：dedupe / cooldown / debounce / max_concurrency / backpressure
+
+---
+
+#### 二、事件總線（Event Bus）— 全部自動化的共同基礎
+
+##### 2.1 事件落地（MUST）
+
+* 全域事件：`~/.amon/events/events.jsonl`
+* 專案事件（可選但建議）：`~/.amon/projects/<id>/.amon/events/events.jsonl`
+
+##### Event schema（JSONL）
+
+```json
+{
+  "event_id": "e_20260205_000123",
+  "ts": "2026-02-05T14:20:30+08:00",
+  "scope": "global|project",
+  "project_id": "p001",
+  "type": "doc.updated",
+  "actor": {"kind":"user|agent|system|job","id":"job:jb_watch_docs"},
+  "source": {"run_id":"r001","node_id":"n2_draft","path":"docs/draft.md"},
+  "payload": {"path":"docs/draft.md","size":10423,"mime":"text/markdown"},
+  "risk": "low|medium|high"
+}
+```
+
+##### 2.2 標準事件類型（v1 MUST）
+
+* Project：`project.created/updated/deleted/restored/opened`
+* Run：`run.started/node_started/node_succeeded/node_failed/completed/cancelled`
+* Docs/Workspace：`doc.created/updated/deleted`、`workspace.file_added/modified/deleted`
+* Tasks：`task.created/updated/completed/rejected`
+* Tools：`tool.forged/tested/registered/failed`
+* Memory：`memory.ingest_started/ingest_completed/chunk_added/index_updated`
+* Billing：`billing.usage_updated/budget_exceeded`
+
+---
+
+#### 三、Hook 系統（Event → Action → GraphRun）
+
+##### 3.1 Hook 定義存放（MUST）
+
+* 全域：`~/.amon/hooks/<hook_id>.yaml`
+* 專案：`~/.amon/projects/<id>/hooks/<hook_id>.yaml`
+
+##### 3.2 Hook YAML schema（v1）
+
+```yaml
+hook_id: hk_doc_ingest_v1
+enabled: true
+scope: project
+project_id: p001
+when:
+  event_types: [doc.created, doc.updated]
+  filter:
+    path_glob: "docs/**/*.md"
+    min_size: 200
+do:
+  action: graph.run
+  template_id: tpl_memory_ingest_v1
+  vars:
+    project_id: "{{event.project_id}}"
+    path: "{{event.payload.path}}"
+policy:
+  require_confirm: false
+  cooldown_seconds: 30
+  max_concurrency: 1
+  dedupe_key: "{{event.type}}:{{event.payload.path}}"
+  ignore_actors: ["system"]   # 避免自觸發迴圈
+```
+
+##### 3.3 Hook 執行規則（MUST）
+
+* 命中 hook → 先寫事件 `hook.fired`
+* 轉成 GraphRun（`graph.run(template_id, vars)`）
+* 若 policy/guard 判定高風險或高成本：Run 進入 `PENDING_CONFIRMATION`，等待使用者在 Chat UI 確認
+
+---
+
+#### 四、Scheduler（排程）— 定期產生事件並觸發 GraphRun
+
+##### 4.1 排程存放（MUST）
+
+* `~/.amon/schedules/schedules.json`（或每個 schedule 一檔，v1 可先用 json）
+
+##### 4.2 Schedule schema（v1）
+
+```json
+{
+  "schedule_id": "sc_daily_brief",
+  "enabled": true,
+  "timezone": "Asia/Taipei",
+  "trigger": {"type":"cron","cron":"0 9 * * *"},
+  "job": {
+    "action":"graph.run",
+    "template_id":"tpl_daily_brief_v1",
+    "vars":{"project_id":"p001","language":"zh-TW"}
+  },
+  "policy": {
+    "require_confirm": false,
+    "max_concurrency": 1,
+    "misfire_grace_seconds": 300,
+    "jitter_seconds": 30
+  }
+}
+```
+
+##### 4.3 排程行為（MUST）
+
+* 到點 → 寫 `schedule.fired` 事件 → 觸發 GraphRun
+* misfire：在 grace 內補跑一次，否則略過並寫事件 `schedule.misfired`
+
+---
+
+#### 五、Resident Jobs（任務常駐執行）
+
+##### 5.1 Job 定義存放（MUST）
+
+* `~/.amon/jobs/<job_id>.yaml`
+* 狀態：`~/.amon/jobs/state/<job_id>.json`
+
+##### 5.2 Job 類型（v1 MUST）
+
+1. `filesystem_watcher`：監控 workspace/docs 變化 → 產生 doc/workspace 事件
+2. `polling_job`：每 N 秒輪詢某來源 → 產生自訂事件
+
+##### 5.3 Job YAML schema（v1）
+
+```yaml
+job_id: jb_watch_docs
+enabled: true
+type: filesystem_watcher
+scope: project
+project_id: p001
+config:
+  paths: ["~/.amon/projects/p001/docs"]
+  recursive: true
+  debounce_ms: 800
+emit:
+  created: doc.created
+  modified: doc.updated
+  deleted: doc.deleted
+policy:
+  restart: always
+  max_retries: 10
+  backoff_seconds: 5
+```
+
+##### 5.4 Job Lifecycle（MUST）
+
+狀態：`STOPPED / STARTING / RUNNING / DEGRADED / FAILED / STOPPING`
+要求：
+
+* daemon 重啟後可恢復（從 state.json 讀取）
+* 出錯依 backoff 重試，超過 max_retries → FAILED 並寫事件 `job.failed`
+
+---
+
+#### 六、Amon Daemon（常駐服務）— 統一承載 hooks/scheduler/jobs
+
+##### 6.1 Daemon 責任（MUST）
+
+* 讀取/寫入 event bus
+* 執行 hook matcher
+* 執行 scheduler tick
+* 執行 resident jobs
+* 管理 `PENDING_CONFIRMATION` 的 run queue
+* 統一寫 logs 與 billing log（不因 CLI 結束而中斷自動化）
+
+##### 6.2 本機 IPC/API（MUST）
+
+* Chat UI / CLI 都只呼叫本機 API
+* daemon 才做真正的長時間運行工作
+
+---
+
+#### 七、與 Graph Runtime 的強制整合
+
+##### 7.1 所有自動化都必須產生 Run（MUST）
+
+* hook/schedule/job 只能「發事件」或「請求 run」
+* 真正執行必經 Graph Runtime
+
+##### 7.2 Run metadata 必含 trigger（MUST）
+
+```json
+{
+  "run_id":"r123",
+  "trigger":{"kind":"hook|schedule|job|chat","id":"hk_doc_ingest_v1","event_id":"e_..."}
+}
+```
+
+---
+
+#### 八、Chat-as-UI：新增管理命令域（hooks/schedules/jobs）
+
+##### 8.1 支援自然語言（MUST）
+
+* 「新增一個 hook：docs 有更新就跑記憶索引」
+* 「每天 9 點跑 daily brief」
+* 「常駐監控 docs，有新檔就摘要」
+
+##### 8.2 對應 CommandPlan API（MUST）
+
+* `hooks.list/create/update/enable/disable/delete`
+* `schedules.list/add/enable/disable/delete/run_now`
+* `jobs.list/start/stop/restart/status/logs`
+
+所有高風險或高成本操作：Plan Card + confirm。
+
+---
+
+#### 九、安全與風險控制（必補）
+
+##### 9.1 無限循環防護（MUST）
+
+* hook 可設定 `ignore_actors`、filter path
+* event 必含 actor/source，hook matcher 必可排除 system 觸發
+
+##### 9.2 事件風暴（MUST）
+
+* watcher debounce
+* hook dedupe_key + cooldown
+* max_concurrency + backpressure（超過上限暫停 job 或丟棄低風險事件）
+
+##### 9.3 Budget gate（MUST）
+
+* hook/schedule/job 觸發的 run 一律受 budget 限制
+* 超過上限 → 寫 `billing.budget_exceeded` 並將 run 置為 paused/pending confirmation
+
+---
+
+#### 十、驗收條件（AC）— 納入總 AC
+
+* [ ] 開啟 daemon 後，filesystem watcher 可產生 doc.updated 事件
+* [ ] hook 命中後會產生 hook.fired 事件並啟動 graph run
+* [ ] schedule cron 會產生 schedule.fired 並啟動 graph run
+* [ ] 高風險 action 會進入 PENDING_CONFIRMATION，不會自動執行
+* [ ] daemon 重啟後 jobs/schedules/hooks 狀態可恢復
+* [ ] 每個 run 都具 trigger metadata，且 events/logs 可追溯
+
+---
+
+### 8) Skills 系統（Claude 相容 + Amon 微調）
 
 #### 7.1 Skill 結構（必須一致）
 
@@ -928,7 +1188,7 @@ embedding_text =
 
 ---
 
-### 8) MCP 工具層（Tool Gateway）
+### 9) MCP 工具層（Tool Gateway）
 
 #### 8.1 角色
 
@@ -955,7 +1215,7 @@ Amon 作為 MCP Client：
 
 ---
 
-### 9) 文件導向協作（Document-first）
+### 10) 文件導向協作（Document-first）
 
 #### 9.1 文件分類
 
@@ -982,7 +1242,7 @@ Amon 作為 MCP Client：
 
 ---
 
-### 10) Logging 與 Billing（強制）
+### 11) Logging 與 Billing（強制）
 
 #### 10.1 log 分流
 
@@ -1002,7 +1262,7 @@ Amon 作為 MCP Client：
 
 ---
 
-### 11) UI/UX（技術面規格）
+### 12) UI/UX（技術面規格）
 
 #### 11.1 主要頁面
 
@@ -1027,7 +1287,7 @@ Amon 作為 MCP Client：
 
 ---
 
-### 12) API（本機服務介面，便於 UI/CLI 分離）
+### 13) API（本機服務介面，便於 UI/CLI 分離）
 
 > v1 建議：Amon Core 提供本機 HTTP API（localhost only），CLI 與 Web UI 都走同一套 API。
 > 若你偏好純 CLI，也可先保留 internal API，再逐步補 UI。
@@ -1046,7 +1306,7 @@ Amon 作為 MCP Client：
 
 ---
 
-### 13) 錯誤處理（Error logic）
+### 14) 錯誤處理（Error logic）
 
 #### 13.1 常見錯誤類型
 
@@ -1066,7 +1326,7 @@ Amon 作為 MCP Client：
 
 ---
 
-### 14) Edge cases / Abuse cases（必補）
+### 15) Edge cases / Abuse cases（必補）
 
 1. **提示注入（tool output / file content）**
 
@@ -1089,7 +1349,7 @@ Amon 作為 MCP Client：
 
 ---
 
-### 15) 驗收條件（Acceptance Criteria）
+### 16) 驗收條件（Acceptance Criteria）
 
 #### A. 專案與持久化
 
@@ -1122,7 +1382,7 @@ Amon 作為 MCP Client：
 
 ---
 
-### 16) 測試案例（含 Gherkin/BDD）
+### 17) 測試案例（含 Gherkin/BDD）
 
 ```gherkin
 Feature: Project persistence
@@ -1171,7 +1431,7 @@ Feature: MCP tool permission
 
 ---
 
-### 17) 我建議你補充的功能（技術版）
+### 18) 我建議你補充的功能（技術版）
 
 1. **變更計畫（Change Plan）機制**：任何會改檔的任務先產出 `docs/change_plan.md`，列出「將修改哪些檔案、每個檔案改什麼」，再執行。
 2. **Git 整合（可選）**：專案若是 git repo，改動前自動建立 branch 或 commit，方便回滾。
