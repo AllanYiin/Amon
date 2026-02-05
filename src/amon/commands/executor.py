@@ -64,66 +64,88 @@ def execute(plan: CommandPlan, confirmed: bool) -> dict[str, Any]:
 
 def _ensure_default_commands() -> None:
     global _DEFAULT_REGISTERED
-    if _DEFAULT_REGISTERED:
+    if _DEFAULT_REGISTERED and _has_default_commands():
         return
 
-    register_command(
+    _register_if_missing(
         "projects.create",
         {"inputs": {"name": "string"}},
         _handle_projects_create,
     )
-    register_command(
+    _register_if_missing(
         "projects.list",
         {"inputs": {}},
         _handle_projects_list,
     )
-    register_command(
+    _register_if_missing(
         "projects.delete",
         {"inputs": {"project_id": "string"}, "requires_confirm": True},
         _handle_projects_delete,
     )
-    register_command(
+    _register_if_missing(
         "projects.restore",
         {"inputs": {"trash_id": "string"}, "requires_confirm": True},
         _handle_projects_restore,
     )
-    register_command(
+    _register_if_missing(
         "graph.run",
         {"inputs": {"project_id": "string", "graph_path": "string", "template_id": "string", "vars": "object"}},
         _handle_graph_run,
     )
-    register_command(
+    _register_if_missing(
         "graph.show",
         {"inputs": {"run_id": "string"}},
         _handle_graph_show,
     )
-    register_command(
+    _register_if_missing(
         "graph.template.create",
         {"inputs": {"project_id": "string", "run_id": "string", "name": "string"}, "requires_confirm": True},
         _handle_graph_template_create,
     )
-    register_command(
+    _register_if_missing(
         "graph.template.parametrize",
         {"inputs": {"template_id": "string", "jsonpath": "string", "var_name": "string"}, "requires_confirm": True},
         _handle_graph_template_parametrize,
     )
-    register_command(
+    _register_if_missing(
         "graph.patch",
         {"inputs": {"message": "string"}, "requires_confirm": True},
         _handle_graph_patch,
     )
-    register_command(
+    _register_if_missing(
         "schedule.add",
         {"inputs": {"template_id": "string", "cron": "string", "vars": "object"}, "requires_confirm": True},
         _handle_schedule_add,
     )
-    register_command(
+    _register_if_missing(
         "schedule.run_now",
         {"inputs": {"schedule_id": "string"}},
         _handle_schedule_run_now,
     )
 
     _DEFAULT_REGISTERED = True
+
+
+def _register_if_missing(name: str, schema: dict[str, Any], handler: Any) -> None:
+    if get_command(name) is None:
+        register_command(name, schema, handler)
+
+
+def _has_default_commands() -> bool:
+    default_names = (
+        "projects.create",
+        "projects.list",
+        "projects.delete",
+        "projects.restore",
+        "graph.run",
+        "graph.show",
+        "graph.template.create",
+        "graph.template.parametrize",
+        "graph.patch",
+        "schedule.add",
+        "schedule.run_now",
+    )
+    return all(get_command(name) is not None for name in default_names)
 
 
 def _handle_projects_create(core: AmonCore, plan: CommandPlan) -> dict[str, Any]:
