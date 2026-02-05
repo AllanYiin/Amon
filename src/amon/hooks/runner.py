@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from amon.core import AmonCore
 from amon.fs.atomic import atomic_write_text
+from amon.events import emit_event
 from amon.logging import log_event
 
 from .matcher import match
@@ -182,6 +183,20 @@ def _guard_llm_policy(action_args: dict[str, Any], event: dict[str, Any]) -> Non
                     "hook_action": "graph.run",
                     "graph_path": str(graph_path),
                     "node_id": node.get("id"),
+                }
+            )
+            emit_event(
+                {
+                    "type": "policy.llm_blocked",
+                    "scope": "policy",
+                    "project_id": project_id,
+                    "actor": "system",
+                    "payload": {
+                        "hook_action": "graph.run",
+                        "graph_path": str(graph_path),
+                        "node_id": node.get("id"),
+                    },
+                    "risk": "medium",
                 }
             )
             raise PermissionError("graph node 使用 LLM 需 allow_llm=true")

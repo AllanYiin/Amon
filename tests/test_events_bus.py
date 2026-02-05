@@ -34,6 +34,8 @@ class EventBusTests(unittest.TestCase):
             lines = events_path.read_text(encoding="utf-8").strip().splitlines()
             self.assertEqual(len(lines), 1)
             payload = json.loads(lines[0])
+            required_fields = {"event_id", "ts", "type", "scope", "actor", "payload", "risk", "project_id"}
+            self.assertTrue(required_fields.issubset(payload.keys()))
             self.assertEqual(payload["event_id"], event_id)
             self.assertEqual(payload["type"], "project.create")
             self.assertEqual(payload["scope"], "project")

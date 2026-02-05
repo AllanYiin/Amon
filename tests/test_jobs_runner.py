@@ -65,6 +65,10 @@ class JobRunnerTests(unittest.TestCase):
                 events_path = Path(temp_dir) / "events" / "events.jsonl"
                 self._wait_for_file(events_path, timeout=4)
                 self._wait_for_event(events_path, "doc.updated", timeout=4)
+                state_path = Path(temp_dir) / "jobs" / "state" / f"{job_id}.json"
+                self._wait_for_file(state_path, timeout=3)
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+                self.assertIsNotNone(state.get("last_event_id"))
             finally:
                 stop_job(job_id)
                 os.environ.pop("AMON_HOME", None)

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 
-REQUIRED_FIELDS = {"ts", "type", "scope", "actor", "payload", "risk"}
+REQUIRED_FIELDS = {"event_id", "ts", "type", "scope", "actor", "payload", "risk"}
 
 
 def emit_event(event: dict[str, Any], *, dispatch_hooks: bool | None = None) -> str:
@@ -19,13 +19,14 @@ def emit_event(event: dict[str, Any], *, dispatch_hooks: bool | None = None) -> 
     payload = dict(event or {})
     if not isinstance(payload, dict):
         raise ValueError("event 必須為 dict")
+    payload.setdefault("event_id", _generate_event_id())
     payload.setdefault("ts", _now_iso())
+    payload.setdefault("project_id", None)
     missing = sorted(field for field in REQUIRED_FIELDS if field not in payload)
     if missing:
         raise ValueError(f"event 缺少必要欄位：{', '.join(missing)}")
     if "project_id" in payload and payload["project_id"] == "":
         payload["project_id"] = None
-    payload.setdefault("event_id", _generate_event_id())
     _atomic_append_jsonl(_events_path(), payload)
     if dispatch_hooks is None:
         dispatch_hooks = os.environ.get("AMON_DISABLE_HOOK_DISPATCH") != "1"
