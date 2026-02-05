@@ -29,6 +29,8 @@ class ActionQueue:
     _queue: queue.Queue[dict[str, Any]] = field(default_factory=queue.Queue, init=False)
     _stop_event: threading.Event = field(default_factory=threading.Event, init=False)
     _workers: list[threading.Thread] = field(default_factory=list, init=False)
+    _cancel_events: dict[str, threading.Event] = field(default_factory=dict, init=False)
+    _lock: threading.Lock = field(default_factory=threading.Lock, init=False)
 
     def start(self) -> None:
         if self._workers:
@@ -55,8 +57,19 @@ class ActionQueue:
         payload = dict(action or {})
         action_id = str(payload.get("action_id") or uuid4().hex)
         payload["action_id"] = action_id
+        cancel_event = threading.Event()
+        with self._lock:
+            self._cancel_events[action_id] = cancel_event
         self._queue.put(payload)
         return action_id
+
+    def cancel_action(self, action_id: str) -> bool:
+        with self._lock:
+            cancel_event = self._cancel_events.get(action_id)
+        if not cancel_event:
+            return False
+        cancel_event.set()
+        return True
 
     def wait_for_idle(self, timeout: float | None = None) -> bool:
         start = time.monotonic()
@@ -76,16 +89,23 @@ class ActionQueue:
             except queue.Empty:
                 continue
             try:
+                action_id = str(action.get("action_id") or "")
+                with self._lock:
+                    cancel_event = self._cancel_events.get(action_id)
                 execute_hook_action(
                     action,
                     tool_executor=self.tool_executor,
                     graph_runner=self.graph_runner,
                     data_dir=self.data_dir,
                     allow_llm=self.allow_llm,
+                    cancel_event=cancel_event,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.error("執行 action 失敗：%s", exc, exc_info=True)
             finally:
+                if action_id:
+                    with self._lock:
+                        self._cancel_events.pop(action_id, None)
                 self._queue.task_done()
 
 
@@ -124,3 +144,7 @@ def get_action_queue() -> ActionQueue:
 
 def enqueue_action(action: dict[str, Any]) -> str:
     return get_action_queue().enqueue_action(action)
+
+
+def cancel_action(action_id: str) -> bool:
+    return get_action_queue().cancel_action(action_id)
