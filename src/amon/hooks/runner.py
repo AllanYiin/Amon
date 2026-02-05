@@ -8,6 +8,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
+from threading import Event
 from uuid import uuid4
 
 from amon.core import AmonCore
@@ -24,7 +25,7 @@ from .utils import render_template
 
 logger = logging.getLogger(__name__)
 
-ToolExecutor = Callable[[str, dict[str, Any], str | None], dict[str, Any]]
+ToolExecutor = Callable[..., dict[str, Any]]
 GraphRunner = Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]
 
 
@@ -58,10 +59,17 @@ def _append_pending_action(hook: Hook, event: dict[str, Any], action_args: dict[
         handle.write("\n")
 
 
-def _default_tool_executor(tool_name: str, args: dict[str, Any], project_id: str | None) -> dict[str, Any]:
+def _default_tool_executor(
+    tool_name: str,
+    args: dict[str, Any],
+    project_id: str | None,
+    *,
+    timeout_s: int | None = None,
+    cancel_event: Event | None = None,
+) -> dict[str, Any]:
     core = AmonCore()
     core.ensure_base_structure()
-    return core.run_tool(tool_name, args, project_id=project_id)
+    return core.run_tool(tool_name, args, project_id=project_id, timeout_s=timeout_s, cancel_event=cancel_event)
 
 
 def _default_graph_runner(action_args: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
@@ -93,12 +101,16 @@ def process_event(
     state_store: HookStateStore | None = None,
     data_dir: Path | None = None,
     allow_llm: bool = False,
+    enqueue_action: Callable[[dict[str, Any]], str] | None = None,
 ) -> list[dict[str, Any]]:
     current_time = now or datetime.now().astimezone()
     store = state_store or HookStateStore(data_dir=data_dir)
-    executor = tool_executor or _default_tool_executor
-    runner = graph_runner or _default_graph_runner
     results: list[dict[str, Any]] = []
+    enqueue = enqueue_action
+    if enqueue is None:
+        from amon.daemon.queue import enqueue_action as default_enqueue_action
+
+        enqueue = default_enqueue_action
 
     for hook in match(event, now=current_time, state_store=store):
         args = render_template(hook.action.args or {}, event)
@@ -113,22 +125,22 @@ def process_event(
             store.increment_inflight(hook.hook_id)
             try:
                 _validate_tool_args(hook.action.tool, args, event, hook.hook_id)
-                result = executor(hook.action.tool, args, event.get("project_id"))
-                results.append({"hook_id": hook.hook_id, "status": "executed", "result": result})
-                log_event(
+                action_id = enqueue(
                     {
-                        "event": "hook_action_executed",
                         "hook_id": hook.hook_id,
                         "action_type": hook.action.type,
-                        "event_id": event.get("event_id"),
+                        "tool": hook.action.tool,
+                        "action_args": args,
+                        "event": event,
+                        "allow_llm": allow_llm,
                     }
                 )
-            except Exception as exc:  # noqa: BLE001
-                logger.error("Hook %s 執行工具失敗：%s", hook.hook_id, exc, exc_info=True)
-                results.append({"hook_id": hook.hook_id, "status": "failed", "error": str(exc)})
-            finally:
-                store.decrement_inflight(hook.hook_id)
                 store.record_trigger(hook.hook_id, current_time, dedupe_key)
+                results.append({"hook_id": hook.hook_id, "status": "queued", "action_id": action_id})
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Hook %s 佇列工具失敗：%s", hook.hook_id, exc, exc_info=True)
+                results.append({"hook_id": hook.hook_id, "status": "failed", "error": str(exc)})
+                store.decrement_inflight(hook.hook_id)
             continue
 
         if hook.action.type == "graph.run":
@@ -136,28 +148,128 @@ def process_event(
             try:
                 if not allow_llm:
                     _guard_llm_policy(args, event)
-                result = runner(args, event)
-                results.append({"hook_id": hook.hook_id, "status": "executed", "result": result})
-                log_event(
+                action_id = enqueue(
                     {
-                        "event": "hook_action_executed",
                         "hook_id": hook.hook_id,
                         "action_type": hook.action.type,
-                        "event_id": event.get("event_id"),
-                        "run_id": result.get("run_id"),
+                        "action_args": args,
+                        "event": event,
+                        "allow_llm": allow_llm,
                     }
                 )
-            except Exception as exc:  # noqa: BLE001
-                logger.error("Hook %s 執行 graph 失敗：%s", hook.hook_id, exc, exc_info=True)
-                results.append({"hook_id": hook.hook_id, "status": "failed", "error": str(exc)})
-            finally:
-                store.decrement_inflight(hook.hook_id)
                 store.record_trigger(hook.hook_id, current_time, dedupe_key)
+                results.append({"hook_id": hook.hook_id, "status": "queued", "action_id": action_id})
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Hook %s 佇列 graph 失敗：%s", hook.hook_id, exc, exc_info=True)
+                results.append({"hook_id": hook.hook_id, "status": "failed", "error": str(exc)})
+                store.decrement_inflight(hook.hook_id)
             continue
-        else:
-            results.append({"hook_id": hook.hook_id, "status": "skipped", "reason": "unsupported_action"})
+
+        results.append({"hook_id": hook.hook_id, "status": "skipped", "reason": "unsupported_action"})
 
     return results
+
+
+def execute_hook_action(
+    action: dict[str, Any],
+    *,
+    tool_executor: ToolExecutor | None = None,
+    graph_runner: GraphRunner | None = None,
+    state_store: HookStateStore | None = None,
+    data_dir: Path | None = None,
+    allow_llm: bool | None = None,
+    cancel_event: Event | None = None,
+) -> dict[str, Any]:
+    store = state_store or HookStateStore(data_dir=data_dir)
+    executor = tool_executor or _default_tool_executor
+    runner = graph_runner or _default_graph_runner
+    hook_id = str(action.get("hook_id") or "")
+    action_type = str(action.get("action_type") or "")
+    args = action.get("action_args") or {}
+    event = action.get("event") or {}
+    llm_allowed = allow_llm if allow_llm is not None else bool(action.get("allow_llm", False))
+
+    timeout_s = _resolve_timeout(action)
+    if cancel_event and cancel_event.is_set():
+        return {"hook_id": hook_id, "status": "canceled"}
+
+    try:
+        if action_type == "tool.call":
+            tool_name = str(action.get("tool") or "")
+            if not tool_name:
+                raise ValueError("tool.call 缺少 tool")
+            _validate_tool_args(tool_name, args, event, hook_id)
+            result = _call_tool_executor(
+                executor,
+                tool_name,
+                args,
+                event.get("project_id"),
+                timeout_s=timeout_s,
+                cancel_event=cancel_event,
+            )
+            log_event(
+                {
+                    "event": "hook_action_executed",
+                    "hook_id": hook_id,
+                    "action_type": action_type,
+                    "event_id": event.get("event_id"),
+                }
+            )
+            return {"hook_id": hook_id, "status": "executed", "result": result}
+        if action_type == "graph.run":
+            if not llm_allowed:
+                _guard_llm_policy(args, event)
+            result = runner(args, event)
+            log_event(
+                {
+                    "event": "hook_action_executed",
+                    "hook_id": hook_id,
+                    "action_type": action_type,
+                    "event_id": event.get("event_id"),
+                    "run_id": result.get("run_id"),
+                }
+            )
+            return {"hook_id": hook_id, "status": "executed", "result": result}
+        return {"hook_id": hook_id, "status": "skipped", "reason": "unsupported_action"}
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Hook %s 執行 action 失敗：%s", hook_id, exc, exc_info=True)
+        return {"hook_id": hook_id, "status": "failed", "error": str(exc)}
+    finally:
+        if hook_id:
+            store.decrement_inflight(hook_id)
+
+
+def _call_tool_executor(
+    executor: ToolExecutor,
+    tool_name: str,
+    args: dict[str, Any],
+    project_id: str | None,
+    *,
+    timeout_s: int,
+    cancel_event: Event | None,
+) -> dict[str, Any]:
+    try:
+        return executor(
+            tool_name,
+            args,
+            project_id,
+            timeout_s=timeout_s,
+            cancel_event=cancel_event,
+        )
+    except TypeError:
+        return executor(tool_name, args, project_id)
+
+
+def _resolve_timeout(action: dict[str, Any]) -> int:
+    raw = action.get("timeout_s") or action.get("tool_timeout_s")
+    if raw is None:
+        env_value = os.environ.get("AMON_TOOL_TIMEOUT") or os.environ.get("AMON_TOOL_TIMEOUT_S")
+        raw = env_value
+    try:
+        timeout = int(raw) if raw is not None else 60
+    except (TypeError, ValueError):
+        timeout = 60
+    return max(timeout, 1)
 
 
 def _guard_llm_policy(action_args: dict[str, Any], event: dict[str, Any]) -> None:
