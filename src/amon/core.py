@@ -80,6 +80,7 @@ class AmonCore:
         self.trash_dir = self.data_dir / "trash"
         self.skills_dir = self.data_dir / "skills"
         self.templates_dir = self.data_dir / "templates"
+        self.schedules_dir = self.data_dir / "schedules"
         self.python_env_dir = self.data_dir / "python_env"
         self.node_env_dir = self.data_dir / "node_env"
         self.billing_log = self.logs_dir / "billing.log"
@@ -94,6 +95,7 @@ class AmonCore:
             self.trash_dir,
             self.skills_dir,
             self.templates_dir,
+            self.schedules_dir,
             self.python_env_dir,
             self.node_env_dir,
         ]:
@@ -124,6 +126,13 @@ class AmonCore:
                 self._atomic_write_text(registry_path, json.dumps({"tools": []}, ensure_ascii=False, indent=2))
             except OSError as exc:
                 self.logger.error("建立工具 registry 失敗：%s", exc, exc_info=True)
+                raise
+        schedules_path = self.schedules_dir / "schedules.json"
+        if not schedules_path.exists():
+            try:
+                self._atomic_write_text(schedules_path, json.dumps({"schedules": []}, ensure_ascii=False, indent=2))
+            except OSError as exc:
+                self.logger.error("建立排程資料失敗：%s", exc, exc_info=True)
                 raise
 
     def initialize(self) -> None:

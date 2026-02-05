@@ -10,6 +10,7 @@ from typing import Any
 
 from amon.chat.session_store import append_event
 from amon.core import AmonCore
+from amon.scheduler.engine import load_schedules, write_schedules
 from amon.fs.safety import make_change_plan
 
 from .registry import get_command, register_command
@@ -114,7 +115,18 @@ def _ensure_default_commands() -> None:
     )
     _register_if_missing(
         "schedule.add",
-        {"inputs": {"template_id": "string", "cron": "string", "vars": "object"}, "requires_confirm": True},
+        {
+            "inputs": {
+                "template_id": "string",
+                "cron": "string",
+                "interval_seconds": "number",
+                "run_at": "string",
+                "vars": "object",
+                "misfire_grace_seconds": "number",
+                "jitter_seconds": "number",
+            },
+            "requires_confirm": True,
+        },
         _handle_schedule_add,
     )
     _register_if_missing(
@@ -271,21 +283,35 @@ def _handle_graph_patch(core: AmonCore, plan: CommandPlan) -> dict[str, Any]:
 def _handle_schedule_add(core: AmonCore, plan: CommandPlan) -> dict[str, Any]:
     template_id = str(plan.args.get("template_id", "")).strip()
     cron = str(plan.args.get("cron", "")).strip()
+    interval_seconds = plan.args.get("interval_seconds")
+    run_at = plan.args.get("run_at")
     vars_payload = plan.args.get("vars") or {}
     if not template_id:
         raise ValueError("template_id 不可為空")
-    if not cron:
-        raise ValueError("cron 不可為空")
+    if not cron and interval_seconds is None and not run_at:
+        raise ValueError("請提供 cron、interval_seconds 或 run_at")
     if not isinstance(vars_payload, dict):
         raise ValueError("vars 需為物件")
+    if interval_seconds is not None:
+        try:
+            interval_seconds = float(interval_seconds)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("interval_seconds 需為數字") from exc
+        if interval_seconds <= 0:
+            raise ValueError("interval_seconds 需大於 0")
 
     schedules = _load_schedules(core)
     schedule_id = uuid.uuid4().hex
     schedule = {
         "schedule_id": schedule_id,
         "template_id": template_id,
-        "cron": cron,
+        "cron": cron or None,
+        "interval_seconds": interval_seconds,
+        "run_at": run_at,
         "vars": vars_payload,
+        "type": _resolve_schedule_type(cron, interval_seconds, run_at),
+        "misfire_grace_seconds": plan.args.get("misfire_grace_seconds"),
+        "jitter_seconds": plan.args.get("jitter_seconds"),
         "created_at": core._now(),
     }
     schedules["schedules"].append(schedule)
@@ -360,23 +386,29 @@ def _resolve_graph_path(project_path: Path, graph_path: str) -> Path:
 
 
 def _load_schedules(core: AmonCore) -> dict[str, Any]:
-    path = core.cache_dir / "schedules.json"
-    if not path.exists():
-        return {"schedules": []}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        return load_schedules(data_dir=core.data_dir)
+    except ValueError as exc:
         core.logger.error("讀取排程資料失敗：%s", exc, exc_info=True)
-        raise ValueError("排程資料讀取失敗") from exc
+        raise
 
 
 def _write_schedules(core: AmonCore, payload: dict[str, Any]) -> None:
-    path = core.cache_dir / "schedules.json"
     try:
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        write_schedules(payload, data_dir=core.data_dir)
     except OSError as exc:
         core.logger.error("寫入排程資料失敗：%s", exc, exc_info=True)
         raise
+
+
+def _resolve_schedule_type(cron: str, interval_seconds: Any, run_at: Any) -> str:
+    if interval_seconds is not None:
+        return "interval"
+    if run_at:
+        return "one_shot"
+    if cron:
+        return "cron"
+    return "interval"
 
 
 def _extract_event_payload(result: dict[str, Any]) -> dict[str, Any]:
