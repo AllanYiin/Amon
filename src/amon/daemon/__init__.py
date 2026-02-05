@@ -15,6 +15,8 @@ from amon.jobs.runner import start_job
 from amon.logging import log_event
 from amon.scheduler.engine import tick
 
+from .queue import configure_action_queue
+
 
 EventEmitter = Callable[[dict[str, Any]], str]
 
@@ -31,6 +33,7 @@ def run_daemon(
     os.environ.setdefault("AMON_DISABLE_HOOK_DISPATCH", "1")
     event_queue: deque[dict[str, Any]] = deque()
     started_jobs: set[str] = set()
+    action_queue = configure_action_queue(tool_executor=tool_executor, data_dir=core.data_dir)
 
     def queue_emitter(event: dict[str, Any]) -> str:
         event_id = emit_event(event, dispatch_hooks=False)
@@ -43,7 +46,7 @@ def run_daemon(
         try:
             _ensure_jobs_started(core.data_dir, started_jobs, queue_emitter)
             tick(data_dir=core.data_dir, event_emitter=queue_emitter)
-            _drain_event_queue(core, event_queue, tool_executor=tool_executor)
+            _drain_event_queue(core, event_queue)
         except Exception as exc:  # noqa: BLE001
             logger.error("Scheduler tick 失敗：%s", exc, exc_info=True)
         try:
@@ -51,6 +54,7 @@ def run_daemon(
         except KeyboardInterrupt:
             logger.info("Daemon 已停止")
             break
+    action_queue.stop()
 
 
 def run_daemon_once(
@@ -62,6 +66,7 @@ def run_daemon_once(
     core.ensure_base_structure()
     os.environ.setdefault("AMON_DISABLE_HOOK_DISPATCH", "1")
     event_queue: deque[dict[str, Any]] = deque()
+    action_queue = configure_action_queue(tool_executor=tool_executor, data_dir=core.data_dir)
 
     def queue_emitter(event: dict[str, Any]) -> str:
         event_id = emit_event(event, dispatch_hooks=False)
@@ -72,7 +77,9 @@ def run_daemon_once(
 
     _ensure_jobs_started(core.data_dir, set(), queue_emitter)
     tick(data_dir=core.data_dir, event_emitter=queue_emitter)
-    _drain_event_queue(core, event_queue, tool_executor=tool_executor)
+    _drain_event_queue(core, event_queue)
+    action_queue.wait_for_idle(timeout=10)
+    action_queue.stop()
 
 
 def _ensure_jobs_started(data_dir: Path, started_jobs: set[str], emitter: EventEmitter) -> None:
@@ -94,15 +101,12 @@ def _ensure_jobs_started(data_dir: Path, started_jobs: set[str], emitter: EventE
 def _drain_event_queue(
     core: AmonCore,
     event_queue: deque[dict[str, Any]],
-    *,
-    tool_executor: Callable[[str, dict[str, Any], str | None], dict[str, Any]] | None = None,
 ) -> None:
     while event_queue:
         event = event_queue.popleft()
         try:
             results = process_event(
                 event,
-                tool_executor=tool_executor or core.run_tool,
                 data_dir=core.data_dir,
                 allow_llm=False,
             )
