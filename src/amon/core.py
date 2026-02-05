@@ -80,6 +80,7 @@ class AmonCore:
         self.projects_dir = self.data_dir / "projects"
         self.trash_dir = self.data_dir / "trash"
         self.skills_dir = self.data_dir / "skills"
+        self.tools_dir = self.data_dir / "tools"
         self.templates_dir = self.data_dir / "templates"
         self.schedules_dir = self.data_dir / "schedules"
         self.python_env_dir = self.data_dir / "python_env"
@@ -95,6 +96,7 @@ class AmonCore:
             self.projects_dir,
             self.trash_dir,
             self.skills_dir,
+            self.tools_dir,
             self.templates_dir,
             self.schedules_dir,
             self.python_env_dir,

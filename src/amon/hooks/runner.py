@@ -72,7 +72,12 @@ def _default_tool_executor(
     return core.run_tool(tool_name, args, project_id=project_id, timeout_s=timeout_s, cancel_event=cancel_event)
 
 
-def _default_graph_runner(action_args: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
+def _default_graph_runner(
+    action_args: dict[str, Any],
+    event: dict[str, Any],
+    *,
+    cancel_event: Event | None = None,
+) -> dict[str, Any]:
     core = AmonCore()
     core.ensure_base_structure()
     project_id = action_args.get("project_id") or event.get("project_id")
@@ -219,7 +224,12 @@ def execute_hook_action(
         if action_type == "graph.run":
             if not llm_allowed:
                 _guard_llm_policy(args, event)
-            result = runner(args, event)
+            result = _call_graph_runner(
+                runner,
+                args,
+                event,
+                cancel_event=cancel_event,
+            )
             log_event(
                 {
                     "event": "hook_action_executed",
@@ -258,6 +268,19 @@ def _call_tool_executor(
         )
     except TypeError:
         return executor(tool_name, args, project_id)
+
+
+def _call_graph_runner(
+    runner: GraphRunner,
+    action_args: dict[str, Any],
+    event: dict[str, Any],
+    *,
+    cancel_event: Event | None,
+) -> dict[str, Any]:
+    try:
+        return runner(action_args, event, cancel_event=cancel_event)
+    except TypeError:
+        return runner(action_args, event)
 
 
 def _resolve_timeout(action: dict[str, Any]) -> int:
@@ -395,6 +418,7 @@ def _run_graph(
         graph_path=graph_path,
         variables=variables,
         run_id=run_id,
+        cancel_event=cancel_event,
     )
     result = runtime.run()
     return {"run_id": result.run_id, "run_dir": str(result.run_dir)}
