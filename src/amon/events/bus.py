@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 from datetime import datetime
@@ -26,6 +27,7 @@ def emit_event(event: dict[str, Any]) -> str:
         payload["project_id"] = None
     payload.setdefault("event_id", _generate_event_id())
     _atomic_append_jsonl(_events_path(), payload)
+    _dispatch_hooks(payload)
     return str(payload["event_id"])
 
 
@@ -62,3 +64,15 @@ def _now_iso() -> str:
 
 def _generate_event_id() -> str:
     return datetime.now().astimezone().strftime("%Y%m%d%H%M%S%f")
+
+
+def _dispatch_hooks(payload: dict[str, Any]) -> None:
+    try:
+        from amon.hooks.runner import process_event
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger(__name__).error("載入 hook runner 失敗：%s", exc, exc_info=True)
+        return
+    try:
+        process_event(payload)
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger(__name__).error("Hook 執行失敗：%s", exc, exc_info=True)
