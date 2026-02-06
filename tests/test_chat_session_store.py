@@ -59,6 +59,15 @@ class ChatSessionStoreTests(unittest.TestCase):
             payloads = [json.loads(line) for line in lines]
             self.assertTrue(all(payload["type"] == "assistant_chunk" for payload in payloads))
 
+    def test_rejects_invalid_project_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                with self.assertRaises(ValueError):
+                    create_chat_session("../escape")
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
 
 if __name__ == "__main__":
     unittest.main()

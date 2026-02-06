@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 DEFAULT_DENYLIST = {
     ".ssh",
@@ -11,6 +12,8 @@ DEFAULT_DENYLIST = {
     ".kube",
     ".docker",
 }
+
+_SAFE_IDENTIFIER_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$")
 
 
 def make_change_plan(ops: list[dict[str, str]]) -> str:
@@ -52,3 +55,18 @@ def _is_within(target: Path, base: Path) -> bool:
 
 def _contains_denied_segment(path: Path) -> bool:
     return any(part in DEFAULT_DENYLIST for part in path.parts)
+
+
+def validate_identifier(value: str, field_name: str) -> None:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name} 不可為空")
+    if not _SAFE_IDENTIFIER_RE.match(value):
+        raise ValueError(f"{field_name} 格式不正確")
+
+
+def validate_project_id(project_id: str) -> None:
+    validate_identifier(project_id, "project_id")
+
+
+def validate_run_id(run_id: str) -> None:
+    validate_identifier(run_id, "run_id")

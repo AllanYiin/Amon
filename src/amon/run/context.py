@@ -9,12 +9,12 @@ from pathlib import Path
 from typing import Any
 
 from amon.logging import log_event
+from amon.fs.safety import validate_run_id
 
 
 def append_run_constraints(run_id: str, constraints: list[str]) -> None:
     """Append run context constraints to the run events log."""
-    if not run_id:
-        raise ValueError("run_id 不可為空")
+    validate_run_id(run_id)
     if not isinstance(constraints, list) or any(not isinstance(item, str) for item in constraints):
         raise ValueError("constraints 必須為字串陣列")
 
@@ -45,8 +45,7 @@ def append_run_constraints(run_id: str, constraints: list[str]) -> None:
 
 def get_effective_constraints(run_id: str) -> list[str]:
     """Return the latest constraints from run events."""
-    if not run_id:
-        raise ValueError("run_id 不可為空")
+    validate_run_id(run_id)
 
     run_dir = _resolve_run_dir(run_id)
     events_path = run_dir / "events.jsonl"

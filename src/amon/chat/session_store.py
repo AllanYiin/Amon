@@ -10,11 +10,11 @@ from pathlib import Path
 from typing import Any
 
 from amon.logging import log_event
+from amon.fs.safety import validate_project_id
 
 
 def create_chat_session(project_id: str) -> str:
-    if not project_id:
-        raise ValueError("project_id 不可為空")
+    validate_project_id(project_id)
 
     chat_id = uuid.uuid4().hex
     session_path = _chat_session_path(project_id, chat_id)
@@ -47,6 +47,10 @@ def append_event(chat_id: str, event: dict[str, Any]) -> None:
     missing_fields = [key for key in ("type", "text", "project_id") if not event.get(key)]
     if missing_fields:
         raise ValueError(f"event 缺少必要欄位：{', '.join(missing_fields)}")
+    project_id = event.get("project_id")
+    if not isinstance(project_id, str):
+        raise ValueError("project_id 需為字串")
+    validate_project_id(project_id)
 
     payload = dict(event)
     payload.setdefault("ts", _now_iso())

@@ -44,16 +44,23 @@ def load_tool_spec(tool_dir: Path) -> ToolSpec:
         data = yaml.safe_load(tool_yaml.read_text(encoding="utf-8")) or {}
     except (OSError, yaml.YAMLError) as exc:
         raise ToolingError(f"讀取 tool.yaml 失敗：{tool_yaml}") from exc
-    missing = [key for key in ["name", "version", "inputs_schema", "outputs_schema", "risk_level", "allowed_paths"] if key not in data]
+    missing = [
+        key
+        for key in ["name", "version", "inputs_schema", "outputs_schema", "risk_level", "allowed_paths"]
+        if key not in data
+    ]
     if missing:
         raise ToolingError(f"tool.yaml 缺少欄位：{', '.join(missing)}")
+    allowed_paths = data.get("allowed_paths")
+    if not isinstance(allowed_paths, list) or any(not isinstance(path, str) for path in allowed_paths):
+        raise ToolingError("tool.yaml allowed_paths 必須為字串陣列")
     return ToolSpec(
         name=str(data["name"]),
         version=str(data["version"]),
         inputs_schema=data["inputs_schema"] or {},
         outputs_schema=data["outputs_schema"] or {},
         risk_level=str(data["risk_level"]),
-        allowed_paths=list(data.get("allowed_paths") or []),
+        allowed_paths=list(allowed_paths or []),
     )
 
 
