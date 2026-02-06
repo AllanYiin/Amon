@@ -60,6 +60,16 @@ class ConfigLoaderTests(unittest.TestCase):
             finally:
                 os.environ.pop("AMON_HOME", None)
 
+    def test_rejects_invalid_project_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                loader = ConfigLoader()
+                with self.assertRaises(ValueError):
+                    loader.load_project("../escape")
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
 
 if __name__ == "__main__":
     unittest.main()

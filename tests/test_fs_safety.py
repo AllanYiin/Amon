@@ -8,6 +8,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from amon.core import AmonCore
+from amon.fs.safety import validate_project_id
 
 
 class FsSafetyTests(unittest.TestCase):
@@ -59,6 +60,11 @@ class FsSafetyTests(unittest.TestCase):
                         core.fs_delete(outside_path)
             finally:
                 os.environ.pop("AMON_HOME", None)
+
+    def test_project_id_allows_unicode_and_rejects_traversal(self) -> None:
+        validate_project_id("排程專案-9150a8")
+        with self.assertRaises(ValueError):
+            validate_project_id("../escape")
 
 
 if __name__ == "__main__":

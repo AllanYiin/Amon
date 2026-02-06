@@ -11,6 +11,7 @@ from typing import Any, Mapping
 import yaml
 
 from .fs.atomic import atomic_write_text
+from .fs.safety import validate_project_id
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "amon": {
@@ -186,4 +187,5 @@ class ConfigLoader:
         return self.data_dir / "config.yaml"
 
     def _project_config_path(self, project_id: str) -> Path:
+        validate_project_id(project_id)
         return self.data_dir / "projects" / project_id / DEFAULT_CONFIG["projects"]["config_name"]

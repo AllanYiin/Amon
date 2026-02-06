@@ -15,3 +15,5 @@ jobs:
           python-version: "3.12"
       - name: Compile all Python files
         run: python -m compileall src tests
+      - name: Scan for Unicode control characters
+        run: python tools/scan_unicode_controls.py --include-zero-width

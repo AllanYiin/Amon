@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 
 DEFAULT_DENYLIST = {
     ".ssh",
@@ -11,6 +12,8 @@ DEFAULT_DENYLIST = {
     ".kube",
     ".docker",
 }
+
+_MAX_IDENTIFIER_LENGTH = 128
 
 
 def make_change_plan(ops: list[dict[str, str]]) -> str:
@@ -52,3 +55,31 @@ def _is_within(target: Path, base: Path) -> bool:
 
 def _contains_denied_segment(path: Path) -> bool:
     return any(part in DEFAULT_DENYLIST for part in path.parts)
+
+
+def validate_identifier(value: str, field_name: str) -> None:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name} 不可為空")
+    if value.strip() != value or any(ch.isspace() for ch in value):
+        raise ValueError(f"{field_name} 格式不正確")
+    if value in {".", ".."} or ".." in value:
+        raise ValueError(f"{field_name} 格式不正確")
+    if len(value) > _MAX_IDENTIFIER_LENGTH:
+        raise ValueError(f"{field_name} 格式不正確")
+    if any(ord(ch) < 32 for ch in value):
+        raise ValueError(f"{field_name} 格式不正確")
+    separators = {"/", "\\"}
+    if os.sep:
+        separators.add(os.sep)
+    if os.altsep:
+        separators.add(os.altsep)
+    if any(sep in value for sep in separators):
+        raise ValueError(f"{field_name} 格式不正確")
+
+
+def validate_project_id(project_id: str) -> None:
+    validate_identifier(project_id, "project_id")
+
+
+def validate_run_id(run_id: str) -> None:
+    validate_identifier(run_id, "run_id")
