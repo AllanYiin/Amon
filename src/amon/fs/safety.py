@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-import re
+import os
 
 DEFAULT_DENYLIST = {
     ".ssh",
@@ -13,7 +13,7 @@ DEFAULT_DENYLIST = {
     ".docker",
 }
 
-_SAFE_IDENTIFIER_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$")
+_MAX_IDENTIFIER_LENGTH = 128
 
 
 def make_change_plan(ops: list[dict[str, str]]) -> str:
@@ -60,7 +60,20 @@ def _contains_denied_segment(path: Path) -> bool:
 def validate_identifier(value: str, field_name: str) -> None:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field_name} 不可為空")
-    if not _SAFE_IDENTIFIER_RE.match(value):
+    if value.strip() != value or any(ch.isspace() for ch in value):
+        raise ValueError(f"{field_name} 格式不正確")
+    if value in {".", ".."} or ".." in value:
+        raise ValueError(f"{field_name} 格式不正確")
+    if len(value) > _MAX_IDENTIFIER_LENGTH:
+        raise ValueError(f"{field_name} 格式不正確")
+    if any(ord(ch) < 32 for ch in value):
+        raise ValueError(f"{field_name} 格式不正確")
+    separators = {"/", "\\"}
+    if os.sep:
+        separators.add(os.sep)
+    if os.altsep:
+        separators.add(os.altsep)
+    if any(sep in value for sep in separators):
         raise ValueError(f"{field_name} 格式不正確")
 
 
