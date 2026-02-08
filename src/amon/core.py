@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import uuid
 import zipfile
 from collections import Counter
@@ -1837,15 +1838,36 @@ class AmonCore:
 
     def call_mcp_tool(self, server_name: str, tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
         self.ensure_base_structure()
+        from .tooling.audit import FileAuditSink, default_audit_log_path
+        from .tooling.types import ToolCall, ToolResult
+
+        start = time.monotonic()
+        def _duration_ms() -> int:
+            return max(0, int((time.monotonic() - start) * 1000))
+
+        audit_sink = FileAuditSink(default_audit_log_path())
         config = self.load_config()
         servers = {server.name: server for server in self._load_mcp_servers(config)}
         if server_name not in servers:
             raise KeyError(f"找不到 MCP server：{server_name}")
         server = servers[server_name]
         full_tool = f"{server_name}:{tool_name}"
+        call = ToolCall(tool=full_tool, args=args, caller="mcp")
         if self._is_tool_denied(full_tool, config, server):
+            result = ToolResult(
+                content=[{"type": "text", "text": "DENIED_BY_POLICY: 工具已被拒絕"}],
+                is_error=True,
+                meta={"status": "denied"},
+            )
+            audit_sink.record(call, result, "deny", duration_ms=_duration_ms(), source="mcp")
             raise PermissionError("DENIED_BY_POLICY: 工具已被拒絕")
         if not self._is_tool_allowed(full_tool, config, server):
+            result = ToolResult(
+                content=[{"type": "text", "text": "DENIED_BY_POLICY: 工具尚未被允許"}],
+                is_error=True,
+                meta={"status": "denied"},
+            )
+            audit_sink.record(call, result, "deny", duration_ms=_duration_ms(), source="mcp")
             raise PermissionError("DENIED_BY_POLICY: 工具尚未被允許")
         if self._is_high_risk_tool(tool_name):
             plan = make_change_plan(
@@ -1865,6 +1887,12 @@ class AmonCore:
                         "tool_name": full_tool,
                     }
                 )
+                result = ToolResult(
+                    content=[{"type": "text", "text": "使用者取消操作"}],
+                    is_error=True,
+                    meta={"status": "cancelled"},
+                )
+                audit_sink.record(call, result, "deny", duration_ms=_duration_ms(), source="mcp")
                 raise RuntimeError("使用者取消操作")
         if server.transport != "stdio" or not server.command:
             raise RuntimeError("目前僅支援 stdio transport")
@@ -1873,6 +1901,12 @@ class AmonCore:
                 result = client.call_tool(tool_name, args)
         except MCPClientError as exc:
             self.logger.error("MCP tool 呼叫失敗：%s", exc, exc_info=True)
+            error_result = ToolResult(
+                content=[{"type": "text", "text": f"MCP tool 呼叫失敗：{exc}"}],
+                is_error=True,
+                meta={"status": "client_error"},
+            )
+            audit_sink.record(call, error_result, "allow", duration_ms=_duration_ms(), source="mcp")
             raise
         is_error = bool(result.get("isError"))
         data_prompt = self._format_mcp_result(full_tool, result)
@@ -1885,6 +1919,12 @@ class AmonCore:
                 "result_summary": self._summarize_value(result),
             }
         )
+        audit_result = ToolResult(
+            content=[{"type": "json", "data": result}],
+            is_error=is_error,
+            meta={"status": "error" if is_error else "ok"},
+        )
+        audit_sink.record(call, audit_result, "allow", duration_ms=_duration_ms(), source="mcp")
         return {"tool": full_tool, "data": result, "data_prompt": data_prompt, "is_error": is_error}
 
     def forge_tool(self, project_id: str, tool_name: str, spec: str) -> Path:

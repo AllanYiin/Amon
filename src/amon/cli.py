@@ -534,7 +534,7 @@ def _handle_tools(core: AmonCore, args: argparse.Namespace) -> None:
             sys.exit(1)
         return
     if args.tools_command == "call":
-        from .tooling.audit import FileAuditSink
+        from .tooling.audit import FileAuditSink, default_audit_log_path
         from .tooling.runtime import build_registry
         from .tooling.types import ToolCall
 
@@ -548,15 +548,10 @@ def _handle_tools(core: AmonCore, args: argparse.Namespace) -> None:
         elif not tool_name.startswith("native:") and tool_name.startswith("native."):
             tool_name = tool_name.replace("native.", "native:", 1)
         workspace_root = core.get_project_path(args.project) if args.project else Path.cwd()
-        audit_log = (
-            core.get_project_path(args.project) / "logs" / "tool_audit.log"
-            if args.project
-            else core.logs_dir / "tool_audit.log"
-        )
         registry = build_registry(
             workspace_root,
             core.native_tool_dirs(args.project),
-            audit_sink=FileAuditSink(audit_log),
+            audit_sink=FileAuditSink(default_audit_log_path()),
         )
         result = registry.call(ToolCall(tool=tool_name, args=parsed_args, caller="cli", project_id=args.project))
         payload = _format_builtin_result(result)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import time
 from typing import Callable
 
 from .audit import AuditSink, NullAuditSink
@@ -37,15 +38,24 @@ class ToolRegistry:
         return self._handlers.get(name)
 
     def call(self, call: ToolCall, require_approval: bool = False) -> ToolResult:
+        start = time.monotonic()
         if call.tool not in self._handlers:
             result = ToolResult(
                 content=[{"type": "text", "text": f"Unknown tool: {call.tool}"}],
                 is_error=True,
                 meta={"status": "unknown_tool"},
             )
-            self.audit_sink.record(call, result, "deny")
+            self.audit_sink.record(
+                call,
+                result,
+                "deny",
+                duration_ms=_duration_ms(start),
+                source="unknown",
+            )
             return result
 
+        spec = self._specs.get(call.tool)
+        source = _resolve_source(spec)
         decision = self.policy.decide(call)
         if decision == "deny":
             result = ToolResult(
@@ -53,7 +63,13 @@ class ToolRegistry:
                 is_error=True,
                 meta={"status": "denied"},
             )
-            self.audit_sink.record(call, result, decision)
+            self.audit_sink.record(
+                call,
+                result,
+                decision,
+                duration_ms=_duration_ms(start),
+                source=source,
+            )
             return result
         if decision == "ask":
             if require_approval:
@@ -62,20 +78,38 @@ class ToolRegistry:
                     is_error=True,
                     meta={"status": "approval_required"},
                 )
-                self.audit_sink.record(call, result, decision)
+                self.audit_sink.record(
+                    call,
+                    result,
+                    decision,
+                    duration_ms=_duration_ms(start),
+                    source=source,
+                )
                 return result
             result = ToolResult(
                 content=[{"type": "text", "text": "Tool execution not approved."}],
                 is_error=True,
                 meta={"status": "approval_missing"},
             )
-            self.audit_sink.record(call, result, decision)
+            self.audit_sink.record(
+                call,
+                result,
+                decision,
+                duration_ms=_duration_ms(start),
+                source=source,
+            )
             return result
 
         self._apply_workspace_guard(call)
         handler = self._handlers[call.tool]
         result = handler(call)
-        self.audit_sink.record(call, result, decision)
+        self.audit_sink.record(
+            call,
+            result,
+            decision,
+            duration_ms=_duration_ms(start),
+            source=source,
+        )
         return result
 
     def _apply_workspace_guard(self, call: ToolCall) -> None:
@@ -90,3 +124,18 @@ class ToolRegistry:
             cwd = call.args.get("cwd")
             if isinstance(cwd, str):
                 self.workspace_guard.assert_in_workspace(cwd)
+
+
+def _resolve_source(spec: ToolSpec | None) -> str:
+    if not spec:
+        return "unknown"
+    annotations = spec.annotations or {}
+    if annotations.get("native"):
+        return "native"
+    if annotations.get("builtin"):
+        return "builtin"
+    return "builtin"
+
+
+def _duration_ms(start: float) -> int:
+    return max(0, int((time.monotonic() - start) * 1000))

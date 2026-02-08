@@ -1,0 +1,20 @@
+name: text_upper
+version: 0.1.0
+description: text_upper native tool
+risk: low
+input_schema:
+  type: object
+  properties:
+    text:
+      type: string
+      description: 要轉換的大寫文字
+  required:
+    - text
+output_schema:
+  type: object
+  properties:
+    result:
+      type: string
+  required:
+    - result
+default_permission: allow
