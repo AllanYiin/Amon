@@ -65,10 +65,19 @@ def trash_restore(trash_id: str, trash_root: Path) -> Path:
     items = manifest.get("items", [])
     if not items:
         raise ValueError("回收桶清單內容異常")
+    original_root = Path(manifest.get("original_root", "")).expanduser().resolve()
+    if not original_root:
+        raise ValueError("回收桶清單缺少 original_root")
+    if not _is_within(original_root, trash_root.parent.expanduser().resolve()):
+        raise ValueError("回收桶清單 original_root 不允許")
     original_path = Path(manifest.get("original_path", "")).expanduser().resolve()
     if not original_path:
         raise ValueError("回收桶清單缺少 original_path")
-    source = Path(items[0]["path"])
+    if not _is_within(original_path, original_root):
+        raise ValueError("回收桶清單 original_path 不允許")
+    source = Path(items[0]["path"]).expanduser().resolve()
+    if not _is_within(source, trash_dir.expanduser().resolve()):
+        raise ValueError("回收桶清單內容異常")
     if original_path.exists():
         raise FileExistsError("原始路徑已存在，無法還原")
     try:
@@ -92,3 +101,11 @@ def trash_restore(trash_id: str, trash_root: Path) -> Path:
         }
     )
     return original_path
+
+
+def _is_within(target: Path, base: Path) -> bool:
+    try:
+        target.relative_to(base)
+    except ValueError:
+        return False
+    return True

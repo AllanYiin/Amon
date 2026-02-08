@@ -28,7 +28,7 @@ import urllib.request
 import yaml
 
 from .config import DEFAULT_CONFIG, deep_merge, get_config_value, read_yaml, set_config_value, write_yaml
-from .fs.atomic import atomic_write_text
+from .fs.atomic import atomic_write_text, file_lock
 from .fs.safety import canonicalize_path, make_change_plan, require_confirm
 from .fs.trash import trash_move, trash_restore
 from .events import emit_event
@@ -331,9 +331,11 @@ class AmonCore:
     def set_config_value(self, key_path: str, value: Any, project_path: Path | None = None) -> None:
         self.ensure_base_structure()
         config_path = self._global_config_path() if project_path is None else project_path / self._project_config_name()
-        current = read_yaml(config_path)
-        updated = set_config_value(current, key_path, value)
-        write_yaml(config_path, updated)
+        lock_path = config_path.with_suffix(f"{config_path.suffix}.lock")
+        with file_lock(lock_path):
+            current = read_yaml(config_path)
+            updated = set_config_value(current, key_path, value)
+            write_yaml(config_path, updated)
 
     def run_agent_task(
         self,
@@ -3167,6 +3169,17 @@ if __name__ == "__main__":
         state: dict[str, Any],
         batch_size: int,
     ) -> int:
+        lock_path = memory_dir / ".aliases.lock"
+        with file_lock(lock_path):
+            return self._process_memory_entities_locked(project_path, memory_dir, state, batch_size)
+
+    def _process_memory_entities_locked(
+        self,
+        project_path: Path,
+        memory_dir: Path,
+        state: dict[str, Any],
+        batch_size: int,
+    ) -> int:
         normalized_path = memory_dir / "normalized.jsonl"
         entities_path = memory_dir / "entities.jsonl"
         stages = state.setdefault("stages", {})
@@ -3557,6 +3570,13 @@ if __name__ == "__main__":
             raise
         lock_path = locks_dir / "project.lock"
         payload = {"pid": os.getpid(), "action": action, "created_at": self._now()}
+        if lock_path.exists():
+            if self._is_stale_project_lock(lock_path):
+                try:
+                    lock_path.unlink()
+                except OSError as exc:
+                    self.logger.error("清除過期鎖定失敗：%s", exc, exc_info=True)
+                    raise
         try:
             with lock_path.open("x", encoding="utf-8") as handle:
                 handle.write(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -3579,6 +3599,37 @@ if __name__ == "__main__":
         except OSError as exc:
             self.logger.error("釋放鎖定失敗：%s", exc, exc_info=True)
             raise
+
+    def _is_stale_project_lock(self, lock_path: Path) -> bool:
+        try:
+            payload = json.loads(lock_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return True
+        pid = payload.get("pid")
+        created_at = payload.get("created_at")
+        if isinstance(pid, int) and self._is_pid_alive(pid):
+            if isinstance(created_at, str):
+                try:
+                    created_time = datetime.fromisoformat(created_at)
+                except ValueError:
+                    created_time = None
+                if created_time:
+                    age = datetime.now(created_time.tzinfo).timestamp() - created_time.timestamp()
+                    if age < 6 * 60 * 60:
+                        return False
+            else:
+                return False
+        return True
+
+    @staticmethod
+    def _is_pid_alive(pid: int) -> bool:
+        if pid <= 0:
+            return False
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return False
+        return True
 
     def _resolve_doc_paths(self, docs_dir: Path) -> tuple[Path, Path, Path, int]:
         try:
@@ -3883,6 +3934,18 @@ if __name__ == "__main__":
                 parsed_command = [str(item) for item in command]
             elif isinstance(command, str):
                 parsed_command = shlex.split(command)
+            if parsed_command:
+                if any(not str(item).strip() for item in parsed_command):
+                    raise ValueError(f"MCP server {name} command 不可為空")
+                if any(item in {"&&", "||", ";", "|", "&"} for item in parsed_command):
+                    raise ValueError(f"MCP server {name} command 不允許 shell 控制字元")
+                executable = parsed_command[0]
+                executable_path = Path(executable)
+                if executable_path.is_absolute():
+                    if not executable_path.exists():
+                        raise ValueError(f"MCP server {name} command 不存在：{executable}")
+                elif shutil.which(executable) is None:
+                    raise ValueError(f"MCP server {name} command 不存在：{executable}")
             servers.append(
                 MCPServerConfig(
                     name=name,

@@ -15,7 +15,7 @@ from pathlib import Path
 from string import Template
 from typing import Any
 
-from .fs.atomic import atomic_write_text
+from .fs.atomic import append_jsonl, atomic_write_text
 from .fs.safety import canonicalize_path
 from .events import emit_event
 from .run.context import get_effective_constraints
@@ -634,9 +634,7 @@ class GraphRuntime:
 
     def _append_event(self, path: Path, payload: dict[str, Any]) -> None:
         payload = {**payload, "ts": self._now_iso()}
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, ensure_ascii=False))
-            handle.write("\n")
+        append_jsonl(path, payload)
 
     def _write_json(self, path: Path, payload: dict[str, Any]) -> None:
         atomic_write_text(path, json.dumps(payload, ensure_ascii=False, indent=2))

@@ -8,6 +8,7 @@ import re
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from threading import Event
 from dataclasses import dataclass
 from datetime import datetime
@@ -144,21 +145,23 @@ def run_tool_process(
     stderr = ""
     remaining_input: str | None = input_payload
     try:
-        while True:
-            try:
-                stdout, stderr = process.communicate(input=remaining_input, timeout=0.1)
-                break
-            except subprocess.TimeoutExpired:
-                remaining_input = None
-                if cancel_event and cancel_event.is_set():
-                    process.kill()
-                    stdout, stderr = process.communicate()
-                    raise ToolingError("工具執行已取消")
-                if timeout_s and (time.monotonic() - start) > timeout_s:
-                    process.kill()
-                    stdout, stderr = process.communicate()
-                    raise ToolingError("工具執行逾時")
-                continue
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(process.communicate, remaining_input)
+            while True:
+                try:
+                    stdout, stderr = future.result(timeout=0.1)
+                    break
+                except FutureTimeoutError:
+                    remaining_input = None
+                    if cancel_event and cancel_event.is_set():
+                        process.kill()
+                        stdout, stderr = future.result(timeout=2)
+                        raise ToolingError("工具執行已取消")
+                    if timeout_s and (time.monotonic() - start) > timeout_s:
+                        process.kill()
+                        stdout, stderr = future.result(timeout=2)
+                        raise ToolingError("工具執行逾時")
+                    continue
     except (OSError, subprocess.SubprocessError) as exc:
         raise ToolingError(f"執行工具失敗：{tool_path}") from exc
     if process.returncode != 0:
@@ -195,9 +198,10 @@ def resolve_allowed_paths(
             else:
                 path = Path(entry).expanduser()
         resolved.append(path)
+    canonical: list[Path] = []
     for target in resolved:
-        canonicalize_path(target, project_allowed)
-    return resolved
+        canonical.append(canonicalize_path(target, project_allowed))
+    return canonical
 
 
 def format_registry_entry(
