@@ -14,6 +14,7 @@ from .config import ConfigLoader
 from .core import AmonCore
 from .events import emit_event
 from .fs.safety import make_change_plan, require_confirm
+from .mcp_client import MCPClientError
 
 
 def _print_project(record) -> None:
@@ -127,6 +128,7 @@ def build_parser() -> argparse.ArgumentParser:
     tools_register.add_argument("--project", help="指定專案 ID")
 
     tools_mcp_list = tools_sub.add_parser("mcp-list", help="列出 MCP tools")
+    tools_mcp_list.add_argument("--refresh", action="store_true", help="重新抓取 MCP tools（忽略快取）")
     tools_mcp_call = tools_sub.add_parser("mcp-call", help="呼叫 MCP tool")
     tools_mcp_call.add_argument("target", help="格式：<server>:<tool>")
     tools_mcp_call.add_argument("--args", default="{}", help="JSON 格式的參數")
@@ -468,7 +470,7 @@ def _handle_tools(core: AmonCore, args: argparse.Namespace) -> None:
         print(f"已註冊工具：{entry.get('name')} {entry.get('version')}")
         return
     if args.tools_command == "mcp-list":
-        registry = core.refresh_mcp_registry()
+        registry = core.get_mcp_registry(refresh=args.refresh)
         servers = registry.get("servers", {})
         if not servers:
             print("尚未設定 MCP tools。")
@@ -495,8 +497,18 @@ def _handle_tools(core: AmonCore, args: argparse.Namespace) -> None:
             parsed_args = json.loads(args.args)
         except json.JSONDecodeError as exc:
             raise ValueError("args 必須是 JSON 格式") from exc
-        result = core.call_mcp_tool(server_name, tool_name, parsed_args)
+        try:
+            result = core.call_mcp_tool(server_name, tool_name, parsed_args)
+        except PermissionError as exc:
+            print(str(exc), file=sys.stderr)
+            sys.exit(1)
+        except MCPClientError as exc:
+            print(f"CLIENT_ERROR: {exc}", file=sys.stderr)
+            sys.exit(1)
         print(result.get("data_prompt", ""))
+        if result.get("is_error"):
+            print("TOOL_ERROR: MCP tool 執行失敗。", file=sys.stderr)
+            sys.exit(1)
         return
     raise ValueError("請指定 tools 指令")
 

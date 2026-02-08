@@ -102,5 +102,14 @@ class MCPStdioClient:
         except json.JSONDecodeError as exc:
             raise MCPClientError(f"MCP 回應格式錯誤：{line}") from exc
         if "error" in response:
-            raise MCPClientError(f"MCP 回應錯誤：{response['error']}")
+            error = response["error"]
+            if isinstance(error, dict):
+                message = error.get("message") or json.dumps(error, ensure_ascii=False)
+            else:
+                message = str(error)
+            hint = "請確認 MCP server 是否支援此方法、回傳 JSON-RPC 格式，並檢查 command/版本設定。"
+            raise MCPClientError(f"MCP protocol error ({method}): {message}。{hint}")
+        if "result" not in response:
+            hint = "請確認 MCP server 回傳內容包含 result 欄位。"
+            raise MCPClientError(f"MCP protocol error ({method}): 缺少 result。{hint}")
         return response

@@ -103,6 +103,7 @@ class AmonCore:
             self.node_env_dir,
         ]:
             path.mkdir(parents=True, exist_ok=True)
+        (self.cache_dir / "mcp").mkdir(parents=True, exist_ok=True)
         self._touch_log(self.logs_dir / "amon.log")
         if not self.billing_log.exists():
             try:
@@ -1787,39 +1788,22 @@ class AmonCore:
             write_yaml(config_path, config)
 
     def refresh_mcp_registry(self) -> dict[str, Any]:
+        return self.get_mcp_registry(refresh=True)
+
+    def get_mcp_registry(self, refresh: bool = False) -> dict[str, Any]:
         self.ensure_base_structure()
         config = self.load_config()
         servers = self._load_mcp_servers(config)
         registry = {"updated_at": self._now(), "servers": {}}
         for server in servers:
-            if server.transport != "stdio":
-                registry["servers"][server.name] = {
-                    "transport": server.transport,
-                    "tools": [],
-                    "error": "尚未支援的 transport",
-                }
-                continue
-            if not server.command:
-                registry["servers"][server.name] = {
-                    "transport": server.transport,
-                    "tools": [],
-                    "error": "缺少 command 設定",
-                }
-                continue
-            try:
-                with MCPStdioClient(server.command) as client:
-                    tools = client.list_tools()
-                registry["servers"][server.name] = {
-                    "transport": server.transport,
-                    "tools": tools,
-                }
-            except MCPClientError as exc:
-                self.logger.error("MCP tools 讀取失敗：%s", exc, exc_info=True)
-                registry["servers"][server.name] = {
-                    "transport": server.transport,
-                    "tools": [],
-                    "error": str(exc),
-                }
+            if not refresh:
+                cached = self._read_mcp_cache(server.name)
+                if cached:
+                    registry["servers"][server.name] = cached
+                    continue
+            info = self._fetch_mcp_tools(server)
+            registry["servers"][server.name] = info
+            self._write_mcp_cache(server.name, info)
         self._write_mcp_registry(registry)
         return registry
 
@@ -1832,9 +1816,9 @@ class AmonCore:
         server = servers[server_name]
         full_tool = f"{server_name}:{tool_name}"
         if self._is_tool_denied(full_tool, config, server):
-            raise PermissionError("工具已被拒絕")
+            raise PermissionError("DENIED_BY_POLICY: 工具已被拒絕")
         if not self._is_tool_allowed(full_tool, config, server):
-            raise PermissionError("工具尚未被允許")
+            raise PermissionError("DENIED_BY_POLICY: 工具尚未被允許")
         if self._is_high_risk_tool(tool_name):
             plan = make_change_plan(
                 [
@@ -1862,17 +1846,18 @@ class AmonCore:
         except MCPClientError as exc:
             self.logger.error("MCP tool 呼叫失敗：%s", exc, exc_info=True)
             raise
+        is_error = bool(result.get("isError"))
         data_prompt = self._format_mcp_result(full_tool, result)
         log_event(
             {
-                "level": "INFO",
+                "level": "ERROR" if is_error else "INFO",
                 "event": "mcp_tool_call",
                 "tool_name": full_tool,
                 "args_summary": self._summarize_value(args),
                 "result_summary": self._summarize_value(result),
             }
         )
-        return {"tool": full_tool, "data": result, "data_prompt": data_prompt}
+        return {"tool": full_tool, "data": result, "data_prompt": data_prompt, "is_error": is_error}
 
     def forge_tool(self, project_id: str, tool_name: str, spec: str) -> Path:
         self.ensure_base_structure()
@@ -2366,6 +2351,13 @@ if __name__ == "__main__":
 
     def _mcp_registry_path(self) -> Path:
         return self.cache_dir / "mcp_registry.json"
+
+    def _mcp_cache_dir(self) -> Path:
+        return self.cache_dir / "mcp"
+
+    def _mcp_cache_path(self, server_name: str) -> Path:
+        safe_name = re.sub(r"[^a-zA-Z0-9_.-]+", "_", server_name)
+        return self._mcp_cache_dir() / f"{safe_name}.json"
 
     def _project_config_name(self) -> str:
         return DEFAULT_CONFIG["projects"]["config_name"]
@@ -4004,12 +3996,63 @@ if __name__ == "__main__":
             )
         return servers
 
+    def _fetch_mcp_tools(self, server: MCPServerConfig) -> dict[str, Any]:
+        if server.transport != "stdio":
+            return {
+                "transport": server.transport,
+                "tools": [],
+                "error": "尚未支援的 transport",
+                "updated_at": self._now(),
+            }
+        if not server.command:
+            return {
+                "transport": server.transport,
+                "tools": [],
+                "error": "缺少 command 設定",
+                "updated_at": self._now(),
+            }
+        try:
+            with MCPStdioClient(server.command) as client:
+                tools = client.list_tools()
+            return {"transport": server.transport, "tools": tools, "updated_at": self._now()}
+        except MCPClientError as exc:
+            self.logger.error("MCP tools 讀取失敗：%s", exc, exc_info=True)
+            return {
+                "transport": server.transport,
+                "tools": [],
+                "error": str(exc),
+                "updated_at": self._now(),
+            }
+
     def _write_mcp_registry(self, registry: dict[str, Any]) -> None:
         path = self._mcp_registry_path()
         try:
             self._atomic_write_text(path, json.dumps(registry, ensure_ascii=False, indent=2))
         except OSError as exc:
             self.logger.error("寫入 MCP registry 失敗：%s", exc, exc_info=True)
+            raise
+
+    def _read_mcp_cache(self, server_name: str) -> dict[str, Any] | None:
+        path = self._mcp_cache_path(server_name)
+        if not path.exists():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.error("讀取 MCP cache 失敗：%s", exc, exc_info=True)
+            return None
+        if not isinstance(data, dict):
+            return None
+        data.setdefault("transport", "unknown")
+        data.setdefault("tools", [])
+        return data
+
+    def _write_mcp_cache(self, server_name: str, payload: dict[str, Any]) -> None:
+        path = self._mcp_cache_path(server_name)
+        try:
+            self._atomic_write_text(path, json.dumps(payload, ensure_ascii=False, indent=2))
+        except OSError as exc:
+            self.logger.error("寫入 MCP cache 失敗：%s", exc, exc_info=True)
             raise
 
     def _is_tool_allowed(self, full_tool: str, config: dict[str, Any], server: MCPServerConfig) -> bool:
