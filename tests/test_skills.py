@@ -23,7 +23,7 @@ class SkillsTests(unittest.TestCase):
                 global_skill_dir.mkdir(parents=True, exist_ok=True)
                 global_skill_file = global_skill_dir / "SKILL.md"
                 global_skill_file.write_text(
-                    "---\nname: global-skill\ndescription: 全域技能\n---\n全域內容\n",
+                    "---\nname: global-skill\ndescription: 全域技能\ncategory: utility\n---\n全域內容\n",
                     encoding="utf-8",
                 )
 
@@ -34,15 +34,27 @@ class SkillsTests(unittest.TestCase):
                     "---\nname: project-skill\ndescription: 專案技能\n---\n專案內容\n",
                     encoding="utf-8",
                 )
+                references_dir = project_skill_dir / "references"
+                references_dir.mkdir(parents=True, exist_ok=True)
+                (references_dir / "note.txt").write_text("note", encoding="utf-8")
 
                 skills = core.scan_skills(project_path=project_path)
                 self.assertEqual({skill["name"] for skill in skills}, {"global-skill", "project-skill"})
+                self.assertTrue(all(skill.get("updated_at") for skill in skills))
+                sources = {skill["name"]: skill.get("source") for skill in skills}
+                self.assertEqual(sources["global-skill"], "global")
+                self.assertEqual(sources["project-skill"], "project")
+                global_meta = next(skill for skill in skills if skill["name"] == "global-skill")
+                self.assertEqual(global_meta.get("frontmatter", {}).get("category"), "utility")
 
                 listed = core.list_skills()
                 self.assertEqual(len(listed), 2)
 
-                skill = core.get_skill("global-skill", project_path=project_path)
+                skill = core.load_skill("global-skill", project_path=project_path)
                 self.assertIn("全域內容", skill["content"])
+
+                project_loaded = core.load_skill("project-skill", project_path=project_path)
+                self.assertEqual(project_loaded.get("references")[0]["path"], "note.txt")
 
                 injected = core._resolve_skill_context("/global-skill 請幫忙", project_path=project_path)
                 self.assertIn("全域內容", injected)

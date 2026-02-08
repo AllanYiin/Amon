@@ -110,11 +110,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     tools_list = tools_sub.add_parser("list", help="列出工具")
     tools_list.add_argument("--project", help="指定專案 ID（可顯示專案覆寫）")
+    tools_list.add_argument("--builtin", action="store_true", help="列出內建工具")
 
     tools_run = tools_sub.add_parser("run", help="執行工具")
     tools_run.add_argument("tool_name", help="工具名稱")
     tools_run.add_argument("--project", help="指定專案 ID")
     tools_run.add_argument("--args", default="{}", help="JSON 格式的參數")
+    tools_run.add_argument("--builtin", action="store_true", help="呼叫內建工具")
 
     tools_test = tools_sub.add_parser("test", help="執行工具測試")
     tools_test.add_argument("tool_name", help="工具名稱")
@@ -377,18 +379,25 @@ def _handle_skills(core: AmonCore, args: argparse.Namespace) -> None:
             print("未找到任何技能。")
             return
         for skill in skills:
-            scope = "全域" if skill.get("scope") == "global" else "專案"
+            source = skill.get("source", skill.get("scope"))
+            scope = "全域" if source == "global" else "專案"
             description = skill.get("description") or "無描述"
             print(f"{skill.get('name')}｜{scope}｜{description}")
         return
     if args.skills_command == "show":
-        skill = core.get_skill(args.name, project_path=project_path)
-        scope = "全域" if skill.get("scope") == "global" else "專案"
+        skill = core.load_skill(args.name, project_path=project_path)
+        source = skill.get("source", skill.get("scope"))
+        scope = "全域" if source == "global" else "專案"
         description = skill.get("description") or "無描述"
         print(f"名稱：{skill.get('name')}")
         print(f"範圍：{scope}")
         print(f"描述：{description}")
         print(f"路徑：{skill.get('path')}")
+        references = skill.get("references", [])
+        if references:
+            print(f"參考資料：{len(references)} 筆")
+            for ref in references:
+                print(f"- {ref.get('path')} ({ref.get('size')} bytes)")
         print("內容：")
         print(skill.get("content", ""))
         return
@@ -429,6 +438,9 @@ def _handle_tools(core: AmonCore, args: argparse.Namespace) -> None:
         print(f"已建立工具：{tool_dir}")
         return
     if args.tools_command == "list":
+        if args.builtin:
+            _handle_builtin_list(core, args)
+            return
         tools = core.list_tools(project_id=args.project)
         if not tools:
             print("目前沒有可用工具。")
@@ -437,6 +449,9 @@ def _handle_tools(core: AmonCore, args: argparse.Namespace) -> None:
             print(f"{tool['name']}｜{tool['version']}｜{tool['risk_level']}｜{tool['scope']}")
         return
     if args.tools_command == "run":
+        if args.builtin or args.tool_name.startswith("builtin:"):
+            _handle_builtin_run(core, args)
+            return
         try:
             parsed_args = json.loads(args.args)
         except json.JSONDecodeError as exc:
@@ -484,6 +499,66 @@ def _handle_tools(core: AmonCore, args: argparse.Namespace) -> None:
         print(result.get("data_prompt", ""))
         return
     raise ValueError("請指定 tools 指令")
+
+
+def _handle_builtin_list(core: AmonCore, args: argparse.Namespace) -> None:
+    from .tooling.builtin import build_registry
+
+    workspace_root = core.get_project_path(args.project) if args.project else Path.cwd()
+    registry = build_registry(workspace_root)
+    specs = sorted(registry.list_specs(), key=lambda spec: spec.name)
+    if not specs:
+        print("目前沒有內建工具。")
+        return
+    for spec in specs:
+        print(f"builtin:{spec.name}｜{spec.risk}｜builtin｜{spec.description}")
+
+
+def _handle_builtin_run(core: AmonCore, args: argparse.Namespace) -> None:
+    from .tooling.builtin import build_registry
+    from .tooling.types import ToolCall
+
+    tool_name = args.tool_name
+    if tool_name.startswith("builtin:"):
+        tool_name = tool_name.split(":", 1)[1]
+    try:
+        parsed_args = json.loads(args.args)
+    except json.JSONDecodeError as exc:
+        raise ValueError("args 必須是 JSON 格式") from exc
+    workspace_root = core.get_project_path(args.project) if args.project else Path.cwd()
+    registry = build_registry(workspace_root)
+    try:
+        result = registry.call(
+            ToolCall(tool=tool_name, args=parsed_args, caller="cli", project_id=args.project)
+        )
+    except ValueError as exc:
+        result = _builtin_error_result(str(exc), status="denied")
+    payload = _format_builtin_result(result)
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+def _builtin_error_result(message: str, status: str) -> "ToolResult":
+    from .tooling.types import ToolResult
+
+    return ToolResult(content=[{"type": "text", "text": message}], is_error=True, meta={"status": status})
+
+
+def _format_builtin_result(result: "ToolResult") -> dict[str, object]:
+    status = result.meta.get("status", "ok")
+    if not result.is_error:
+        return {"status": "ok", "content": result.content, "text": result.as_text()}
+    label = _map_builtin_error(status)
+    return {"status": status, "error": label, "content": result.content, "text": result.as_text()}
+
+
+def _map_builtin_error(status: str) -> str:
+    if status == "unknown_tool":
+        return "Unknown tool"
+    if status == "denied":
+        return "DENIED"
+    if status in {"approval_required", "approval_missing"}:
+        return "APPROVAL_REQUIRED"
+    return "ERROR"
 
 
 def _handle_doctor(core: AmonCore) -> None:
