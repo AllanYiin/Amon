@@ -15,8 +15,12 @@ def build_registry(workspace_root: Path) -> ToolRegistry:
         policy=ToolPolicy(allow=("filesystem.read",)),
         workspace_guard=WorkspaceGuard(workspace_root=workspace_root),
     )
-    registry.register(_filesystem_read_spec(), _filesystem_read)
+    register_builtin_tools(registry)
     return registry
+
+
+def register_builtin_tools(registry: ToolRegistry) -> None:
+    registry.register(_filesystem_read_spec(), _filesystem_read)
 
 
 def _filesystem_read_spec() -> ToolSpec:

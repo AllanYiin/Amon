@@ -48,6 +48,7 @@ from .tooling import (
     run_tool_process,
     write_tool_spec,
 )
+from .tooling.native import compute_tool_sha256, parse_native_manifest, scan_native_tools
 
 
 @dataclass
@@ -130,6 +131,13 @@ class AmonCore:
                 self._atomic_write_text(registry_path, json.dumps({"tools": []}, ensure_ascii=False, indent=2))
             except OSError as exc:
                 self.logger.error("建立工具 registry 失敗：%s", exc, exc_info=True)
+                raise
+        toolforge_index = self._toolforge_index_path()
+        if not toolforge_index.exists():
+            try:
+                self._atomic_write_text(toolforge_index, json.dumps({"tools": []}, ensure_ascii=False, indent=2))
+            except OSError as exc:
+                self.logger.error("建立 toolforge index 失敗：%s", exc, exc_info=True)
                 raise
         schedules_path = self.schedules_dir / "schedules.json"
         if not schedules_path.exists():
@@ -2031,6 +2039,102 @@ class AmonCore:
         )
         return entry
 
+    def toolforge_init(self, name: str, base_dir: Path | None = None) -> Path:
+        ensure_tool_name(name)
+        root = base_dir or Path.cwd()
+        tool_dir = root / name
+        if tool_dir.exists():
+            raise FileExistsError(f"工具資料夾已存在：{tool_dir}")
+        tool_dir.mkdir(parents=True, exist_ok=True)
+        tests_dir = tool_dir / "tests"
+        tests_dir.mkdir(parents=True, exist_ok=True)
+        tool_yaml = {
+            "name": name,
+            "version": "0.1.0",
+            "description": f"{name} native tool",
+            "risk": "low",
+            "input_schema": {
+                "type": "object",
+                "properties": {"text": {"type": "string", "description": "要處理的文字"}},
+                "required": ["text"],
+            },
+            "output_schema": {
+                "type": "object",
+                "properties": {"result": {"type": "string"}},
+                "required": ["result"],
+            },
+            "default_permission": "allow",
+        }
+        tool_py = self._render_native_tool_template(name)
+        readme = self._render_native_tool_readme(name)
+        test_py = self._render_native_tool_test(name)
+        try:
+            (tool_dir / "tool.py").write_text(tool_py, encoding="utf-8")
+            (tool_dir / "tool.yaml").write_text(
+                yaml.safe_dump(tool_yaml, allow_unicode=True, sort_keys=False),
+                encoding="utf-8",
+            )
+            (tool_dir / "README.md").write_text(readme, encoding="utf-8")
+            (tests_dir / "test_tool.py").write_text(test_py, encoding="utf-8")
+        except OSError as exc:
+            self.logger.error("建立 toolforge 工具失敗：%s", exc, exc_info=True)
+            raise
+        log_event({"level": "INFO", "event": "toolforge_init", "tool_name": name})
+        return tool_dir
+
+    def toolforge_install(self, source: Path, project_id: str | None = None) -> dict[str, Any]:
+        self.ensure_base_structure()
+        src = source.expanduser().resolve()
+        if not src.exists():
+            raise FileNotFoundError(f"找不到工具資料夾：{src}")
+        manifest, _ = parse_native_manifest(src, strict=True)
+        project_path = self.get_project_path(project_id) if project_id else None
+        base_dirs = self._native_tool_base_dirs(project_path)
+        target_root = next(path for scope, path in base_dirs if scope == ("project" if project_path else "global"))
+        target_root.mkdir(parents=True, exist_ok=True)
+        dest = target_root / manifest.name
+        if dest.exists():
+            raise FileExistsError(f"工具已存在：{manifest.name}")
+        try:
+            shutil.copytree(src, dest)
+        except OSError as exc:
+            self.logger.error("安裝 toolforge 工具失敗：%s", exc, exc_info=True)
+            raise
+        entry = {
+            "name": manifest.name,
+            "version": manifest.version,
+            "path": str(dest),
+            "scope": "project" if project_path else "global",
+            "project_id": project_path.name if project_path else None,
+            "sha256": compute_tool_sha256(dest),
+            "risk": manifest.risk,
+            "default_permission": manifest.default_permission,
+            "installed_at": self._now(),
+        }
+        self._update_toolforge_index(entry)
+        log_event(
+            {
+                "level": "INFO",
+                "event": "toolforge_install",
+                "tool_name": manifest.name,
+                "scope": entry["scope"],
+            }
+        )
+        return entry
+
+    def toolforge_verify(self, project_id: str | None = None) -> list[dict[str, Any]]:
+        self.ensure_base_structure()
+        project_path = self.get_project_path(project_id) if project_id else None
+        entries = scan_native_tools(self._native_tool_base_dirs(project_path), project_id=project_id)
+        return [entry.to_dict() for entry in entries]
+
+    def list_native_tools(self, project_id: str | None = None) -> list[dict[str, Any]]:
+        return self.toolforge_verify(project_id=project_id)
+
+    def native_tool_dirs(self, project_id: str | None = None) -> list[tuple[str, Path]]:
+        project_path = self.get_project_path(project_id) if project_id else None
+        return self._native_tool_base_dirs(project_path)
+
     def _tool_base_dirs(self, project_path: Path | None) -> list[tuple[str, Path]]:
         config = self.load_config(project_path)
         tools_cfg = config.get("tools", {})
@@ -2040,6 +2144,37 @@ class AmonCore:
             project_rel = tools_cfg.get("project_dir_rel", "tools")
             dirs.insert(0, ("project", project_path / project_rel))
         return dirs
+
+    def _native_tool_base_dirs(self, project_path: Path | None) -> list[tuple[str, Path]]:
+        dirs: list[tuple[str, Path]] = [("global", self.tools_dir)]
+        if project_path:
+            dirs.insert(0, ("project", project_path / ".amon" / "tools"))
+        return dirs
+
+    def _toolforge_index_path(self) -> Path:
+        return self.cache_dir / "toolforge_index.json"
+
+    def _update_toolforge_index(self, entry: dict[str, Any]) -> None:
+        index_path = self._toolforge_index_path()
+        try:
+            data = json.loads(index_path.read_text(encoding="utf-8")) if index_path.exists() else {"tools": []}
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.error("讀取 toolforge index 失敗：%s", exc, exc_info=True)
+            raise
+        tools = [
+            item
+            for item in data.get("tools", [])
+            if item.get("name") != entry.get("name")
+            or item.get("scope") != entry.get("scope")
+            or item.get("project_id") != entry.get("project_id")
+        ]
+        tools.append(entry)
+        data["tools"] = tools
+        try:
+            self._atomic_write_text(index_path, json.dumps(data, ensure_ascii=False, indent=2))
+        except OSError as exc:
+            self.logger.error("寫入 toolforge index 失敗：%s", exc, exc_info=True)
+            raise
 
     def _resolve_tool_dir(self, tool_name: str, project_id: str | None) -> tuple[Path, str, Path | None]:
         ensure_tool_name(tool_name)
@@ -2162,6 +2297,74 @@ if __name__ == "__main__":
     main()
 '''
 
+    def _render_native_tool_template(self, tool_name: str) -> str:
+        return f'''"""Amon native tool: {tool_name}."""
+
+from __future__ import annotations
+
+from amon.tooling.types import ToolCall, ToolResult, ToolSpec
+
+TOOL_SPEC = ToolSpec(
+    name="native:{tool_name}",
+    description="{tool_name} native tool",
+    input_schema={{
+        "type": "object",
+        "properties": {{"text": {{"type": "string"}}}},
+        "required": ["text"],
+    }},
+    output_schema={{
+        "type": "object",
+        "properties": {{"result": {{"type": "string"}}}},
+        "required": ["result"],
+    }},
+    risk="low",
+    annotations={{"native": True}},
+)
+
+
+def handle(call: ToolCall) -> ToolResult:
+    text = call.args.get("text", "")
+    if not isinstance(text, str):
+        return ToolResult(
+            content=[{{"type": "text", "text": "text 必須是字串"}}],
+            is_error=True,
+            meta={{"status": "invalid_args"}},
+        )
+    result = text.upper()
+    return ToolResult(
+        content=[{{"type": "text", "text": result}}],
+        is_error=False,
+        meta={{"status": "ok"}},
+    )
+'''
+
+    def _render_native_tool_readme(self, tool_name: str) -> str:
+        return f"""# {tool_name}
+
+這是 toolforge native tool 範例。
+
+## 使用方式
+
+透過 `amon tools call native:{tool_name} --args '{{\"text\":\"hello\"}}'` 呼叫。
+"""
+
+    def _render_native_tool_test(self, tool_name: str) -> str:
+        return f'''"""Toolforge native tool test for {tool_name}."""
+
+from __future__ import annotations
+
+import unittest
+
+
+class NativeToolPlaceholderTests(unittest.TestCase):
+    def test_placeholder(self) -> None:
+        self.assertTrue(True)
+
+
+if __name__ == "__main__":
+    unittest.main()
+'''
+
     @staticmethod
     def _format_mcp_result(tool_name: str, result: dict[str, Any]) -> str:
         payload = json.dumps(result, ensure_ascii=False, indent=2)
@@ -2240,6 +2443,7 @@ if __name__ == "__main__":
         (project_path / "logs").mkdir(parents=True, exist_ok=True)
         (project_path / ".claude" / "skills").mkdir(parents=True, exist_ok=True)
         (project_path / ".amon" / "locks").mkdir(parents=True, exist_ok=True)
+        (project_path / ".amon" / "tools").mkdir(parents=True, exist_ok=True)
         (project_path / "tools").mkdir(parents=True, exist_ok=True)
 
         tasks_path = project_path / "tasks" / "tasks.json"
