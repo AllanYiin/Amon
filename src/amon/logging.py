@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .fs.atomic import append_jsonl
 
 def log_event(event: dict[str, Any]) -> None:
     payload = _build_payload(event)
@@ -30,10 +30,7 @@ def _build_payload(source: dict[str, Any]) -> dict[str, Any]:
 
 
 def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(payload, ensure_ascii=False))
-        handle.write("\n")
+    append_jsonl(path, payload)
 
 
 def _log_path(filename: str) -> Path:

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from amon.events import emit_event
+from amon.fs.atomic import atomic_write_text
 
 
 logger = logging.getLogger(__name__)
@@ -70,8 +71,7 @@ def load_schedules(*, data_dir: Path | None = None) -> dict[str, Any]:
 def write_schedules(payload: dict[str, Any], *, data_dir: Path | None = None) -> None:
     path = _resolve_schedules_path(data_dir)
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_text(path, json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     except OSError as exc:
         logger.error("寫入排程資料失敗：%s", exc, exc_info=True)
         raise

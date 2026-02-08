@@ -94,7 +94,7 @@ class MCPStdioClient:
             raise MCPClientError(f"讀取 MCP 回應失敗：{exc}") from exc
         if not line:
             stderr = ""
-            if self._process.stderr:
+            if self._process.poll() is not None and self._process.stderr:
                 stderr = self._process.stderr.read().strip()
             raise MCPClientError(f"MCP server 無回應：{stderr or 'stdout empty'}")
         try:

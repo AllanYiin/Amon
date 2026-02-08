@@ -2,18 +2,16 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
-import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from amon.fs.atomic import append_jsonl
+
 
 REQUIRED_FIELDS = {"event_id", "ts", "type", "scope", "actor", "payload", "risk"}
-
-
 def emit_event(event: dict[str, Any], *, dispatch_hooks: bool | None = None) -> str:
     """Emit an event to the JSONL bus and return the event_id."""
     payload = dict(event or {})
@@ -27,7 +25,7 @@ def emit_event(event: dict[str, Any], *, dispatch_hooks: bool | None = None) -> 
         raise ValueError(f"event 缺少必要欄位：{', '.join(missing)}")
     if "project_id" in payload and payload["project_id"] == "":
         payload["project_id"] = None
-    _atomic_append_jsonl(_events_path(), payload)
+    append_jsonl(_events_path(), payload)
     if dispatch_hooks is None:
         dispatch_hooks = os.environ.get("AMON_DISABLE_HOOK_DISPATCH") != "1"
     if dispatch_hooks:
@@ -38,28 +36,6 @@ def emit_event(event: dict[str, Any], *, dispatch_hooks: bool | None = None) -> 
 def _events_path() -> Path:
     base_dir = Path(os.environ.get("AMON_HOME", "~/.amon")).expanduser()
     return base_dir / "events" / "events.jsonl"
-
-
-def _atomic_append_jsonl(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    line = json.dumps(payload, ensure_ascii=False)
-    content = ""
-    if path.exists():
-        content = path.read_text(encoding="utf-8")
-        if content and not content.endswith("\n"):
-            content += "\n"
-    content += f"{line}\n"
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        dir=str(path.parent),
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-        delete=False,
-    ) as tmp_file:
-        tmp_file.write(content)
-        temp_name = tmp_file.name
-    os.replace(temp_name, path)
 
 
 def _now_iso() -> str:

@@ -164,17 +164,17 @@ def _parse_natural_command(message: str) -> tuple[str, dict]:
     if "列出專案" in message:
         return "projects.list", {}
     if "建立專案" in message:
-        name = message.split("建立專案", 1)[1].strip()
+        name = _extract_tail(message, "建立專案")
         if not name:
             raise ValueError("請提供專案名稱")
         return "projects.create", {"name": name}
     if "刪除專案" in message:
-        project_id = message.split("刪除專案", 1)[1].strip()
+        project_id = _extract_tail(message, "刪除專案")
         if not project_id:
             raise ValueError("請提供專案 ID")
         return "projects.delete", {"project_id": project_id}
     if "還原專案" in message:
-        trash_id = message.split("還原專案", 1)[1].strip()
+        trash_id = _extract_tail(message, "還原專案")
         if not trash_id:
             raise ValueError("請提供 trash ID")
         return "projects.restore", {"trash_id": trash_id}
@@ -194,6 +194,11 @@ def _parse_args(tokens: list[str]) -> dict:
     if not isinstance(data, dict):
         raise ValueError("args 需為 JSON 物件")
     return data
+
+
+def _extract_tail(message: str, keyword: str) -> str:
+    _, _, tail = message.partition(keyword)
+    return tail.strip()
 
 
 def _prompt_confirm(input_func: Callable[[str], str], output_func: Callable[[str], None]) -> bool:

@@ -12,7 +12,7 @@ from threading import Event
 from uuid import uuid4
 
 from amon.core import AmonCore
-from amon.fs.atomic import atomic_write_text
+from amon.fs.atomic import append_jsonl, atomic_write_text
 from amon.events import emit_event
 from amon.logging import log_event
 from amon.tooling import load_tool_spec, validate_inputs_schema
@@ -54,9 +54,7 @@ def _append_pending_action(hook: Hook, event: dict[str, Any], action_args: dict[
         "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
     }
     pending_path = hooks_dir / "pending_actions.jsonl"
-    with pending_path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(payload, ensure_ascii=False))
-        handle.write("\n")
+    append_jsonl(pending_path, payload)
 
 
 def _default_tool_executor(
@@ -87,7 +85,7 @@ def _default_graph_runner(
     if not graph_path_value:
         raise ValueError("graph.run 需要 graph_path")
     variables = action_args.get("variables") or action_args.get("vars") or {}
-    return _run_graph(core, project_id, graph_path_value, variables, event, action_args)
+    return _run_graph(core, project_id, graph_path_value, variables, event, action_args, cancel_event=cancel_event)
 
 
 def _dedupe_key_for(hook: Hook, event: dict[str, Any]) -> str | None:
@@ -382,6 +380,8 @@ def _run_graph(
     variables: dict[str, Any],
     event: dict[str, Any],
     action_args: dict[str, Any],
+    *,
+    cancel_event: Event | None = None,
 ) -> dict[str, Any]:
     project_path = core.get_project_path(project_id)
     graph_path = (project_path / graph_path_value).expanduser() if not Path(graph_path_value).is_absolute() else Path(graph_path_value)

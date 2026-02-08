@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from amon.fs.atomic import append_jsonl
 from amon.logging import log_event
 from amon.fs.safety import validate_run_id
 
@@ -27,10 +28,7 @@ def append_run_constraints(run_id: str, constraints: list[str]) -> None:
         "ts": _now_iso(),
     }
     try:
-        events_path.parent.mkdir(parents=True, exist_ok=True)
-        with events_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, ensure_ascii=False))
-            handle.write("\n")
+        append_jsonl(events_path, payload)
     except OSError as exc:
         log_event(
             {

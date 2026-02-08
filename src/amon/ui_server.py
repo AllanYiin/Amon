@@ -179,6 +179,7 @@ _TASK_MANAGER = _TaskManager()
 
 
 class AmonUIHandler(SimpleHTTPRequestHandler):
+    _MAX_BODY_BYTES = 10 * 1024 * 1024
     def __init__(self, *args: Any, core: AmonCore, **kwargs: Any) -> None:
         self.core = core
         super().__init__(*args, **kwargs)
@@ -213,7 +214,10 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             self._send_json(200, {"depth": get_queue_depth()})
             return
         if parsed.path.startswith("/v1/runs/") and parsed.path.endswith("/status"):
-            run_id = parsed.path.split("/")[3]
+            run_id = self._get_path_segment(parsed.path, 2)
+            if not run_id:
+                self._send_json(400, {"message": "無效的 run_id"})
+                return
             params = parse_qs(parsed.query)
             project_id = params.get("project_id", [""])[0].strip()
             if not project_id:
@@ -228,7 +232,10 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             self._send_json(200, {"run": status})
             return
         if parsed.path.startswith("/v1/jobs/") and parsed.path.endswith("/status"):
-            job_id = parsed.path.split("/")[3]
+            job_id = self._get_path_segment(parsed.path, 2)
+            if not job_id:
+                self._send_json(400, {"message": "無效的 job_id"})
+                return
             try:
                 status = self.core.get_job_status(job_id)
             except Exception as exc:  # noqa: BLE001
@@ -237,7 +244,10 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             self._send_json(200, {"job": status})
             return
         if parsed.path.startswith("/v1/requests/") and parsed.path.endswith("/status"):
-            request_id = parsed.path.split("/")[3]
+            request_id = self._get_path_segment(parsed.path, 2)
+            if not request_id:
+                self._send_json(400, {"message": "無效的 request_id"})
+                return
             status = _TASK_MANAGER.get_status(request_id)
             if not status:
                 self._send_json(404, {"message": "找不到 request"})
@@ -254,7 +264,10 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             self._send_json(200, {"projects": [record.to_dict() for record in records]})
             return
         if parsed.path.endswith("/context") and parsed.path.startswith("/v1/projects/"):
-            project_id = parsed.path.split("/")[3]
+            project_id = self._get_path_segment(parsed.path, 2)
+            if not project_id:
+                self._send_json(400, {"message": "無效的 project_id"})
+                return
             try:
                 context = self._build_project_context(project_id)
             except Exception as exc:  # noqa: BLE001
@@ -263,7 +276,10 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             self._send_json(200, context)
             return
         if parsed.path.startswith("/v1/projects/"):
-            project_id = parsed.path.split("/")[3]
+            project_id = self._get_path_segment(parsed.path, 2)
+            if not project_id:
+                self._send_json(400, {"message": "無效的 project_id"})
+                return
             try:
                 record = self.core.get_project(project_id)
             except KeyError as exc:
@@ -277,6 +293,8 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/v1/runs":
             payload = self._read_json()
+            if payload is None:
+                return
             project_id = str(payload.get("project_id", "")).strip()
             graph_path = str(payload.get("graph_path", "")).strip()
             variables = payload.get("variables") or {}
@@ -304,6 +322,8 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             return
         if parsed.path == "/v1/runs/cancel":
             payload = self._read_json()
+            if payload is None:
+                return
             project_id = str(payload.get("project_id", "")).strip()
             run_id = str(payload.get("run_id", "")).strip()
             if not project_id or not run_id:
@@ -322,6 +342,8 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             return
         if parsed.path == "/v1/tools/run":
             payload = self._read_json()
+            if payload is None:
+                return
             tool_name = str(payload.get("tool_name", "")).strip()
             project_id = str(payload.get("project_id", "")).strip() or None
             args = payload.get("args") or {}
@@ -342,6 +364,8 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             return
         if parsed.path == "/v1/jobs/start":
             payload = self._read_json()
+            if payload is None:
+                return
             job_id = str(payload.get("job_id", "")).strip()
             if not job_id:
                 self._send_json(400, {"message": "請提供 job_id"})
@@ -351,6 +375,8 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             return
         if parsed.path == "/v1/hooks/dispatch":
             payload = self._read_json()
+            if payload is None:
+                return
             if not isinstance(payload, dict):
                 self._send_json(400, {"message": "payload 需為物件"})
                 return
@@ -367,6 +393,8 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             return
         if parsed.path == "/v1/chat/sessions":
             payload = self._read_json()
+            if payload is None:
+                return
             project_id = str(payload.get("project_id", "")).strip()
             if not project_id:
                 self._send_json(400, {"message": "請提供 project_id"})
@@ -380,6 +408,8 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             return
         if parsed.path == "/v1/chat/plan/confirm":
             payload = self._read_json()
+            if payload is None:
+                return
             project_id = str(payload.get("project_id", "")).strip()
             chat_id = str(payload.get("chat_id", "")).strip()
             command = str(payload.get("command", "")).strip()
@@ -409,6 +439,8 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             return
         if parsed.path == "/v1/projects":
             payload = self._read_json()
+            if payload is None:
+                return
             name = str(payload.get("name", "")).strip()
             if not name:
                 self._send_json(400, {"message": "請提供專案名稱"})
@@ -424,7 +456,10 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             self._send_json(201, {"project": record.to_dict()})
             return
         if parsed.path.startswith("/v1/projects/") and parsed.path.endswith("/restore"):
-            project_id = parsed.path.split("/")[3]
+            project_id = self._get_path_segment(parsed.path, 2)
+            if not project_id:
+                self._send_json(400, {"message": "無效的 project_id"})
+                return
             try:
                 record = self.core.restore_project(project_id)
             except (KeyError, ValueError, FileExistsError) as exc:
@@ -441,8 +476,13 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
     def _handle_api_patch(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path.startswith("/v1/projects/"):
-            project_id = parsed.path.split("/")[3]
+            project_id = self._get_path_segment(parsed.path, 2)
+            if not project_id:
+                self._send_json(400, {"message": "無效的 project_id"})
+                return
             payload = self._read_json()
+            if payload is None:
+                return
             name = str(payload.get("name", "")).strip()
             if not name:
                 self._send_json(400, {"message": "請提供新的專案名稱"})
@@ -462,7 +502,10 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
     def _handle_api_delete(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path.startswith("/v1/projects/"):
-            project_id = parsed.path.split("/")[3]
+            project_id = self._get_path_segment(parsed.path, 2)
+            if not project_id:
+                self._send_json(400, {"message": "無效的 project_id"})
+                return
             try:
                 record = self.core.delete_project(project_id)
             except (KeyError, ValueError) as exc:
@@ -476,8 +519,11 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             return
         self._send_json(404, {"message": "找不到 API 路徑"})
 
-    def _read_json(self) -> dict[str, Any]:
+    def _read_json(self) -> dict[str, Any] | None:
         content_length = int(self.headers.get("Content-Length", "0"))
+        if content_length > self._MAX_BODY_BYTES:
+            self._send_json(413, {"message": "請求內容過大"})
+            return None
         if content_length <= 0:
             return {}
         raw = self.rfile.read(content_length)
@@ -485,6 +531,12 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             return json.loads(raw.decode("utf-8"))
         except json.JSONDecodeError:
             return {}
+
+    def _get_path_segment(self, path: str, index: int) -> str | None:
+        parts = [part for part in path.split("/") if part]
+        if len(parts) <= index:
+            return None
+        return parts[index]
 
     def _send_json(self, status: int, payload: dict[str, Any]) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
