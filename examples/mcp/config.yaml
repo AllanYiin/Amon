@@ -1,0 +1,9 @@
+mcp:
+  servers:
+    local_stub:
+      transport: stdio
+      command: ["python", "-m", "tests.mcp_stub_server"]
+  allowed_tools:
+    - "local_stub:add"
+  denied_tools:
+    - "local_stub:delete"

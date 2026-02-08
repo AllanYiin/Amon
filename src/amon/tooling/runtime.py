@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
-from .audit import AuditSink, NullAuditSink
+from .audit import AuditSink, FileAuditSink, NullAuditSink, default_audit_log_path
 from .builtin import register_builtin_tools
 from .native import NativeToolRuntime, load_native_runtimes
 from .policy import ToolPolicy, WorkspaceGuard
@@ -33,7 +33,7 @@ def build_registry(
     registry = ToolRegistry(
         policy=ToolPolicy(allow=tuple(allow), ask=tuple(ask), deny=tuple(deny)),
         workspace_guard=WorkspaceGuard(workspace_root=workspace_root),
-        audit_sink=audit_sink or NullAuditSink(),
+        audit_sink=audit_sink or FileAuditSink(default_audit_log_path()),
     )
     register_builtin_tools(registry)
     _register_native(registry, native_runtimes)

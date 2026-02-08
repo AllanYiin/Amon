@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .audit import FileAuditSink, default_audit_log_path
 from .policy import ToolPolicy, WorkspaceGuard
 from .registry import ToolRegistry
 from .types import ToolCall, ToolResult, ToolSpec
@@ -14,6 +15,7 @@ def build_registry(workspace_root: Path) -> ToolRegistry:
     registry = ToolRegistry(
         policy=ToolPolicy(allow=("filesystem.read",)),
         workspace_guard=WorkspaceGuard(workspace_root=workspace_root),
+        audit_sink=FileAuditSink(default_audit_log_path()),
     )
     register_builtin_tools(registry)
     return registry
