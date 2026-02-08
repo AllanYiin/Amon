@@ -41,6 +41,79 @@ class MCPToolsTests(unittest.TestCase):
             finally:
                 os.environ.pop("AMON_HOME", None)
 
+    def test_mcp_cache_uses_cached_tools(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                core.initialize()
+                stub_path = Path(__file__).with_name("mcp_stub_server.py")
+                core.set_config_value(
+                    "mcp.servers.stub",
+                    {
+                        "transport": "stdio",
+                        "command": [sys.executable, str(stub_path)],
+                        "allowed": ["echo"],
+                    },
+                )
+                cache_dir = Path(temp_dir) / "cache" / "mcp"
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                cache_payload = {
+                    "transport": "stdio",
+                    "tools": [{"name": "cached", "description": "cached tool"}],
+                    "updated_at": "cached",
+                }
+                cache_path = cache_dir / "stub.json"
+                cache_path.write_text(json.dumps(cache_payload, ensure_ascii=False), encoding="utf-8")
+
+                registry = core.get_mcp_registry()
+                tools = registry["servers"]["stub"].get("tools", [])
+                self.assertTrue(any(tool.get("name") == "cached" for tool in tools))
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+    def test_mcp_allowed_tools_enforced(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                core.initialize()
+                stub_path = Path(__file__).with_name("mcp_stub_server.py")
+                core.set_config_value(
+                    "mcp.servers.stub",
+                    {
+                        "transport": "stdio",
+                        "command": [sys.executable, str(stub_path)],
+                    },
+                )
+                core.set_config_value("mcp.allowed_tools", ["stub:other"])
+                with self.assertRaises(PermissionError) as ctx:
+                    core.call_mcp_tool("stub", "echo", {"text": "hello"})
+                self.assertIn("DENIED_BY_POLICY", str(ctx.exception))
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+    def test_mcp_tool_error_result(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                core.initialize()
+                stub_path = Path(__file__).with_name("mcp_stub_server.py")
+                core.set_config_value(
+                    "mcp.servers.stub",
+                    {
+                        "transport": "stdio",
+                        "command": [sys.executable, str(stub_path)],
+                    },
+                )
+                result = core.call_mcp_tool("stub", "fail", {})
+                self.assertTrue(result.get("is_error"))
+                content = result.get("data", {}).get("content", [])
+                self.assertTrue(any(item.get("text") == "stub failure" for item in content))
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
 
 if __name__ == "__main__":
     unittest.main()

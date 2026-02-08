@@ -39,11 +39,14 @@ amon run --prompt "請用繁體中文摘要以下內容..." --project <project_i
 # 列出 MCP server 設定
 amon mcp list
 
-# 列出 MCP tools
-amon tools list
+# 列出 MCP tools（使用快取）
+amon tools mcp-list
+
+# 重新抓取 MCP tools
+amon tools mcp-list --refresh
 
 # 呼叫 MCP tool
-amon tools call local-tools:echo --args '{"text":"hello"}'
+amon tools mcp-call local-tools:echo --args '{"text":"hello"}'
 
 # 啟動 UI 預覽（瀏覽 http://localhost:8000）
 amon ui --port 8000
@@ -59,6 +62,7 @@ amon ui --port 8000
 ├─ trash/           # 回收桶 + manifest.json
 ├─ logs/            # amon.log + billing.log
 ├─ cache/           # 索引快取
+│  └─ mcp/          # MCP tools 快取
 ├─ skills/          # 全域 skills
 ├─ python_env/      # 共用 Python 環境
 └─ node_env/        # 共用 Node 環境
@@ -68,6 +72,11 @@ amon ui --port 8000
 
 * 全域設定：`~/.amon/config.yaml`
 * 專案設定：`<project>/amon.project.yaml`
+
+## MCP 行為補充
+
+* MCP tools 清單預設會讀取 `~/.amon/cache/mcp/<server>.json` 快取，使用 `amon tools mcp-list --refresh` 強制重新抓取。
+* 若設定 `mcp.allowed_tools`，僅允許清單內的工具被呼叫（格式支援 `server:tool` 或 `server.*`）。
 * 優先順序：專案設定 > 全域設定 > 預設值
 
 ### 設定範例（節錄）

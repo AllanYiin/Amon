@@ -23,12 +23,23 @@ def main() -> None:
                         "name": "echo",
                         "description": "Echo input arguments",
                         "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}}},
-                    }
+                    },
+                    {
+                        "name": "fail",
+                        "description": "Return an error result",
+                        "inputSchema": {"type": "object", "properties": {}},
+                    },
                 ]
             }
         elif method == "tools/call":
             params = payload.get("params", {})
-            result = {"echo": params}
+            if params.get("name") == "fail":
+                result = {
+                    "content": [{"type": "text", "text": "stub failure"}],
+                    "isError": True,
+                }
+            else:
+                result = {"echo": params}
         else:
             result = {}
         response = {"jsonrpc": "2.0", "id": request_id, "result": result}
