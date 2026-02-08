@@ -61,6 +61,34 @@ class SkillsTests(unittest.TestCase):
             finally:
                 os.environ.pop("AMON_HOME", None)
 
+    def test_selected_skill_updates_system_message(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("技能系統訊息測試")
+                project_path = Path(project.path)
+
+                skill_dir = Path(temp_dir) / "skills" / "review-skill"
+                skill_dir.mkdir(parents=True, exist_ok=True)
+                (skill_dir / "SKILL.md").write_text("請專注 code review。", encoding="utf-8")
+
+                config = core.load_config(project_path)
+                base_message = core._build_system_message("測試", project_path, config=config)
+                skill_message = core._build_system_message(
+                    "測試",
+                    project_path,
+                    config=config,
+                    skill_names=["review-skill"],
+                )
+
+                self.assertNotIn("## Skill: review-skill", base_message)
+                self.assertIn("## Skill: review-skill", skill_message)
+                self.assertIn("請專注 code review。", skill_message)
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
     def test_invalid_frontmatter_is_tolerant(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir

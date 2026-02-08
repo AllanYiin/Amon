@@ -292,6 +292,7 @@ class GraphRuntime:
                 model=node_vars.get("model") or node.get("model"),
                 mode=node_vars.get("mode", "single"),
                 stream_handler=self.stream_handler,
+                skill_names=node_vars.get("skill_names"),
             )
             output_path = self._resolve_output_path(
                 node,
