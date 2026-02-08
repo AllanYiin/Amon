@@ -30,6 +30,12 @@ class ToolRegistry:
     def list_specs(self) -> list[ToolSpec]:
         return list(self._specs.values())
 
+    def get_spec(self, name: str) -> ToolSpec | None:
+        return self._specs.get(name)
+
+    def get_handler(self, name: str) -> ToolHandler | None:
+        return self._handlers.get(name)
+
     def call(self, call: ToolCall, require_approval: bool = False) -> ToolResult:
         if call.tool not in self._handlers:
             result = ToolResult(

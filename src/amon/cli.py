@@ -133,6 +133,21 @@ def build_parser() -> argparse.ArgumentParser:
     tools_mcp_call.add_argument("target", help="格式：<server>:<tool>")
     tools_mcp_call.add_argument("--args", default="{}", help="JSON 格式的參數")
 
+    tools_call = tools_sub.add_parser("call", help="呼叫內建/原生工具")
+    tools_call.add_argument("tool_name", help="工具名稱（例如 native:hello 或 builtin:filesystem.read）")
+    tools_call.add_argument("--project", help="指定專案 ID")
+    tools_call.add_argument("--args", default="{}", help="JSON 格式的參數")
+
+    toolforge_parser = subparsers.add_parser("toolforge", help="Toolforge 管理")
+    toolforge_sub = toolforge_parser.add_subparsers(dest="toolforge_command")
+    toolforge_init = toolforge_sub.add_parser("init", help="建立 toolforge scaffold")
+    toolforge_init.add_argument("name", help="工具名稱")
+    toolforge_install = toolforge_sub.add_parser("install", help="安裝 toolforge 工具")
+    toolforge_install.add_argument("path", help="工具資料夾")
+    toolforge_install.add_argument("--project", help="指定專案 ID（安裝到專案）")
+    toolforge_verify = toolforge_sub.add_parser("verify", help="驗證已安裝工具")
+    toolforge_verify.add_argument("--project", help="指定專案 ID（包含專案工具）")
+
     ui_parser = subparsers.add_parser("ui", help="啟動 UI 預覽")
     ui_parser.add_argument("--port", type=int, default=8000, help="UI 服務埠號（預設 8000）")
 
@@ -248,6 +263,8 @@ def main() -> None:
             _handle_mcp(core, args)
         elif args.command == "tools":
             _handle_tools(core, args)
+        elif args.command == "toolforge":
+            _handle_toolforge(core, args)
         elif args.command == "ui":
             _handle_ui(args)
         elif args.command == "daemon":
@@ -443,12 +460,17 @@ def _handle_tools(core: AmonCore, args: argparse.Namespace) -> None:
         if args.builtin:
             _handle_builtin_list(core, args)
             return
-        tools = core.list_tools(project_id=args.project)
-        if not tools:
+        legacy_tools = core.list_tools(project_id=args.project)
+        native_tools = core.list_native_tools(project_id=args.project)
+        if not legacy_tools and not native_tools:
             print("目前沒有可用工具。")
             return
-        for tool in tools:
+        for tool in legacy_tools:
             print(f"{tool['name']}｜{tool['version']}｜{tool['risk_level']}｜{tool['scope']}")
+        for tool in native_tools:
+            print(
+                f"native:{tool['name']}｜{tool['version']}｜{tool['risk']}｜native｜{tool['default_permission']}"
+            )
         return
     if args.tools_command == "run":
         if args.builtin or args.tool_name.startswith("builtin:"):
@@ -510,7 +532,61 @@ def _handle_tools(core: AmonCore, args: argparse.Namespace) -> None:
             print("TOOL_ERROR: MCP tool 執行失敗。", file=sys.stderr)
             sys.exit(1)
         return
+    if args.tools_command == "call":
+        from .tooling.audit import FileAuditSink
+        from .tooling.runtime import build_registry
+        from .tooling.types import ToolCall
+
+        try:
+            parsed_args = json.loads(args.args)
+        except json.JSONDecodeError as exc:
+            raise ValueError("args 必須是 JSON 格式") from exc
+        tool_name = args.tool_name
+        if tool_name.startswith("builtin:"):
+            tool_name = tool_name.split(":", 1)[1]
+        elif not tool_name.startswith("native:") and tool_name.startswith("native."):
+            tool_name = tool_name.replace("native.", "native:", 1)
+        workspace_root = core.get_project_path(args.project) if args.project else Path.cwd()
+        audit_log = (
+            core.get_project_path(args.project) / "logs" / "tool_audit.log"
+            if args.project
+            else core.logs_dir / "tool_audit.log"
+        )
+        registry = build_registry(
+            workspace_root,
+            core.native_tool_dirs(args.project),
+            audit_sink=FileAuditSink(audit_log),
+        )
+        result = registry.call(ToolCall(tool=tool_name, args=parsed_args, caller="cli", project_id=args.project))
+        payload = _format_builtin_result(result)
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
     raise ValueError("請指定 tools 指令")
+
+
+def _handle_toolforge(core: AmonCore, args: argparse.Namespace) -> None:
+    if args.toolforge_command == "init":
+        tool_dir = core.toolforge_init(args.name)
+        print(f"已建立 toolforge 工具：{tool_dir}")
+        return
+    if args.toolforge_command == "install":
+        entry = core.toolforge_install(Path(args.path), project_id=args.project)
+        print(f"已安裝 toolforge 工具：{entry.get('name')} {entry.get('version')}")
+        return
+    if args.toolforge_command == "verify":
+        tools = core.toolforge_verify(project_id=args.project)
+        if not tools:
+            print("尚未安裝 toolforge 工具。")
+            return
+        for tool in tools:
+            violations = tool.get("violations") or []
+            violation_text = f"｜VIOLATION: {', '.join(violations)}" if violations else ""
+            print(
+                f"native:{tool['name']}｜{tool['version']}｜{tool['path']}｜{tool['sha256']}｜"
+                f"{tool['risk']}｜{tool['default_permission']}{violation_text}"
+            )
+        return
+    raise ValueError("請指定 toolforge 指令")
 
 
 def _handle_builtin_list(core: AmonCore, args: argparse.Namespace) -> None:
