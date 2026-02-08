@@ -92,3 +92,22 @@ mcp:
   allowed_tools:
     - filesystem.read
 ```
+
+## Skills 結構與掃描行為
+
+* Skill 目錄：每個 skill 是一個資料夾，包含 `SKILL.md`。
+* `SKILL.md` 需包含 YAML frontmatter，至少有 `name` 與 `description`。
+* 可選擇建立 `references/` 目錄放補充檔案（掃描時只列出清單，不讀取大檔）。
+* `amon skills scan` 會掃描全域與專案目錄並寫入快取索引：
+  - 全域：`~/.amon/skills`
+  - 專案：`<project>/.claude/skills`
+  - 索引：`~/.amon/cache/skills/index.json`
+
+範例：
+
+```
+<skill_dir>/
+├─ SKILL.md
+└─ references/
+   └─ diagram.png
+```

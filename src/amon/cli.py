@@ -379,18 +379,25 @@ def _handle_skills(core: AmonCore, args: argparse.Namespace) -> None:
             print("未找到任何技能。")
             return
         for skill in skills:
-            scope = "全域" if skill.get("scope") == "global" else "專案"
+            source = skill.get("source", skill.get("scope"))
+            scope = "全域" if source == "global" else "專案"
             description = skill.get("description") or "無描述"
             print(f"{skill.get('name')}｜{scope}｜{description}")
         return
     if args.skills_command == "show":
-        skill = core.get_skill(args.name, project_path=project_path)
-        scope = "全域" if skill.get("scope") == "global" else "專案"
+        skill = core.load_skill(args.name, project_path=project_path)
+        source = skill.get("source", skill.get("scope"))
+        scope = "全域" if source == "global" else "專案"
         description = skill.get("description") or "無描述"
         print(f"名稱：{skill.get('name')}")
         print(f"範圍：{scope}")
         print(f"描述：{description}")
         print(f"路徑：{skill.get('path')}")
+        references = skill.get("references", [])
+        if references:
+            print(f"參考資料：{len(references)} 筆")
+            for ref in references:
+                print(f"- {ref.get('path')} ({ref.get('size')} bytes)")
         print("內容：")
         print(skill.get("content", ""))
         return

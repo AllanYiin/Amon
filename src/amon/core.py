@@ -1293,7 +1293,10 @@ class AmonCore:
             return {"status": "error", "message": f"模型檢查失敗：{exc}"}
 
     def _doctor_skills_index(self) -> dict[str, str]:
-        index_path = self.cache_dir / "skills_index.json"
+        index_path = self._skills_index_path()
+        legacy_path = self.cache_dir / "skills_index.json"
+        if not index_path.exists() and legacy_path.exists():
+            index_path = legacy_path
         if not index_path.exists():
             return {"status": "warning", "message": "尚未建立 skills index（請執行 amon skills scan）"}
         try:
@@ -1708,16 +1711,18 @@ class AmonCore:
 
     def scan_skills(self, project_path: Path | None = None) -> list[dict[str, Any]]:
         config = self.load_config(project_path)
-        skills = []
+        skills: list[dict[str, Any]] = []
         global_dir = Path(config["skills"]["global_dir"]).expanduser()
         if global_dir.exists():
-            skills.extend(self._scan_skill_dir(global_dir, scope="global"))
+            skills.extend(self._scan_skill_dir(global_dir, source="global"))
         if project_path:
             project_dir = project_path / config["skills"]["project_dir_rel"]
             if project_dir.exists():
-                skills.extend(self._scan_skill_dir(project_dir, scope="project"))
-        index_path = self.cache_dir / "skills_index.json"
+                skills.extend(self._scan_skill_dir(project_dir, source="project"))
+        skills = sorted(skills, key=lambda item: (item.get("name", ""), item.get("source", ""), item.get("path", "")))
+        index_path = self._skills_index_path()
         try:
+            index_path.parent.mkdir(parents=True, exist_ok=True)
             self._atomic_write_text(index_path, json.dumps({"skills": skills}, ensure_ascii=False, indent=2))
         except OSError as exc:
             self.logger.error("寫入技能索引失敗：%s", exc, exc_info=True)
@@ -1725,7 +1730,10 @@ class AmonCore:
         return skills
 
     def list_skills(self) -> list[dict[str, Any]]:
-        index_path = self.cache_dir / "skills_index.json"
+        index_path = self._skills_index_path()
+        legacy_path = self.cache_dir / "skills_index.json"
+        if not index_path.exists() and legacy_path.exists():
+            index_path = legacy_path
         if not index_path.exists():
             return []
         try:
@@ -1736,6 +1744,9 @@ class AmonCore:
         return data.get("skills", [])
 
     def get_skill(self, name: str, project_path: Path | None = None) -> dict[str, Any]:
+        return self.load_skill(name, project_path=project_path)
+
+    def load_skill(self, name: str, project_path: Path | None = None) -> dict[str, Any]:
         if project_path:
             skills = self.scan_skills(project_path)
         else:
@@ -1749,7 +1760,8 @@ class AmonCore:
                 except OSError as exc:
                     self.logger.error("讀取技能檔案失敗：%s", exc, exc_info=True)
                     raise
-                return {**skill, "content": content}
+                references = self._list_skill_references(Path(skill["path"]).parent)
+                return {**skill, "content": content, "references": references}
         raise KeyError(f"找不到技能：{name}")
 
     def get_project_path(self, project_id: str) -> Path:
@@ -2400,18 +2412,18 @@ if __name__ == "__main__":
             self.logger.error("寫入回收桶清單失敗：%s", exc, exc_info=True)
             raise
 
-    def _scan_skill_dir(self, base_dir: Path, scope: str) -> list[dict[str, Any]]:
+    def _scan_skill_dir(self, base_dir: Path, source: str) -> list[dict[str, Any]]:
         skills = []
-        for child in base_dir.iterdir():
+        for child in sorted(base_dir.iterdir(), key=lambda path: path.name):
             if not child.is_dir():
                 continue
             skill_file = child / "SKILL.md"
             if not skill_file.exists():
                 continue
-            skills.append(self._read_skill(skill_file, child.name, scope))
+            skills.append(self._read_skill(skill_file, child.name, source))
         return skills
 
-    def _read_skill(self, skill_file: Path, fallback_name: str, scope: str) -> dict[str, Any]:
+    def _read_skill(self, skill_file: Path, fallback_name: str, source: str) -> dict[str, Any]:
         try:
             content = skill_file.read_text(encoding="utf-8")
         except OSError as exc:
@@ -2419,22 +2431,57 @@ if __name__ == "__main__":
             raise
         name = fallback_name
         description = ""
+        frontmatter: dict[str, Any] = {}
         if content.startswith("---"):
-            parts = content.split("---", 2)
-            if len(parts) >= 3:
+            frontmatter_text, _ = self._split_frontmatter(content)
+            if frontmatter_text is not None:
                 try:
-                    frontmatter = yaml.safe_load(parts[1]) or {}
+                    frontmatter = yaml.safe_load(frontmatter_text) or {}
                 except yaml.YAMLError as exc:
                     self.logger.warning("解析技能 YAML frontmatter 失敗：%s", exc, exc_info=True)
                     frontmatter = {}
                 name = frontmatter.get("name", name)
                 description = frontmatter.get("description", "")
+        updated_at = datetime.fromtimestamp(skill_file.stat().st_mtime, tz=ZoneInfo("UTC")).isoformat()
         return {
             "name": name,
             "description": description,
             "path": str(skill_file),
-            "scope": scope,
+            "source": source,
+            "updated_at": updated_at,
+            "frontmatter": frontmatter,
         }
+
+    def _split_frontmatter(self, content: str) -> tuple[str | None, str]:
+        if not content.startswith("---"):
+            return None, content
+        lines = content.splitlines()
+        if len(lines) < 3:
+            return None, content
+        try:
+            end_index = lines[1:].index("---") + 1
+        except ValueError:
+            return None, content
+        frontmatter_text = "\n".join(lines[1:end_index])
+        body = "\n".join(lines[end_index + 1 :])
+        return frontmatter_text, body
+
+    def _list_skill_references(self, skill_dir: Path) -> list[dict[str, Any]]:
+        references_dir = skill_dir / "references"
+        if not references_dir.exists():
+            return []
+        entries: list[dict[str, Any]] = []
+        for path in sorted(references_dir.rglob("*")):
+            if not path.is_file():
+                continue
+            rel_path = path.relative_to(references_dir).as_posix()
+            entries.append({"path": rel_path, "size": path.stat().st_size})
+            if len(entries) >= 200:
+                break
+        return entries
+
+    def _skills_index_path(self) -> Path:
+        return self.cache_dir / "skills" / "index.json"
 
     def _resolve_skill_context(self, prompt: str, project_path: Path | None) -> str:
         if not prompt.startswith("/"):
