@@ -83,6 +83,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--project", required=True, help="指定專案 ID")
     run_parser.add_argument("--model", help="指定模型")
     run_parser.add_argument("--mode", default="single", help="指定模式（single/self_critique/team）")
+    run_parser.add_argument("--skill", action="append", default=[], help="指定技能名稱（可重複）")
 
     skills_parser = subparsers.add_parser("skills", help="技能管理")
     skills_sub = skills_parser.add_subparsers(dest="skills_command")
@@ -369,13 +370,13 @@ def _handle_run(core: AmonCore, args: argparse.Namespace) -> None:
         raise ValueError("請提供任務內容")
     project_path = core.get_project_path(args.project) if args.project else None
     if args.mode == "single":
-        core.run_single(user_task, project_path=project_path, model=args.model)
+        core.run_single(user_task, project_path=project_path, model=args.model, skill_names=args.skill)
         return
     if args.mode == "self_critique":
-        core.run_self_critique(user_task, project_path=project_path, model=args.model)
+        core.run_self_critique(user_task, project_path=project_path, model=args.model, skill_names=args.skill)
         return
     if args.mode == "team":
-        core.run_team(user_task, project_path=project_path, model=args.model)
+        core.run_team(user_task, project_path=project_path, model=args.model, skill_names=args.skill)
         return
     raise ValueError(f"目前僅支援 single/self_critique/team 模式（收到：{args.mode}）")
 

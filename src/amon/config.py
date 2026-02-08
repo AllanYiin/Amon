@@ -47,6 +47,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "skills": {
         "global_dir": "~/.amon/skills",
         "project_dir_rel": ".claude/skills",
+        "selected": [],
     },
     "tools": {
         "global_dir": "~/.amon/tools",

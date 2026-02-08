@@ -353,6 +353,7 @@ class AmonCore:
         model: str | None = None,
         mode: str = "single",
         stream_handler=None,
+        skill_names: list[str] | None = None,
     ) -> str:
         config = self.load_config(project_path)
         project_id = project_path.name if project_path else None
@@ -369,14 +370,12 @@ class AmonCore:
         provider_cfg = config.get("providers", {}).get(provider_name, {})
         provider_model = model or provider_cfg.get("default_model") or provider_cfg.get("model")
         provider = build_provider(provider_cfg, model=provider_model)
-        system_message = (
-            "你是 Amon 的專案助理，請用繁體中文回覆。"
-            "請把使用者需求視為任務委託而非問答，主動釐清目標與限制，提出可執行方案並承擔完成責任。"
-            "若資訊不足，請先提出最少必要問題，其餘假設請明確說明。"
+        system_message = self._build_system_message(
+            prompt,
+            project_path,
+            config=config,
+            skill_names=skill_names,
         )
-        skill_context = self._resolve_skill_context(prompt, project_path)
-        if skill_context:
-            system_message = f"{system_message}\n\n[Skill]\n{skill_context}"
         user_prompt = prompt
         if prompt.startswith("/"):
             user_prompt = " ".join(prompt.split()[1:]).strip()
@@ -458,7 +457,13 @@ class AmonCore:
         )
         return response_text
 
-    def run_single(self, prompt: str, project_path: Path | None = None, model: str | None = None) -> str:
+    def run_single(
+        self,
+        prompt: str,
+        project_path: Path | None = None,
+        model: str | None = None,
+        skill_names: list[str] | None = None,
+    ) -> str:
         if not project_path:
             self.ensure_base_structure()
             temp_root = self.data_dir / "temp_runs"
@@ -470,7 +475,7 @@ class AmonCore:
             graph_path = self._write_graph_resolved(
                 project_path,
                 graph,
-                {"prompt": prompt, "mode": "single", "model": model or ""},
+                {"prompt": prompt, "mode": "single", "model": model or "", "skill_names": skill_names or []},
                 mode="single",
             )
             result = self.run_graph(project_path=project_path, graph_path=graph_path)
@@ -482,6 +487,7 @@ class AmonCore:
         project_path: Path,
         model: str | None = None,
         stream_handler=None,
+        skill_names: list[str] | None = None,
     ) -> tuple[GraphRunResult, str]:
         if not project_path:
             raise ValueError("執行 stream 需要指定專案")
@@ -491,7 +497,7 @@ class AmonCore:
             graph_path = self._write_graph_resolved(
                 project_path,
                 graph,
-                {"prompt": prompt, "mode": "single", "model": model or ""},
+                {"prompt": prompt, "mode": "single", "model": model or "", "skill_names": skill_names or []},
                 mode="single",
             )
             result = self.run_graph(
@@ -502,7 +508,13 @@ class AmonCore:
             response = self._load_graph_primary_output(result.run_dir)
             return result, response
 
-    def run_self_critique(self, prompt: str, project_path: Path | None = None, model: str | None = None) -> str:
+    def run_self_critique(
+        self,
+        prompt: str,
+        project_path: Path | None = None,
+        model: str | None = None,
+        skill_names: list[str] | None = None,
+    ) -> str:
         if not project_path:
             raise ValueError("執行 self_critique 需要指定專案")
         with self._project_lock(project_path, "self_critique"):
@@ -533,6 +545,7 @@ class AmonCore:
                     "reviews_dir": str(reviews_dir.relative_to(project_path)),
                     "final_path": str(final_path.relative_to(project_path)),
                     "model": model or "",
+                    "skill_names": skill_names or [],
                 },
                 mode="self_critique",
             )
@@ -547,7 +560,13 @@ class AmonCore:
             )
             return final_path.read_text(encoding="utf-8")
 
-    def run_team(self, prompt: str, project_path: Path | None = None, model: str | None = None) -> str:
+    def run_team(
+        self,
+        prompt: str,
+        project_path: Path | None = None,
+        model: str | None = None,
+        skill_names: list[str] | None = None,
+    ) -> str:
         if not project_path:
             raise ValueError("執行 team 需要指定專案")
         with self._project_lock(project_path, "team"):
@@ -578,6 +597,7 @@ class AmonCore:
                     "tasks_path": "docs/tasks.json",
                     "audit_force_approve": False,
                     "model": model or "",
+                    "skill_names": skill_names or [],
                 },
                 mode="team",
             )
@@ -2679,15 +2699,98 @@ if __name__ == "__main__":
     def _skills_index_path(self) -> Path:
         return self.cache_dir / "skills" / "index.json"
 
-    def _resolve_skill_context(self, prompt: str, project_path: Path | None) -> str:
-        if not prompt.startswith("/"):
+    def _normalize_skill_names(self, names: list[str] | None) -> list[str]:
+        if not names:
+            return []
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for name in names:
+            trimmed = str(name).strip()
+            if not trimmed or trimmed in seen:
+                continue
+            normalized.append(trimmed)
+            seen.add(trimmed)
+        return normalized
+
+    def _load_skills(
+        self,
+        names: list[str],
+        project_path: Path | None,
+        *,
+        ignore_missing: bool,
+    ) -> list[dict[str, Any]]:
+        skills: list[dict[str, Any]] = []
+        for name in names:
+            try:
+                skills.append(self.load_skill(name, project_path=project_path))
+            except KeyError:
+                if ignore_missing:
+                    continue
+                raise
+        return skills
+
+    def _format_skill_context(self, skills: list[dict[str, Any]]) -> str:
+        blocks = []
+        for skill in skills:
+            content = (skill.get("content") or "").strip()
+            blocks.append(f"## Skill: {skill.get('name')}\n{content}".rstrip())
+        return "\n\n".join(blocks)
+
+    def _collect_skill_names(
+        self,
+        config: dict[str, Any],
+        skill_names: list[str] | None,
+    ) -> list[str]:
+        if skill_names:
+            return self._normalize_skill_names(skill_names)
+        configured = config.get("skills", {}).get("selected", [])
+        if isinstance(configured, list):
+            return self._normalize_skill_names([str(name) for name in configured])
+        return []
+
+    def _resolve_skill_context(
+        self,
+        prompt: str,
+        project_path: Path | None,
+        *,
+        config: dict[str, Any] | None = None,
+        skill_names: list[str] | None = None,
+    ) -> str:
+        config = config or self.load_config(project_path)
+        selected = self._collect_skill_names(config, skill_names)
+        skills: list[dict[str, Any]] = []
+        if selected:
+            skills.extend(self._load_skills(selected, project_path, ignore_missing=False))
+        if prompt.startswith("/"):
+            prompt_skill = prompt.split()[0].lstrip("/")
+            if prompt_skill:
+                skills.extend(self._load_skills([prompt_skill], project_path, ignore_missing=True))
+        if not skills:
             return ""
-        skill_name = prompt.split()[0].lstrip("/")
-        try:
-            skill = self.get_skill(skill_name, project_path=project_path)
-        except KeyError:
-            return ""
-        return skill.get("content", "")
+        return self._format_skill_context(skills)
+
+    def _build_system_message(
+        self,
+        prompt: str,
+        project_path: Path | None,
+        *,
+        config: dict[str, Any],
+        skill_names: list[str] | None = None,
+    ) -> str:
+        system_message = (
+            "你是 Amon 的專案助理，請用繁體中文回覆。"
+            "請把使用者需求視為任務委託而非問答，主動釐清目標與限制，提出可執行方案並承擔完成責任。"
+            "若資訊不足，請先提出最少必要問題，其餘假設請明確說明。"
+        )
+        skill_context = self._resolve_skill_context(
+            prompt,
+            project_path,
+            config=config,
+            skill_names=skill_names,
+        )
+        if skill_context:
+            system_message = f"{system_message}\n\n{skill_context}"
+        return system_message
 
     def _prepare_session_path(self, project_path: Path | None, session_id: str) -> Path:
         if not project_path:
