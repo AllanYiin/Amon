@@ -7,15 +7,12 @@ from fnmatch import fnmatch
 from pathlib import Path
 from typing import Iterable
 
-from .types import ToolCall
-
-
-Decision = str
+from .types import Decision, ToolCall
 
 
 @dataclass(frozen=True)
 class ToolPolicy:
-    """Policy matching for tool execution decisions."""
+    """Policy matching for tool execution decisions (glob-style rules)."""
 
     allow: tuple[str, ...] = ()
     ask: tuple[str, ...] = ()
@@ -34,12 +31,15 @@ class ToolPolicy:
 _DEFAULT_DENY_GLOBS = (
     "**/.env",
     "**/.env.*",
+    "**/.git/**",
     "**/.ssh/**",
+    "**/*id_rsa*",
     "**/*.pem",
     "**/*.key",
     "**/secrets/**",
     "**/secrets.*",
     "**/*secret*",
+    "**/*token*",
 )
 
 
@@ -74,7 +74,7 @@ def _matches_pattern(call: ToolCall, pattern: str) -> bool:
         if call.tool != "process.exec":
             return False
         cmd_glob = pattern.split(":", 1)[1]
-        command = call.args.get("command")
+        command = call.args.get("command") or call.args.get("cmd")
         if not isinstance(command, str):
             return False
         return fnmatch(command, cmd_glob)

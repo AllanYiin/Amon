@@ -19,7 +19,7 @@ def build_registry(
     audit_sink: AuditSink | None = None,
 ) -> ToolRegistry:
     native_runtimes = load_native_runtimes(base_dirs)
-    allow = ["filesystem.read"]
+    allow = ["filesystem.read", "filesystem.list", "filesystem.grep"]
     ask: list[str] = []
     deny: list[str] = []
     for runtime in native_runtimes:
