@@ -244,6 +244,16 @@
         elements.planCard.hidden = false;
       }
 
+      function applySessionFromEvent(data) {
+        if (!data) return;
+        if (data.project_id && data.project_id !== state.projectId) {
+          setProjectState(data.project_id);
+        }
+        if (data.chat_id) {
+          state.chatId = data.chat_id;
+        }
+      }
+
       async function confirmPlan(confirmed) {
         if (!state.plan) return;
         try {
@@ -274,25 +284,19 @@
       }
 
       function startStream(message, attachments = []) {
-        if (!state.projectId) {
-          showToast("請先選擇專案。若尚未建立專案，請先建立。");
-          return;
-        }
-        if (!state.chatId) {
-          showToast("尚未建立 chat session。");
-          return;
-        }
         resetPlanCard();
         const finalMessage = `${message}${buildAttachmentSummary(attachments)}`;
         appendMessage("user", `你：${finalMessage}`);
         const agentBubble = appendMessage("agent", "Amon：");
         setStreaming(true);
 
-        const query = new URLSearchParams({
-          project_id: state.projectId,
-          chat_id: state.chatId,
-          message: finalMessage,
-        });
+        const query = new URLSearchParams({ message: finalMessage });
+        if (state.projectId) {
+          query.set("project_id", state.projectId);
+        }
+        if (state.chatId) {
+          query.set("chat_id", state.chatId);
+        }
         const source = new EventSource(`/v1/chat/stream?${query.toString()}`);
         let buffer = "";
 
@@ -312,6 +316,7 @@
 
         source.addEventListener("plan", (event) => {
           const data = JSON.parse(event.data || "{}");
+          applySessionFromEvent(data);
           showPlanCard(data);
           agentBubble.textContent = "Amon：已產生 Plan Card，請確認。";
         });
@@ -330,7 +335,9 @@
           }
         });
 
-        source.addEventListener("done", async () => {
+        source.addEventListener("done", async (event) => {
+          const data = JSON.parse(event.data || "{}");
+          applySessionFromEvent(data);
           source.close();
           setStreaming(false);
           await loadProjects();
