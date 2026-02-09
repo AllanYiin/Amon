@@ -603,6 +603,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     message=message,
                     router_type=router_result.type,
                     build_plan_from_message=_build_plan_from_message,
+                    is_slash_command=message.startswith("/"),
                 )
                 if created_project:
                     project_id = created_project.project_id
@@ -667,12 +668,17 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                             "plan_card": plan_card,
                             "command": command_name,
                             "args": args,
+                            "project_id": project_id,
+                            "chat_id": chat_id,
                         },
                     )
-                    send_event("done", {"status": "confirm_required", "chat_id": chat_id})
+                    send_event(
+                        "done",
+                        {"status": "confirm_required", "chat_id": chat_id, "project_id": project_id},
+                    )
                     return
                 send_event("result", result)
-                send_event("done", {"status": "ok", "chat_id": chat_id})
+                send_event("done", {"status": "ok", "chat_id": chat_id, "project_id": project_id})
                 return
             if router_result.type == "chat_response":
                 config = self.core.load_config(self.core.get_project_path(project_id))
@@ -697,11 +703,12 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     {
                         "status": "ok",
                         "chat_id": chat_id,
+                        "project_id": project_id,
                         "run_id": result.run_id,
                     },
                 )
                 return
-            send_event("done", {"status": "unsupported", "chat_id": chat_id})
+            send_event("done", {"status": "unsupported", "chat_id": chat_id, "project_id": project_id})
         except Exception as exc:  # noqa: BLE001
             log_event(
                 {
