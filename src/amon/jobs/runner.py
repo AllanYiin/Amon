@@ -281,8 +281,14 @@ def _emit_fs_event(
 
 
 def _emit_job_event(emitter: EventEmitter, job_id: str, event_type: str, payload: dict[str, Any]) -> None:
+    event_id = datetime.now().astimezone().strftime("%Y%m%d%H%M%S%f")
+    handle = _JOB_REGISTRY.get(job_id)
+    if handle:
+        handle.last_event_id = event_id
+        _write_state(handle)
     event_id = emitter(
         {
+            "event_id": event_id,
             "type": event_type,
             "scope": "job",
             "actor": f"job:{job_id}",
