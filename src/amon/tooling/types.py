@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+import json
+from typing import Any, Callable, Literal
+
+
+Risk = Literal["low", "medium", "high"]
+Decision = Literal["allow", "ask", "deny"]
 
 
 @dataclass(frozen=True)
@@ -15,17 +20,17 @@ class ToolSpec:
     description: str
     input_schema: dict[str, Any]
     output_schema: dict[str, Any] | None = None
-    risk: str = "low"
+    risk: Risk = "low"
     annotations: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass(frozen=True)
+@dataclass
 class ToolCall:
     """Represents a tool invocation request."""
 
     tool: str
     args: dict[str, Any]
-    caller: str
+    caller: str = "agent"
     project_id: str | None = None
     session_id: str | None = None
     ts_ms: int = field(
@@ -33,7 +38,7 @@ class ToolCall:
     )
 
 
-@dataclass(frozen=True)
+@dataclass
 class ToolResult:
     """Represents a tool invocation outcome."""
 
@@ -44,8 +49,15 @@ class ToolResult:
     def as_text(self) -> str:
         parts: list[str] = []
         for item in self.content:
-            if "text" in item and isinstance(item["text"], str):
-                parts.append(item["text"])
-            else:
-                parts.append(str(item))
+            if item.get("type") == "text":
+                parts.append(str(item.get("text", "")))
+            elif "text" in item:
+                parts.append(str(item.get("text", "")))
         return "\n".join(parts)
+
+
+Handler = Callable[[ToolCall], ToolResult]
+
+
+def json_dumps_stable(obj: Any) -> str:
+    return json.dumps(obj, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
