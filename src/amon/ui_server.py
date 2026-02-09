@@ -13,6 +13,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from amon.chat.cli import _build_plan_from_message
+from amon.chat.project_bootstrap import bootstrap_project_if_needed
 from amon.chat.router import route_intent
 from amon.chat.session_store import append_event, create_chat_session
 from amon.commands.executor import CommandPlan, execute
@@ -435,6 +436,15 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 return
             plan = CommandPlan(name=command, args=args, project_id=project_id, chat_id=chat_id)
             result = execute(plan, confirmed=True)
+            append_event(
+                chat_id,
+                {
+                    "type": "command_result",
+                    "text": json.dumps(result, ensure_ascii=False),
+                    "project_id": project_id,
+                    "command": command,
+                },
+            )
             self._send_json(200, {"status": "ok", "result": result})
             return
         if parsed.path == "/v1/projects":
@@ -559,15 +569,15 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
 
     def _handle_chat_stream(self, parsed) -> None:
         params = parse_qs(parsed.query)
-        project_id = params.get("project_id", [""])[0].strip()
+        project_id = params.get("project_id", [""])[0].strip() or None
         chat_id = params.get("chat_id", [""])[0].strip()
         message = params.get("message", [""])[0].strip()
 
-        if not project_id or not message:
-            self.send_error(400, "缺少 project_id 或 message")
+        if not message:
+            self.send_error(400, "缺少 message")
             return
-        if not chat_id:
-            chat_id = create_chat_session(project_id)
+        if project_id is None:
+            chat_id = ""
 
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
@@ -583,10 +593,28 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             self.wfile.write(b"\n")
             self.wfile.flush()
 
-        append_event(chat_id, {"type": "user", "text": message, "project_id": project_id})
-
         try:
             router_result = route_intent(message, project_id=project_id)
+            created_project: ProjectRecord | None = None
+            if project_id is None:
+                created_project = bootstrap_project_if_needed(
+                    core=self.core,
+                    project_id=project_id,
+                    message=message,
+                    router_type=router_result.type,
+                    build_plan_from_message=_build_plan_from_message,
+                )
+                if created_project:
+                    project_id = created_project.project_id
+                else:
+                    send_event("error", {"message": "缺少 project_id"})
+                    send_event("done", {"status": "project_required"})
+                    return
+            if not chat_id:
+                chat_id = create_chat_session(project_id)
+            append_event(chat_id, {"type": "user", "text": message, "project_id": project_id})
+            if created_project:
+                router_result = route_intent(message, project_id=project_id)
             append_event(
                 chat_id,
                 {
@@ -613,6 +641,15 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     },
                 )
                 result = execute(plan, confirmed=False)
+                append_event(
+                    chat_id,
+                    {
+                        "type": "command_result",
+                        "text": json.dumps(result, ensure_ascii=False),
+                        "project_id": project_id,
+                        "command": command_name,
+                    },
+                )
                 if result.get("status") == "confirm_required":
                     plan_card = result.get("plan_card") or ""
                     append_event(
@@ -644,6 +681,10 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
 
                 def stream_handler(token: str) -> None:
                     send_event("token", {"text": token})
+                    append_event(
+                        chat_id,
+                        {"type": "assistant_chunk", "text": token, "project_id": project_id},
+                    )
 
                 result, response_text = self.core.run_single_stream(
                     message,
@@ -670,7 +711,8 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     "stack": traceback.format_exc(),
                 }
             )
-            append_event(chat_id, {"type": "error", "text": str(exc), "project_id": project_id})
+            if chat_id and project_id:
+                append_event(chat_id, {"type": "error", "text": str(exc), "project_id": project_id})
             send_event("error", {"message": str(exc)})
             send_event("done", {"status": "failed", "chat_id": chat_id})
 
