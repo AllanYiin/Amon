@@ -84,6 +84,11 @@ class FileAuditSink:
             return None
 
 
+@dataclass(frozen=True)
+class JsonlAuditSink(FileAuditSink):
+    """JSONL audit sink alias for compatibility."""
+
+
 def default_audit_log_path() -> Path:
     base_dir = Path(os.environ.get("AMON_HOME", "~/.amon")).expanduser()
     return base_dir / "logs" / "tool_audit.jsonl"
