@@ -850,6 +850,47 @@ body {
   font-size: 20px;
 }
 
+.context-project {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #e4e7ec;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+
+.context-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.context-tab {
+  border: 1px solid #d0d5dd;
+  background: #ffffff;
+  color: #475467;
+  border-radius: 999px;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.context-tab.is-active {
+  background: var(--highlight);
+  border-color: #c7d2fe;
+  color: var(--primary);
+}
+
+.context-overview {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 .context-section {
   margin-bottom: 16px;
 }
