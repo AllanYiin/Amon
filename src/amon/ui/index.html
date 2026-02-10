@@ -128,7 +128,14 @@
           </section>
           <section class="context-section" data-context-panel="graph" hidden>
             <h3>Graph Preview</h3>
+            <div class="graph-toolbar">
+              <span id="graph-run-meta" class="graph-run-meta">尚未偵測到 run</span>
+              <div class="graph-toolbar__actions">
+                <button type="button" class="secondary-btn" id="graph-create-template">Create template</button>
+              </div>
+            </div>
             <div id="graph-preview" class="graph-preview"></div>
+            <ul id="graph-node-list" class="graph-node-list"></ul>
             <pre id="graph-code" class="graph-code"></pre>
           </section>
           <section class="context-section" data-context-panel="docs" hidden>
@@ -142,6 +149,34 @@
     </main>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <aside id="graph-node-drawer" class="graph-node-drawer" hidden>
+      <header class="graph-node-drawer__header">
+        <h3 id="graph-node-title">Node 詳細</h3>
+        <button type="button" class="secondary-btn" id="graph-node-close">關閉</button>
+      </header>
+      <div class="graph-node-drawer__meta" id="graph-node-meta"></div>
+      <section>
+        <h4>inputs</h4>
+        <details open>
+          <summary>展開內容</summary>
+          <pre id="graph-node-inputs" class="graph-node-json"></pre>
+        </details>
+      </section>
+      <section>
+        <h4>outputs（docs/artifacts）</h4>
+        <pre id="graph-node-outputs" class="graph-node-json"></pre>
+      </section>
+      <section>
+        <h4>最近 events/logs</h4>
+        <ul id="graph-node-events" class="graph-node-events"></ul>
+      </section>
+      <section>
+        <h4>Template 化</h4>
+        <div class="graph-node-drawer__actions">
+          <button type="button" class="secondary-btn" id="graph-parametrize">Parametrize（改成 {{var}}）</button>
+        </div>
+      </section>
+    </aside>
 
     <script src="/event_stream_client.js"></script>
     <script>
@@ -154,6 +189,12 @@
         attachments: [],
         uiStore: createUiEventStore(),
         streamClient: null,
+        graph: null,
+        graphRunId: null,
+        graphNodeStates: {},
+        graphEvents: [],
+        graphSelectedNodeId: null,
+        graphTemplateId: null,
       };
 
       const elements = {
@@ -171,6 +212,17 @@
         refreshContext: document.getElementById("refresh-context"),
         graphPreview: document.getElementById("graph-preview"),
         graphCode: document.getElementById("graph-code"),
+        graphNodeList: document.getElementById("graph-node-list"),
+        graphRunMeta: document.getElementById("graph-run-meta"),
+        graphCreateTemplate: document.getElementById("graph-create-template"),
+        graphNodeDrawer: document.getElementById("graph-node-drawer"),
+        graphNodeClose: document.getElementById("graph-node-close"),
+        graphNodeTitle: document.getElementById("graph-node-title"),
+        graphNodeMeta: document.getElementById("graph-node-meta"),
+        graphNodeInputs: document.getElementById("graph-node-inputs"),
+        graphNodeOutputs: document.getElementById("graph-node-outputs"),
+        graphNodeEvents: document.getElementById("graph-node-events"),
+        graphParametrize: document.getElementById("graph-parametrize"),
         docsList: document.getElementById("docs-list"),
         contextProject: document.getElementById("context-project"),
         contextOverview: document.getElementById("context-overview"),
@@ -448,8 +500,16 @@
           return;
         }
         const payload = await apiFetch(`/projects/${state.projectId}/context`);
+        state.graph = payload.graph || { nodes: [], edges: [] };
+        state.graphRunId = payload.run_id || null;
+        state.graphNodeStates = payload.node_states || {};
+        state.graphEvents = payload.recent_events || [];
         elements.graphCode.textContent = payload.graph_mermaid || "";
-        renderMermaid(payload.graph_mermaid || "");
+        renderGraph(payload.graph_mermaid || "");
+        renderNodeList();
+        elements.graphRunMeta.textContent = state.graphRunId
+          ? `Run：${state.graphRunId}（${payload.run_status || "unknown"}）`
+          : "尚未偵測到 run";
         renderDocs(payload.docs || []);
         const docCount = (payload.docs || []).length;
         const hasGraph = payload.graph_mermaid ? "有" : "無";
@@ -471,15 +531,121 @@
         });
       }
 
-      async function renderMermaid(code) {
+      async function renderGraph(code) {
         elements.graphPreview.innerHTML = "";
         if (!code) return;
         try {
-          const { svg } = await window.__mermaid.render("graphPreview", code);
+          const { svg } = await window.__mermaid.render(`graphPreview-${Date.now()}`, code);
           elements.graphPreview.innerHTML = svg;
+          decorateMermaidNodes();
         } catch (error) {
           elements.graphPreview.innerHTML = "<p>Mermaid 渲染失敗，請檢查 graph。</p>";
         }
+      }
+
+      function normalizeNodeStatus(status) {
+        if (status === "completed") return "succeeded";
+        if (["pending", "running", "failed", "succeeded"].includes(status)) return status;
+        return "pending";
+      }
+
+      function getNodeState(nodeId) {
+        return state.graphNodeStates?.[nodeId] || { status: "pending" };
+      }
+
+      function nodeStatusLabel(status) {
+        const normalized = normalizeNodeStatus(status);
+        if (normalized === "running") return "執行中";
+        if (normalized === "succeeded") return "成功";
+        if (normalized === "failed") return "失敗";
+        return "等待中";
+      }
+
+      function renderNodeList() {
+        elements.graphNodeList.innerHTML = "";
+        const nodes = state.graph?.nodes || [];
+        if (!nodes.length) return;
+        nodes.forEach((node) => {
+          const stateItem = getNodeState(node.id);
+          const status = normalizeNodeStatus(stateItem.status);
+          const item = document.createElement("li");
+          item.className = "graph-node-item";
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "graph-node-item__button";
+          btn.innerHTML = `<span>${node.id}</span><span class="node-status node-status--${status}">${nodeStatusLabel(status)}</span>`;
+          btn.addEventListener("click", () => openNodeDrawer(node.id));
+          item.appendChild(btn);
+          elements.graphNodeList.appendChild(item);
+        });
+      }
+
+      function decorateMermaidNodes() {
+        const groups = elements.graphPreview.querySelectorAll("g.node");
+        groups.forEach((group) => {
+          const label = group.querySelector(".nodeLabel")?.textContent?.trim();
+          if (!label) return;
+          const status = normalizeNodeStatus(getNodeState(label).status);
+          group.classList.add(`node-status--${status}`);
+          group.style.cursor = "pointer";
+          group.addEventListener("click", () => openNodeDrawer(label));
+        });
+      }
+
+      function inferNodeInputs(node) {
+        const payload = {};
+        ["args", "input", "inputs", "prompt", "content", "tool"].forEach((key) => {
+          if (node[key] !== undefined) payload[key] = node[key];
+        });
+        return payload;
+      }
+
+      function extractOutputArtifacts(output) {
+        if (!output || typeof output !== "object") return { docs: [], artifacts: [], raw: output };
+        return {
+          docs: output.docs || output.documents || [],
+          artifacts: output.artifacts || output.files || [],
+          raw: output,
+        };
+      }
+
+      function openNodeDrawer(nodeId) {
+        const node = (state.graph?.nodes || []).find((item) => item.id === nodeId);
+        if (!node) return;
+        state.graphSelectedNodeId = nodeId;
+        const nodeState = getNodeState(nodeId);
+        const executionEngine = node.type && String(node.type).includes("tool") ? "tool" : "llm";
+        elements.graphNodeTitle.textContent = `Node：${nodeId}`;
+        elements.graphNodeMeta.textContent = `status：${nodeStatusLabel(nodeState.status)} ｜ execution_engine：${executionEngine}`;
+        elements.graphNodeInputs.textContent = JSON.stringify(inferNodeInputs(node), null, 2);
+        elements.graphNodeOutputs.textContent = JSON.stringify(extractOutputArtifacts(nodeState.output), null, 2);
+        elements.graphNodeEvents.innerHTML = "";
+        state.graphEvents
+          .filter((event) => event.node_id === nodeId || event.from === nodeId || event.to === nodeId)
+          .slice(-8)
+          .forEach((event) => {
+            const item = document.createElement("li");
+            item.textContent = JSON.stringify(event);
+            elements.graphNodeEvents.appendChild(item);
+          });
+        if (!elements.graphNodeEvents.children.length) {
+          const item = document.createElement("li");
+          item.textContent = "尚無 events/logs";
+          elements.graphNodeEvents.appendChild(item);
+        }
+        elements.graphNodeDrawer.hidden = false;
+      }
+
+      function closeNodeDrawer() {
+        elements.graphNodeDrawer.hidden = true;
+      }
+
+      function queuePlanCommand(command, args, description) {
+        showPlanCard({
+          command,
+          args,
+          plan_card: `${description}\n\ncommand: ${command}\nargs: ${JSON.stringify(args, null, 2)}`,
+        });
       }
 
       function showPlanCard(plan) {
@@ -501,7 +667,7 @@
       async function confirmPlan(confirmed) {
         if (!state.plan) return;
         try {
-          await apiFetch("/chat/plan/confirm", {
+          const payload = await apiFetch("/chat/plan/confirm", {
             method: "POST",
             body: JSON.stringify({
               project_id: state.projectId,
@@ -512,7 +678,16 @@
             }),
           });
           appendMessage("agent", confirmed ? "已確認執行。" : "已取消執行。");
+          if (confirmed && state.plan?.command === "graph.template.create") {
+            state.graphTemplateId = payload.result?.template_id || state.graphTemplateId;
+            if (state.graphTemplateId) {
+              showToast(`Template 已建立：${state.graphTemplateId}`);
+            }
+          }
           resetPlanCard();
+          if (state.projectId) {
+            await loadContext();
+          }
         } catch (error) {
           showToast(`Plan 執行失敗：${error.message}`);
         }
@@ -574,6 +749,9 @@
           },
           onEvent: async (eventType, data) => {
             state.uiStore.applyEvent(eventType, data);
+            if (state.projectId && ["result", "done", "notice"].includes(eventType)) {
+              await loadContext();
+            }
             if (eventType === "token") {
               buffer += data.text || "";
               agentBubble.innerHTML = renderMarkdown(`Amon：${buffer}`);
@@ -675,6 +853,37 @@
       elements.refreshContext.addEventListener("click", loadContext);
       elements.planConfirm.addEventListener("click", () => confirmPlan(true));
       elements.planCancel.addEventListener("click", () => confirmPlan(false));
+      elements.graphNodeClose.addEventListener("click", closeNodeDrawer);
+      elements.graphCreateTemplate.addEventListener("click", () => {
+        if (!state.projectId || !state.graphRunId) {
+          showToast("需要先有 run 才能建立 template。");
+          return;
+        }
+        queuePlanCommand(
+          "graph.template.create",
+          { project_id: state.projectId, run_id: state.graphRunId, name: `${state.projectId}-${state.graphRunId}` },
+          "建立 graph template（需確認）"
+        );
+      });
+      elements.graphParametrize.addEventListener("click", () => {
+        if (!state.graphTemplateId) {
+          showToast("請先 Create template。\n此操作需要 Plan Card。");
+          return;
+        }
+        if (!state.graphSelectedNodeId) {
+          showToast("請先選擇 node。");
+          return;
+        }
+        const varName = window.prompt("請輸入變數名稱（例如 customer_name）", "var");
+        if (!varName) return;
+        const jsonPath = window.prompt("請輸入 JSONPath（例如 $.nodes[0].args.prompt）", "");
+        if (!jsonPath) return;
+        queuePlanCommand(
+          "graph.template.parametrize",
+          { template_id: state.graphTemplateId, jsonpath: jsonPath, var_name: varName },
+          `參數化 template（需確認）\nnode: ${state.graphSelectedNodeId}`
+        );
+      });
       elements.chatAttachments.addEventListener("change", (event) => {
         state.attachments = Array.from(event.target.files || []);
         renderAttachmentPreview();

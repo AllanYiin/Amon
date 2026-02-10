@@ -751,11 +751,83 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
 
     def _build_project_context(self, project_id: str) -> dict[str, Any]:
         project_path = self.core.get_project_path(project_id)
-        graph = self._load_latest_graph(project_path)
+        run_bundle = self._load_latest_run_bundle(project_path)
+        graph = run_bundle["graph"]
         docs = self._list_docs(project_path / "docs")
         return {
             "graph_mermaid": self._graph_to_mermaid(graph),
+            "graph": graph,
+            "run_id": run_bundle["run_id"],
+            "run_status": run_bundle["run_status"],
+            "node_states": run_bundle["node_states"],
+            "recent_events": run_bundle["recent_events"],
             "docs": docs,
+        }
+
+    def _load_latest_run_bundle(self, project_path: Path) -> dict[str, Any]:
+        fallback_graph = self._load_latest_graph(project_path)
+        runs_dir = project_path / ".amon" / "runs"
+        if not runs_dir.exists():
+            return {
+                "run_id": None,
+                "run_status": "not_found",
+                "graph": fallback_graph,
+                "node_states": {},
+                "recent_events": [],
+            }
+
+        run_dirs = [path for path in runs_dir.iterdir() if path.is_dir()]
+        if not run_dirs:
+            return {
+                "run_id": None,
+                "run_status": "not_found",
+                "graph": fallback_graph,
+                "node_states": {},
+                "recent_events": [],
+            }
+
+        latest = max(run_dirs, key=lambda path: path.stat().st_mtime)
+        run_id = latest.name
+
+        graph = fallback_graph
+        resolved_path = latest / "graph.resolved.json"
+        if resolved_path.exists():
+            try:
+                graph = json.loads(resolved_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                graph = fallback_graph
+
+        state_payload: dict[str, Any] = {}
+        state_path = latest / "state.json"
+        if state_path.exists():
+            try:
+                state_payload = json.loads(state_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                state_payload = {}
+
+        events: list[dict[str, Any]] = []
+        events_path = latest / "events.jsonl"
+        if events_path.exists():
+            try:
+                for line in events_path.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        payload = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(payload, dict):
+                        events.append(payload)
+            except OSError:
+                events = []
+
+        return {
+            "run_id": run_id,
+            "run_status": state_payload.get("status", "unknown"),
+            "graph": graph,
+            "node_states": state_payload.get("nodes", {}),
+            "recent_events": events[-100:],
         }
 
     def _load_latest_graph(self, project_path: Path) -> dict[str, Any]:
