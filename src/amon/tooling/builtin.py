@@ -17,7 +17,15 @@ from .builtins.web import WebPolicy, register_web_tools
 
 def build_registry(workspace_root: Path) -> ToolRegistry:
     registry = ToolRegistry(
-        policy=ToolPolicy(allow=("filesystem.read", "filesystem.list", "filesystem.grep")),
+        policy=ToolPolicy(
+            allow=(
+                "filesystem.read",
+                "filesystem.list",
+                "filesystem.grep",
+                "web.fetch",
+                "web.search",
+            )
+        ),
         workspace_guard=WorkspaceGuard(workspace_root=workspace_root),
         audit_sink=FileAuditSink(default_audit_log_path()),
     )
