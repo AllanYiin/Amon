@@ -22,4 +22,4 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-amon = ["ui/*.html", "ui/*.css", "resources/skills/*.skill"]
+amon = ["ui/*.html", "ui/*.css", "ui/*.js", "resources/skills/*.skill"]
