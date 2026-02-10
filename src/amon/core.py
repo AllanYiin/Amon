@@ -19,6 +19,7 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 import hashlib
+import importlib.resources as importlib_resources
 from pathlib import Path
 from typing import Any
 import unicodedata
@@ -147,6 +148,25 @@ class AmonCore:
             except OSError as exc:
                 self.logger.error("建立排程資料失敗：%s", exc, exc_info=True)
                 raise
+        self._install_packaged_skill_archives()
+
+    def _install_packaged_skill_archives(self) -> None:
+        try:
+            skills_package = importlib_resources.files("amon").joinpath("resources", "skills")
+            skill_archives = sorted(path for path in skills_package.iterdir() if path.name.endswith(".skill"))
+        except (ModuleNotFoundError, FileNotFoundError, OSError) as exc:
+            self.logger.warning("載入內建技能資源失敗：%s", exc, exc_info=True)
+            return
+
+        for archive_resource in skill_archives:
+            target_path = self.skills_dir / archive_resource.name
+            if target_path.exists():
+                continue
+            try:
+                with importlib_resources.as_file(archive_resource) as source_path:
+                    shutil.copy2(source_path, target_path)
+            except OSError as exc:
+                self.logger.warning("安裝內建技能封包失敗：%s", exc, exc_info=True)
 
     def initialize(self) -> None:
         try:
