@@ -26,7 +26,7 @@ amon project restore <project_id>
 
 # 讀寫設定（global 或專案）
 amon config get providers.openai.model
-amon config set providers.openai.model '"gpt-4o-mini"'
+amon config set providers.openai.model '"gpt-5.2"'
 amon config get amon.provider --project <project_id>
 amon config set amon.provider '"openai"' --project <project_id>
 amon config show --project <project_id>
@@ -158,7 +158,7 @@ providers:
   openai:
     type: openai_compatible
     base_url: https://api.openai.com/v1
-    model: gpt-4o-mini
+    model: gpt-5.2
     api_key_env: OPENAI_API_KEY
 skills:
   global_dir: ~/.amon/skills

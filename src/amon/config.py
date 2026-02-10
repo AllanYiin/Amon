@@ -29,8 +29,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "openai": {
             "type": "openai_compatible",
             "base_url": "https://api.openai.com/v1",
-            "model": "gpt-4o-mini",
-            "default_model": "gpt-4o-mini",
+            "model": "gpt-5.2",
+            "default_model": "gpt-5.2",
             "api_key_env": "OPENAI_API_KEY",
             "timeout_s": 60,
         },
