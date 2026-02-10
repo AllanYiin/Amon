@@ -38,6 +38,24 @@ class InitTests(unittest.TestCase):
             bundled_skill = base_path / "skills" / "spec-to-tasks.skill"
             self.assertTrue(bundled_skill.exists())
 
+    def test_init_installs_missing_global_skills(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                core.initialize()
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+            base_path = Path(temp_dir)
+            source_dir = Path(__file__).resolve().parents[1] / "src" / "amon" / "resources" / "skills"
+            expected_skill_names = sorted(path.name for path in source_dir.glob("*.skill"))
+            installed_skill_names = sorted(path.name for path in (base_path / "skills").glob("*.skill"))
+
+            self.assertEqual(expected_skill_names, installed_skill_names)
+            index_path = base_path / "cache" / "skills" / "index.json"
+            self.assertTrue(index_path.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

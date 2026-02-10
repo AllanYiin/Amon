@@ -171,9 +171,27 @@ class AmonCore:
     def initialize(self) -> None:
         try:
             self.ensure_base_structure()
+            self._ensure_global_skills_installed()
+            self.scan_skills()
         except OSError as exc:
             self.logger.error("初始化 Amon 失敗：%s", exc, exc_info=True)
             raise
+
+    def _ensure_global_skills_installed(self) -> None:
+        source_dir = Path(__file__).resolve().parent / "resources" / "skills"
+        if not source_dir.exists():
+            self.logger.warning("找不到內建 skills 來源資料夾：%s", source_dir)
+            return
+
+        for source_file in source_dir.glob("*.skill"):
+            target_file = self.skills_dir / source_file.name
+            if target_file.exists():
+                continue
+            try:
+                shutil.copy2(source_file, target_file)
+            except OSError as exc:
+                self.logger.error("安裝內建 skill 失敗：%s -> %s (%s)", source_file, target_file, exc, exc_info=True)
+                raise
 
     def create_project(self, name: str) -> ProjectRecord:
         self.ensure_base_structure()
