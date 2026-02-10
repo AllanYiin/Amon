@@ -24,7 +24,7 @@
             <button type="button" class="shell-nav__item" data-shell-view="config">Config</button>
             <button type="button" class="shell-nav__item" data-shell-view="logs-events">Logs &amp; Events</button>
             <button type="button" class="shell-nav__item" data-shell-view="chat">Docs</button>
-            <button type="button" class="shell-nav__item" data-shell-view="chat">Bill</button>
+            <button type="button" class="shell-nav__item" data-shell-view="bill">Bill</button>
           </nav>
         </aside>
 
@@ -181,6 +181,62 @@
           </section>
             </aside>
           </div>
+
+
+          <section class="main-card bill-page" id="bill-page" hidden>
+            <header class="bill-page__header">
+              <div>
+                <h2>Bill</h2>
+                <p class="subtitle">顯示今日、專案累計、breakdown、automation/interactive 與 budgets。</p>
+              </div>
+              <button type="button" class="secondary-btn" id="bill-refresh">重新整理</button>
+            </header>
+
+            <div class="bill-kpis">
+              <article class="context-shell-card">
+                <p class="context-shell-card__label">今日費用 / 用量</p>
+                <strong id="bill-today">--</strong>
+              </article>
+              <article class="context-shell-card">
+                <p class="context-shell-card__label">專案累計費用 / 用量</p>
+                <strong id="bill-project-total">--</strong>
+              </article>
+              <article class="context-shell-card">
+                <p class="context-shell-card__label">automation / interactive</p>
+                <strong id="bill-mode-summary">--</strong>
+              </article>
+            </div>
+
+            <section class="bill-grid">
+              <article class="config-card">
+                <h3>Budgets</h3>
+                <pre id="bill-budgets">尚未載入。</pre>
+              </article>
+              <article class="config-card">
+                <h3>超限事件（budget_exceeded）</h3>
+                <ul id="bill-exceeded" class="logs-list"></ul>
+              </article>
+            </section>
+
+            <section class="bill-grid">
+              <article class="config-card">
+                <h3>Breakdown：provider</h3>
+                <pre id="bill-breakdown-provider">尚未載入。</pre>
+              </article>
+              <article class="config-card">
+                <h3>Breakdown：model</h3>
+                <pre id="bill-breakdown-model">尚未載入。</pre>
+              </article>
+              <article class="config-card">
+                <h3>Breakdown：agent</h3>
+                <pre id="bill-breakdown-agent">尚未載入。</pre>
+              </article>
+              <article class="config-card">
+                <h3>Breakdown：node</h3>
+                <pre id="bill-breakdown-node">尚未載入。</pre>
+              </article>
+            </section>
+          </section>
 
 
           <section class="main-card config-page" id="config-page" hidden>
@@ -379,6 +435,8 @@
         skillsCatalog: [],
         configView: null,
         logsPage: { logsPage: 1, eventsPage: 1, logsHasNext: false, eventsHasNext: false },
+        billingSummary: null,
+        billingStreamSource: null,
       };
 
       const elements = {
@@ -425,6 +483,17 @@
         artifactList: document.getElementById("artifact-list"),
         shellNavItems: document.querySelectorAll(".shell-nav__item"),
         toolsSkillsPage: document.getElementById("tools-skills-page"),
+        billPage: document.getElementById("bill-page"),
+        billRefresh: document.getElementById("bill-refresh"),
+        billToday: document.getElementById("bill-today"),
+        billProjectTotal: document.getElementById("bill-project-total"),
+        billModeSummary: document.getElementById("bill-mode-summary"),
+        billBudgets: document.getElementById("bill-budgets"),
+        billExceeded: document.getElementById("bill-exceeded"),
+        billBreakdownProvider: document.getElementById("bill-breakdown-provider"),
+        billBreakdownModel: document.getElementById("bill-breakdown-model"),
+        billBreakdownAgent: document.getElementById("bill-breakdown-agent"),
+        billBreakdownNode: document.getElementById("bill-breakdown-node"),
         toolsSkillsRefresh: document.getElementById("tools-skills-refresh"),
         toolsList: document.getElementById("tools-list"),
         skillsList: document.getElementById("skills-list"),
@@ -487,9 +556,13 @@
       syncContextPanelToggle();
 
       function switchShellView(view) {
+        if (view !== "bill") {
+          closeBillingStream();
+        }
         state.shellView = view;
         elements.chatLayout.hidden = view !== "chat";
         elements.toolsSkillsPage.hidden = view !== "tools-skills";
+        elements.billPage.hidden = view !== "bill";
         elements.configPage.hidden = view !== "config";
         elements.logsEventsPage.hidden = view !== "logs-events";
       }
@@ -553,6 +626,93 @@
         const payload = await apiFetch(`/config/view${projectParam}`);
         state.configView = payload;
         renderConfigTable();
+      }
+
+      function formatBillMetric(cost, usage, currency) {
+        return `${currency} ${Number(cost || 0).toFixed(2)} / ${Number(usage || 0).toFixed(2)}`;
+      }
+
+      function formatBreakdown(payload = {}) {
+        const entries = Object.entries(payload || {});
+        if (!entries.length) return "尚無資料";
+        return entries
+          .sort((a, b) => Number(b[1]?.cost || 0) - Number(a[1]?.cost || 0))
+          .map(
+            ([key, value]) =>
+              `${key}\n  cost: ${Number(value?.cost || 0).toFixed(4)}\n  usage: ${Number(value?.usage || 0).toFixed(4)}\n  records: ${Number(value?.records || 0)}`
+          )
+          .join("\n\n");
+      }
+
+      function renderBillPage() {
+        const payload = state.billingSummary;
+        if (!payload) {
+          elements.billToday.textContent = "--";
+          elements.billProjectTotal.textContent = "--";
+          elements.billModeSummary.textContent = "--";
+          elements.billBudgets.textContent = "尚未載入。";
+          elements.billExceeded.innerHTML = "";
+          elements.billBreakdownProvider.textContent = "尚未載入。";
+          elements.billBreakdownModel.textContent = "尚未載入。";
+          elements.billBreakdownAgent.textContent = "尚未載入。";
+          elements.billBreakdownNode.textContent = "尚未載入。";
+          return;
+        }
+        const currency = payload.currency || "USD";
+        elements.billToday.textContent = formatBillMetric(payload.today?.cost, payload.today?.usage, currency);
+        elements.billProjectTotal.textContent = formatBillMetric(payload.project_total?.cost, payload.project_total?.usage, currency);
+        elements.billModeSummary.textContent = `automation ${formatBillMetric(payload.mode_breakdown?.automation?.cost, payload.mode_breakdown?.automation?.usage, currency)}｜interactive ${formatBillMetric(payload.mode_breakdown?.interactive?.cost, payload.mode_breakdown?.interactive?.usage, currency)}`;
+        elements.billBudgets.textContent = JSON.stringify(payload.budgets || {}, null, 2);
+        elements.billBreakdownProvider.textContent = formatBreakdown(payload.breakdown?.provider);
+        elements.billBreakdownModel.textContent = formatBreakdown(payload.breakdown?.model);
+        elements.billBreakdownAgent.textContent = formatBreakdown(payload.breakdown?.agent);
+        elements.billBreakdownNode.textContent = formatBreakdown(payload.breakdown?.node);
+
+        elements.billExceeded.innerHTML = "";
+        (payload.exceeded_events || []).forEach((event) => {
+          const card = document.createElement("article");
+          card.className = "log-item";
+          card.innerHTML = `<header><strong>budget_exceeded</strong> · <code>${escapeHtml(event.ts || "-")}</code></header><pre>${escapeHtml(JSON.stringify(event, null, 2))}</pre>`;
+          elements.billExceeded.appendChild(card);
+        });
+        if (!payload.exceeded_events || !payload.exceeded_events.length) {
+          elements.billExceeded.textContent = "目前沒有超限事件。";
+        }
+      }
+
+      function closeBillingStream() {
+        if (state.billingStreamSource) {
+          state.billingStreamSource.close();
+          state.billingStreamSource = null;
+        }
+      }
+
+      function openBillingStream() {
+        closeBillingStream();
+        const params = new URLSearchParams();
+        if (state.projectId) {
+          params.set("project_id", state.projectId);
+        }
+        const source = new EventSource(`/v1/billing/stream?${params.toString()}`);
+        source.addEventListener("usage_updated", (event) => {
+          state.billingSummary = JSON.parse(event.data || "{}");
+          renderBillPage();
+        });
+        source.addEventListener("budget_exceeded", () => {
+          showToast("偵測到 budget_exceeded 事件，已同步 Bill。", 4500);
+        });
+        source.onerror = () => {
+          closeBillingStream();
+        };
+        state.billingStreamSource = source;
+      }
+
+      async function loadBillPage() {
+        const projectParam = state.projectId ? `?project_id=${encodeURIComponent(state.projectId)}` : "";
+        const payload = await apiFetch(`/billing/summary${projectParam}`);
+        state.billingSummary = payload;
+        renderBillPage();
+        openBillingStream();
       }
 
       function exportEffectiveConfig() {
@@ -1585,6 +1745,9 @@
           if (view === "logs-events") {
             await loadLogsEventsPage();
           }
+          if (view === "bill") {
+            await loadBillPage();
+          }
         });
       });
 
@@ -1609,6 +1772,7 @@
 
       elements.toolsSkillsRefresh.addEventListener("click", loadToolsSkillsPage);
       elements.configRefresh.addEventListener("click", loadConfigPage);
+      elements.billRefresh.addEventListener("click", loadBillPage);
       elements.configSearch.addEventListener("input", renderConfigTable);
       elements.configExport.addEventListener("click", exportEffectiveConfig);
       elements.skillTriggerPreview.addEventListener("click", async () => {
@@ -1656,6 +1820,9 @@
         }
         if (state.shellView === "logs-events") {
           await loadLogsEventsPage();
+        }
+        if (state.shellView === "bill") {
+          await loadBillPage();
         }
       });
 
