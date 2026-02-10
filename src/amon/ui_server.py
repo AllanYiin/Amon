@@ -577,6 +577,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         project_id = params.get("project_id", [""])[0].strip() or None
         chat_id = params.get("chat_id", [""])[0].strip()
         message = params.get("message", [""])[0].strip()
+        last_event_id_raw = params.get("last_event_id", [""])[0].strip()
 
         if not message:
             self.send_error(400, "缺少 message")
@@ -590,8 +591,18 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         self.send_header("Connection", "keep-alive")
         self.end_headers()
 
+        event_seq = 0
+        if last_event_id_raw:
+            try:
+                event_seq = int(last_event_id_raw)
+            except ValueError:
+                event_seq = 0
+
         def send_event(event: str, data: dict[str, Any] | str) -> None:
+            nonlocal event_seq
+            event_seq += 1
             payload = data if isinstance(data, str) else json.dumps(data, ensure_ascii=False)
+            self.wfile.write(f"id: {event_seq}\n".encode("utf-8"))
             self.wfile.write(f"event: {event}\n".encode("utf-8"))
             for line in payload.splitlines() or [""]:
                 self.wfile.write(f"data: {line}\n".encode("utf-8"))

@@ -38,9 +38,9 @@
                   <option>Internal Playground（假資料）</option>
                 </select>
               </label>
-              <span class="shell-status shell-status--run">Run：Idle</span>
-              <span class="shell-status shell-status--daemon">Daemon：Healthy</span>
-              <span class="shell-status shell-status--budget">Budget：NT$ 0 / NT$ 5,000</span>
+              <span class="shell-status shell-status--run" id="shell-run-status">Run：Idle</span>
+              <span class="shell-status shell-status--daemon" id="shell-daemon-status">Daemon：Healthy</span>
+              <span class="shell-status shell-status--budget" id="shell-budget-status">Budget：NT$ 0 / NT$ 5,000</span>
             </div>
             <button type="button" class="secondary-btn shell-context-toggle" id="toggle-context-panel" aria-expanded="true">收合右側面板</button>
           </header>
@@ -137,19 +137,19 @@
           <div class="context-shell-placeholders" aria-label="右側狀態摘要">
             <div class="context-shell-card">
               <p class="context-shell-card__label">Memory Used</p>
-              <strong>--</strong>
+              <strong id="card-memory-used">--</strong>
             </div>
             <div class="context-shell-card">
               <p class="context-shell-card__label">Run Progress</p>
-              <strong>--</strong>
+              <strong id="card-run-progress">--</strong>
             </div>
             <div class="context-shell-card">
               <p class="context-shell-card__label">Billing</p>
-              <strong>--</strong>
+              <strong id="card-billing">--</strong>
             </div>
             <div class="context-shell-card">
               <p class="context-shell-card__label">Pending Confirmations</p>
-              <strong>--</strong>
+              <strong id="card-pending-confirmations">--</strong>
             </div>
           </div>
           <div class="context-project" id="context-project">目前專案：未選擇</div>
@@ -180,7 +180,9 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
+    <script src="/event_stream_client.js"></script>
     <script>
+      const { EventStreamClient, createUiEventStore, defaultMockFactory } = window.AmonUIEventStream;
       const state = {
         chatId: null,
         projectId: null,
@@ -248,6 +250,33 @@
           elements.toast.classList.remove("visible");
         }, 9000);
       }
+
+      function isMockModeEnabled() {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get("mock_stream") === "1") {
+          return true;
+        }
+        return window.localStorage.getItem("amon.ui.mock_stream") === "1";
+      }
+
+      function renderStoreSummary(storeState) {
+        const runStatus = storeState.run?.status || (state.streaming ? "streaming" : "idle");
+        const runProgress = storeState.run?.progress;
+        elements.shellRunStatus.textContent = `Run：${runStatus}`;
+        elements.cardRunProgress.textContent = Number.isFinite(runProgress) ? `${runProgress}%` : "--";
+        elements.cardBilling.textContent = `NT$ ${storeState.billing.total_cost.toFixed(2)}`;
+        elements.shellBudgetStatus.textContent = `Budget：NT$ ${storeState.billing.total_cost.toFixed(2)} / NT$ 5,000`;
+        const pendingJobs = Object.values(storeState.jobs).filter((job) => job.status && job.status !== "completed").length;
+        elements.cardPendingConfirmations.textContent = pendingJobs > 0 ? `${pendingJobs} 項任務進行中` : "0";
+      }
+
+      state.uiStore.subscribe((snapshot) => {
+        renderStoreSummary(snapshot);
+        if (snapshot.docs.length > 0) {
+          renderDocs(snapshot.docs);
+        }
+      });
+      renderStoreSummary(state.uiStore.getState());
 
       async function apiFetch(path, options = {}) {
         const response = await fetch(`/v1${path}`, {
