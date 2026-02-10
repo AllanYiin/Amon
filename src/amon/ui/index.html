@@ -341,7 +341,9 @@
           source.close();
           setStreaming(false);
           await loadProjects();
-          await loadContext();
+          if (state.projectId) {
+            await loadContext();
+          }
         });
       }
 

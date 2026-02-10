@@ -13,7 +13,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from amon.chat.cli import _build_plan_from_message
-from amon.chat.project_bootstrap import bootstrap_project_if_needed
+from amon.chat.project_bootstrap import bootstrap_project_if_needed, resolve_project_id_from_message
 from amon.chat.router import route_intent
 from amon.chat.session_store import append_event, create_chat_session
 from amon.commands.executor import CommandPlan, execute
@@ -594,6 +594,10 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             self.wfile.flush()
 
         try:
+            if project_id is None:
+                inferred_project_id = resolve_project_id_from_message(self.core, message)
+                if inferred_project_id:
+                    project_id = inferred_project_id
             router_result = route_intent(message, project_id=project_id)
             created_project: ProjectRecord | None = None
             if project_id is None:
