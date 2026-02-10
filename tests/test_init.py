@@ -35,6 +35,8 @@ class InitTests(unittest.TestCase):
             self.assertTrue((base_path / "logs" / "amon.log").exists())
             self.assertTrue((base_path / "logs" / "billing.log").exists())
             self.assertTrue((base_path / "config.yaml").exists())
+            bundled_skill = base_path / "skills" / "spec-to-tasks.skill"
+            self.assertTrue(bundled_skill.exists())
 
 
 if __name__ == "__main__":
