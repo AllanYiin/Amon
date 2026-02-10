@@ -87,6 +87,74 @@ def append_event(chat_id: str, event: dict[str, Any]) -> None:
     )
 
 
+def load_recent_dialogue(project_id: str, chat_id: str, limit: int = 12) -> list[dict[str, str]]:
+    """Load recent user/assistant dialogue turns for contextual continuity."""
+    if not chat_id:
+        return []
+    if limit <= 0:
+        return []
+    validate_project_id(project_id)
+
+    session_path = _chat_session_path(project_id, chat_id)
+    if not session_path.exists():
+        return []
+
+    dialogue: list[dict[str, str]] = []
+    try:
+        for raw_line in session_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            event_type = payload.get("type")
+            text = payload.get("text")
+            if event_type not in {"user", "assistant"} or not isinstance(text, str) or not text.strip():
+                continue
+            role = "user" if event_type == "user" else "assistant"
+            dialogue.append({"role": role, "content": text.strip()})
+    except OSError as exc:
+        log_event(
+            {
+                "event": "chat_session_read_failed",
+                "level": "WARNING",
+                "project_id": project_id,
+                "session_id": chat_id,
+                "error": str(exc),
+            }
+        )
+        return []
+    return dialogue[-limit:]
+
+
+def build_prompt_with_history(message: str, dialogue: list[dict[str, str]] | None = None) -> str:
+    """Compose prompt with conversation history when available."""
+    cleaned_message = (message or "").strip()
+    if not dialogue:
+        return cleaned_message
+
+    history_lines: list[str] = []
+    for item in dialogue:
+        role = item.get("role")
+        content = (item.get("content") or "").strip()
+        if role not in {"user", "assistant"} or not content:
+            continue
+        speaker = "使用者" if role == "user" else "Amon"
+        history_lines.append(f"{speaker}: {content}")
+    if not history_lines:
+        return cleaned_message
+    history = "\n".join(history_lines)
+    return (
+        "請根據以下歷史對話延續回覆，保持脈絡一致。\n"
+        "[歷史對話]\n"
+        f"{history}\n"
+        "[目前訊息]\n"
+        f"使用者: {cleaned_message}"
+    )
+
+
 def _chat_session_path(project_id: str, chat_id: str) -> Path:
     return _resolve_data_dir() / "projects" / project_id / "sessions" / "chat" / f"{chat_id}.jsonl"
 

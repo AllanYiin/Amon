@@ -8,7 +8,12 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from amon.chat.session_store import append_event, create_chat_session
+from amon.chat.session_store import (
+    append_event,
+    build_prompt_with_history,
+    create_chat_session,
+    load_recent_dialogue,
+)
 
 
 class ChatSessionStoreTests(unittest.TestCase):
@@ -67,6 +72,42 @@ class ChatSessionStoreTests(unittest.TestCase):
                     create_chat_session("../escape")
             finally:
                 os.environ.pop("AMON_HOME", None)
+
+    def test_load_recent_dialogue_filters_non_dialogue_events(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                project_id = "proj-789"
+                chat_id = create_chat_session(project_id)
+                append_event(chat_id, {"type": "user", "text": "你好", "project_id": project_id})
+                append_event(chat_id, {"type": "router", "text": "chat_response", "project_id": project_id})
+                append_event(chat_id, {"type": "assistant", "text": "哈囉！", "project_id": project_id})
+                append_event(chat_id, {"type": "assistant_chunk", "text": "ignored", "project_id": project_id})
+                dialogue = load_recent_dialogue(project_id, chat_id)
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+            self.assertEqual(
+                dialogue,
+                [
+                    {"role": "user", "content": "你好"},
+                    {"role": "assistant", "content": "哈囉！"},
+                ],
+            )
+
+    def test_build_prompt_with_history_includes_previous_turns(self) -> None:
+        prompt = build_prompt_with_history(
+            "請繼續",
+            [
+                {"role": "user", "content": "幫我整理簡報"},
+                {"role": "assistant", "content": "好的，請提供主題。"},
+            ],
+        )
+        self.assertIn("[歷史對話]", prompt)
+        self.assertIn("使用者: 幫我整理簡報", prompt)
+        self.assertIn("Amon: 好的，請提供主題。", prompt)
+        self.assertIn("[目前訊息]", prompt)
+        self.assertIn("使用者: 請繼續", prompt)
 
 
 if __name__ == "__main__":

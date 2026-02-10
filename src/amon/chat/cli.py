@@ -7,7 +7,12 @@ from typing import Callable
 
 from amon.chat.project_bootstrap import bootstrap_project_if_needed
 from amon.chat.router import RouterResult, route_intent
-from amon.chat.session_store import append_event, create_chat_session
+from amon.chat.session_store import (
+    append_event,
+    build_prompt_with_history,
+    create_chat_session,
+    load_recent_dialogue,
+)
 from amon.commands.executor import CommandPlan, execute
 from amon.core import AmonCore
 from amon.fs.safety import make_change_plan
@@ -48,10 +53,12 @@ def run_chat_repl(
 
         try:
             is_slash_command = message.startswith("/")
+            history = load_recent_dialogue(project_id, chat_id) if project_id and chat_id else []
             if is_slash_command:
                 router_result = RouterResult(type="command_plan")
             else:
-                router_result = route_intent(message, project_id=project_id, run_id=last_run_id)
+                context = {"conversation_history": history} if history else None
+                router_result = route_intent(message, project_id=project_id, run_id=last_run_id, context=context)
             created_project = bootstrap_project_if_needed(
                 core=core,
                 project_id=project_id,
@@ -97,7 +104,10 @@ def run_chat_repl(
                     output_func("請先建立或指定專案。")
                     continue
                 output_func("Amon：")
-                response = core.run_single(message, project_path=project_path)
+                response = core.run_single(
+                    build_prompt_with_history(message, history),
+                    project_path=project_path,
+                )
                 append_event(chat_id, {"type": "assistant", "text": response, "project_id": project_id})
                 continue
             output_func("目前尚未支援此類型的操作。")
