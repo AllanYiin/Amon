@@ -39,7 +39,8 @@ class SkillsTests(unittest.TestCase):
                 (references_dir / "note.txt").write_text("note", encoding="utf-8")
 
                 skills = core.scan_skills(project_path=project_path)
-                self.assertEqual({skill["name"] for skill in skills}, {"global-skill", "project-skill"})
+                skill_names = {skill["name"] for skill in skills}
+                self.assertTrue({"global-skill", "project-skill"}.issubset(skill_names))
                 self.assertTrue(all(skill.get("updated_at") for skill in skills))
                 sources = {skill["name"]: skill.get("source") for skill in skills}
                 self.assertEqual(sources["global-skill"], "global")
@@ -48,7 +49,8 @@ class SkillsTests(unittest.TestCase):
                 self.assertEqual(global_meta.get("frontmatter", {}).get("category"), "utility")
 
                 listed = core.list_skills()
-                self.assertEqual(len(listed), 2)
+                listed_names = {skill["name"] for skill in listed}
+                self.assertTrue({"global-skill", "project-skill"}.issubset(listed_names))
 
                 skill = core.load_skill("global-skill", project_path=project_path)
                 self.assertIn("全域內容", skill["content"])
@@ -105,8 +107,8 @@ class SkillsTests(unittest.TestCase):
                 )
 
                 skills = core.scan_skills()
-                self.assertEqual(skills[0]["name"], "broken-skill")
-                self.assertEqual(skills[0]["description"], "")
+                broken = next(skill for skill in skills if skill["name"] == "broken-skill")
+                self.assertEqual(broken["description"], "")
             finally:
                 os.environ.pop("AMON_HOME", None)
 

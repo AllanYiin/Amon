@@ -184,13 +184,30 @@ class AmonCore:
             return
 
         for source_file in source_dir.glob("*.skill"):
-            target_file = self.skills_dir / source_file.name
-            if target_file.exists():
-                continue
             try:
-                shutil.copy2(source_file, target_file)
+                with zipfile.ZipFile(source_file) as archive:
+                    members = [Path(name) for name in archive.namelist() if name.endswith("/SKILL.md")]
+                    if not members:
+                        self.logger.warning("內建 skill 封包缺少 SKILL.md：%s", source_file)
+                        continue
+                    for member in members:
+                        skill_dir_name = member.parent.name
+                        target_dir = self.skills_dir / skill_dir_name
+                        if target_dir.exists():
+                            continue
+                        archive.extractall(path=self.skills_dir)
+                        break
+            except zipfile.BadZipFile:
+                target_file = self.skills_dir / source_file.name
+                if target_file.exists():
+                    continue
+                try:
+                    shutil.copy2(source_file, target_file)
+                except OSError as exc:
+                    self.logger.error("安裝內建 skill 失敗：%s -> %s (%s)", source_file, target_file, exc, exc_info=True)
+                    raise
             except OSError as exc:
-                self.logger.error("安裝內建 skill 失敗：%s -> %s (%s)", source_file, target_file, exc, exc_info=True)
+                self.logger.error("安裝內建 skill 封包失敗：%s (%s)", source_file, exc, exc_info=True)
                 raise
 
     def create_project(self, name: str) -> ProjectRecord:
