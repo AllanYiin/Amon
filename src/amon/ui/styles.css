@@ -366,6 +366,43 @@ body {
   background: var(--highlight);
 }
 
+.chat-bubble p {
+  margin: 0;
+}
+
+.chat-bubble p + p,
+.chat-bubble p + ul,
+.chat-bubble ul + p,
+.chat-bubble pre,
+.chat-bubble h1,
+.chat-bubble h2,
+.chat-bubble h3 {
+  margin-top: 8px;
+}
+
+.chat-bubble ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.chat-bubble pre {
+  margin-bottom: 0;
+  overflow-x: auto;
+  background: rgba(15, 23, 42, 0.06);
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.chat-bubble code {
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+}
+
+.chat-bubble a {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
 .chat-input {
   display: flex;
   gap: 10px;

@@ -137,10 +137,110 @@
       function appendMessage(role, text) {
         const bubble = document.createElement("div");
         bubble.className = `chat-bubble ${role}`;
-        bubble.textContent = text;
+        bubble.innerHTML = renderMarkdown(text);
         elements.timeline.appendChild(bubble);
         elements.timeline.scrollTop = elements.timeline.scrollHeight;
         return bubble;
+      }
+
+      function escapeHtml(text) {
+        return text
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+
+      function renderInlineMarkdown(text) {
+        let html = escapeHtml(text);
+        html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+        html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+        html = html.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+        html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+        return html;
+      }
+
+      function renderMarkdown(text) {
+        const lines = String(text || "").split("\n");
+        const html = [];
+        let inList = false;
+        let inCodeBlock = false;
+        let codeLines = [];
+        let paragraph = [];
+
+        const flushParagraph = () => {
+          if (!paragraph.length) return;
+          html.push(`<p>${renderInlineMarkdown(paragraph.join("\n")).replaceAll("\n", "<br />")}</p>`);
+          paragraph = [];
+        };
+
+        const flushCodeBlock = () => {
+          if (!inCodeBlock) return;
+          html.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
+          inCodeBlock = false;
+          codeLines = [];
+        };
+
+        const closeList = () => {
+          if (!inList) return;
+          html.push("</ul>");
+          inList = false;
+        };
+
+        lines.forEach((rawLine) => {
+          const line = rawLine.trimEnd();
+          if (line.trim().startsWith("```")) {
+            flushParagraph();
+            closeList();
+            if (inCodeBlock) {
+              flushCodeBlock();
+            } else {
+              inCodeBlock = true;
+              codeLines = [];
+            }
+            return;
+          }
+
+          if (inCodeBlock) {
+            codeLines.push(rawLine);
+            return;
+          }
+
+          if (!line.trim()) {
+            flushParagraph();
+            closeList();
+            return;
+          }
+
+          const headingMatch = line.match(/^(#{1,3})\s+(.+)$/);
+          if (headingMatch) {
+            flushParagraph();
+            closeList();
+            const level = headingMatch[1].length;
+            html.push(`<h${level}>${renderInlineMarkdown(headingMatch[2])}</h${level}>`);
+            return;
+          }
+
+          const listMatch = line.match(/^[-*]\s+(.+)$/);
+          if (listMatch) {
+            flushParagraph();
+            if (!inList) {
+              html.push("<ul>");
+              inList = true;
+            }
+            html.push(`<li>${renderInlineMarkdown(listMatch[1])}</li>`);
+            return;
+          }
+
+          closeList();
+          paragraph.push(line);
+        });
+
+        flushParagraph();
+        closeList();
+        flushCodeBlock();
+        return html.join("");
       }
 
       function setStreaming(active) {
@@ -303,7 +403,7 @@
         source.addEventListener("token", (event) => {
           const data = JSON.parse(event.data || "{}");
           buffer += data.text || "";
-          agentBubble.textContent = `Amon：${buffer}`;
+          agentBubble.innerHTML = renderMarkdown(`Amon：${buffer}`);
           elements.timeline.scrollTop = elements.timeline.scrollHeight;
         });
 
@@ -318,12 +418,12 @@
           const data = JSON.parse(event.data || "{}");
           applySessionFromEvent(data);
           showPlanCard(data);
-          agentBubble.textContent = "Amon：已產生 Plan Card，請確認。";
+          agentBubble.innerHTML = renderMarkdown("Amon：已產生 Plan Card，請確認。");
         });
 
         source.addEventListener("result", (event) => {
           const data = JSON.parse(event.data || "{}");
-          agentBubble.textContent = `Amon：${JSON.stringify(data, null, 2)}`;
+          agentBubble.innerHTML = renderMarkdown(`Amon：\n\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``);
         });
 
         source.addEventListener("error", (event) => {
