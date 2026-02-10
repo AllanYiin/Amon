@@ -63,6 +63,24 @@
 
           <section id="timeline" class="chat-timeline"></section>
 
+          <section class="thinking-panel" id="thinking-panel">
+            <div class="thinking-panel__header">
+              <h3>Thinking 狀態</h3>
+              <label class="field-label thinking-mode">
+                顯示模式
+                <select id="thinking-mode">
+                  <option value="off">off</option>
+                  <option value="brief" selected>brief</option>
+                  <option value="verbose">verbose</option>
+                </select>
+              </label>
+            </div>
+            <details open id="thinking-details">
+              <summary id="thinking-summary">目前沒有 Thinking 事件</summary>
+              <div id="thinking-detail" class="thinking-panel__detail"></div>
+            </details>
+          </section>
+
           <div class="progress-bar" id="stream-progress" aria-hidden="true">
             <span></span>
           </div>
@@ -72,11 +90,30 @@
               <h3>Plan Card</h3>
               <p>此操作需要確認才能繼續。</p>
             </div>
+            <div class="plan-grid">
+              <div>
+                <h4>Commands</h4>
+                <ul id="plan-commands" class="plan-list"></ul>
+              </div>
+              <div>
+                <h4>Graph Patches</h4>
+                <ul id="plan-patches" class="plan-list"></ul>
+              </div>
+            </div>
+            <div class="plan-risk" id="plan-risk"></div>
             <pre id="plan-content"></pre>
             <div class="plan-card__actions">
               <button class="secondary-btn" id="plan-cancel">取消</button>
               <button class="primary-btn" id="plan-confirm">確認執行</button>
             </div>
+          </section>
+
+          <section class="artifact-section">
+            <div class="artifact-section__header">
+              <h3>Artifacts</h3>
+              <p>顯示來自 run/node 的產出。</p>
+            </div>
+            <div id="artifact-list" class="artifact-list"></div>
           </section>
 
           <form id="chat-form" class="chat-input">
@@ -152,8 +189,9 @@
         plan: null,
         streaming: false,
         attachments: [],
-        uiStore: createUiEventStore(),
-        streamClient: null,
+        mockMode: true,
+        thinkingMode: "brief",
+        pendingAssistantBubble: null,
       };
 
       const elements = {
@@ -166,6 +204,9 @@
         toast: document.getElementById("toast"),
         planCard: document.getElementById("plan-card"),
         planContent: document.getElementById("plan-content"),
+        planCommands: document.getElementById("plan-commands"),
+        planPatches: document.getElementById("plan-patches"),
+        planRisk: document.getElementById("plan-risk"),
         planConfirm: document.getElementById("plan-confirm"),
         planCancel: document.getElementById("plan-cancel"),
         refreshContext: document.getElementById("refresh-context"),
@@ -179,12 +220,10 @@
         streamProgress: document.getElementById("stream-progress"),
         uiShell: document.getElementById("ui-shell"),
         toggleContextPanel: document.getElementById("toggle-context-panel"),
-        shellRunStatus: document.getElementById("shell-run-status"),
-        shellDaemonStatus: document.getElementById("shell-daemon-status"),
-        shellBudgetStatus: document.getElementById("shell-budget-status"),
-        cardRunProgress: document.getElementById("card-run-progress"),
-        cardBilling: document.getElementById("card-billing"),
-        cardPendingConfirmations: document.getElementById("card-pending-confirmations"),
+        thinkingMode: document.getElementById("thinking-mode"),
+        thinkingSummary: document.getElementById("thinking-summary"),
+        thinkingDetail: document.getElementById("thinking-detail"),
+        artifactList: document.getElementById("artifact-list"),
       };
 
       function syncContextPanelToggle() {
@@ -256,13 +295,33 @@
         return payload;
       }
 
-      function appendMessage(role, text) {
+      function appendMessage(role, text, meta = {}) {
+        const row = document.createElement("article");
+        row.className = "timeline-row";
+
         const bubble = document.createElement("div");
         bubble.className = `chat-bubble ${role}`;
         bubble.innerHTML = renderMarkdown(text);
-        elements.timeline.appendChild(bubble);
+
+        const footer = document.createElement("footer");
+        footer.className = "timeline-meta";
+        const roleLabel = role === "user" ? "你" : "Amon";
+        const status = meta.status ? `・${meta.status}` : "";
+        footer.textContent = `${new Date().toLocaleTimeString("zh-TW", { hour12: false })}・${roleLabel}${status}`;
+
+        row.appendChild(bubble);
+        row.appendChild(footer);
+        elements.timeline.appendChild(row);
         elements.timeline.scrollTop = elements.timeline.scrollHeight;
         return bubble;
+      }
+
+      function appendTimelineStatus(message) {
+        const item = document.createElement("div");
+        item.className = "timeline-status";
+        item.textContent = message;
+        elements.timeline.appendChild(item);
+        elements.timeline.scrollTop = elements.timeline.scrollHeight;
       }
 
       function escapeHtml(text) {
@@ -375,6 +434,9 @@
         state.plan = null;
         elements.planCard.hidden = true;
         elements.planContent.textContent = "";
+        elements.planCommands.innerHTML = "";
+        elements.planPatches.innerHTML = "";
+        elements.planRisk.innerHTML = "";
       }
 
       function setProjectState(projectId) {
@@ -408,8 +470,19 @@
       }
 
       async function loadProjects() {
-        const payload = await apiFetch("/projects");
-        const projects = payload.projects || [];
+        let projects = [];
+        try {
+          const payload = await apiFetch("/projects");
+          projects = payload.projects || [];
+        } catch (error) {
+          if (!state.mockMode) {
+            throw error;
+          }
+          projects = [
+            { project_id: "demo-project", name: "Demo 專案（Mock）" },
+            { project_id: "playground", name: "Internal Playground（Mock）" },
+          ];
+        }
         elements.projectSelect.innerHTML = "";
         const emptyOption = document.createElement("option");
         emptyOption.value = "";
@@ -425,6 +498,9 @@
         if (state.projectId && !availableIds.has(state.projectId)) {
           state.projectId = null;
         }
+        if (!state.projectId && state.mockMode && projects.length) {
+          state.projectId = projects[0].project_id;
+        }
         elements.projectSelect.value = state.projectId || "";
         syncContextHeader();
         if (!projects.length) {
@@ -435,6 +511,10 @@
 
       async function ensureChatSession() {
         if (!state.projectId) return;
+        if (state.mockMode) {
+          state.chatId = state.chatId || `mock-chat-${state.projectId}`;
+          return;
+        }
         const payload = await apiFetch("/chat/sessions", {
           method: "POST",
           body: JSON.stringify({ project_id: state.projectId }),
@@ -447,7 +527,18 @@
           showToast("請先選擇專案。");
           return;
         }
-        const payload = await apiFetch(`/projects/${state.projectId}/context`);
+        let payload;
+        if (state.mockMode) {
+          payload = {
+            graph_mermaid: `graph TD
+User-->Chat
+Chat-->Planner
+Planner-->Artifacts`,
+            docs: ["docs/overview.md", "docs/roadmap.md"],
+          };
+        } else {
+          payload = await apiFetch(`/projects/${state.projectId}/context`);
+        }
         elements.graphCode.textContent = payload.graph_mermaid || "";
         renderMermaid(payload.graph_mermaid || "");
         renderDocs(payload.docs || []);
@@ -482,9 +573,37 @@
         }
       }
 
+      function renderPlanList(target, rows = []) {
+        target.innerHTML = "";
+        if (!rows.length) {
+          const empty = document.createElement("li");
+          empty.textContent = "無";
+          target.appendChild(empty);
+          return;
+        }
+        rows.forEach((row) => {
+          const item = document.createElement("li");
+          item.textContent = typeof row === "string" ? row : JSON.stringify(row);
+          target.appendChild(item);
+        });
+      }
+
+      function renderPlanRisk(plan) {
+        const risk = plan.risk || {};
+        const chips = [
+          `require_confirm：${risk.require_confirm ? "是" : "否"}`,
+          `file change plan：${risk.file_change_plan || "未提供"}`,
+          `cost：${risk.cost || "未知"}`,
+        ];
+        elements.planRisk.innerHTML = chips.map((chip) => `<span class="risk-chip">${chip}</span>`).join("");
+      }
+
       function showPlanCard(plan) {
         state.plan = plan;
         elements.planContent.textContent = plan.plan_card || "";
+        renderPlanList(elements.planCommands, plan.commands || []);
+        renderPlanList(elements.planPatches, plan.graph_patches || []);
+        renderPlanRisk(plan);
         elements.planCard.hidden = false;
       }
 
@@ -501,17 +620,22 @@
       async function confirmPlan(confirmed) {
         if (!state.plan) return;
         try {
-          await apiFetch("/chat/plan/confirm", {
-            method: "POST",
-            body: JSON.stringify({
-              project_id: state.projectId,
-              chat_id: state.chatId,
-              command: state.plan.command,
-              args: state.plan.args || {},
-              confirmed,
-            }),
-          });
-          appendMessage("agent", confirmed ? "已確認執行。" : "已取消執行。");
+          if (state.mockMode) {
+            await new Promise((resolve) => window.setTimeout(resolve, 320));
+          } else {
+            await apiFetch("/chat/plan/confirm", {
+              method: "POST",
+              body: JSON.stringify({
+                project_id: state.projectId,
+                chat_id: state.chatId,
+                command: state.plan.command,
+                args: state.plan.args || {},
+                confirmed,
+              }),
+            });
+          }
+          appendMessage("agent", confirmed ? "已確認執行，任務繼續。" : "已取消執行。", { status: "done" });
+          showToast(state.mockMode ? "目前為 Mock API：已模擬 Plan Confirm。" : "Plan Confirm 成功。");
           resetPlanCard();
         } catch (error) {
           showToast(`Plan 執行失敗：${error.message}`);
@@ -527,94 +651,188 @@
         return `\n\n[附件摘要]\n${lines.join("\n")}`;
       }
 
+      function updateThinking(payload = {}) {
+        const mode = state.thinkingMode;
+        if (mode === "off") {
+          elements.thinkingSummary.textContent = "Thinking 顯示已關閉";
+          elements.thinkingDetail.textContent = "";
+          return;
+        }
+        const status = payload.status || "分析中";
+        const brief = payload.brief || "正在整理回覆與執行計畫";
+        elements.thinkingSummary.textContent = `狀態：${status}｜${brief}`;
+        elements.thinkingDetail.textContent = mode === "verbose" ? (payload.verbose || brief) : brief;
+      }
+
+      function renderArtifacts(artifacts = []) {
+        elements.artifactList.innerHTML = "";
+        if (!artifacts.length) {
+          elements.artifactList.innerHTML = '<p class="empty-context">目前尚無 artifact</p>';
+          return;
+        }
+        artifacts.forEach((artifact) => {
+          const card = document.createElement("article");
+          card.className = "artifact-card";
+          card.innerHTML = `
+            <header>
+              <strong>${artifact.type}</strong>
+              <span>${artifact.run_id}/${artifact.node_id}</span>
+            </header>
+            <p>${artifact.path}</p>
+            <pre>${escapeHtml(artifact.preview || "(無預覽)")}</pre>
+            <div class="artifact-card__actions">
+              <button type="button" class="secondary-btn small" data-artifact-action="open">Open</button>
+              <button type="button" class="secondary-btn small" data-artifact-action="download">Download</button>
+              <button type="button" class="secondary-btn small" data-artifact-action="pin">Pin（stub）</button>
+            </div>`;
+          card.querySelectorAll("[data-artifact-action]").forEach((btn) => {
+            btn.addEventListener("click", () => {
+              showToast(`目前為 Mock 動作：${btn.dataset.artifactAction} ${artifact.path}`);
+            });
+          });
+          elements.artifactList.appendChild(card);
+        });
+      }
+
+      function applyTokenChunk(text = "") {
+        if (!state.pendingAssistantBubble) {
+          state.pendingAssistantBubble = appendMessage("agent", "Amon：", { status: "streaming" });
+          state.pendingAssistantBubble.dataset.buffer = "";
+        }
+        state.pendingAssistantBubble.dataset.buffer = `${state.pendingAssistantBubble.dataset.buffer || ""}${text}`;
+        state.pendingAssistantBubble.innerHTML = renderMarkdown(`Amon：${state.pendingAssistantBubble.dataset.buffer}`);
+        elements.timeline.scrollTop = elements.timeline.scrollHeight;
+      }
+
+      function finalizeAssistantBubble() {
+        state.pendingAssistantBubble = null;
+      }
+
+      function buildMockEventQueue() {
+        return [
+          { type: "thinking", data: { status: "planning", brief: "解析需求與附件摘要", verbose: "正在比對專案上下文與可執行工具，建立最低風險計畫。" } },
+          { type: "token", data: { text: "我已收到需求，先建立可確認的執行計畫。" } },
+          { type: "token", data: { text: "接著會等待你確認 Plan Card。" } },
+          {
+            type: "plan",
+            data: {
+              plan_card: "準備更新 chat timeline、thinking 區塊與 artifact cards。",
+              commands: ["python -m unittest discover -s tests", "python -m compileall src tests"],
+              graph_patches: ["+ node: artifact_renderer", "~ edge: stream -> timeline"],
+              risk: { require_confirm: true, file_change_plan: "更新前端 HTML/CSS", cost: "low" },
+              command: "apply_chat_ui_core",
+              args: { target: "chat" },
+            },
+          },
+          {
+            type: "result",
+            data: {
+              artifacts: [
+                { type: "doc", run_id: "run_demo_001", node_id: "summarizer", path: "docs/plan.md", preview: "# Plan\n- timeline streaming" },
+                { type: "graph", run_id: "run_demo_001", node_id: "graph_builder", path: "graphs/flow.mmd", preview: "graph TD\nA-->B" },
+                { type: "table", run_id: "run_demo_001", node_id: "metrics", path: "reports/summary.csv", preview: "name,value\nlatency,120" },
+                { type: "log", run_id: "run_demo_001", node_id: "executor", path: "logs/run.log", preview: "INFO task finished" },
+              ],
+            },
+          },
+          { type: "done", data: { status: "completed" } },
+        ];
+      }
+
+      function consumeEvent(eventType, data) {
+        if (eventType === "token") {
+          applyTokenChunk(data.text || "");
+        } else if (eventType === "thinking") {
+          updateThinking(data);
+        } else if (eventType === "plan") {
+          applySessionFromEvent(data);
+          showPlanCard(data);
+          appendTimelineStatus("已收到 Plan Card，請確認後繼續。");
+        } else if (eventType === "result") {
+          if (Array.isArray(data.artifacts)) {
+            renderArtifacts(data.artifacts);
+          }
+          appendMessage("agent", `Amon：\n\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``);
+        } else if (eventType === "error") {
+          showToast(data.message || "串流失敗");
+        }
+      }
+
+      function runMockStream() {
+        const queue = buildMockEventQueue();
+        let index = 0;
+        const next = () => {
+          if (index >= queue.length) return;
+          const event = queue[index++];
+          if (event.type === "done") {
+            finalizeAssistantBubble();
+            setStreaming(false);
+            appendTimelineStatus("Mock 串流完成。提醒：目前畫面使用 Mock data / Mock API。");
+            return;
+          }
+          consumeEvent(event.type, event.data);
+          window.setTimeout(next, event.type === "token" ? 260 : 420);
+        };
+        next();
+      }
+
       function startStream(message, attachments = []) {
         resetPlanCard();
         const finalMessage = `${message}${buildAttachmentSummary(attachments)}`;
         appendMessage("user", `你：${finalMessage}`);
-        const agentBubble = appendMessage("agent", "Amon：");
+        appendTimelineStatus("訊息已送出，等待事件回傳中...");
+        updateThinking({ status: "queued", brief: "已送出，等待伺服器事件" });
         setStreaming(true);
-        let buffer = "";
 
-        if (state.streamClient) {
-          state.streamClient.stop();
-          state.streamClient = null;
+        if (state.mockMode) {
+          showToast("提醒：目前為 Mock 串流與 Mock API，僅供 UI Demo。");
+          runMockStream();
+          return;
         }
 
-        state.streamClient = new EventStreamClient({
-          preferSSE: true,
-          useMock: isMockModeEnabled(),
-          sseUrlBuilder: (params, lastEventId) => {
-            const query = new URLSearchParams({ message: params.message });
-            if (params.project_id) query.set("project_id", params.project_id);
-            if (params.chat_id) query.set("chat_id", params.chat_id);
-            if (lastEventId) query.set("last_event_id", lastEventId);
-            return `/v1/chat/stream?${query.toString()}`;
-          },
-          wsUrlBuilder: (params, lastEventId) => {
-            const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-            const query = new URLSearchParams({ message: params.message });
-            if (params.project_id) query.set("project_id", params.project_id);
-            if (params.chat_id) query.set("chat_id", params.chat_id);
-            if (lastEventId) query.set("last_event_id", lastEventId);
-            return `${protocol}://${window.location.host}/v1/chat/ws?${query.toString()}`;
-          },
-          mockFactory: defaultMockFactory,
-          onStatusChange: ({ status, transport }) => {
-            if (status === "connected") {
-              const mode = transport === "mock" ? "Mock" : "Healthy";
-              elements.shellDaemonStatus.textContent = `Daemon：${mode}`;
-            }
-            if (status === "reconnecting") {
-              elements.shellDaemonStatus.textContent = "Daemon：Reconnecting";
-              showToast(`串流中斷，正在重新連線（${transport || "unknown"}）`);
-            }
-            if (status === "error") {
-              elements.shellDaemonStatus.textContent = "Daemon：Unavailable";
-            }
-          },
-          onEvent: async (eventType, data) => {
-            state.uiStore.applyEvent(eventType, data);
-            if (eventType === "token") {
-              buffer += data.text || "";
-              agentBubble.innerHTML = renderMarkdown(`Amon：${buffer}`);
-              elements.timeline.scrollTop = elements.timeline.scrollHeight;
-              return;
-            }
-            if (eventType === "notice") {
-              if (data.text) appendMessage("agent", data.text);
-              return;
-            }
-            if (eventType === "plan") {
-              applySessionFromEvent(data);
-              showPlanCard(data);
-              agentBubble.innerHTML = renderMarkdown("Amon：已產生 Plan Card，請確認。");
-              return;
-            }
-            if (eventType === "result") {
-              agentBubble.innerHTML = renderMarkdown(`Amon：\n\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``);
-              return;
-            }
-            if (eventType === "error") {
-              showToast(data.message || "串流失敗");
-              return;
-            }
-            if (eventType === "done") {
-              applySessionFromEvent(data);
-              state.streamClient?.stop();
-              state.streamClient = null;
-              setStreaming(false);
-              await loadProjects();
-              if (state.projectId) {
-                await loadContext();
-              }
-            }
-          },
+        const query = new URLSearchParams({ message: finalMessage });
+        if (state.projectId) {
+          query.set("project_id", state.projectId);
+        }
+        if (state.chatId) {
+          query.set("chat_id", state.chatId);
+        }
+        const source = new EventSource(`/v1/chat/stream?${query.toString()}`);
+
+        source.addEventListener("token", (event) => {
+          consumeEvent("token", JSON.parse(event.data || "{}"));
         });
 
-        state.streamClient.start({
-          message: finalMessage,
-          project_id: state.projectId,
-          chat_id: state.chatId,
+        source.addEventListener("thinking", (event) => {
+          consumeEvent("thinking", JSON.parse(event.data || "{}"));
+        });
+
+        source.addEventListener("plan", (event) => {
+          consumeEvent("plan", JSON.parse(event.data || "{}"));
+        });
+
+        source.addEventListener("result", (event) => {
+          consumeEvent("result", JSON.parse(event.data || "{}"));
+        });
+
+        source.addEventListener("error", (event) => {
+          try {
+            consumeEvent("error", JSON.parse(event.data || "{}"));
+          } catch (error) {
+            showToast("串流失敗");
+          }
+        });
+
+        source.addEventListener("done", async (event) => {
+          const data = JSON.parse(event.data || "{}");
+          applySessionFromEvent(data);
+          source.close();
+          finalizeAssistantBubble();
+          setStreaming(false);
+          await loadProjects();
+          if (state.projectId) {
+            await loadContext();
+          }
         });
       }
 
@@ -683,10 +901,17 @@
         tab.addEventListener("click", () => switchContextTab(tab.dataset.contextTab));
       });
 
+      elements.thinkingMode.addEventListener("change", (event) => {
+        state.thinkingMode = event.target.value;
+        updateThinking({ status: "idle", brief: "已切換 Thinking 顯示模式" });
+      });
+
       (async () => {
         try {
           await loadProjects();
           setProjectState(state.projectId);
+          renderArtifacts([]);
+          updateThinking({ status: "idle", brief: "目前沒有 Thinking 事件" });
           if (state.projectId) {
             await ensureChatSession();
             await loadContext();
