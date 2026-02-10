@@ -256,5 +256,81 @@ class UIAsyncAPITests(unittest.TestCase):
 
 
 
+    def test_logs_and_events_query_api_supports_filters_and_paging(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("logs-events-test")
+                project_path = Path(project.path)
+
+                logs_dir = data_dir / "logs"
+                logs_dir.mkdir(parents=True, exist_ok=True)
+                (logs_dir / "amon.log").write_text(
+                    "\n".join(
+                        [
+                            json.dumps({"ts": "2026-01-01T00:00:00+00:00", "level": "INFO", "component": "daemon", "project_id": project.project_id}, ensure_ascii=False),
+                            json.dumps({"ts": "2026-01-02T00:00:00+00:00", "level": "ERROR", "component": "runner", "project_id": project.project_id, "run_id": "run-001"}, ensure_ascii=False),
+                        ]
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                (logs_dir / "billing.log").write_text(
+                    json.dumps({"ts": "2026-01-03T00:00:00+00:00", "level": "INFO", "project_id": project.project_id, "cost": 0.15}, ensure_ascii=False) + "\n",
+                    encoding="utf-8",
+                )
+
+                run_dir = project_path / ".amon" / "runs" / "run-001"
+                run_dir.mkdir(parents=True, exist_ok=True)
+                (run_dir / "events.jsonl").write_text(
+                    "\n".join(
+                        [
+                            json.dumps({"ts": "2026-01-02T01:00:00+00:00", "event": "node_start", "node_id": "n1"}, ensure_ascii=False),
+                            json.dumps({"ts": "2026-01-02T01:01:00+00:00", "event": "job_triggered", "job_id": "job-1"}, ensure_ascii=False),
+                        ]
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port)
+                encoded_project = quote(project.project_id)
+                conn.request("GET", f"/v1/logs/query?source=amon&project_id={encoded_project}&severity=ERROR&page=1&page_size=1")
+                logs_resp = conn.getresponse()
+                logs_payload = json.loads(logs_resp.read().decode("utf-8"))
+                self.assertEqual(logs_resp.status, 200)
+                self.assertEqual(logs_payload["total"], 1)
+                self.assertEqual(logs_payload["items"][0]["level"], "ERROR")
+
+                conn.request("GET", f"/v1/events/query?project_id={encoded_project}&type=job&page=1&page_size=10")
+                events_resp = conn.getresponse()
+                events_payload = json.loads(events_resp.read().decode("utf-8"))
+                self.assertEqual(events_resp.status, 200)
+                self.assertEqual(events_payload["total"], 1)
+                self.assertEqual(events_payload["items"][0]["drilldown"]["job_id"], "job-1")
+
+                conn.request("GET", f"/v1/logs/download?source=billing&project_id={encoded_project}")
+                download_resp = conn.getresponse()
+                body = download_resp.read().decode("utf-8")
+                self.assertEqual(download_resp.status, 200)
+                self.assertIn("application/x-ndjson", download_resp.getheader("Content-Type"))
+                self.assertIn("cost", body)
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
+
 if __name__ == "__main__":
     unittest.main()
