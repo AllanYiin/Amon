@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from amon.core import AmonCore
+from amon.tooling.builtin import build_registry as build_builtin_registry
 from amon.tooling.policy import ToolPolicy, WorkspaceGuard
 from amon.tooling.registry import ToolRegistry
 from amon.tooling.types import ToolCall, ToolResult, ToolSpec
@@ -59,6 +60,20 @@ class ToolPolicyTests(unittest.TestCase):
 
         decision_after = policy.decide(call)
         self.assertEqual(decision_before, decision_after)
+
+
+class BuiltinRegistryTests(unittest.TestCase):
+    def test_web_tools_allowed_by_default_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            registry = build_builtin_registry(Path(tmpdir))
+            fetch_result = registry.call(
+                ToolCall(
+                    tool="web.fetch",
+                    args={"url": "https://example.com"},
+                    caller="tester",
+                )
+            )
+            self.assertNotEqual(fetch_result.meta.get("status"), "denied")
 
 
 class WorkspaceGuardTests(unittest.TestCase):
