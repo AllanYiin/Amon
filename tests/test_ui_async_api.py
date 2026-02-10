@@ -136,5 +136,79 @@ class UIAsyncAPITests(unittest.TestCase):
                 os.environ.pop("AMON_HOME", None)
 
 
+    def test_project_context_contains_graph_runtime_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("graph-context-test")
+                project_path = Path(project.path)
+
+                run_dir = project_path / ".amon" / "runs" / "run-001"
+                run_dir.mkdir(parents=True, exist_ok=True)
+                (run_dir / "graph.resolved.json").write_text(
+                    json.dumps(
+                        {
+                            "nodes": [{"id": "draft", "type": "llm.generate", "prompt": "hi"}],
+                            "edges": [],
+                        },
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+                (run_dir / "state.json").write_text(
+                    json.dumps(
+                        {
+                            "status": "running",
+                            "nodes": {
+                                "draft": {
+                                    "status": "running",
+                                    "output": {"artifacts": ["draft.md"]},
+                                }
+                            },
+                        },
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+                (run_dir / "events.jsonl").write_text(
+                    "\n".join(
+                        [
+                            json.dumps({"event": "node_start", "node_id": "draft"}, ensure_ascii=False),
+                            json.dumps({"event": "node_complete", "node_id": "draft"}, ensure_ascii=False),
+                        ]
+                    ),
+                    encoding="utf-8",
+                )
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port)
+                encoded_project = quote(project.project_id)
+                conn.request("GET", f"/v1/projects/{encoded_project}/context")
+                response = conn.getresponse()
+                payload = json.loads(response.read().decode("utf-8"))
+
+                self.assertEqual(response.status, 200)
+                self.assertEqual(payload["run_id"], "run-001")
+                self.assertEqual(payload["run_status"], "running")
+                self.assertIn("graph", payload)
+                self.assertIn("node_states", payload)
+                self.assertEqual(payload["node_states"]["draft"]["status"], "running")
+                self.assertGreaterEqual(len(payload["recent_events"]), 1)
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
+
 if __name__ == "__main__":
     unittest.main()
