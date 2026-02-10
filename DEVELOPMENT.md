@@ -2,6 +2,23 @@
 
 以下步驟以 macOS/Linux 為例，Windows 可用 WSL 或等效指令。
 
+## Agent 任務執行流程（必遵守）
+
+1. 接到任何人類委託後，先拆解具體步驟並建立 TODO list。
+2. TODO list 完成前不得直接進入開發或修改程式碼。
+3. 開發時採最小修改原則，避免不必要的架構變更。
+4. 完成後需執行最小品質門檻與測試，並記錄結果。
+
+### TODO list 建議格式
+
+```markdown
+- [ ] 釐清需求與影響範圍
+- [ ] 實作最小必要變更
+- [ ] 執行 `python -m compileall src tests`
+- [ ] 執行 `python -m unittest discover -s tests`
+- [ ] 更新文件與提交紀錄
+```
+
 ## 1) 安裝與初始化
 ```bash
 python -m venv .venv
