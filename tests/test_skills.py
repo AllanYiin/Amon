@@ -84,6 +84,7 @@ class SkillsTests(unittest.TestCase):
                 )
 
                 self.assertNotIn("## Skill: review-skill", base_message)
+                self.assertIn("回覆必須先交付可執行內容", base_message)
                 self.assertIn("## Skill: review-skill", skill_message)
                 self.assertIn("請專注 code review。", skill_message)
             finally:
