@@ -1441,3 +1441,93 @@ body {
   background: #f8fafc;
   word-break: break-word;
 }
+
+.tools-skills-page {
+  display: grid;
+  gap: 16px;
+}
+
+.tools-skills-page__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.tools-list,
+.skills-list {
+  display: grid;
+  gap: 12px;
+}
+
+.tool-card,
+.skill-card {
+  border: 1px solid var(--stroke);
+  border-radius: 12px;
+  padding: 12px;
+  background: #fff;
+}
+
+.tool-card header,
+.skill-card header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.tool-card header p,
+.skill-card p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.tool-card details {
+  margin-top: 8px;
+}
+
+.tool-card pre,
+.skill-card pre,
+.skill-injection-preview {
+  margin: 8px 0 0;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 10px;
+  padding: 10px;
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow: auto;
+  max-height: 220px;
+}
+
+.tool-card__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.skills-preview-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.skills-preview-controls select {
+  min-width: 260px;
+  padding: 8px 10px;
+  border: 1px solid var(--stroke);
+  border-radius: 10px;
+}
+
+.collision-tip {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid #fed7aa;
+  background: #fff7ed;
+  font-size: 12px;
+  color: #9a3412;
+}
