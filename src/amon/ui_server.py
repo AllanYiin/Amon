@@ -24,6 +24,7 @@ from amon.chat.session_store import (
     load_recent_dialogue,
 )
 from amon.commands.executor import CommandPlan, execute
+from amon.config import ConfigLoader
 from amon.daemon.queue import get_queue_depth
 from amon.events import emit_event
 from amon.jobs.runner import start_job
@@ -300,6 +301,31 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             project_id = params.get("project_id", [""])[0].strip() or None
             try:
                 payload = self._build_skills_catalog(project_id=project_id)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, payload)
+            return
+        if parsed.path == "/v1/config/view":
+            params = parse_qs(parsed.query)
+            project_id = params.get("project_id", [""])[0].strip() or None
+            cli_overrides = self._read_query_json_object(params, "cli_overrides")
+            if cli_overrides is None:
+                self._send_json(400, {"message": "cli_overrides 必須是 JSON 物件"})
+                return
+            chat_overrides = self._read_query_json_object(params, "chat_overrides")
+            if chat_overrides is None:
+                self._send_json(400, {"message": "chat_overrides 必須是 JSON 物件"})
+                return
+            try:
+                payload = self._build_config_view_payload(
+                    project_id=project_id,
+                    cli_overrides=cli_overrides,
+                    chat_overrides=chat_overrides,
+                )
+            except KeyError as exc:
+                self._handle_error(exc, status=404)
+                return
             except Exception as exc:  # noqa: BLE001
                 self._handle_error(exc, status=500)
                 return
@@ -696,6 +722,60 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 collisions.append({"name": name, "message": "project override global"})
         return {"skills": scanned, "collisions": collisions, "updated_at": self.core._now()}
 
+
+    def _build_config_view_payload(
+        self,
+        *,
+        project_id: str | None,
+        cli_overrides: dict[str, Any],
+        chat_overrides: dict[str, Any],
+    ) -> dict[str, Any]:
+        loader = ConfigLoader(data_dir=self.core.data_dir)
+        global_config = loader.load_global()
+        project_config: dict[str, Any] = {}
+        if project_id:
+            self.core.get_project_path(project_id)
+            project_config = loader.load_project(project_id)
+        resolution = loader.resolve(project_id=project_id, cli_overrides=cli_overrides or None)
+        effective = resolution.effective
+        sources = resolution.sources
+        if chat_overrides:
+            self._overlay_with_source(effective, sources, chat_overrides, "chat")
+        return {
+            "project_id": project_id,
+            "global_config": global_config,
+            "project_config": project_config,
+            "effective_config": effective,
+            "sources": sources,
+        }
+
+    @staticmethod
+    def _overlay_with_source(base: dict[str, Any], sources: dict[str, Any], updates: dict[str, Any], source: str) -> None:
+        for key, value in updates.items():
+            if isinstance(value, dict) and isinstance(base.get(key), dict) and isinstance(sources.get(key), dict):
+                AmonUIHandler._overlay_with_source(base[key], sources[key], value, source)
+                continue
+            base[key] = value
+            sources[key] = AmonUIHandler._assign_source_tree(value, source)
+
+    @staticmethod
+    def _assign_source_tree(value: Any, source: str) -> Any:
+        if isinstance(value, dict):
+            return {key: AmonUIHandler._assign_source_tree(item, source) for key, item in value.items()}
+        return source
+
+    @staticmethod
+    def _read_query_json_object(params: dict[str, list[str]], key: str) -> dict[str, Any] | None:
+        raw = params.get(key, [""])[0].strip()
+        if not raw:
+            return {}
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(value, dict):
+            return None
+        return value
     def _build_skill_trigger_preview(self, *, skill_name: str, project_id: str | None) -> dict[str, Any]:
         project_path = self.core.get_project_path(project_id) if project_id else None
         skill = self.core.load_skill(skill_name, project_path=project_path)

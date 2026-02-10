@@ -21,7 +21,7 @@
             <button type="button" class="shell-nav__item" data-shell-view="chat">Context</button>
             <button type="button" class="shell-nav__item" data-shell-view="chat">Graph</button>
             <button type="button" class="shell-nav__item" data-shell-view="tools-skills">Tools &amp; Skills</button>
-            <button type="button" class="shell-nav__item" data-shell-view="chat">Config</button>
+            <button type="button" class="shell-nav__item" data-shell-view="config">Config</button>
             <button type="button" class="shell-nav__item" data-shell-view="chat">Logs &amp; Events</button>
             <button type="button" class="shell-nav__item" data-shell-view="chat">Docs</button>
             <button type="button" class="shell-nav__item" data-shell-view="chat">Bill</button>
@@ -182,6 +182,53 @@
             </aside>
           </div>
 
+
+          <section class="main-card config-page" id="config-page" hidden>
+            <header class="config-page__header">
+              <div>
+                <h2>Config</h2>
+                <p class="subtitle">唯讀檢視 Global / Project / Effective 設定，並顯示 Effective 來源。</p>
+              </div>
+              <button type="button" class="secondary-btn" id="config-export">匯出 Effective Config</button>
+            </header>
+
+            <div class="config-toolbar">
+              <label class="field-label config-toolbar__search">
+                搜尋 key path
+                <input type="search" id="config-search" placeholder="例如：amon.ui.theme" />
+              </label>
+              <button type="button" class="secondary-btn" id="config-refresh">重新整理</button>
+            </div>
+
+            <div class="config-grid">
+              <article class="config-card">
+                <h3>Global config</h3>
+                <pre id="config-global">尚未載入。</pre>
+              </article>
+              <article class="config-card">
+                <h3>Project config</h3>
+                <pre id="config-project">尚未載入。</pre>
+              </article>
+            </div>
+
+            <article class="config-card">
+              <h3>Effective config（含來源）</h3>
+              <div id="config-effective-summary" class="config-effective-summary">尚未載入。</div>
+              <div class="config-table-wrap">
+                <table class="config-table" id="config-table">
+                  <thead>
+                    <tr>
+                      <th>Key path</th>
+                      <th>Effective</th>
+                      <th>Source</th>
+                    </tr>
+                  </thead>
+                  <tbody id="config-table-body"></tbody>
+                </table>
+              </div>
+            </article>
+          </section>
+
           <section class="main-card tools-skills-page" id="tools-skills-page" hidden>
             <header class="tools-skills-page__header">
               <div>
@@ -265,6 +312,7 @@
         shellView: "chat",
         toolsCatalog: [],
         skillsCatalog: [],
+        configView: null,
       };
 
       const elements = {
@@ -318,6 +366,14 @@
         skillTriggerSelect: document.getElementById("skill-trigger-select"),
         skillTriggerPreview: document.getElementById("skill-trigger-preview"),
         skillInjectionPreview: document.getElementById("skill-injection-preview"),
+        configPage: document.getElementById("config-page"),
+        configRefresh: document.getElementById("config-refresh"),
+        configSearch: document.getElementById("config-search"),
+        configExport: document.getElementById("config-export"),
+        configGlobal: document.getElementById("config-global"),
+        configProject: document.getElementById("config-project"),
+        configEffectiveSummary: document.getElementById("config-effective-summary"),
+        configTableBody: document.getElementById("config-table-body"),
       };
 
       function syncContextPanelToggle() {
@@ -340,6 +396,85 @@
         state.shellView = view;
         elements.chatLayout.hidden = view !== "chat";
         elements.toolsSkillsPage.hidden = view !== "tools-skills";
+        elements.configPage.hidden = view !== "config";
+      }
+
+      function formatConfigCell(value) {
+        if (value === undefined) return "-";
+        if (value === null) return "null";
+        if (typeof value === "string") return value;
+        return JSON.stringify(value);
+      }
+
+      function flattenConfigRows(effective, sources, prefix = "") {
+        if (!effective || typeof effective !== "object" || Array.isArray(effective)) {
+          return [{ keyPath: prefix || "(root)", effective, source: sources || "default" }];
+        }
+        const rows = [];
+        Object.entries(effective).forEach(([key, value]) => {
+          const keyPath = prefix ? `${prefix}.${key}` : key;
+          const sourceValue = sources && typeof sources === "object" ? sources[key] : undefined;
+          if (value && typeof value === "object" && !Array.isArray(value)) {
+            rows.push(...flattenConfigRows(value, sourceValue, keyPath));
+            return;
+          }
+          rows.push({ keyPath, effective: value, source: sourceValue || "default" });
+        });
+        return rows;
+      }
+
+      function renderConfigTable() {
+        const payload = state.configView;
+        if (!payload) {
+          elements.configGlobal.textContent = "尚未載入。";
+          elements.configProject.textContent = "尚未載入。";
+          elements.configEffectiveSummary.textContent = "尚未載入。";
+          elements.configTableBody.innerHTML = "";
+          return;
+        }
+        elements.configGlobal.textContent = JSON.stringify(payload.global_config || {}, null, 2);
+        elements.configProject.textContent = JSON.stringify(payload.project_config || {}, null, 2);
+
+        const keyword = (elements.configSearch.value || "").trim().toLowerCase();
+        const rows = flattenConfigRows(payload.effective_config || {}, payload.sources || {});
+        const filtered = keyword ? rows.filter((row) => row.keyPath.toLowerCase().includes(keyword)) : rows;
+        elements.configEffectiveSummary.textContent = `共 ${rows.length} 筆 leaf 設定，篩選後 ${filtered.length} 筆。來源包含：default / global / project / cli / chat。`;
+        elements.configTableBody.innerHTML = "";
+
+        filtered.forEach((row) => {
+          const tr = document.createElement("tr");
+          const sourceLabel = ["default", "global", "project", "cli", "chat"].includes(row.source) ? row.source : "default";
+          tr.innerHTML = `
+            <td><code>${escapeHtml(row.keyPath)}</code></td>
+            <td><code>${escapeHtml(formatConfigCell(row.effective))}</code></td>
+            <td><span class="config-source config-source--${sourceLabel}">${sourceLabel}</span></td>
+          `;
+          elements.configTableBody.appendChild(tr);
+        });
+      }
+
+      async function loadConfigPage() {
+        const projectParam = state.projectId ? `?project_id=${encodeURIComponent(state.projectId)}` : "";
+        const payload = await apiFetch(`/config/view${projectParam}`);
+        state.configView = payload;
+        renderConfigTable();
+      }
+
+      function exportEffectiveConfig() {
+        if (!state.configView) {
+          showToast("請先載入 Config。");
+          return;
+        }
+        const blob = new Blob([JSON.stringify(state.configView.effective_config || {}, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        const projectSuffix = state.projectId ? `-${state.projectId}` : "-global";
+        link.href = url;
+        link.download = `amon-effective-config${projectSuffix}.json`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
       }
 
       async function loadToolsSkillsPage() {
@@ -1224,10 +1359,16 @@
           if (view === "tools-skills") {
             await loadToolsSkillsPage();
           }
+          if (view === "config") {
+            await loadConfigPage();
+          }
         });
       });
 
       elements.toolsSkillsRefresh.addEventListener("click", loadToolsSkillsPage);
+      elements.configRefresh.addEventListener("click", loadConfigPage);
+      elements.configSearch.addEventListener("input", renderConfigTable);
+      elements.configExport.addEventListener("click", exportEffectiveConfig);
       elements.skillTriggerPreview.addEventListener("click", async () => {
         const skillName = elements.skillTriggerSelect.value;
         if (!skillName) {
@@ -1267,6 +1408,9 @@
         }
         if (state.shellView === "tools-skills") {
           await loadToolsSkillsPage();
+        }
+        if (state.shellView === "config") {
+          await loadConfigPage();
         }
       });
 

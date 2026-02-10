@@ -210,5 +210,51 @@ class UIAsyncAPITests(unittest.TestCase):
                 os.environ.pop("AMON_HOME", None)
 
 
+    def test_config_view_api_returns_sources_and_chat_override(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("config-view-test")
+                project_path = Path(project.path)
+
+                (data_dir / "config.yaml").write_text(
+                    json.dumps({"amon": {"ui": {"theme": "light"}}}, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+                (project_path / "amon.project.yaml").write_text(
+                    json.dumps({"amon": {"ui": {"theme": "dark"}}}, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port)
+                encoded_project = quote(project.project_id)
+                chat_overrides = quote(json.dumps({"amon": {"ui": {"theme": "chat-theme"}}}, ensure_ascii=False))
+                conn.request("GET", f"/v1/config/view?project_id={encoded_project}&chat_overrides={chat_overrides}")
+                response = conn.getresponse()
+                payload = json.loads(response.read().decode("utf-8"))
+
+                self.assertEqual(response.status, 200)
+                self.assertEqual(payload["global_config"]["amon"]["ui"]["theme"], "light")
+                self.assertEqual(payload["project_config"]["amon"]["ui"]["theme"], "dark")
+                self.assertEqual(payload["effective_config"]["amon"]["ui"]["theme"], "chat-theme")
+                self.assertEqual(payload["sources"]["amon"]["ui"]["theme"], "chat")
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
+
+
 if __name__ == "__main__":
     unittest.main()
