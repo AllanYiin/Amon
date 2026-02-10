@@ -11,7 +11,7 @@ from typing import Any, Callable, Iterable
 
 import yaml
 
-from . import ToolingError, ensure_tool_name
+from amon._tooling_legacy import ToolingError, ensure_tool_name
 from .types import ToolCall, ToolResult, ToolSpec
 from .registry import ToolRegistry
 
