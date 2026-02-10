@@ -64,13 +64,24 @@
         </section>
 
         <aside class="context-panel">
-          <h2>Context</h2>
-          <section class="context-section">
+          <h2>右側資訊</h2>
+          <div class="context-project" id="context-project">目前專案：未選擇</div>
+          <div class="context-tabs" role="tablist" aria-label="右側資訊切換">
+            <button type="button" class="context-tab is-active" data-context-tab="context" role="tab" aria-selected="true">Context</button>
+            <button type="button" class="context-tab" data-context-tab="graph" role="tab" aria-selected="false">Graph</button>
+            <button type="button" class="context-tab" data-context-tab="docs" role="tab" aria-selected="false">Docs</button>
+          </div>
+
+          <section class="context-section" data-context-panel="context">
+            <h3>Context</h3>
+            <p id="context-overview" class="context-overview">請先在上方選擇專案，右側內容會自動同步。</p>
+          </section>
+          <section class="context-section" data-context-panel="graph" hidden>
             <h3>Graph Preview</h3>
             <div id="graph-preview" class="graph-preview"></div>
             <pre id="graph-code" class="graph-code"></pre>
           </section>
-          <section class="context-section">
+          <section class="context-section" data-context-panel="docs" hidden>
             <h3>Docs</h3>
             <ul id="docs-list" class="docs-list"></ul>
           </section>
@@ -105,6 +116,10 @@
         graphPreview: document.getElementById("graph-preview"),
         graphCode: document.getElementById("graph-code"),
         docsList: document.getElementById("docs-list"),
+        contextProject: document.getElementById("context-project"),
+        contextOverview: document.getElementById("context-overview"),
+        contextTabs: document.querySelectorAll(".context-tab"),
+        contextPanels: document.querySelectorAll("[data-context-panel]"),
         streamProgress: document.getElementById("stream-progress"),
       };
 
@@ -259,12 +274,30 @@
         state.projectId = projectId || null;
         elements.refreshContext.disabled = !state.projectId;
         elements.projectSelect.value = projectId || "";
+        syncContextHeader();
         if (!state.projectId) {
           state.chatId = null;
-          elements.graphPreview.innerHTML = "<p class=\"empty-context\">請先選擇專案</p>";
+          elements.graphPreview.innerHTML = "<p class=\"empty-context\">請先在上方選擇專案。</p>";
           elements.graphCode.textContent = "";
+          elements.contextOverview.textContent = "請先在上方選擇專案，右側內容會自動同步。";
           renderDocs([]);
         }
+      }
+
+      function syncContextHeader() {
+        const selected = elements.projectSelect.selectedOptions[0]?.textContent || "未選擇";
+        elements.contextProject.textContent = `目前專案：${selected}`;
+      }
+
+      function switchContextTab(tabName) {
+        elements.contextTabs.forEach((tab) => {
+          const isActive = tab.dataset.contextTab === tabName;
+          tab.classList.toggle("is-active", isActive);
+          tab.setAttribute("aria-selected", String(isActive));
+        });
+        elements.contextPanels.forEach((panel) => {
+          panel.hidden = panel.dataset.contextPanel !== tabName;
+        });
       }
 
       async function loadProjects() {
@@ -286,6 +319,7 @@
           state.projectId = null;
         }
         elements.projectSelect.value = state.projectId || "";
+        syncContextHeader();
         if (!projects.length) {
           showToast("尚無專案，請在聊天輸入：建立專案 <名稱>");
         }
@@ -310,6 +344,9 @@
         elements.graphCode.textContent = payload.graph_mermaid || "";
         renderMermaid(payload.graph_mermaid || "");
         renderDocs(payload.docs || []);
+        const docCount = (payload.docs || []).length;
+        const hasGraph = payload.graph_mermaid ? "有" : "無";
+        elements.contextOverview.textContent = `已同步專案內容：Graph ${hasGraph}、文件 ${docCount} 筆。`;
       }
 
       function renderDocs(docs) {
@@ -507,6 +544,9 @@
       elements.chatAttachments.addEventListener("change", (event) => {
         state.attachments = Array.from(event.target.files || []);
         renderAttachmentPreview();
+      });
+      elements.contextTabs.forEach((tab) => {
+        tab.addEventListener("click", () => switchContextTab(tab.dataset.contextTab));
       });
 
       (async () => {
