@@ -7,6 +7,8 @@ import json
 import threading
 import traceback
 import uuid
+
+import yaml
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -25,6 +27,7 @@ from amon.commands.executor import CommandPlan, execute
 from amon.daemon.queue import get_queue_depth
 from amon.events import emit_event
 from amon.jobs.runner import start_job
+from amon.tooling.audit import default_audit_log_path
 from .core import AmonCore, ProjectRecord
 from .logging import log_event
 
@@ -281,6 +284,27 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 return
             self._send_json(200, context)
             return
+        if parsed.path == "/v1/tools/catalog":
+            params = parse_qs(parsed.query)
+            project_id = params.get("project_id", [""])[0].strip() or None
+            refresh = params.get("refresh", ["false"])[0].lower() == "true"
+            try:
+                payload = self._build_tools_catalog(project_id=project_id, refresh_mcp=refresh)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, payload)
+            return
+        if parsed.path == "/v1/skills/catalog":
+            params = parse_qs(parsed.query)
+            project_id = params.get("project_id", [""])[0].strip() or None
+            try:
+                payload = self._build_skills_catalog(project_id=project_id)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, payload)
+            return
         if parsed.path.startswith("/v1/projects/"):
             project_id = self._get_path_segment(parsed.path, 2)
             if not project_id:
@@ -452,6 +476,82 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             )
             self._send_json(200, {"status": "ok", "result": result})
             return
+        if parsed.path == "/v1/tools/policy/plan":
+            payload = self._read_json()
+            if payload is None:
+                return
+            action = str(payload.get("action", "")).strip()
+            tool_name = str(payload.get("tool_name", "")).strip()
+            if action not in {"enable", "disable", "require_confirm"}:
+                self._send_json(400, {"message": "action 僅允許 enable/disable/require_confirm"})
+                return
+            if not tool_name:
+                self._send_json(400, {"message": "請提供 tool_name"})
+                return
+            plan = {
+                "command": "tools.policy.update",
+                "args": {
+                    "action": action,
+                    "tool_name": tool_name,
+                    "require_confirm": bool(payload.get("require_confirm", False)),
+                },
+                "plan_card": (
+                    "即將更新工具權限設定，需二次確認。\n\n"
+                    f"action: {action}\n"
+                    f"tool: {tool_name}\n"
+                    f"require_confirm: {bool(payload.get('require_confirm', False))}"
+                ),
+                "risk": {"require_confirm": True, "scope": "tools_policy", "level": "medium"},
+                "commands": [f"tools.policy.{action}({tool_name})"],
+            }
+            self._send_json(200, {"plan": plan})
+            return
+        if parsed.path == "/v1/tools/policy/confirm":
+            payload = self._read_json()
+            if payload is None:
+                return
+            action = str(payload.get("action", "")).strip()
+            tool_name = str(payload.get("tool_name", "")).strip()
+            confirmed = bool(payload.get("confirmed"))
+            if action not in {"enable", "disable", "require_confirm"}:
+                self._send_json(400, {"message": "action 僅允許 enable/disable/require_confirm"})
+                return
+            if not tool_name:
+                self._send_json(400, {"message": "請提供 tool_name"})
+                return
+            if not confirmed:
+                self._send_json(200, {"status": "cancelled"})
+                return
+            try:
+                self._apply_tool_policy_update(
+                    action=action,
+                    tool_name=tool_name,
+                    require_confirm=bool(payload.get("require_confirm", False)),
+                )
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, {"status": "updated"})
+            return
+        if parsed.path == "/v1/skills/trigger-preview":
+            payload = self._read_json()
+            if payload is None:
+                return
+            skill_name = str(payload.get("skill_name", "")).strip()
+            project_id = str(payload.get("project_id", "")).strip() or None
+            if not skill_name:
+                self._send_json(400, {"message": "請提供 skill_name"})
+                return
+            try:
+                preview = self._build_skill_trigger_preview(skill_name=skill_name, project_id=project_id)
+            except KeyError as exc:
+                self._handle_error(exc, status=404)
+                return
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, preview)
+            return
         if parsed.path == "/v1/projects":
             payload = self._read_json()
             if payload is None:
@@ -533,6 +633,147 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             self._send_json(200, {"project": record.to_dict()})
             return
         self._send_json(404, {"message": "找不到 API 路徑"})
+
+    def _build_tools_catalog(self, project_id: str | None, *, refresh_mcp: bool = False) -> dict[str, Any]:
+        project_path = self.core.get_project_path(project_id) if project_id else None
+        config = self.core.load_config(project_path)
+        mcp_registry = self.core.get_mcp_registry(refresh=refresh_mcp)
+        recent_usage = self._read_recent_tool_usage()
+        server_map = {server.name: server for server in self.core._load_mcp_servers(config)}
+
+        tools: list[dict[str, Any]] = []
+        for server_name, server_info in (mcp_registry.get("servers") or {}).items():
+            for tool in server_info.get("tools") or []:
+                tool_name = str(tool.get("name") or "").strip()
+                if not tool_name:
+                    continue
+                full_name = f"{server_name}:{tool_name}"
+                tools.append(
+                    {
+                        "type": "mcp",
+                        "name": full_name,
+                        "version": tool.get("version") or "unknown",
+                        "input_schema": tool.get("inputSchema") or tool.get("input_schema") or {},
+                        "output_schema": tool.get("outputSchema") or tool.get("output_schema") or {},
+                        "risk": "high" if self.core._is_high_risk_tool(tool_name) else "medium",
+                        "allowed_paths": config.get("tools", {}).get("allowed_paths", ["workspace"]),
+                        "enabled": self.core._is_tool_allowed(full_name, config, server_map[server_name]) if server_name in server_map else True,
+                        "require_confirm": self.core._is_high_risk_tool(tool_name),
+                        "recent_usage": recent_usage.get(full_name),
+                    }
+                )
+
+        for spec in self.core.tool_registry.list_specs():
+            source = "forged" if spec.name.startswith("native:") else "built-in"
+            tools.append(
+                {
+                    "type": source,
+                    "name": spec.name,
+                    "version": str((spec.annotations or {}).get("version") or "builtin"),
+                    "input_schema": spec.input_schema,
+                    "output_schema": spec.output_schema or {},
+                    "risk": spec.risk,
+                    "allowed_paths": config.get("tools", {}).get("allowed_paths", ["workspace"]),
+                    "enabled": self._is_internal_tool_enabled(spec.name, config),
+                    "require_confirm": spec.name in set(self.core.tool_registry.policy.ask),
+                    "recent_usage": recent_usage.get(spec.name),
+                }
+            )
+
+        tools.sort(key=lambda item: (item.get("type", ""), item.get("name", "")))
+        return {"tools": tools, "updated_at": self.core._now(), "policy_editable": True}
+
+    def _build_skills_catalog(self, project_id: str | None) -> dict[str, Any]:
+        project_path = self.core.get_project_path(project_id) if project_id else None
+        scanned = self.core.scan_skills(project_path=project_path)
+        collisions: list[dict[str, Any]] = []
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for skill in scanned:
+            grouped.setdefault(str(skill.get("name") or ""), []).append(skill)
+        for name, items in grouped.items():
+            sources = {item.get("source") for item in items}
+            if "global" in sources and "project" in sources:
+                collisions.append({"name": name, "message": "project override global"})
+        return {"skills": scanned, "collisions": collisions, "updated_at": self.core._now()}
+
+    def _build_skill_trigger_preview(self, *, skill_name: str, project_id: str | None) -> dict[str, Any]:
+        project_path = self.core.get_project_path(project_id) if project_id else None
+        skill = self.core.load_skill(skill_name, project_path=project_path)
+        content = str(skill.get("content") or "")
+        preview = content.strip()[:1600]
+        return {
+            "skill": {
+                "name": skill.get("name"),
+                "source": skill.get("source"),
+                "path": skill.get("path"),
+                "frontmatter": skill.get("frontmatter") or {},
+            },
+            "injection_preview": preview,
+            "stub": {
+                "status": "not_executed",
+                "message": "目前為 UI + API stub，尚未真正觸發模型注入。",
+            },
+        }
+
+    def _apply_tool_policy_update(self, *, action: str, tool_name: str, require_confirm: bool) -> None:
+        config_path = self.core._global_config_path()
+        config = self.core.load_config()
+        if ":" in tool_name:
+            mcp = config.setdefault("mcp", {})
+            allowed = mcp.setdefault("allowed_tools", [])
+            if action == "enable" and tool_name not in allowed:
+                allowed.append(tool_name)
+            if action == "disable" and tool_name in allowed:
+                allowed.remove(tool_name)
+        else:
+            tooling = config.setdefault("tooling", {})
+            disabled = tooling.setdefault("disabled_tools", [])
+            ask = tooling.setdefault("ask_tools", [])
+            if action == "enable" and tool_name in disabled:
+                disabled.remove(tool_name)
+            if action == "disable" and tool_name not in disabled:
+                disabled.append(tool_name)
+            if action == "require_confirm":
+                if require_confirm and tool_name not in ask:
+                    ask.append(tool_name)
+                if (not require_confirm) and tool_name in ask:
+                    ask.remove(tool_name)
+        self.core._atomic_write_text(config_path, yaml.safe_dump(config, allow_unicode=True, sort_keys=False))
+
+    def _is_internal_tool_enabled(self, tool_name: str, config: dict[str, Any]) -> bool:
+        disabled = config.get("tooling", {}).get("disabled_tools", []) or []
+        return tool_name not in disabled
+
+    def _read_recent_tool_usage(self) -> dict[str, dict[str, Any]]:
+        latest: dict[str, dict[str, Any]] = {}
+        log_path = default_audit_log_path()
+        if not log_path.exists():
+            return latest
+        try:
+            with log_path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    text = line.strip()
+                    if not text:
+                        continue
+                    try:
+                        item = json.loads(text)
+                    except json.JSONDecodeError:
+                        continue
+                    name = str(item.get("tool") or "").strip()
+                    ts_ms = int(item.get("ts_ms") or 0)
+                    if not name:
+                        continue
+                    prev = latest.get(name)
+                    if prev and prev.get("ts_ms", 0) >= ts_ms:
+                        continue
+                    latest[name] = {
+                        "ts_ms": ts_ms,
+                        "decision": item.get("decision"),
+                        "source": item.get("source"),
+                    }
+        except OSError:
+            return latest
+        return latest
 
     def _read_json(self) -> dict[str, Any] | None:
         content_length = int(self.headers.get("Content-Length", "0"))

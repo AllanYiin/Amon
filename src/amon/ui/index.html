@@ -16,15 +16,15 @@
       <div class="ui-shell" id="ui-shell">
         <aside class="shell-sidebar" aria-label="主要導覽">
           <h2>Amon UI</h2>
-          <nav class="shell-nav">
-            <button type="button" class="shell-nav__item is-active">Chat</button>
-            <button type="button" class="shell-nav__item">Context</button>
-            <button type="button" class="shell-nav__item">Graph</button>
-            <button type="button" class="shell-nav__item">Tools &amp; Skills</button>
-            <button type="button" class="shell-nav__item">Config</button>
-            <button type="button" class="shell-nav__item">Logs &amp; Events</button>
-            <button type="button" class="shell-nav__item">Docs</button>
-            <button type="button" class="shell-nav__item">Bill</button>
+          <nav class="shell-nav" id="shell-nav">
+            <button type="button" class="shell-nav__item is-active" data-shell-view="chat">Chat</button>
+            <button type="button" class="shell-nav__item" data-shell-view="chat">Context</button>
+            <button type="button" class="shell-nav__item" data-shell-view="chat">Graph</button>
+            <button type="button" class="shell-nav__item" data-shell-view="tools-skills">Tools &amp; Skills</button>
+            <button type="button" class="shell-nav__item" data-shell-view="chat">Config</button>
+            <button type="button" class="shell-nav__item" data-shell-view="chat">Logs &amp; Events</button>
+            <button type="button" class="shell-nav__item" data-shell-view="chat">Docs</button>
+            <button type="button" class="shell-nav__item" data-shell-view="chat">Bill</button>
           </nav>
         </aside>
 
@@ -181,6 +181,36 @@
           </section>
             </aside>
           </div>
+
+          <section class="main-card tools-skills-page" id="tools-skills-page" hidden>
+            <header class="tools-skills-page__header">
+              <div>
+                <h2>Tools &amp; Skills</h2>
+                <p class="subtitle">管理工具與技能清單；所有權限變更都必須經過 Plan Card 確認。</p>
+              </div>
+              <button type="button" class="secondary-btn" id="tools-skills-refresh">重新整理</button>
+            </header>
+
+            <section class="tools-section">
+              <h3>Tools</h3>
+              <div id="tools-list" class="tools-list"></div>
+            </section>
+
+            <section class="skills-section">
+              <h3>Skills</h3>
+              <div id="skills-collisions" class="skills-collisions"></div>
+              <div id="skills-list" class="skills-list"></div>
+            </section>
+
+            <section class="skills-preview-section">
+              <h3>手動觸發（UI + API stub）</h3>
+              <div class="skills-preview-controls">
+                <select id="skill-trigger-select"></select>
+                <button type="button" class="primary-btn" id="skill-trigger-preview">預覽注入內容</button>
+              </div>
+              <pre id="skill-injection-preview" class="skill-injection-preview">尚未產生預覽。</pre>
+            </section>
+          </section>
         </section>
       </div>
     </main>
@@ -232,6 +262,9 @@
         graphEvents: [],
         graphSelectedNodeId: null,
         graphTemplateId: null,
+        shellView: "chat",
+        toolsCatalog: [],
+        skillsCatalog: [],
       };
 
       const elements = {
@@ -269,12 +302,22 @@
         contextTabs: document.querySelectorAll(".context-tab"),
         contextPanels: document.querySelectorAll("[data-context-panel]"),
         streamProgress: document.getElementById("stream-progress"),
+        chatLayout: document.getElementById("chat-layout"),
         uiShell: document.getElementById("ui-shell"),
         toggleContextPanel: document.getElementById("toggle-context-panel"),
         thinkingMode: document.getElementById("thinking-mode"),
         thinkingSummary: document.getElementById("thinking-summary"),
         thinkingDetail: document.getElementById("thinking-detail"),
         artifactList: document.getElementById("artifact-list"),
+        shellNavItems: document.querySelectorAll(".shell-nav__item"),
+        toolsSkillsPage: document.getElementById("tools-skills-page"),
+        toolsSkillsRefresh: document.getElementById("tools-skills-refresh"),
+        toolsList: document.getElementById("tools-list"),
+        skillsList: document.getElementById("skills-list"),
+        skillsCollisions: document.getElementById("skills-collisions"),
+        skillTriggerSelect: document.getElementById("skill-trigger-select"),
+        skillTriggerPreview: document.getElementById("skill-trigger-preview"),
+        skillInjectionPreview: document.getElementById("skill-injection-preview"),
       };
 
       function syncContextPanelToggle() {
@@ -292,6 +335,125 @@
       });
 
       syncContextPanelToggle();
+
+      function switchShellView(view) {
+        state.shellView = view;
+        elements.chatLayout.hidden = view !== "chat";
+        elements.toolsSkillsPage.hidden = view !== "tools-skills";
+      }
+
+      async function loadToolsSkillsPage() {
+        const projectParam = state.projectId ? `?project_id=${encodeURIComponent(state.projectId)}` : "";
+        const toolsPayload = await apiFetch(`/tools/catalog${projectParam}`);
+        const skillsPayload = await apiFetch(`/skills/catalog${projectParam}`);
+        state.toolsCatalog = toolsPayload.tools || [];
+        state.skillsCatalog = skillsPayload.skills || [];
+        renderToolsList(state.toolsCatalog, toolsPayload.policy_editable);
+        renderSkillsList(state.skillsCatalog, skillsPayload.collisions || []);
+      }
+
+      function formatRecentUsage(usage) {
+        if (!usage || !usage.ts_ms) return "尚無紀錄";
+        const dt = new Date(usage.ts_ms);
+        return `${dt.toLocaleString("zh-TW", { hour12: false })} (${usage.decision || "unknown"})`;
+      }
+
+      function renderSchema(schema) {
+        return `<pre>${escapeHtml(JSON.stringify(schema || {}, null, 2))}</pre>`;
+      }
+
+      function queueToolPolicyPlan(toolName, action, requireConfirm) {
+        apiFetch("/tools/policy/plan", {
+          method: "POST",
+          body: JSON.stringify({ tool_name: toolName, action, require_confirm: requireConfirm }),
+        })
+          .then((payload) => {
+            showPlanCard({
+              ...payload.plan,
+              confirm_api: "/tools/policy/confirm",
+            });
+          })
+          .catch((error) => showToast(`建立 Plan Card 失敗：${error.message}`));
+      }
+
+      function renderToolsList(tools = [], policyEditable = false) {
+        elements.toolsList.innerHTML = "";
+        if (!tools.length) {
+          elements.toolsList.innerHTML = '<p class="empty-context">尚未找到工具。</p>';
+          return;
+        }
+        tools.forEach((tool) => {
+          const card = document.createElement("article");
+          card.className = "tool-card";
+          card.innerHTML = `
+            <header>
+              <div>
+                <strong>${escapeHtml(tool.name)}</strong>
+                <p>${escapeHtml(tool.type)} ｜ v${escapeHtml(String(tool.version || "unknown"))}</p>
+              </div>
+              <span class="risk-chip">risk: ${escapeHtml(String(tool.risk || "unknown"))}</span>
+            </header>
+            <p>allowed_paths：${escapeHtml((tool.allowed_paths || []).join(", ") || "workspace")}</p>
+            <p>最近使用：${escapeHtml(formatRecentUsage(tool.recent_usage))}</p>
+            <details><summary>inputs schema</summary>${renderSchema(tool.input_schema)}</details>
+            <details><summary>outputs schema</summary>${renderSchema(tool.output_schema)}</details>
+          `;
+          const actions = document.createElement("div");
+          actions.className = "tool-card__actions";
+          if (policyEditable) {
+            const enableButton = document.createElement("button");
+            enableButton.type = "button";
+            enableButton.className = "secondary-btn small";
+            enableButton.textContent = tool.enabled ? "Disable" : "Enable";
+            enableButton.addEventListener("click", () => queueToolPolicyPlan(tool.name, tool.enabled ? "disable" : "enable", Boolean(tool.require_confirm)));
+            actions.appendChild(enableButton);
+
+            const confirmButton = document.createElement("button");
+            confirmButton.type = "button";
+            confirmButton.className = "secondary-btn small";
+            confirmButton.textContent = `Require Confirm：${tool.require_confirm ? "ON" : "OFF"}`;
+            confirmButton.addEventListener("click", () => queueToolPolicyPlan(tool.name, "require_confirm", !tool.require_confirm));
+            actions.appendChild(confirmButton);
+          }
+          card.appendChild(actions);
+          elements.toolsList.appendChild(card);
+        });
+      }
+
+      function renderSkillsList(skills = [], collisions = []) {
+        elements.skillsList.innerHTML = "";
+        elements.skillsCollisions.innerHTML = "";
+        if (collisions.length) {
+          collisions.forEach((item) => {
+            const tip = document.createElement("p");
+            tip.className = "collision-tip";
+            tip.textContent = `⚠️ ${item.name}：${item.message}`;
+            elements.skillsCollisions.appendChild(tip);
+          });
+        }
+        if (!skills.length) {
+          elements.skillsList.innerHTML = '<p class="empty-context">尚未找到 skills。</p>';
+          return;
+        }
+        elements.skillTriggerSelect.innerHTML = "";
+        skills.forEach((skill) => {
+          const card = document.createElement("article");
+          card.className = "skill-card";
+          const frontmatter = skill.frontmatter || {};
+          card.innerHTML = `
+            <header><strong>${escapeHtml(skill.name || "(未命名)")}</strong><span>${escapeHtml(skill.source || "unknown")}</span></header>
+            <p>${escapeHtml(frontmatter.description || skill.description || "無描述")}</p>
+            <p class="skill-source">來源：${escapeHtml(skill.path || "")}</p>
+            <pre>${escapeHtml(JSON.stringify({ name: frontmatter.name || skill.name, description: frontmatter.description || "" }, null, 2))}</pre>
+          `;
+          elements.skillsList.appendChild(card);
+
+          const option = document.createElement("option");
+          option.value = skill.name || "";
+          option.textContent = `${skill.name || "(未命名)"}（${skill.source || "unknown"}）`;
+          elements.skillTriggerSelect.appendChild(option);
+        });
+      }
 
       function showToast(message) {
         elements.toast.textContent = message;
@@ -749,16 +911,23 @@
       async function confirmPlan(confirmed) {
         if (!state.plan) return;
         try {
-          const payload = await apiFetch("/chat/plan/confirm", {
-            method: "POST",
-            body: JSON.stringify({
-              project_id: state.projectId,
-              chat_id: state.chatId,
-              command: state.plan.command,
-              args: state.plan.args || {},
-              confirmed,
-            }),
-          });
+          const path = state.plan.confirm_api || "/chat/plan/confirm";
+          const payload =
+            path === "/chat/plan/confirm"
+              ? await apiFetch(path, {
+                  method: "POST",
+                  body: JSON.stringify({
+                    project_id: state.projectId,
+                    chat_id: state.chatId,
+                    command: state.plan.command,
+                    args: state.plan.args || {},
+                    confirmed,
+                  }),
+                })
+              : await apiFetch(path, {
+                  method: "POST",
+                  body: JSON.stringify({ ...state.plan.args, confirmed }),
+                });
           appendMessage("agent", confirmed ? "已確認執行。" : "已取消執行。");
           if (confirmed && state.plan?.command === "graph.template.create") {
             state.graphTemplateId = payload.result?.template_id || state.graphTemplateId;
@@ -769,6 +938,9 @@
           resetPlanCard();
           if (state.projectId) {
             await loadContext();
+          }
+          if (path !== "/chat/plan/confirm") {
+            await loadToolsSkillsPage();
           }
         } catch (error) {
           showToast(`Plan 執行失敗：${error.message}`);
@@ -1043,6 +1215,37 @@
         });
       }
 
+      elements.shellNavItems.forEach((button) => {
+        button.addEventListener("click", async () => {
+          elements.shellNavItems.forEach((item) => item.classList.remove("is-active"));
+          button.classList.add("is-active");
+          const view = button.dataset.shellView || "chat";
+          switchShellView(view);
+          if (view === "tools-skills") {
+            await loadToolsSkillsPage();
+          }
+        });
+      });
+
+      elements.toolsSkillsRefresh.addEventListener("click", loadToolsSkillsPage);
+      elements.skillTriggerPreview.addEventListener("click", async () => {
+        const skillName = elements.skillTriggerSelect.value;
+        if (!skillName) {
+          showToast("請先選擇 skill。");
+          return;
+        }
+        try {
+          const payload = await apiFetch("/skills/trigger-preview", {
+            method: "POST",
+            body: JSON.stringify({ skill_name: skillName, project_id: state.projectId || "" }),
+          });
+          elements.skillInjectionPreview.textContent = JSON.stringify(payload, null, 2);
+          showToast("已產生 skill 注入預覽（stub）。");
+        } catch (error) {
+          showToast(`技能預覽失敗：${error.message}`);
+        }
+      });
+
       elements.chatForm.addEventListener("submit", (event) => {
         event.preventDefault();
         const message = elements.chatInput.value.trim();
@@ -1061,6 +1264,9 @@
         if (state.projectId) {
           await ensureChatSession();
           await loadContext();
+        }
+        if (state.shellView === "tools-skills") {
+          await loadToolsSkillsPage();
         }
       });
 
@@ -1113,6 +1319,7 @@
 
       (async () => {
         try {
+          switchShellView("chat");
           await loadProjects();
           setProjectState(state.projectId);
           renderArtifacts([]);
