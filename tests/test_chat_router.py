@@ -12,9 +12,10 @@ from amon.commands.registry import clear_commands, register_command
 class MockLLM:
     def __init__(self, response: str) -> None:
         self.response = response
+        self.last_messages: list[dict[str, str]] = []
 
     def generate_stream(self, messages: list[dict[str, str]], model: str | None = None) -> Iterable[str]:
-        _ = messages
+        self.last_messages = messages
         _ = model
         return [self.response]
 
@@ -61,6 +62,17 @@ class ChatRouterTests(unittest.TestCase):
             llm_client=MockLLM("not-json"),
         )
         self.assertEqual(result.type, "chat_response")
+
+    def test_route_intent_includes_conversation_history_in_context(self) -> None:
+        mock = MockLLM('{"type":"chat_response","confidence":0.9}')
+        route_intent(
+            "延續上一題",
+            project_id="proj",
+            llm_client=mock,
+            context={"conversation_history": [{"role": "user", "content": "前一題內容"}]},
+        )
+        self.assertEqual(len(mock.last_messages), 2)
+        self.assertIn("conversation_history", mock.last_messages[1]["content"])
 
 
 if __name__ == "__main__":

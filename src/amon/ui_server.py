@@ -15,7 +15,12 @@ from urllib.parse import parse_qs, urlparse
 from amon.chat.cli import _build_plan_from_message
 from amon.chat.project_bootstrap import bootstrap_project_if_needed, resolve_project_id_from_message
 from amon.chat.router import route_intent
-from amon.chat.session_store import append_event, create_chat_session
+from amon.chat.session_store import (
+    append_event,
+    build_prompt_with_history,
+    create_chat_session,
+    load_recent_dialogue,
+)
 from amon.commands.executor import CommandPlan, execute
 from amon.daemon.queue import get_queue_depth
 from amon.events import emit_event
@@ -598,7 +603,12 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 inferred_project_id = resolve_project_id_from_message(self.core, message)
                 if inferred_project_id:
                     project_id = inferred_project_id
-            router_result = route_intent(message, project_id=project_id)
+            initial_context: dict[str, Any] | None = None
+            if project_id and chat_id:
+                history = load_recent_dialogue(project_id, chat_id)
+                if history:
+                    initial_context = {"conversation_history": history}
+            router_result = route_intent(message, project_id=project_id, context=initial_context)
             created_project: ProjectRecord | None = None
             if project_id is None:
                 created_project = bootstrap_project_if_needed(
@@ -617,9 +627,10 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     return
             if not chat_id:
                 chat_id = create_chat_session(project_id)
+            history = load_recent_dialogue(project_id, chat_id)
+            router_context = {"conversation_history": history} if history else None
+            router_result = route_intent(message, project_id=project_id, context=router_context)
             append_event(chat_id, {"type": "user", "text": message, "project_id": project_id})
-            if created_project:
-                router_result = route_intent(message, project_id=project_id)
             append_event(
                 chat_id,
                 {
@@ -697,7 +708,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     )
 
                 result, response_text = self.core.run_single_stream(
-                    message,
+                    build_prompt_with_history(message, history),
                     project_path=self.core.get_project_path(project_id),
                     stream_handler=stream_handler,
                 )
