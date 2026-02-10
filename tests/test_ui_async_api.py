@@ -331,6 +331,64 @@ class UIAsyncAPITests(unittest.TestCase):
                     server.server_close()
                 os.environ.pop("AMON_HOME", None)
 
+    def test_docs_api_supports_catalog_preview_and_download(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("docs-api-test")
+                project_path = Path(project.path)
+
+                docs_dir = project_path / "docs" / "tasks" / "task-a"
+                docs_dir.mkdir(parents=True, exist_ok=True)
+                (docs_dir / "result_run_001.md").write_text("# 任務結果\n- 測試", encoding="utf-8")
+
+                run_dir = project_path / ".amon" / "runs" / "run-001"
+                run_dir.mkdir(parents=True, exist_ok=True)
+                (run_dir / "events.jsonl").write_text(
+                    json.dumps({"event": "node_output", "node_id": "writer", "output_path": "docs/tasks/task-a/result_run_001.md"}, ensure_ascii=False)
+                    + "\n",
+                    encoding="utf-8",
+                )
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port)
+                encoded_project = quote(project.project_id)
+                encoded_path = quote("tasks/task-a/result_run_001.md")
+                conn.request("GET", f"/v1/projects/{encoded_project}/docs")
+                docs_resp = conn.getresponse()
+                docs_payload = json.loads(docs_resp.read().decode("utf-8"))
+                self.assertEqual(docs_resp.status, 200)
+                self.assertEqual(len(docs_payload["docs"]), 1)
+                self.assertEqual(docs_payload["docs"][0]["task_id"], "task-a")
+                self.assertEqual(docs_payload["docs"][0]["node_id"], "writer")
+
+                conn.request("GET", f"/v1/projects/{encoded_project}/docs/content?path={encoded_path}")
+                preview_resp = conn.getresponse()
+                preview_payload = json.loads(preview_resp.read().decode("utf-8"))
+                self.assertEqual(preview_resp.status, 200)
+                self.assertIn("# 任務結果", preview_payload["content"])
+
+                conn.request("GET", f"/v1/projects/{encoded_project}/docs/download?path={encoded_path}")
+                download_resp = conn.getresponse()
+                download_body = download_resp.read().decode("utf-8")
+                self.assertEqual(download_resp.status, 200)
+                self.assertIn("text/markdown", download_resp.getheader("Content-Type"))
+                self.assertIn("任務結果", download_body)
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
 
     def test_billing_summary_api_returns_breakdown_and_budgets(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -350,6 +350,38 @@
             </section>
           </section>
 
+          <section class="main-card docs-page" id="docs-page" hidden>
+            <header class="docs-page__header">
+              <div>
+                <h2>Docs</h2>
+                <p class="subtitle">依 run/task 檢視文件，預覽 markdown，並插入 Chat 引用。</p>
+              </div>
+              <button type="button" class="secondary-btn" id="docs-refresh">重新整理</button>
+            </header>
+            <div class="docs-layout">
+              <aside class="docs-tree" id="docs-tree-wrap">
+                <div class="docs-tree__meta" id="docs-tree-meta">尚未載入。</div>
+                <div class="docs-tree__viewport" id="docs-tree-viewport" role="list"></div>
+              </aside>
+              <article class="docs-preview">
+                <header class="docs-preview__header">
+                  <div>
+                    <h3 id="docs-preview-title">請從左側選擇文件</h3>
+                    <p id="docs-preview-meta" class="docs-preview__meta">來源 run / node 將顯示於此。</p>
+                  </div>
+                  <div class="docs-preview__actions">
+                    <button type="button" class="secondary-btn" id="docs-open" disabled>Open</button>
+                    <button type="button" class="secondary-btn" id="docs-download" disabled>Download</button>
+                    <button type="button" class="primary-btn" id="docs-insert" disabled>插入 @doc（stub）</button>
+                  </div>
+                </header>
+                <div id="docs-preview-content" class="docs-preview__content">
+                  <p class="empty-context">尚未選擇文件。</p>
+                </div>
+              </article>
+            </div>
+          </section>
+
           <section class="main-card tools-skills-page" id="tools-skills-page" hidden>
             <header class="tools-skills-page__header">
               <div>
@@ -503,6 +535,16 @@
         skillInjectionPreview: document.getElementById("skill-injection-preview"),
         configPage: document.getElementById("config-page"),
         logsEventsPage: document.getElementById("logs-events-page"),
+        docsPage: document.getElementById("docs-page"),
+        docsRefresh: document.getElementById("docs-refresh"),
+        docsTreeMeta: document.getElementById("docs-tree-meta"),
+        docsTreeViewport: document.getElementById("docs-tree-viewport"),
+        docsPreviewTitle: document.getElementById("docs-preview-title"),
+        docsPreviewMeta: document.getElementById("docs-preview-meta"),
+        docsPreviewContent: document.getElementById("docs-preview-content"),
+        docsOpen: document.getElementById("docs-open"),
+        docsDownload: document.getElementById("docs-download"),
+        docsInsert: document.getElementById("docs-insert"),
         logsSource: document.getElementById("logs-source"),
         logsTimeFrom: document.getElementById("logs-time-from"),
         logsTimeTo: document.getElementById("logs-time-to"),
@@ -565,6 +607,7 @@
         elements.billPage.hidden = view !== "bill";
         elements.configPage.hidden = view !== "config";
         elements.logsEventsPage.hidden = view !== "logs-events";
+        elements.docsPage.hidden = view !== "docs";
       }
 
       function formatConfigCell(value) {
@@ -1272,19 +1315,168 @@
         elements.contextOverview.textContent = `已同步專案內容：Graph ${hasGraph}、文件 ${docCount} 筆。`;
       }
 
+      function normalizeDocItem(doc) {
+        if (typeof doc === "string") {
+          return {
+            path: doc,
+            name: doc.split("/").pop() || doc,
+            run_id: "unknown",
+            node_id: "unknown",
+            task_id: "ungrouped",
+            open_url: null,
+            download_url: null,
+          };
+        }
+        return {
+          path: doc.path || "",
+          name: doc.name || (doc.path || "").split("/").pop() || "(未命名)",
+          run_id: doc.run_id || "unknown",
+          node_id: doc.node_id || "unknown",
+          task_id: doc.task_id || "ungrouped",
+          open_url: doc.open_url || null,
+          download_url: doc.download_url || null,
+        };
+      }
+
       function renderDocs(docs) {
         elements.docsList.innerHTML = "";
-        if (!docs.length) {
+        const normalized = (docs || []).map(normalizeDocItem);
+        state.docsItems = normalized;
+        if (!normalized.length) {
           const item = document.createElement("li");
           item.textContent = state.projectId ? "尚無文件" : "請先選擇專案";
           elements.docsList.appendChild(item);
           return;
         }
-        docs.forEach((doc) => {
+        normalized.slice(0, 8).forEach((doc) => {
           const item = document.createElement("li");
-          item.textContent = doc;
+          item.textContent = doc.path;
           elements.docsList.appendChild(item);
         });
+      }
+
+      function buildDocsTree(items = []) {
+        const grouped = new Map();
+        items.forEach((doc) => {
+          const runKey = `run:${doc.run_id || "unknown"}`;
+          if (!grouped.has(runKey)) {
+            grouped.set(runKey, { type: "group", key: runKey, label: `Run ${doc.run_id || "unknown"}` });
+          }
+          const taskKey = `${runKey}/task:${doc.task_id || "ungrouped"}`;
+          if (!grouped.has(taskKey)) {
+            grouped.set(taskKey, { type: "group", key: taskKey, label: `Task ${doc.task_id || "ungrouped"}`, depth: 1 });
+          }
+        });
+
+        const flat = [];
+        Array.from(grouped.values()).forEach((entry) => {
+          if (entry.depth !== 1) {
+            flat.push({ ...entry, depth: 0 });
+            Array.from(grouped.values())
+              .filter((task) => task.depth === 1 && task.key.startsWith(entry.key))
+              .forEach((task) => {
+                flat.push(task);
+                items
+                  .filter((doc) => task.key === `run:${doc.run_id || "unknown"}/task:${doc.task_id || "ungrouped"}`)
+                  .forEach((doc) => {
+                    flat.push({ type: "doc", depth: 2, key: doc.path, doc });
+                  });
+              });
+          }
+        });
+        return flat;
+      }
+
+      function renderDocsVirtualList() {
+        const viewport = elements.docsTreeViewport;
+        const total = state.docsFlatItems.length;
+        if (!total) {
+          viewport.innerHTML = '<p class="empty-context">尚無文件可顯示。</p>';
+          return;
+        }
+        const rowHeight = state.docsVirtual.rowHeight;
+        const scrollTop = viewport.scrollTop;
+        const startIndex = Math.max(0, Math.floor(scrollTop / rowHeight) - state.docsVirtual.buffer);
+        const visibleCount = Math.ceil(viewport.clientHeight / rowHeight) + state.docsVirtual.buffer * 2;
+        const endIndex = Math.min(total, startIndex + visibleCount);
+
+        const spacerTop = startIndex * rowHeight;
+        const spacerBottom = Math.max(0, (total - endIndex) * rowHeight);
+
+        const fragment = document.createDocumentFragment();
+        if (spacerTop > 0) {
+          const top = document.createElement("div");
+          top.style.height = `${spacerTop}px`;
+          fragment.appendChild(top);
+        }
+
+        state.docsFlatItems.slice(startIndex, endIndex).forEach((item) => {
+          const row = document.createElement("button");
+          row.type = "button";
+          row.className = `docs-row docs-row--${item.type}`;
+          row.style.paddingLeft = `${12 + item.depth * 16}px`;
+          row.setAttribute("role", "listitem");
+          if (item.type === "doc") {
+            row.textContent = `${item.doc.name} · ${item.doc.node_id}`;
+            row.classList.toggle("is-active", state.docsSelectedPath === item.doc.path);
+            row.addEventListener("click", () => selectDoc(item.doc.path));
+          } else {
+            row.disabled = true;
+            row.textContent = item.label;
+          }
+          fragment.appendChild(row);
+        });
+
+        if (spacerBottom > 0) {
+          const bottom = document.createElement("div");
+          bottom.style.height = `${spacerBottom}px`;
+          fragment.appendChild(bottom);
+        }
+
+        viewport.replaceChildren(fragment);
+      }
+
+      function getSelectedDoc() {
+        return state.docsItems.find((item) => item.path === state.docsSelectedPath) || null;
+      }
+
+      async function selectDoc(docPath) {
+        state.docsSelectedPath = docPath;
+        renderDocsVirtualList();
+        const selected = getSelectedDoc();
+        if (!selected) return;
+        elements.docsPreviewTitle.textContent = selected.path;
+        elements.docsPreviewMeta.textContent = `run_id：${selected.run_id}｜node_id：${selected.node_id}`;
+        elements.docsOpen.disabled = false;
+        elements.docsDownload.disabled = false;
+        elements.docsInsert.disabled = false;
+        try {
+          const payload = await apiFetch(`/projects/${encodeURIComponent(state.projectId)}/docs/content?path=${encodeURIComponent(selected.path)}`);
+          elements.docsPreviewContent.innerHTML = renderMarkdown(payload.content || "");
+        } catch (error) {
+          elements.docsPreviewContent.innerHTML = `<p class="empty-context">預覽失敗：${escapeHtml(error.message)}</p>`;
+        }
+      }
+
+      async function loadDocsPage() {
+        if (!state.projectId) {
+          elements.docsTreeMeta.textContent = "請先選擇專案。";
+          state.docsFlatItems = [];
+          renderDocsVirtualList();
+          return;
+        }
+        const payload = await apiFetch(`/projects/${encodeURIComponent(state.projectId)}/docs`);
+        const docs = (payload.docs || []).map(normalizeDocItem);
+        state.docsItems = docs;
+        state.docsFlatItems = buildDocsTree(docs);
+        elements.docsTreeMeta.textContent = `共 ${docs.length} 份文件（虛擬列表模式）`;
+        if (!docs.find((doc) => doc.path === state.docsSelectedPath)) {
+          state.docsSelectedPath = docs[0]?.path || null;
+        }
+        renderDocsVirtualList();
+        if (state.docsSelectedPath) {
+          await selectDoc(state.docsSelectedPath);
+        }
       }
 
       async function renderGraph(code) {
@@ -1771,6 +1963,26 @@
       });
 
       elements.toolsSkillsRefresh.addEventListener("click", loadToolsSkillsPage);
+      elements.docsRefresh.addEventListener("click", loadDocsPage);
+      elements.docsTreeViewport.addEventListener("scroll", renderDocsVirtualList);
+      elements.docsOpen.addEventListener("click", () => {
+        const selected = getSelectedDoc();
+        if (!selected || !state.projectId) return;
+        window.open(`/v1/projects/${encodeURIComponent(state.projectId)}/docs/content?path=${encodeURIComponent(selected.path)}`, "_blank", "noopener");
+      });
+      elements.docsDownload.addEventListener("click", () => {
+        const selected = getSelectedDoc();
+        if (!selected || !state.projectId) return;
+        window.open(`/v1/projects/${encodeURIComponent(state.projectId)}/docs/download?path=${encodeURIComponent(selected.path)}`, "_blank", "noopener");
+      });
+      elements.docsInsert.addEventListener("click", () => {
+        const selected = getSelectedDoc();
+        if (!selected) return;
+        const stubRef = ` @doc(${selected.path})`;
+        elements.chatInput.value = `${elements.chatInput.value}${stubRef}`.trim();
+        elements.chatInput.focus();
+        showToast("已插入 @doc 引用（stub）。");
+      });
       elements.configRefresh.addEventListener("click", loadConfigPage);
       elements.billRefresh.addEventListener("click", loadBillPage);
       elements.configSearch.addEventListener("input", renderConfigTable);
