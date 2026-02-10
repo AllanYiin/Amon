@@ -13,8 +13,40 @@
   </head>
   <body>
     <main class="page">
-      <div class="layout chat-layout">
-        <section class="main-card chat-panel">
+      <div class="ui-shell" id="ui-shell">
+        <aside class="shell-sidebar" aria-label="主要導覽">
+          <h2>Amon UI</h2>
+          <nav class="shell-nav">
+            <button type="button" class="shell-nav__item is-active">Chat</button>
+            <button type="button" class="shell-nav__item">Context</button>
+            <button type="button" class="shell-nav__item">Graph</button>
+            <button type="button" class="shell-nav__item">Tools &amp; Skills</button>
+            <button type="button" class="shell-nav__item">Config</button>
+            <button type="button" class="shell-nav__item">Logs &amp; Events</button>
+            <button type="button" class="shell-nav__item">Docs</button>
+            <button type="button" class="shell-nav__item">Bill</button>
+          </nav>
+        </aside>
+
+        <section class="shell-main">
+          <header class="shell-topbar" aria-label="工作列">
+            <div class="shell-topbar__group">
+              <label class="field-label shell-topbar__field">
+                Project
+                <select id="shell-project-select">
+                  <option>Demo 專案（假資料）</option>
+                  <option>Internal Playground（假資料）</option>
+                </select>
+              </label>
+              <span class="shell-status shell-status--run">Run：Idle</span>
+              <span class="shell-status shell-status--daemon">Daemon：Healthy</span>
+              <span class="shell-status shell-status--budget">Budget：NT$ 0 / NT$ 5,000</span>
+            </div>
+            <button type="button" class="secondary-btn shell-context-toggle" id="toggle-context-panel" aria-expanded="true">收合右側面板</button>
+          </header>
+
+          <div class="layout chat-layout" id="chat-layout">
+            <section class="main-card chat-panel">
           <header class="chat-header">
             <div>
               <h1>Amon Chat</h1>
@@ -63,8 +95,26 @@
           </form>
         </section>
 
-        <aside class="context-panel">
+            <aside class="context-panel" id="context-panel">
           <h2>右側資訊</h2>
+          <div class="context-shell-placeholders" aria-label="右側狀態摘要">
+            <div class="context-shell-card">
+              <p class="context-shell-card__label">Memory Used</p>
+              <strong>--</strong>
+            </div>
+            <div class="context-shell-card">
+              <p class="context-shell-card__label">Run Progress</p>
+              <strong>--</strong>
+            </div>
+            <div class="context-shell-card">
+              <p class="context-shell-card__label">Billing</p>
+              <strong>--</strong>
+            </div>
+            <div class="context-shell-card">
+              <p class="context-shell-card__label">Pending Confirmations</p>
+              <strong>--</strong>
+            </div>
+          </div>
           <div class="context-project" id="context-project">目前專案：未選擇</div>
           <div class="context-tabs" role="tablist" aria-label="右側資訊切換">
             <button type="button" class="context-tab is-active" data-context-tab="context" role="tab" aria-selected="true">Context</button>
@@ -85,7 +135,9 @@
             <h3>Docs</h3>
             <ul id="docs-list" class="docs-list"></ul>
           </section>
-        </aside>
+            </aside>
+          </div>
+        </section>
       </div>
     </main>
 
@@ -121,7 +173,25 @@
         contextTabs: document.querySelectorAll(".context-tab"),
         contextPanels: document.querySelectorAll("[data-context-panel]"),
         streamProgress: document.getElementById("stream-progress"),
+        uiShell: document.getElementById("ui-shell"),
+        toggleContextPanel: document.getElementById("toggle-context-panel"),
       };
+
+      function syncContextPanelToggle() {
+        if (!elements.uiShell || !elements.toggleContextPanel) {
+          return;
+        }
+        const collapsed = elements.uiShell.classList.contains("is-context-collapsed");
+        elements.toggleContextPanel.textContent = collapsed ? "展開右側面板" : "收合右側面板";
+        elements.toggleContextPanel.setAttribute("aria-expanded", String(!collapsed));
+      }
+
+      elements.toggleContextPanel?.addEventListener("click", () => {
+        elements.uiShell?.classList.toggle("is-context-collapsed");
+        syncContextPanelToggle();
+      });
+
+      syncContextPanelToggle();
 
       function showToast(message) {
         elements.toast.textContent = message;
