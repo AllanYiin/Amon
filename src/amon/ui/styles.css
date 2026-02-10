@@ -1531,3 +1531,92 @@ body {
   font-size: 12px;
   color: #9a3412;
 }
+
+.config-page {
+  display: grid;
+  gap: 16px;
+}
+
+.config-page__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.config-toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: end;
+  flex-wrap: wrap;
+}
+
+.config-toolbar__search input {
+  min-width: 280px;
+}
+
+.config-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.config-card {
+  border: 1px solid var(--stroke);
+  border-radius: 12px;
+  padding: 12px;
+  background: #fff;
+}
+
+.config-card pre {
+  margin: 8px 0 0;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 10px;
+  padding: 10px;
+  font-size: 11px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.config-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--stroke);
+  border-radius: 10px;
+}
+
+.config-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 680px;
+}
+
+.config-table th,
+.config-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #eef2f7;
+  text-align: left;
+  vertical-align: top;
+  font-size: 13px;
+}
+
+.config-effective-summary {
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.config-source {
+  display: inline-flex;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 12px;
+  border: 1px solid #d1d5db;
+  background: #f8fafc;
+}
+
+.config-source--default { background: #f1f5f9; }
+.config-source--global { background: #dbeafe; border-color: #93c5fd; }
+.config-source--project { background: #dcfce7; border-color: #86efac; }
+.config-source--cli { background: #fef3c7; border-color: #fcd34d; }
+.config-source--chat { background: #fae8ff; border-color: #e9d5ff; }
