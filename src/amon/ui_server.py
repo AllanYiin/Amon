@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import json
+import re
 import threading
 import traceback
 import uuid
@@ -13,7 +14,7 @@ import yaml
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 from amon.chat.cli import _build_plan_from_message
 from amon.chat.project_bootstrap import bootstrap_project_if_needed, resolve_project_id_from_message
@@ -285,6 +286,75 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 self._handle_error(exc, status=500)
                 return
             self._send_json(200, context)
+            return
+        if parsed.path.endswith("/docs") and parsed.path.startswith("/v1/projects/"):
+            project_id = self._get_path_segment(parsed.path, 2)
+            if not project_id:
+                self._send_json(400, {"message": "無效的 project_id"})
+                return
+            try:
+                project_path = self.core.get_project_path(project_id)
+                docs = self._build_docs_catalog(project_id=project_id, project_path=project_path)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, {"docs": docs})
+            return
+        if parsed.path.endswith("/docs/content") and parsed.path.startswith("/v1/projects/"):
+            project_id = self._get_path_segment(parsed.path, 2)
+            if not project_id:
+                self._send_json(400, {"message": "無效的 project_id"})
+                return
+            params = parse_qs(parsed.query)
+            doc_path = params.get("path", [""])[0].strip()
+            if not doc_path:
+                self._send_json(400, {"message": "請提供 path"})
+                return
+            try:
+                project_path = self.core.get_project_path(project_id)
+                resolved_path = self._resolve_doc_path(project_path, doc_path)
+                content = resolved_path.read_text(encoding="utf-8")
+            except FileNotFoundError as exc:
+                self._handle_error(exc, status=404)
+                return
+            except ValueError as exc:
+                self._send_json(400, {"message": str(exc)})
+                return
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, {"path": doc_path, "content": content})
+            return
+        if parsed.path.endswith("/docs/download") and parsed.path.startswith("/v1/projects/"):
+            project_id = self._get_path_segment(parsed.path, 2)
+            if not project_id:
+                self._send_json(400, {"message": "無效的 project_id"})
+                return
+            params = parse_qs(parsed.query)
+            doc_path = params.get("path", [""])[0].strip()
+            if not doc_path:
+                self._send_json(400, {"message": "請提供 path"})
+                return
+            try:
+                project_path = self.core.get_project_path(project_id)
+                resolved_path = self._resolve_doc_path(project_path, doc_path)
+                content = resolved_path.read_text(encoding="utf-8")
+            except FileNotFoundError as exc:
+                self._handle_error(exc, status=404)
+                return
+            except ValueError as exc:
+                self._send_json(400, {"message": str(exc)})
+                return
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            body = content.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/markdown; charset=utf-8")
+            self.send_header("Content-Disposition", f'attachment; filename="{Path(doc_path).name}"')
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
             return
         if parsed.path == "/v1/tools/catalog":
             params = parse_qs(parsed.query)
@@ -1117,7 +1187,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         project_path = self.core.get_project_path(project_id)
         run_bundle = self._load_latest_run_bundle(project_path)
         graph = run_bundle["graph"]
-        docs = self._list_docs(project_path / "docs")
+        docs = self._build_docs_catalog(project_id=project_id, project_path=project_path)
         return {
             "graph_mermaid": self._graph_to_mermaid(graph),
             "graph": graph,
@@ -1353,6 +1423,77 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         if fallback.exists():
             return json.loads(fallback.read_text(encoding="utf-8"))
         return {"nodes": [], "edges": []}
+
+    def _build_docs_catalog(self, *, project_id: str, project_path: Path) -> list[dict[str, Any]]:
+        docs_dir = project_path / "docs"
+        if not docs_dir.exists():
+            return []
+        source_by_path: dict[str, dict[str, str]] = {}
+        runs_dir = project_path / ".amon" / "runs"
+        if runs_dir.exists():
+            for run_dir in runs_dir.iterdir():
+                if not run_dir.is_dir():
+                    continue
+                for event in self._read_jsonl_records(run_dir / "events.jsonl"):
+                    node_id = str(event.get("node_id") or "").strip()
+                    for key in ("path", "output_path", "doc_path", "artifact_path"):
+                        raw_path = str(event.get(key) or "").strip()
+                        if not raw_path or not raw_path.startswith("docs/"):
+                            continue
+                        relative_path = raw_path.replace("docs/", "", 1)
+                        source_by_path.setdefault(
+                            relative_path,
+                            {
+                                "run_id": run_dir.name,
+                                "node_id": node_id or "unknown",
+                            },
+                        )
+
+        docs: list[dict[str, Any]] = []
+        for path in sorted(docs_dir.rglob("*")):
+            if not path.is_file():
+                continue
+            relative_path = str(path.relative_to(docs_dir))
+            inferred = source_by_path.get(relative_path, {})
+            run_id = inferred.get("run_id") or self._infer_run_id_from_path(relative_path)
+            node_id = inferred.get("node_id") or "unknown"
+            task_id = self._infer_task_id_from_path(relative_path)
+            encoded_path = quote(relative_path, safe="")
+            docs.append(
+                {
+                    "path": relative_path,
+                    "name": path.name,
+                    "run_id": run_id or "unknown",
+                    "node_id": node_id,
+                    "task_id": task_id or "ungrouped",
+                    "download_url": f"/v1/projects/{project_id}/docs/download?path={encoded_path}",
+                    "open_url": f"/v1/projects/{project_id}/docs/content?path={encoded_path}",
+                }
+            )
+        return docs
+
+    def _resolve_doc_path(self, project_path: Path, relative_path: str) -> Path:
+        docs_dir = (project_path / "docs").resolve()
+        candidate = (docs_dir / relative_path).resolve()
+        if docs_dir not in candidate.parents and candidate != docs_dir:
+            raise ValueError("path 必須位於 docs 目錄下")
+        if not candidate.exists() or not candidate.is_file():
+            raise FileNotFoundError("找不到文件")
+        return candidate
+
+    def _infer_run_id_from_path(self, relative_path: str) -> str | None:
+        matched = re.search(r"(?:^|[_-])run[_-]?([a-zA-Z0-9]+)", relative_path)
+        if matched:
+            return f"run_{matched.group(1)}"
+        return None
+
+    def _infer_task_id_from_path(self, relative_path: str) -> str | None:
+        parts = Path(relative_path).parts
+        if "tasks" in parts:
+            index = parts.index("tasks")
+            if index + 1 < len(parts):
+                return parts[index + 1]
+        return None
 
     def _list_docs(self, docs_dir: Path) -> list[str]:
         if not docs_dir.exists():
