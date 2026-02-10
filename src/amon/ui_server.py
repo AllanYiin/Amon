@@ -7,6 +7,7 @@ import json
 import threading
 import traceback
 import uuid
+from datetime import datetime
 
 import yaml
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -325,6 +326,48 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 )
             except KeyError as exc:
                 self._handle_error(exc, status=404)
+                return
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, payload)
+            return
+        if parsed.path == "/v1/logs/query":
+            params = parse_qs(parsed.query)
+            try:
+                payload = self._query_logs(params)
+            except ValueError as exc:
+                self._send_json(400, {"message": str(exc)})
+                return
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, payload)
+            return
+        if parsed.path == "/v1/logs/download":
+            params = parse_qs(parsed.query)
+            try:
+                payload = self._query_logs(params, include_paging=False)
+            except ValueError as exc:
+                self._send_json(400, {"message": str(exc)})
+                return
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            body = "\n".join(json.dumps(item, ensure_ascii=False) for item in payload["items"]) + "\n"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+            self.send_header("Content-Disposition", 'attachment; filename="amon-logs.ndjson"')
+            self.send_header("Content-Length", str(len(body.encode("utf-8"))))
+            self.end_headers()
+            self.wfile.write(body.encode("utf-8"))
+            return
+        if parsed.path == "/v1/events/query":
+            params = parse_qs(parsed.query)
+            try:
+                payload = self._query_events(params)
+            except ValueError as exc:
+                self._send_json(400, {"message": str(exc)})
                 return
             except Exception as exc:  # noqa: BLE001
                 self._handle_error(exc, status=500)
@@ -1150,6 +1193,152 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             "node_states": state_payload.get("nodes", {}),
             "recent_events": events[-100:],
         }
+
+    def _query_logs(self, params: dict[str, list[str]], *, include_paging: bool = True) -> dict[str, Any]:
+        source = params.get("source", ["amon"])[0].strip().lower()
+        if source not in {"amon", "project", "billing"}:
+            raise ValueError("source 僅支援 amon/project/billing")
+        project_id = params.get("project_id", [""])[0].strip() or None
+        run_id = params.get("run_id", [""])[0].strip() or None
+        node_id = params.get("node_id", [""])[0].strip() or None
+        severity = params.get("severity", [""])[0].strip().upper() or None
+        component = params.get("component", [""])[0].strip().lower() or None
+        time_from = self._parse_time(params.get("time_from", [""])[0].strip())
+        time_to = self._parse_time(params.get("time_to", [""])[0].strip())
+        page = max(int(params.get("page", ["1"])[0] or "1"), 1)
+        page_size = min(max(int(params.get("page_size", ["50"])[0] or "50"), 1), 200)
+
+        items = self._read_logs_source(source, project_id=project_id)
+        filtered = []
+        for item in items:
+            if project_id and str(item.get("project_id") or "") != project_id:
+                continue
+            if run_id and str(item.get("run_id") or "") != run_id:
+                continue
+            if node_id and str(item.get("node_id") or "") != node_id:
+                continue
+            if severity and str(item.get("level") or "").upper() != severity:
+                continue
+            if component and component not in str(item.get("component") or item.get("event") or "").lower():
+                continue
+            ts = self._parse_time(str(item.get("ts") or ""))
+            if time_from and ts and ts < time_from:
+                continue
+            if time_to and ts and ts > time_to:
+                continue
+            filtered.append(item)
+        filtered.sort(key=lambda payload: str(payload.get("ts") or ""), reverse=True)
+
+        if not include_paging:
+            return {"items": filtered, "total": len(filtered), "page": 1, "page_size": len(filtered), "has_next": False}
+        start = (page - 1) * page_size
+        end = start + page_size
+        return {
+            "items": filtered[start:end],
+            "total": len(filtered),
+            "page": page,
+            "page_size": page_size,
+            "has_next": end < len(filtered),
+        }
+
+    def _query_events(self, params: dict[str, list[str]]) -> dict[str, Any]:
+        project_id = params.get("project_id", [""])[0].strip() or None
+        run_id = params.get("run_id", [""])[0].strip() or None
+        node_id = params.get("node_id", [""])[0].strip() or None
+        event_type = params.get("type", [""])[0].strip().lower() or None
+        time_from = self._parse_time(params.get("time_from", [""])[0].strip())
+        time_to = self._parse_time(params.get("time_to", [""])[0].strip())
+        page = max(int(params.get("page", ["1"])[0] or "1"), 1)
+        page_size = min(max(int(params.get("page_size", ["50"])[0] or "50"), 1), 200)
+
+        entries = self._read_project_run_events(project_id=project_id)
+        filtered = []
+        for item in entries:
+            if project_id and str(item.get("project_id") or "") != project_id:
+                continue
+            if run_id and str(item.get("run_id") or "") != run_id:
+                continue
+            if node_id and str(item.get("node_id") or "") != node_id:
+                continue
+            if event_type and event_type not in str(item.get("event") or item.get("type") or "").lower():
+                continue
+            ts = self._parse_time(str(item.get("ts") or ""))
+            if time_from and ts and ts < time_from:
+                continue
+            if time_to and ts and ts > time_to:
+                continue
+            item["drilldown"] = {
+                "run_id": item.get("run_id"),
+                "node_id": item.get("node_id"),
+                "hook_id": item.get("hook_id"),
+                "schedule_id": item.get("schedule_id"),
+                "job_id": item.get("job_id"),
+            }
+            filtered.append(item)
+        filtered.sort(key=lambda payload: str(payload.get("ts") or ""), reverse=True)
+        start = (page - 1) * page_size
+        end = start + page_size
+        return {
+            "items": filtered[start:end],
+            "total": len(filtered),
+            "page": page,
+            "page_size": page_size,
+            "has_next": end < len(filtered),
+        }
+
+    def _read_logs_source(self, source: str, *, project_id: str | None) -> list[dict[str, Any]]:
+        if source == "amon":
+            return self._read_jsonl_records(self.core.data_dir / "logs" / "amon.log")
+        if source == "billing":
+            return self._read_jsonl_records(self.core.data_dir / "logs" / "billing.log")
+        return self._read_project_run_events(project_id=project_id)
+
+    def _read_project_run_events(self, *, project_id: str | None) -> list[dict[str, Any]]:
+        records: list[dict[str, Any]] = []
+        projects = [self.core.get_project(project_id)] if project_id else self.core.list_projects(include_deleted=False)
+        for project in projects:
+            project_path = Path(project.path)
+            runs_dir = project_path / ".amon" / "runs"
+            if not runs_dir.exists():
+                continue
+            run_dirs = [path for path in runs_dir.iterdir() if path.is_dir()]
+            for run_dir in run_dirs:
+                for payload in self._read_jsonl_records(run_dir / "events.jsonl"):
+                    payload.setdefault("project_id", project.project_id)
+                    payload.setdefault("run_id", run_dir.name)
+                    payload.setdefault("source", "project")
+                    if "type" in payload and "event" not in payload:
+                        payload["event"] = payload.get("type")
+                    records.append(payload)
+        return records
+
+    def _read_jsonl_records(self, path: Path) -> list[dict[str, Any]]:
+        if not path.exists():
+            return []
+        records: list[dict[str, Any]] = []
+        try:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(payload, dict):
+                    records.append(payload)
+        except OSError:
+            return []
+        return records
+
+    def _parse_time(self, text: str) -> datetime | None:
+        value = text.strip()
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("time range 必須是 ISO 時間格式") from exc
 
     def _load_latest_graph(self, project_path: Path) -> dict[str, Any]:
         runs_dir = project_path / ".amon" / "runs"
