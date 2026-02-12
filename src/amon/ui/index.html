@@ -1971,16 +1971,10 @@
           },
         });
 
-        source.addEventListener("done", async (event) => {
-          const data = JSON.parse(event.data || "{}");
-          applySessionFromEvent(data);
-          source.close();
-          finalizeAssistantBubble();
-          setStreaming(false);
-          await loadProjects();
-          if (state.projectId) {
-            await loadContext();
-          }
+        state.streamClient.start({
+          message: finalMessage,
+          project_id: state.projectId,
+          chat_id: state.chatId,
         });
       }
 
