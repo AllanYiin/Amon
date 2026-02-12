@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Callable
 
 from amon.core import AmonCore, ProjectRecord
@@ -61,10 +62,11 @@ def build_project_name(message: str, plan_type: str, build_plan_from_message: Pl
     else:
         snippet = " ".join(message.strip().split())
         if snippet:
-            name = snippet[:30]
+            name = snippet
     if not name:
         name = command_name or "未命名任務"
-    return " ".join(name.split())
+    normalized = " ".join(name.split())
+    return _normalize_project_name(normalized)
 
 
 def bootstrap_project_if_needed(
@@ -141,3 +143,40 @@ def _format_arg(key: str, value: Any) -> str:
     if not value_text:
         return key
     return f"{key}={value_text}"
+
+
+def _normalize_project_name(name: str) -> str:
+    cleaned = " ".join(name.split()).strip()
+    if not cleaned:
+        return "未命名任務"
+    has_cjk = any(_is_cjk(char) for char in cleaned)
+    if has_cjk:
+        compact = re.sub(r"\s+", "", cleaned)
+        result_chars: list[str] = []
+        cjk_count = 0
+        for char in compact:
+            if _is_cjk(char):
+                if cjk_count >= 10:
+                    break
+                cjk_count += 1
+                result_chars.append(char)
+                continue
+            if char.isalnum() and cjk_count < 10:
+                result_chars.append(char)
+        result = "".join(result_chars).strip("-_ ")
+        while result.endswith(("的", "了", "與", "和")):
+            result = result[:-1]
+        return result or "新任務"
+
+    words = cleaned.split()
+    result = " ".join(words[:5]).strip()
+    return result or "new task"
+
+
+def _is_cjk(char: str) -> bool:
+    code = ord(char)
+    return (
+        0x4E00 <= code <= 0x9FFF
+        or 0x3400 <= code <= 0x4DBF
+        or 0xF900 <= code <= 0xFAFF
+    )

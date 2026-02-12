@@ -33,10 +33,7 @@
             <div class="shell-topbar__group">
               <label class="field-label shell-topbar__field">
                 Project
-                <select id="shell-project-select">
-                  <option>Demo 專案（假資料）</option>
-                  <option>Internal Playground（假資料）</option>
-                </select>
+                <select id="project-select"></select>
               </label>
               <span class="shell-status shell-status--run" id="shell-run-status">Run：Idle</span>
               <span class="shell-status shell-status--daemon" id="shell-daemon-status">Daemon：Healthy</span>
@@ -53,10 +50,7 @@
               <p class="subtitle">請用自然語言操作專案與任務（支援 streaming）。</p>
             </div>
             <div class="chat-controls">
-              <label class="field-label">
-                專案
-                <select id="project-select"></select>
-              </label>
+              <span class="chat-project-label" id="chat-project-label">目前專案：未指定專案</span>
               <button class="secondary-btn" id="refresh-context">刷新 Context</button>
             </div>
           </header>
@@ -501,6 +495,7 @@
         graphNodeEvents: document.getElementById("graph-node-events"),
         graphParametrize: document.getElementById("graph-parametrize"),
         docsList: document.getElementById("docs-list"),
+        chatProjectLabel: document.getElementById("chat-project-label"),
         contextProject: document.getElementById("context-project"),
         contextOverview: document.getElementById("context-overview"),
         contextTabs: document.querySelectorAll(".context-tab"),
@@ -1095,6 +1090,82 @@
         elements.timeline.scrollTop = elements.timeline.scrollHeight;
       }
 
+
+      function appendRestoredMessage(role, text, ts = "") {
+        const row = document.createElement("article");
+        row.className = "timeline-row";
+
+        const bubble = document.createElement("div");
+        bubble.className = `chat-bubble ${role}`;
+        const prefix = role === "user" ? "你：" : "Amon：";
+        bubble.innerHTML = renderMarkdown(`${prefix}${text}`);
+
+        const footer = document.createElement("footer");
+        footer.className = "timeline-meta";
+        const roleLabel = role === "user" ? "你" : "Amon";
+        footer.textContent = ts ? `${ts}・${roleLabel}` : roleLabel;
+
+        row.appendChild(bubble);
+        row.appendChild(footer);
+        elements.timeline.appendChild(row);
+      }
+
+      async function loadProjectHistory() {
+        elements.timeline.innerHTML = "";
+        if (!state.projectId) {
+          appendTimelineStatus("目前為無專案模式。輸入任務後會自動建立新專案並切換。");
+          return;
+        }
+        const payload = await apiFetch(`/projects/${encodeURIComponent(state.projectId)}/chat-history`);
+        state.chatId = payload.chat_id || state.chatId;
+        const messages = Array.isArray(payload.messages) ? payload.messages : [];
+        if (!messages.length) {
+          appendTimelineStatus("目前尚無歷史對話。請直接輸入需求開始。");
+          return;
+        }
+        messages.forEach((item) => {
+          const role = item.role === "user" ? "user" : "agent";
+          appendRestoredMessage(role, item.text || "", item.ts || "");
+        });
+        elements.timeline.scrollTop = elements.timeline.scrollHeight;
+      }
+
+      function collectArtifactsFromNodeStates(nodeStates = {}) {
+        const artifacts = [];
+        Object.entries(nodeStates || {}).forEach(([nodeId, nodeState]) => {
+          const output = nodeState && typeof nodeState === "object" ? nodeState.output : null;
+          if (!output || typeof output !== "object") {
+            return;
+          }
+          const entries = [];
+          if (Array.isArray(output.artifacts)) {
+            entries.push(...output.artifacts);
+          }
+          if (Array.isArray(output.docs)) {
+            entries.push(...output.docs);
+          }
+          if (typeof output.path === "string") {
+            entries.push({ path: output.path });
+          }
+          entries.forEach((item) => {
+            if (typeof item === "string") {
+              artifacts.push({ type: "artifact", run_id: state.graphRunId || "unknown", node_id: nodeId, path: item, preview: "" });
+              return;
+            }
+            if (item && typeof item === "object" && item.path) {
+              artifacts.push({
+                type: item.type || "artifact",
+                run_id: item.run_id || state.graphRunId || "unknown",
+                node_id: item.node_id || nodeId,
+                path: item.path,
+                preview: item.preview || "",
+              });
+            }
+          });
+        });
+        return artifacts;
+      }
+
       function escapeHtml(text) {
         return text
           .replaceAll("&", "&amp;")
@@ -1217,6 +1288,8 @@
         syncContextHeader();
         if (!state.projectId) {
           state.chatId = null;
+          elements.timeline.innerHTML = "";
+          renderArtifacts([]);
           elements.graphPreview.innerHTML = "<p class=\"empty-context\">請先在上方選擇專案。</p>";
           elements.graphCode.textContent = "";
           elements.contextOverview.textContent = "請先在上方選擇專案，右側內容會自動同步。";
@@ -1225,8 +1298,9 @@
       }
 
       function syncContextHeader() {
-        const selected = elements.projectSelect.selectedOptions[0]?.textContent || "未選擇";
+        const selected = elements.projectSelect.selectedOptions[0]?.textContent || "未指定專案";
         elements.contextProject.textContent = `目前專案：${selected}`;
+        elements.chatProjectLabel.textContent = `目前專案：${selected}`;
       }
 
       function switchContextTab(tabName) {
@@ -1257,7 +1331,7 @@
         elements.projectSelect.innerHTML = "";
         const emptyOption = document.createElement("option");
         emptyOption.value = "";
-        emptyOption.textContent = "不指定專案";
+        emptyOption.textContent = "無專案";
         elements.projectSelect.appendChild(emptyOption);
         projects.forEach((project) => {
           const option = document.createElement("option");
@@ -1313,6 +1387,7 @@
         const docCount = (payload.docs || []).length;
         const hasGraph = payload.graph_mermaid ? "有" : "無";
         elements.contextOverview.textContent = `已同步專案內容：Graph ${hasGraph}、文件 ${docCount} 筆。`;
+        renderArtifacts(collectArtifactsFromNodeStates(state.graphNodeStates));
       }
 
       function normalizeDocItem(doc) {
@@ -2020,6 +2095,7 @@
       elements.projectSelect.addEventListener("change", async (event) => {
         const selectedProject = event.target.value;
         setProjectState(selectedProject);
+        await loadProjectHistory();
         if (state.projectId) {
           await ensureChatSession();
           await loadContext();
@@ -2092,6 +2168,7 @@
           setProjectState(state.projectId);
           renderArtifacts([]);
           updateThinking({ status: "idle", brief: "目前沒有 Thinking 事件" });
+          await loadProjectHistory();
           if (state.projectId) {
             await ensureChatSession();
             await loadContext();

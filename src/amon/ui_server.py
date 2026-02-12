@@ -288,8 +288,20 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/v1/projects":
             params = parse_qs(parsed.query)
             include_deleted = params.get("include_deleted", ["false"])[0].lower() == "true"
-            records = self.core.list_projects(include_deleted=include_deleted)
-            self._send_json(200, {"projects": [record.to_dict() for record in records]})
+            records = self._list_projects_for_ui(include_deleted=include_deleted)
+            self._send_json(200, {"projects": records})
+            return
+        if parsed.path.endswith("/chat-history") and parsed.path.startswith("/v1/projects/"):
+            project_id = self._get_path_segment(parsed.path, 2)
+            if not project_id:
+                self._send_json(400, {"message": "無效的 project_id"})
+                return
+            try:
+                payload = self._build_project_chat_history(project_id)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, payload)
             return
         if parsed.path.endswith("/context") and parsed.path.startswith("/v1/projects/"):
             project_id = self._get_path_segment(parsed.path, 2)
@@ -1198,6 +1210,65 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 append_event(chat_id, {"type": "error", "text": str(exc), "project_id": project_id})
             send_event("error", {"message": str(exc)})
             send_event("done", {"status": "failed", "chat_id": chat_id})
+
+    def _list_projects_for_ui(self, *, include_deleted: bool = False) -> list[dict[str, Any]]:
+        records = self.core.list_projects(include_deleted=include_deleted)
+        merged: dict[str, dict[str, Any]] = {record.project_id: record.to_dict() for record in records}
+
+        projects_dir = self.core.projects_dir
+        if projects_dir.exists():
+            for child in projects_dir.iterdir():
+                if not child.is_dir():
+                    continue
+                project_id = child.name.strip()
+                if not project_id or project_id in merged:
+                    continue
+                merged[project_id] = {
+                    "project_id": project_id,
+                    "name": project_id,
+                    "path": str(child),
+                    "created_at": "",
+                    "updated_at": "",
+                    "status": "active",
+                }
+
+        projects = list(merged.values())
+        projects.sort(key=lambda item: item.get("project_id") or "")
+        return projects
+
+    def _build_project_chat_history(self, project_id: str) -> dict[str, Any]:
+        project_path = self.core.get_project_path(project_id)
+        sessions_dir = project_path / "sessions" / "chat"
+        if not sessions_dir.exists():
+            return {"project_id": project_id, "chat_id": None, "messages": []}
+
+        session_files = [path for path in sessions_dir.glob("*.jsonl") if path.is_file()]
+        if not session_files:
+            return {"project_id": project_id, "chat_id": None, "messages": []}
+
+        latest_session = max(session_files, key=lambda path: path.stat().st_mtime)
+        messages: list[dict[str, Any]] = []
+        for raw_line in latest_session.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            event_type = str(payload.get("type") or "").strip()
+            text = payload.get("text")
+            if event_type not in {"user", "assistant"} or not isinstance(text, str) or not text.strip():
+                continue
+            messages.append(
+                {
+                    "role": "user" if event_type == "user" else "assistant",
+                    "text": text.strip(),
+                    "ts": str(payload.get("ts") or "").strip(),
+                }
+            )
+
+        return {"project_id": project_id, "chat_id": latest_session.stem, "messages": messages[-60:]}
 
     def _build_project_context(self, project_id: str) -> dict[str, Any]:
         project_path = self.core.get_project_path(project_id)
