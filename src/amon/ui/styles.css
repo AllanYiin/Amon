@@ -14,6 +14,10 @@
   --highlight: #eef2ff;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 * {
   box-sizing: border-box;
 }
