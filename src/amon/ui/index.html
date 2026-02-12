@@ -1963,6 +1963,11 @@ ${JSON.stringify(data, null, 2)}
               }
               if (eventType === "done") {
                 applySessionFromEvent(data);
+                const doneStatus = data.status || "ok";
+                if (doneStatus !== "ok" && doneStatus !== "confirm_required") {
+                  appendMessage("agent", `Amon：流程結束（${doneStatus}）。我已收到你的訊息，請調整描述後再送出，我會持續回應。`);
+                  appendTimelineStatus(`流程狀態：${doneStatus}`);
+                }
                 finalizeAssistantBubble();
                 state.streamClient?.stop();
                 state.streamClient = null;

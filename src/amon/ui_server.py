@@ -1094,7 +1094,18 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 )
                 if created_project:
                     project_id = created_project.project_id
+                    send_event(
+                        "notice",
+                        {
+                            "text": f"Amon：已自動建立新專案「{created_project.name}」（{created_project.project_id}），並繼續執行你的需求。",
+                            "project_id": project_id,
+                        },
+                    )
                 else:
+                    send_event(
+                        "notice",
+                        {"text": "Amon：目前尚未指定專案，且無法自動判斷任務範圍。請補充任務目標，或先建立專案。"},
+                    )
                     send_event("error", {"message": "缺少 project_id"})
                     send_event("done", {"status": "project_required"})
                     return
@@ -1196,6 +1207,14 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     },
                 )
                 return
+            send_event(
+                "notice",
+                {
+                    "text": "Amon：已收到你的訊息，但目前無法判斷可執行的意圖。請改用更明確的任務描述，我會立即繼續處理。",
+                    "chat_id": chat_id,
+                    "project_id": project_id,
+                },
+            )
             send_event("done", {"status": "unsupported", "chat_id": chat_id, "project_id": project_id})
         except Exception as exc:  # noqa: BLE001
             log_event(
