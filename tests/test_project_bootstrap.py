@@ -29,7 +29,20 @@ class ProjectBootstrapTests(unittest.TestCase):
 
         name = build_project_name("請幫我整理出 20 頁以上的投影片", "command_plan", _raise)
 
-        self.assertEqual(name, "請幫我整理出 20 頁以上的投影片")
+        self.assertEqual(name, "請幫我整理出20頁以上")
+
+
+    def test_build_project_name_limits_english_to_five_words(self) -> None:
+        def _raise(_: str, __: str) -> tuple[str, dict]:
+            raise ValueError("無法解析")
+
+        name = build_project_name(
+            "Please create a concise execution plan for the marketing launch",
+            "command_plan",
+            _raise,
+        )
+
+        self.assertEqual(name, "Please create a concise execution")
 
     def test_resolve_project_id_from_message_by_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
