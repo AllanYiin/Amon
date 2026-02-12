@@ -18,6 +18,15 @@ class UIShellSmokeTests(unittest.TestCase):
         ]:
             self.assertIn(token, html)
 
+
+    def test_chat_stream_uses_defined_render_paths(self) -> None:
+        html = Path("src/amon/ui/index.html").read_text(encoding="utf-8")
+
+        self.assertIn("state.streamClient.start({", html)
+        self.assertIn('applyTokenChunk(data.text || "")', html)
+        self.assertNotIn("agentBubble.innerHTML", html)
+        self.assertNotIn("buffer += data.text", html)
+
     def test_styles_force_hidden_attribute_to_behave_like_tabs(self) -> None:
         css = Path("src/amon/ui/styles.css").read_text(encoding="utf-8")
         self.assertIn("[hidden]", css)
