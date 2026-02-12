@@ -22,7 +22,7 @@
             <button type="button" class="shell-nav__item" data-shell-view="chat">Graph</button>
             <button type="button" class="shell-nav__item" data-shell-view="tools-skills">Tools &amp; Skills</button>
             <button type="button" class="shell-nav__item" data-shell-view="config">Config</button>
-            <button type="button" class="shell-nav__item" data-shell-view="chat">Logs &amp; Events</button>
+            <button type="button" class="shell-nav__item" data-shell-view="logs-events">Logs &amp; Events</button>
             <button type="button" class="shell-nav__item" data-shell-view="chat">Docs</button>
             <button type="button" class="shell-nav__item" data-shell-view="chat">Bill</button>
           </nav>
@@ -229,6 +229,71 @@
             </article>
           </section>
 
+          <section class="main-card logs-events-page" id="logs-events-page" hidden>
+            <header class="logs-events-page__header">
+              <div>
+                <h2>Logs &amp; Events</h2>
+                <p class="subtitle">依來源與條件檢視 log/event，並支援下載與 drilldown。</p>
+              </div>
+            </header>
+
+            <section class="logs-panel">
+              <h3>Logs</h3>
+              <div class="logs-toolbar">
+                <label class="field-label">來源
+                  <select id="logs-source">
+                    <option value="amon">amon</option>
+                    <option value="project">project</option>
+                    <option value="billing">billing</option>
+                  </select>
+                </label>
+                <label class="field-label">起始時間<input type="datetime-local" id="logs-time-from" /></label>
+                <label class="field-label">結束時間<input type="datetime-local" id="logs-time-to" /></label>
+                <label class="field-label">project<input type="text" id="logs-filter-project" placeholder="project_id" /></label>
+                <label class="field-label">run<input type="text" id="logs-filter-run" placeholder="run_id" /></label>
+                <label class="field-label">node<input type="text" id="logs-filter-node" placeholder="node_id" /></label>
+                <label class="field-label">severity
+                  <select id="logs-filter-severity">
+                    <option value="">全部</option>
+                    <option value="INFO">INFO</option>
+                    <option value="WARNING">WARNING</option>
+                    <option value="ERROR">ERROR</option>
+                  </select>
+                </label>
+                <label class="field-label">component<input type="text" id="logs-filter-component" placeholder="component / event" /></label>
+                <button type="button" class="secondary-btn" id="logs-refresh">查詢</button>
+                <button type="button" class="secondary-btn" id="logs-download">下載</button>
+              </div>
+              <div id="logs-summary" class="logs-summary">尚未載入。</div>
+              <div id="logs-list" class="logs-list"></div>
+              <div class="pager" id="logs-pager">
+                <button type="button" class="secondary-btn" id="logs-prev">上一頁</button>
+                <span id="logs-page-label">第 1 頁</span>
+                <button type="button" class="secondary-btn" id="logs-next">下一頁</button>
+              </div>
+            </section>
+
+            <section class="events-panel">
+              <h3>Events</h3>
+              <div class="logs-toolbar">
+                <label class="field-label">type<input type="text" id="events-filter-type" placeholder="event type" /></label>
+                <label class="field-label">起始時間<input type="datetime-local" id="events-time-from" /></label>
+                <label class="field-label">結束時間<input type="datetime-local" id="events-time-to" /></label>
+                <label class="field-label">project<input type="text" id="events-filter-project" placeholder="project_id" /></label>
+                <label class="field-label">run<input type="text" id="events-filter-run" placeholder="run_id" /></label>
+                <label class="field-label">node<input type="text" id="events-filter-node" placeholder="node_id" /></label>
+                <button type="button" class="secondary-btn" id="events-refresh">查詢</button>
+              </div>
+              <div id="events-summary" class="logs-summary">尚未載入。</div>
+              <div id="events-list" class="logs-list"></div>
+              <div class="pager" id="events-pager">
+                <button type="button" class="secondary-btn" id="events-prev">上一頁</button>
+                <span id="events-page-label">第 1 頁</span>
+                <button type="button" class="secondary-btn" id="events-next">下一頁</button>
+              </div>
+            </section>
+          </section>
+
           <section class="main-card tools-skills-page" id="tools-skills-page" hidden>
             <header class="tools-skills-page__header">
               <div>
@@ -313,6 +378,7 @@
         toolsCatalog: [],
         skillsCatalog: [],
         configView: null,
+        logsPage: { logsPage: 1, eventsPage: 1, logsHasNext: false, eventsHasNext: false },
       };
 
       const elements = {
@@ -367,6 +433,34 @@
         skillTriggerPreview: document.getElementById("skill-trigger-preview"),
         skillInjectionPreview: document.getElementById("skill-injection-preview"),
         configPage: document.getElementById("config-page"),
+        logsEventsPage: document.getElementById("logs-events-page"),
+        logsSource: document.getElementById("logs-source"),
+        logsTimeFrom: document.getElementById("logs-time-from"),
+        logsTimeTo: document.getElementById("logs-time-to"),
+        logsFilterProject: document.getElementById("logs-filter-project"),
+        logsFilterRun: document.getElementById("logs-filter-run"),
+        logsFilterNode: document.getElementById("logs-filter-node"),
+        logsFilterSeverity: document.getElementById("logs-filter-severity"),
+        logsFilterComponent: document.getElementById("logs-filter-component"),
+        logsRefresh: document.getElementById("logs-refresh"),
+        logsDownload: document.getElementById("logs-download"),
+        logsSummary: document.getElementById("logs-summary"),
+        logsList: document.getElementById("logs-list"),
+        logsPrev: document.getElementById("logs-prev"),
+        logsNext: document.getElementById("logs-next"),
+        logsPageLabel: document.getElementById("logs-page-label"),
+        eventsFilterType: document.getElementById("events-filter-type"),
+        eventsTimeFrom: document.getElementById("events-time-from"),
+        eventsTimeTo: document.getElementById("events-time-to"),
+        eventsFilterProject: document.getElementById("events-filter-project"),
+        eventsFilterRun: document.getElementById("events-filter-run"),
+        eventsFilterNode: document.getElementById("events-filter-node"),
+        eventsRefresh: document.getElementById("events-refresh"),
+        eventsSummary: document.getElementById("events-summary"),
+        eventsList: document.getElementById("events-list"),
+        eventsPrev: document.getElementById("events-prev"),
+        eventsNext: document.getElementById("events-next"),
+        eventsPageLabel: document.getElementById("events-page-label"),
         configRefresh: document.getElementById("config-refresh"),
         configSearch: document.getElementById("config-search"),
         configExport: document.getElementById("config-export"),
@@ -397,6 +491,7 @@
         elements.chatLayout.hidden = view !== "chat";
         elements.toolsSkillsPage.hidden = view !== "tools-skills";
         elements.configPage.hidden = view !== "config";
+        elements.logsEventsPage.hidden = view !== "logs-events";
       }
 
       function formatConfigCell(value) {
@@ -475,6 +570,131 @@
         link.click();
         link.remove();
         URL.revokeObjectURL(url);
+      }
+
+      function fromDateInput(value) {
+        if (!value) return "";
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return "";
+        return date.toISOString();
+      }
+
+      function buildLogsQuery(page) {
+        const params = new URLSearchParams({ source: elements.logsSource.value, page: String(page), page_size: "50" });
+        [
+          ["project_id", elements.logsFilterProject.value || state.projectId || ""],
+          ["run_id", elements.logsFilterRun.value],
+          ["node_id", elements.logsFilterNode.value],
+          ["severity", elements.logsFilterSeverity.value],
+          ["component", elements.logsFilterComponent.value],
+          ["time_from", fromDateInput(elements.logsTimeFrom.value)],
+          ["time_to", fromDateInput(elements.logsTimeTo.value)],
+        ].forEach(([key, value]) => {
+          if (value) params.set(key, value);
+        });
+        return params;
+      }
+
+      function buildEventsQuery(page) {
+        const params = new URLSearchParams({ page: String(page), page_size: "50" });
+        [
+          ["project_id", elements.eventsFilterProject.value || state.projectId || ""],
+          ["run_id", elements.eventsFilterRun.value],
+          ["node_id", elements.eventsFilterNode.value],
+          ["type", elements.eventsFilterType.value],
+          ["time_from", fromDateInput(elements.eventsTimeFrom.value)],
+          ["time_to", fromDateInput(elements.eventsTimeTo.value)],
+        ].forEach(([key, value]) => {
+          if (value) params.set(key, value);
+        });
+        return params;
+      }
+
+      function renderLogsPage(payload) {
+        elements.logsList.innerHTML = "";
+        elements.logsSummary.textContent = `共 ${payload.total} 筆，顯示第 ${payload.page} 頁。`;
+        elements.logsPageLabel.textContent = `第 ${payload.page} 頁`;
+        elements.logsPrev.disabled = payload.page <= 1;
+        elements.logsNext.disabled = !payload.has_next;
+        payload.items.forEach((item) => {
+          const card = document.createElement("article");
+          card.className = "log-item";
+          card.innerHTML = `
+            <header><strong>${escapeHtml(item.level || item.severity || "INFO")}</strong> · <code>${escapeHtml(item.ts || "-")}</code></header>
+            <div class="log-item__meta">${escapeHtml(item.project_id || "-")} / ${escapeHtml(item.run_id || "-")} / ${escapeHtml(item.node_id || "-")}</div>
+            <pre>${escapeHtml(JSON.stringify(item, null, 2))}</pre>
+          `;
+          elements.logsList.appendChild(card);
+        });
+        if (!payload.items.length) {
+          elements.logsList.textContent = "查無資料";
+        }
+      }
+
+      function renderEventsPage(payload) {
+        elements.eventsList.innerHTML = "";
+        elements.eventsSummary.textContent = `共 ${payload.total} 筆，顯示第 ${payload.page} 頁。`;
+        elements.eventsPageLabel.textContent = `第 ${payload.page} 頁`;
+        elements.eventsPrev.disabled = payload.page <= 1;
+        elements.eventsNext.disabled = !payload.has_next;
+        payload.items.forEach((item) => {
+          const card = document.createElement("article");
+          card.className = "log-item";
+          const eventType = item.event || item.type || "unknown";
+          card.innerHTML = `
+            <header><strong>${escapeHtml(eventType)}</strong> · <code>${escapeHtml(item.ts || "-")}</code></header>
+            <div class="log-item__meta">${escapeHtml(item.project_id || "-")} / ${escapeHtml(item.run_id || "-")} / ${escapeHtml(item.node_id || "-")}</div>
+            <pre>${escapeHtml(JSON.stringify(item, null, 2))}</pre>
+          `;
+          const drilldown = document.createElement("div");
+          drilldown.className = "log-item__actions";
+          ["run_id", "node_id", "hook_id", "schedule_id", "job_id"].forEach((key) => {
+            const value = item.drilldown && item.drilldown[key];
+            if (!value) return;
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "secondary-btn";
+            button.textContent = `前往 ${key.replace("_id", "")}：${value}`;
+            button.addEventListener("click", async () => {
+              if (item.project_id) {
+                setProjectState(item.project_id);
+                await loadContext();
+              }
+              switchShellView("chat");
+              showToast(`已切換至 Chat，可依 ${key}=${value} 追蹤。`);
+            });
+            drilldown.appendChild(button);
+          });
+          card.appendChild(drilldown);
+          elements.eventsList.appendChild(card);
+        });
+        if (!payload.items.length) {
+          elements.eventsList.textContent = "查無資料";
+        }
+      }
+
+      async function loadLogsPage(page = 1) {
+        const payload = await apiFetch(`/logs/query?${buildLogsQuery(page).toString()}`);
+        state.logsPage.logsPage = payload.page;
+        state.logsPage.logsHasNext = payload.has_next;
+        renderLogsPage(payload);
+      }
+
+      async function loadEventsPage(page = 1) {
+        const payload = await apiFetch(`/events/query?${buildEventsQuery(page).toString()}`);
+        state.logsPage.eventsPage = payload.page;
+        state.logsPage.eventsHasNext = payload.has_next;
+        renderEventsPage(payload);
+      }
+
+      async function loadLogsEventsPage() {
+        if (!elements.logsFilterProject.value && state.projectId) {
+          elements.logsFilterProject.value = state.projectId;
+        }
+        if (!elements.eventsFilterProject.value && state.projectId) {
+          elements.eventsFilterProject.value = state.projectId;
+        }
+        await Promise.all([loadLogsPage(1), loadEventsPage(1)]);
       }
 
       async function loadToolsSkillsPage() {
@@ -1362,7 +1582,29 @@
           if (view === "config") {
             await loadConfigPage();
           }
+          if (view === "logs-events") {
+            await loadLogsEventsPage();
+          }
         });
+      });
+
+      elements.logsRefresh.addEventListener("click", () => loadLogsPage(1));
+      elements.eventsRefresh.addEventListener("click", () => loadEventsPage(1));
+      elements.logsPrev.addEventListener("click", () => loadLogsPage(Math.max(1, state.logsPage.logsPage - 1)));
+      elements.logsNext.addEventListener("click", () => {
+        if (state.logsPage.logsHasNext) {
+          loadLogsPage(state.logsPage.logsPage + 1);
+        }
+      });
+      elements.eventsPrev.addEventListener("click", () => loadEventsPage(Math.max(1, state.logsPage.eventsPage - 1)));
+      elements.eventsNext.addEventListener("click", () => {
+        if (state.logsPage.eventsHasNext) {
+          loadEventsPage(state.logsPage.eventsPage + 1);
+        }
+      });
+      elements.logsDownload.addEventListener("click", () => {
+        const url = `/v1/logs/download?${buildLogsQuery(1).toString()}`;
+        window.open(url, "_blank", "noopener");
       });
 
       elements.toolsSkillsRefresh.addEventListener("click", loadToolsSkillsPage);
@@ -1411,6 +1653,9 @@
         }
         if (state.shellView === "config") {
           await loadConfigPage();
+        }
+        if (state.shellView === "logs-events") {
+          await loadLogsEventsPage();
         }
       });
 
