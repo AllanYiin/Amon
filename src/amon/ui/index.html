@@ -1930,57 +1930,59 @@
             }
           },
           onEvent: async (eventType, data) => {
-            state.uiStore.applyEvent(eventType, data);
-            if (state.projectId && ["result", "done", "notice"].includes(eventType)) {
-              await loadContext();
-            }
-            if (eventType === "token") {
-              buffer += data.text || "";
-              agentBubble.innerHTML = renderMarkdown(`Amon：${buffer}`);
-              elements.timeline.scrollTop = elements.timeline.scrollHeight;
-              return;
-            }
-            if (eventType === "notice") {
-              if (data.text) appendMessage("agent", data.text);
-              return;
-            }
-            if (eventType === "plan") {
-              applySessionFromEvent(data);
-              showPlanCard(data);
-              agentBubble.innerHTML = renderMarkdown("Amon：已產生 Plan Card，請確認。");
-              return;
-            }
-            if (eventType === "result") {
-              agentBubble.innerHTML = renderMarkdown(`Amon：\n\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``);
-              return;
-            }
-            if (eventType === "error") {
-              showToast(data.message || "串流失敗");
-              return;
-            }
-            if (eventType === "done") {
-              applySessionFromEvent(data);
-              state.streamClient?.stop();
-              state.streamClient = null;
-              setStreaming(false);
-              await loadProjects();
-              if (state.projectId) {
+            try {
+              state.uiStore.applyEvent(eventType, data);
+              if (state.projectId && ["result", "done", "notice"].includes(eventType)) {
                 await loadContext();
               }
+              if (eventType === "token") {
+                applyTokenChunk(data.text || "");
+                return;
+              }
+              if (eventType === "notice") {
+                if (data.text) appendMessage("agent", data.text);
+                return;
+              }
+              if (eventType === "plan") {
+                applySessionFromEvent(data);
+                showPlanCard(data);
+                appendMessage("agent", "Amon：已產生 Plan Card，請確認。");
+                return;
+              }
+              if (eventType === "result") {
+                appendMessage("agent", `Amon：
+
+\`\`\`json
+${JSON.stringify(data, null, 2)}
+\`\`\``);
+                return;
+              }
+              if (eventType === "error") {
+                showToast(data.message || "串流失敗");
+                return;
+              }
+              if (eventType === "done") {
+                applySessionFromEvent(data);
+                finalizeAssistantBubble();
+                state.streamClient?.stop();
+                state.streamClient = null;
+                setStreaming(false);
+                await loadProjects();
+                if (state.projectId) {
+                  await loadContext();
+                }
+              }
+            } catch (error) {
+              console.error("stream_event_error", error);
+              showToast(`事件處理失敗：${error.message || error}`);
             }
           },
         });
 
-        source.addEventListener("done", async (event) => {
-          const data = JSON.parse(event.data || "{}");
-          applySessionFromEvent(data);
-          source.close();
-          finalizeAssistantBubble();
-          setStreaming(false);
-          await loadProjects();
-          if (state.projectId) {
-            await loadContext();
-          }
+        state.streamClient.start({
+          message: finalMessage,
+          project_id: state.projectId,
+          chat_id: state.chatId,
         });
       }
 
