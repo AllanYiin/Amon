@@ -19,6 +19,49 @@ from http.server import ThreadingHTTPServer
 
 
 class UIAsyncAPITests(unittest.TestCase):
+    def test_chat_stream_emits_immediate_notice_without_project(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                message = quote("你好")
+                conn.request("GET", f"/v1/chat/stream?message={message}")
+                response = conn.getresponse()
+
+                self.assertEqual(response.status, 200)
+                self.assertIn("text/event-stream", response.getheader("Content-Type", ""))
+
+                lines: list[str] = []
+                for _ in range(20):
+                    raw_line = response.fp.readline()
+                    if not raw_line:
+                        break
+                    decoded = raw_line.decode("utf-8", errors="ignore").strip()
+                    if decoded:
+                        lines.append(decoded)
+                    if decoded == "event: done":
+                        break
+
+                joined = "\n".join(lines)
+                self.assertIn("event: notice", joined)
+                self.assertIn("已收到你的需求", joined)
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
     def test_run_request_is_non_blocking_and_cancelable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"
