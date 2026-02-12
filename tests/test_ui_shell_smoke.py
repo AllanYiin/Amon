@@ -11,9 +11,17 @@ class UIShellSmokeTests(unittest.TestCase):
             "toggle-context-panel",
             "Memory Used",
             "Tools &amp; Skills",
+            "data-shell-view=\"bill\"",
+            "id=\"bill-page\"",
+            "id=\"bill-breakdown-provider\"",
             "Daemon：Healthy",
         ]:
             self.assertIn(token, html)
+
+    def test_styles_force_hidden_attribute_to_behave_like_tabs(self) -> None:
+        css = Path("src/amon/ui/styles.css").read_text(encoding="utf-8")
+        self.assertIn("[hidden]", css)
+        self.assertIn("display: none !important", css)
 
 
 if __name__ == "__main__":

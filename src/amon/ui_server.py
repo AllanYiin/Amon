@@ -5,9 +5,10 @@ from __future__ import annotations
 import functools
 import json
 import threading
+import time
 import traceback
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 import yaml
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -267,6 +268,21 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             return
         if parsed.path == "/v1/chat/stream":
             self._handle_chat_stream(parsed)
+            return
+        if parsed.path == "/v1/billing/summary":
+            params = parse_qs(parsed.query)
+            project_id = params.get("project_id", [""])[0].strip() or None
+            try:
+                payload = self._build_billing_summary(project_id=project_id)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, payload)
+            return
+        if parsed.path == "/v1/billing/stream":
+            params = parse_qs(parsed.query)
+            project_id = params.get("project_id", [""])[0].strip() or None
+            self._handle_billing_stream(project_id=project_id)
             return
         if parsed.path == "/v1/projects":
             params = parse_qs(parsed.query)
@@ -1311,6 +1327,174 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         payload["event"] = payload.get("type")
                     records.append(payload)
         return records
+
+    def _billing_amount(self, record: dict[str, Any]) -> float:
+        amount = record.get("cost", record.get("amount", record.get("usage", record.get("token", 0))))
+        try:
+            parsed = float(amount)
+        except (TypeError, ValueError):
+            return 0.0
+        if parsed < 0:
+            return 0.0
+        return parsed
+
+    def _billing_bucket(self, record: dict[str, Any]) -> str:
+        mode_value = str(record.get("mode") or record.get("interaction") or record.get("channel") or "").lower()
+        if mode_value in {"automation", "auto", "daemon", "scheduled", "batch"}:
+            return "automation"
+        return "interactive"
+
+    @staticmethod
+    def _extract_date(text: str | None) -> date | None:
+        if not text:
+            return None
+        try:
+            return datetime.fromisoformat(text.replace("Z", "+00:00")).date()
+        except ValueError:
+            return None
+
+    def _safe_budget_value(self, value: Any) -> float | None:
+        if value is None:
+            return None
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        if parsed < 0:
+            return None
+        return parsed
+
+    def _build_billing_summary(self, *, project_id: str | None) -> dict[str, Any]:
+        records = self._read_jsonl_records(self.core.data_dir / "logs" / "billing.log")
+        today = datetime.now().date()
+        summary: dict[str, Any] = {
+            "currency": "USD",
+            "today": {"cost": 0.0, "usage": 0.0, "records": 0},
+            "project_total": {"cost": 0.0, "usage": 0.0, "records": 0},
+            "breakdown": {"provider": {}, "model": {}, "agent": {}, "node": {}},
+            "mode_breakdown": {
+                "automation": {"cost": 0.0, "usage": 0.0, "records": 0},
+                "interactive": {"cost": 0.0, "usage": 0.0, "records": 0},
+            },
+            "budgets": {
+                "daily_budget": None,
+                "per_project_budget": None,
+                "automation_budget": None,
+                "daily_usage": 0.0,
+                "project_usage": 0.0,
+                "automation_usage": 0.0,
+            },
+            "exceeded_events": [],
+        }
+
+        config = self.core.load_config(self.core.get_project_path(project_id)) if project_id else self.core.load_config(None)
+        billing_cfg = config.get("billing", {}) if isinstance(config, dict) else {}
+        summary["currency"] = str(billing_cfg.get("currency") or "USD")
+        summary["budgets"]["daily_budget"] = self._safe_budget_value(billing_cfg.get("daily_budget"))
+        summary["budgets"]["per_project_budget"] = self._safe_budget_value(billing_cfg.get("per_project_budget"))
+        summary["budgets"]["automation_budget"] = self._safe_budget_value(billing_cfg.get("automation_budget"))
+
+        for record in records:
+            record_project_id = str(record.get("project_id") or "").strip() or None
+            if project_id and record_project_id != project_id:
+                continue
+            amount = self._billing_amount(record)
+            record_date = self._extract_date(str(record.get("ts") or ""))
+            mode_bucket = self._billing_bucket(record)
+
+            summary["project_total"]["cost"] += amount
+            summary["project_total"]["usage"] += amount
+            summary["project_total"]["records"] += 1
+            summary["mode_breakdown"][mode_bucket]["cost"] += amount
+            summary["mode_breakdown"][mode_bucket]["usage"] += amount
+            summary["mode_breakdown"][mode_bucket]["records"] += 1
+
+            if record_date == today:
+                summary["today"]["cost"] += amount
+                summary["today"]["usage"] += amount
+                summary["today"]["records"] += 1
+
+            for key in ("provider", "model", "agent", "node"):
+                raw_value = record.get(f"{key}_id", record.get(key))
+                value = str(raw_value or "unknown")
+                bucket = summary["breakdown"][key].setdefault(value, {"cost": 0.0, "usage": 0.0, "records": 0})
+                bucket["cost"] += amount
+                bucket["usage"] += amount
+                bucket["records"] += 1
+
+        # Budgets使用全域/專案資料，不受 project filter 影響 daily_usage
+        all_records = self._read_jsonl_records(self.core.data_dir / "logs" / "billing.log")
+        for record in all_records:
+            amount = self._billing_amount(record)
+            record_date = self._extract_date(str(record.get("ts") or ""))
+            if record_date == today:
+                summary["budgets"]["daily_usage"] += amount
+            if project_id and str(record.get("project_id") or "").strip() == project_id:
+                summary["budgets"]["project_usage"] += amount
+            if self._billing_bucket(record) == "automation":
+                summary["budgets"]["automation_usage"] += amount
+
+        for event in self._read_jsonl_records(self.core.data_dir / "logs" / "amon.log"):
+            if str(event.get("event") or "") != "budget_exceeded":
+                continue
+            if project_id and str(event.get("project_id") or "") != project_id:
+                continue
+            summary["exceeded_events"].append(event)
+        summary["exceeded_events"].sort(key=lambda item: str(item.get("ts") or ""), reverse=True)
+        summary["exceeded_events"] = summary["exceeded_events"][:50]
+        return summary
+
+    def _handle_billing_stream(self, *, project_id: str | None) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
+
+        billing_log = self.core.data_dir / "logs" / "billing.log"
+        amon_log = self.core.data_dir / "logs" / "amon.log"
+
+        def emit(event_type: str, payload: dict[str, Any]) -> None:
+            body = f"event: {event_type}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+            self.wfile.write(body.encode("utf-8"))
+            self.wfile.flush()
+
+        try:
+            last_billing_mtime = billing_log.stat().st_mtime if billing_log.exists() else 0.0
+            last_amon_mtime = amon_log.stat().st_mtime if amon_log.exists() else 0.0
+            known_budget_count = len(
+                [
+                    item
+                    for item in self._read_jsonl_records(amon_log)
+                    if str(item.get("event") or "") == "budget_exceeded"
+                    and (not project_id or str(item.get("project_id") or "") == project_id)
+                ]
+            )
+            emit("usage_updated", self._build_billing_summary(project_id=project_id))
+            while True:
+                time.sleep(2)
+                current_billing_mtime = billing_log.stat().st_mtime if billing_log.exists() else 0.0
+                if current_billing_mtime != last_billing_mtime:
+                    last_billing_mtime = current_billing_mtime
+                    emit("usage_updated", self._build_billing_summary(project_id=project_id))
+
+                current_amon_mtime = amon_log.stat().st_mtime if amon_log.exists() else 0.0
+                if current_amon_mtime == last_amon_mtime:
+                    continue
+                last_amon_mtime = current_amon_mtime
+                budget_events = [
+                    item
+                    for item in self._read_jsonl_records(amon_log)
+                    if str(item.get("event") or "") == "budget_exceeded"
+                    and (not project_id or str(item.get("project_id") or "") == project_id)
+                ]
+                if len(budget_events) > known_budget_count:
+                    for item in budget_events[known_budget_count:]:
+                        emit("budget_exceeded", item)
+                    known_budget_count = len(budget_events)
+                    emit("usage_updated", self._build_billing_summary(project_id=project_id))
+        except (BrokenPipeError, ConnectionResetError):
+            return
 
     def _read_jsonl_records(self, path: Path) -> list[dict[str, Any]]:
         if not path.exists():
