@@ -18,12 +18,12 @@
           <h2>Amon UI</h2>
           <nav class="shell-nav" id="shell-nav">
             <button type="button" class="shell-nav__item is-active" data-shell-view="chat">Chat</button>
-            <button type="button" class="shell-nav__item" data-shell-view="chat">Context</button>
-            <button type="button" class="shell-nav__item" data-shell-view="chat">Graph</button>
+            <button type="button" class="shell-nav__item" data-shell-view="context">Context</button>
+            <button type="button" class="shell-nav__item" data-shell-view="graph">Graph</button>
             <button type="button" class="shell-nav__item" data-shell-view="tools-skills">Tools &amp; Skills</button>
             <button type="button" class="shell-nav__item" data-shell-view="config">Config</button>
             <button type="button" class="shell-nav__item" data-shell-view="logs-events">Logs &amp; Events</button>
-            <button type="button" class="shell-nav__item" data-shell-view="chat">Docs</button>
+            <button type="button" class="shell-nav__item" data-shell-view="docs">Docs</button>
             <button type="button" class="shell-nav__item" data-shell-view="bill">Bill</button>
           </nav>
         </aside>
@@ -344,6 +344,22 @@
             </section>
           </section>
 
+          <section class="main-card context-page" id="context-page" hidden>
+            <header>
+              <h2>Context</h2>
+              <p class="subtitle">此分頁預留為中心畫面 Context 視圖。</p>
+            </header>
+            <p class="empty-context">目前尚無可顯示內容。</p>
+          </section>
+
+          <section class="main-card graph-page" id="graph-page" hidden>
+            <header>
+              <h2>Graph</h2>
+              <p class="subtitle">此分頁預留為中心畫面 Graph 視圖。</p>
+            </header>
+            <p class="empty-context">目前尚無可顯示內容。</p>
+          </section>
+
           <section class="main-card docs-page" id="docs-page" hidden>
             <header class="docs-page__header">
               <div>
@@ -502,6 +518,8 @@
         contextPanels: document.querySelectorAll("[data-context-panel]"),
         streamProgress: document.getElementById("stream-progress"),
         chatLayout: document.getElementById("chat-layout"),
+        contextPage: document.getElementById("context-page"),
+        graphPage: document.getElementById("graph-page"),
         uiShell: document.getElementById("ui-shell"),
         toggleContextPanel: document.getElementById("toggle-context-panel"),
         thinkingMode: document.getElementById("thinking-mode"),
@@ -598,6 +616,8 @@
         }
         state.shellView = view;
         elements.chatLayout.hidden = view !== "chat";
+        elements.contextPage.hidden = view !== "context";
+        elements.graphPage.hidden = view !== "graph";
         elements.toolsSkillsPage.hidden = view !== "tools-skills";
         elements.billPage.hidden = view !== "bill";
         elements.configPage.hidden = view !== "config";
@@ -2012,6 +2032,9 @@
           if (view === "logs-events") {
             await loadLogsEventsPage();
           }
+          if (view === "docs") {
+            await loadDocsPage();
+          }
           if (view === "bill") {
             await loadBillPage();
           }
@@ -2108,6 +2131,9 @@
         }
         if (state.shellView === "logs-events") {
           await loadLogsEventsPage();
+        }
+        if (state.shellView === "docs") {
+          await loadDocsPage();
         }
         if (state.shellView === "bill") {
           await loadBillPage();
