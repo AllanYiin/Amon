@@ -87,8 +87,12 @@ class SkillsTests(unittest.TestCase):
 
                 self.assertNotIn("## Skill: review-skill", base_message)
                 self.assertIn("回覆必須先交付可執行內容", base_message)
+                self.assertIn("## First-party tools", base_message)
+                self.assertIn("- filesystem.read", base_message)
                 self.assertIn("## Skill: review-skill", skill_message)
                 self.assertIn("請專注 code review。", skill_message)
+                self.assertIn("## First-party tools", skill_message)
+                self.assertLess(skill_message.index("## First-party tools"), skill_message.index("## Skill: review-skill"))
             finally:
                 os.environ.pop("AMON_HOME", None)
 

@@ -2922,6 +2922,9 @@ if __name__ == "__main__":
             "若資訊不足，請在同一則訊息先列出暫定假設與立即可執行步驟，再補上最少必要問題。"
             "若任務需要網路資料，可優先使用第一方工具 web.search 與 web.fetch，不要直接宣稱無法上網。"
         )
+        tool_context = self._first_party_tool_context(project_path)
+        if tool_context:
+            system_message = f"{system_message}\n\n{tool_context}"
         skill_context = self._resolve_skill_context(
             prompt,
             project_path,
@@ -2931,6 +2934,22 @@ if __name__ == "__main__":
         if skill_context:
             system_message = f"{system_message}\n\n{skill_context}"
         return system_message
+
+    def _first_party_tool_context(self, project_path: Path | None) -> str:
+        from .tooling.builtin import build_registry
+
+        workspace_root = project_path or Path.cwd()
+        registry = build_registry(workspace_root)
+        specs = sorted(registry.list_specs(), key=lambda spec: spec.name)
+        if not specs:
+            return ""
+        lines = ["## First-party tools"]
+        for spec in specs:
+            schema = json.dumps(spec.input_schema or {}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            lines.append(
+                f"- {spec.name}｜risk={spec.risk}｜description={spec.description}｜input_schema={schema}"
+            )
+        return "\n".join(lines)
 
     def _prepare_session_path(self, project_path: Path | None, session_id: str) -> Path:
         if not project_path:
