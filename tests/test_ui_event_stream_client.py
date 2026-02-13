@@ -88,6 +88,54 @@ class UIEventStreamClientTests(unittest.TestCase):
         )
         self._run_node(script)
 
+    def test_sse_error_event_stops_reconnect(self) -> None:
+        script = textwrap.dedent(
+            """
+            const { EventStreamClient } = require('./src/amon/ui/event_stream_client.js');
+
+            let instances = 0;
+            class FakeEventSource {
+              constructor(_url) {
+                instances += 1;
+                this.listeners = new Map();
+                setTimeout(() => {
+                  const handler = this.listeners.get('error');
+                  if (handler) {
+                    handler({ data: JSON.stringify({ message: 'node timeout' }), lastEventId: 'evt-2' });
+                  }
+                  if (typeof this.onerror === 'function') {
+                    this.onerror(new Error('closed'));
+                  }
+                }, 0);
+              }
+
+              addEventListener(eventType, callback) {
+                this.listeners.set(eventType, callback);
+              }
+
+              close() {}
+            }
+
+            global.EventSource = FakeEventSource;
+
+            const client = new EventStreamClient({
+              preferSSE: true,
+              maxReconnectAttempts: 5,
+              sseUrlBuilder: () => '/v1/chat/stream?message=demo',
+            });
+
+            client.start({ message: 'demo' });
+
+            setTimeout(() => {
+              if (instances !== 1) {
+                throw new Error(`EventSource should not reconnect after error event, got ${instances}`);
+              }
+              process.exit(0);
+            }, 30);
+            """
+        )
+        self._run_node(script)
+
 
 if __name__ == "__main__":
     unittest.main()

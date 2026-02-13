@@ -183,8 +183,15 @@
           const payload = safeParseJson(event.data);
           const eventId = event.lastEventId || null;
           this._dispatch(eventType, payload, eventId);
-          if (eventType === "done") {
+          if (eventType === "done" || eventType === "error") {
+            this.shouldRun = false;
             source.close();
+            this.connection = null;
+            if (eventType === "error") {
+              this._setStatus("error", "stream error event");
+            } else {
+              this._setStatus("stopped", "stream completed");
+            }
           }
         });
       });
