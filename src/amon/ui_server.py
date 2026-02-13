@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, quote, unquote, urlparse
 from amon.chat.cli import _build_plan_from_message
 from amon.chat.project_bootstrap import bootstrap_project_if_needed, resolve_project_id_from_message
 from amon.chat.router import route_intent
+from amon.chat.router_types import RouterResult
 from amon.chat.session_store import (
     append_event,
     build_prompt_with_history,
@@ -189,6 +190,12 @@ class _TaskManager:
 
 
 _TASK_MANAGER = _TaskManager()
+
+
+def _resolve_command_plan_from_router(message: str, router_result: RouterResult) -> tuple[str, dict[str, Any]]:
+    if router_result.api and isinstance(router_result.args, dict):
+        return router_result.api, dict(router_result.args)
+    return _build_plan_from_message(message, router_result.type)
 
 
 class AmonUIHandler(SimpleHTTPRequestHandler):
@@ -1147,7 +1154,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 },
             )
             if router_result.type in {"command_plan", "graph_patch_plan"}:
-                command_name, args = _build_plan_from_message(message, router_result.type)
+                command_name, args = _resolve_command_plan_from_router(message, router_result)
                 plan = CommandPlan(
                     name=command_name,
                     args=args,
