@@ -2865,11 +2865,13 @@ if __name__ == "__main__":
         return skills
 
     def _format_skill_context(self, skills: list[dict[str, Any]]) -> str:
-        blocks = []
+        lines = ["## Skills (frontmatter)"]
         for skill in skills:
-            content = (skill.get("content") or "").strip()
-            blocks.append(f"## Skill: {skill.get('name')}\n{content}".rstrip())
-        return "\n\n".join(blocks)
+            frontmatter = skill.get("frontmatter") if isinstance(skill.get("frontmatter"), dict) else {}
+            name = str(frontmatter.get("name") or skill.get("name") or "")
+            description = str(frontmatter.get("description") or skill.get("description") or "").strip() or "無描述"
+            lines.append(f"- {name}：{description}")
+        return "\n".join(lines)
 
     def _collect_skill_names(
         self,
@@ -2893,13 +2895,25 @@ if __name__ == "__main__":
     ) -> str:
         config = config or self.load_config(project_path)
         selected = self._collect_skill_names(config, skill_names)
-        skills: list[dict[str, Any]] = []
-        if selected:
-            skills.extend(self._load_skills(selected, project_path, ignore_missing=False))
+        indexed_skills = self.scan_skills(project_path) if project_path else self.list_skills() or self.scan_skills()
+        by_name = {str(item.get("name")): item for item in indexed_skills}
+
+        resolved_names: list[str] = []
+        resolved_names.extend(selected)
         if prompt.startswith("/"):
             prompt_skill = prompt.split()[0].lstrip("/")
             if prompt_skill:
-                skills.extend(self._load_skills([prompt_skill], project_path, ignore_missing=True))
+                resolved_names.append(prompt_skill)
+
+        deduped_names: list[str] = []
+        seen: set[str] = set()
+        for name in resolved_names:
+            if name in seen:
+                continue
+            seen.add(name)
+            deduped_names.append(name)
+
+        skills: list[dict[str, Any]] = [by_name[name] for name in deduped_names if name in by_name]
         if not skills:
             return ""
         return self._format_skill_context(skills)

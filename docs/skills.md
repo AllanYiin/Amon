@@ -44,6 +44,22 @@ amon skills list
 amon skills show <name>
 ```
 
+### Skill context 載入的 metadata 形狀
+
+Skill context 採按需載入以節省 context，預設只需載入 `frontmatter` 內容清單：
+
+```json
+{
+  "frontmatter": {
+    "name": "incident-triage",
+    "description": "log/錯誤快速定位..."
+  }
+}
+```
+
+- `frontmatter` 作為技能摘要入口，先提供 `name`、`description` 等必要欄位。
+- 只有在實際觸發該技能時，才需要進一步讀取 `SKILL.md` 內文。
+
 ## 在執行任務時使用技能
 
 CLI 的 `run` 指令可透過 `--skill` 指定多個技能：
