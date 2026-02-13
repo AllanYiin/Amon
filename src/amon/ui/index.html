@@ -1313,6 +1313,13 @@
       function setProjectState(projectId) {
         state.projectId = projectId || null;
         elements.refreshContext.disabled = !state.projectId;
+        if (state.projectId && !elements.projectSelect.querySelector(`option[value="${CSS.escape(state.projectId)}"]`)) {
+          const dynamicOption = document.createElement("option");
+          dynamicOption.value = state.projectId;
+          dynamicOption.textContent = `新專案（${state.projectId}）`;
+          dynamicOption.dataset.dynamic = "true";
+          elements.projectSelect.appendChild(dynamicOption);
+        }
         elements.projectSelect.value = projectId || "";
         syncContextHeader();
         if (!state.projectId) {
@@ -1709,13 +1716,18 @@
         elements.planCard.hidden = false;
       }
 
-      function applySessionFromEvent(data) {
+      async function applySessionFromEvent(data) {
         if (!data) return;
+        let projectChanged = false;
         if (data.project_id && data.project_id !== state.projectId) {
           setProjectState(data.project_id);
+          projectChanged = true;
         }
         if (data.chat_id) {
           state.chatId = data.chat_id;
+        }
+        if (projectChanged && !state.mockMode) {
+          await loadProjects();
         }
       }
 
@@ -1941,7 +1953,7 @@
           onEvent: async (eventType, data) => {
             try {
               state.uiStore.applyEvent(eventType, data);
-              applySessionFromEvent(data);
+              await applySessionFromEvent(data);
               if (state.projectId && ["result", "done", "notice"].includes(eventType)) {
                 await loadContext();
               }
@@ -1971,7 +1983,7 @@ ${JSON.stringify(data, null, 2)}
                 return;
               }
               if (eventType === "done") {
-                applySessionFromEvent(data);
+                await applySessionFromEvent(data);
                 const doneStatus = data.status || "ok";
                 if (doneStatus !== "ok" && doneStatus !== "confirm_required") {
                   appendMessage("agent", `Amon：流程結束（${doneStatus}）。我已收到你的訊息，請調整描述後再送出，我會持續回應。`);
