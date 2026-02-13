@@ -202,6 +202,22 @@ def _resolve_command_plan_from_router(message: str, router_result: RouterResult)
     return _build_plan_from_message(message, router_result.type)
 
 
+def _is_duplicate_project_create(
+    *,
+    active_project: ProjectRecord | None,
+    command_name: str,
+    args: dict[str, Any],
+) -> bool:
+    if command_name != "projects.create" or not active_project:
+        return False
+    requested_name = " ".join(str(args.get("name", "")).split()).lower()
+    if not requested_name:
+        return False
+    active_name = " ".join(active_project.name.split()).lower()
+    active_project_id = active_project.project_id.lower()
+    return requested_name in {active_name, active_project_id}
+
+
 class AmonUIHandler(SimpleHTTPRequestHandler):
     _MAX_BODY_BYTES = 10 * 1024 * 1024
     def __init__(self, *args: Any, core: AmonCore, **kwargs: Any) -> None:
@@ -1159,6 +1175,32 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             )
             if router_result.type in {"command_plan", "graph_patch_plan"}:
                 command_name, args = _resolve_command_plan_from_router(message, router_result)
+                active_project = self.core.get_project(project_id) if project_id else None
+                if _is_duplicate_project_create(active_project=active_project, command_name=command_name, args=args):
+                    append_event(
+                        chat_id,
+                        {
+                            "type": "notice",
+                            "text": "skip_duplicate_projects_create",
+                            "project_id": project_id,
+                        },
+                    )
+                    send_event(
+                        "notice",
+                        {
+                            "text": f"Amon：目前已在專案「{active_project.name}」（{active_project.project_id}），略過重複建立專案。",
+                            "project_id": active_project.project_id,
+                        },
+                    )
+                    send_event(
+                        "done",
+                        {
+                            "status": "ok",
+                            "project_id": active_project.project_id,
+                            "chat_id": chat_id,
+                        },
+                    )
+                    return
                 plan = CommandPlan(
                     name=command_name,
                     args=args,
