@@ -610,6 +610,7 @@ class AmonCore:
         project_path: Path | None = None,
         model: str | None = None,
         skill_names: list[str] | None = None,
+        stream_handler=None,
     ) -> str:
         if not project_path:
             raise ValueError("執行 self_critique 需要指定專案")
@@ -645,7 +646,7 @@ class AmonCore:
                 },
                 mode="self_critique",
             )
-            self.run_graph(project_path=project_path, graph_path=graph_path)
+            self.run_graph(project_path=project_path, graph_path=graph_path, stream_handler=stream_handler)
             log_event(
                 {
                     "level": "INFO",
@@ -662,6 +663,7 @@ class AmonCore:
         project_path: Path | None = None,
         model: str | None = None,
         skill_names: list[str] | None = None,
+        stream_handler=None,
     ) -> str:
         if not project_path:
             raise ValueError("執行 team 需要指定專案")
@@ -697,7 +699,7 @@ class AmonCore:
                 },
                 mode="team",
             )
-            self.run_graph(project_path=project_path, graph_path=graph_path)
+            self.run_graph(project_path=project_path, graph_path=graph_path, stream_handler=stream_handler)
             tasks_dir = project_path / "tasks"
             tasks_dir.mkdir(parents=True, exist_ok=True)
             self._sync_team_tasks(project_path, tasks_dir, docs_dir)

@@ -1238,15 +1238,15 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     response_text = self.core.run_self_critique(
                         prompt_with_history,
                         project_path=self.core.get_project_path(project_id),
+                        stream_handler=stream_handler,
                     )
-                    stream_handler(response_text)
                 else:
                     send_event("notice", {"text": "Amon：偵測為研究級任務，改用 team 流程。"})
                     response_text = self.core.run_team(
                         prompt_with_history,
                         project_path=self.core.get_project_path(project_id),
+                        stream_handler=stream_handler,
                     )
-                    stream_handler(response_text)
                 append_event(chat_id, {"type": "assistant", "text": response_text, "project_id": project_id})
                 send_event(
                     "done",
