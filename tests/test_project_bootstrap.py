@@ -29,7 +29,19 @@ class ProjectBootstrapTests(unittest.TestCase):
 
         name = build_project_name("請幫我整理出 20 頁以上的投影片", "command_plan", _raise)
 
-        self.assertEqual(name, "請幫我整理出20頁以上")
+        self.assertEqual(name, "整理出20頁以上的投影片")
+
+    def test_build_project_name_summarizes_comparison_article_prompt(self) -> None:
+        def _raise(_: str, __: str) -> tuple[str, dict]:
+            raise ValueError("無法解析")
+
+        name = build_project_name(
+            "協助撰寫比較OpenClaw與Manus在記憶機制以及多agent任務同步機制比較的技術文章",
+            "command_plan",
+            _raise,
+        )
+
+        self.assertEqual(name, "撰寫OpenClaw與Manus技術文章")
 
 
     def test_build_project_name_limits_english_to_five_words(self) -> None:

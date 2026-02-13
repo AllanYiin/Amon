@@ -1941,6 +1941,7 @@
           onEvent: async (eventType, data) => {
             try {
               state.uiStore.applyEvent(eventType, data);
+              applySessionFromEvent(data);
               if (state.projectId && ["result", "done", "notice"].includes(eventType)) {
                 await loadContext();
               }
@@ -1953,7 +1954,6 @@
                 return;
               }
               if (eventType === "plan") {
-                applySessionFromEvent(data);
                 showPlanCard(data);
                 appendMessage("agent", "Amon：已產生 Plan Card，請確認。");
                 return;

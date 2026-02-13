@@ -30,6 +30,7 @@ class UIShellSmokeTests(unittest.TestCase):
 
         self.assertIn("state.streamClient.start({", html)
         self.assertIn('applyTokenChunk(data.text || "")', html)
+        self.assertIn("applySessionFromEvent(data);", html)
         self.assertNotIn("agentBubble.innerHTML", html)
         self.assertNotIn("buffer += data.text", html)
 
