@@ -183,8 +183,15 @@
           const payload = safeParseJson(event.data);
           const eventId = event.lastEventId || null;
           this._dispatch(eventType, payload, eventId);
-          if (eventType === "done") {
+          if (eventType === "done" || eventType === "error") {
+            this.shouldRun = false;
             source.close();
+            this.connection = null;
+            if (eventType === "error") {
+              this._setStatus("error", "stream error event");
+            } else {
+              this._setStatus("stopped", "stream completed");
+            }
           }
         });
       });
@@ -220,6 +227,14 @@
     }
 
     _dispatch(eventType, payload, eventId) {
+      if (payload && typeof payload === "object") {
+        if (payload.project_id) {
+          this.params = { ...(this.params || {}), project_id: payload.project_id };
+        }
+        if (payload.chat_id) {
+          this.params = { ...(this.params || {}), chat_id: payload.chat_id };
+        }
+      }
       if (eventId) {
         this.lastEventId = eventId;
       } else if (payload && typeof payload.last_event_id === "string") {

@@ -30,6 +30,5 @@ class UIRouterPlanTests(unittest.TestCase):
         self.assertEqual(command_name, "projects.list")
         self.assertEqual(args, {})
 
-
 if __name__ == "__main__":
     unittest.main()
