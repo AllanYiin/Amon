@@ -113,6 +113,16 @@
     }
 
     start(params) {
+      if (this.connection && typeof this.connection.close === "function") {
+        this.connection.close();
+      }
+      if (this.mockController && typeof this.mockController.stop === "function") {
+        this.mockController.stop();
+      }
+      this.connection = null;
+      this.mockController = null;
+      this.currentTransport = null;
+      this.lastEventId = null;
       this.params = params || {};
       this.shouldRun = true;
       this.reconnectAttempts = 0;
@@ -130,6 +140,8 @@
         this.mockController.stop();
       }
       this.mockController = null;
+      this.currentTransport = null;
+      this.lastEventId = null;
     }
 
     _connect() {
