@@ -14,6 +14,12 @@ class UIShellSmokeTests(unittest.TestCase):
             "data-shell-view=\"bill\"",
             "id=\"bill-page\"",
             "id=\"bill-breakdown-provider\"",
+            "id=\"shell-run-status\"",
+            "id=\"shell-daemon-status\"",
+            "id=\"shell-budget-status\"",
+            "id=\"card-run-progress\"",
+            "id=\"card-billing\"",
+            "id=\"card-pending-confirmations\"",
             "Daemon：Healthy",
         ]:
             self.assertIn(token, html)
