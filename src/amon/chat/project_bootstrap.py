@@ -60,13 +60,36 @@ def build_project_name(message: str, plan_type: str, build_plan_from_message: Pl
         else:
             name = command_name
     else:
-        snippet = " ".join(message.strip().split())
+        snippet = summarize_task_message(message)
         if snippet:
             name = snippet
     if not name:
         name = command_name or "未命名任務"
     normalized = " ".join(name.split())
     return _normalize_project_name(normalized)
+
+
+def summarize_task_message(message: str) -> str:
+    normalized = " ".join(message.strip().split())
+    if not normalized:
+        return ""
+
+    stripped = normalized
+    for prefix in ("請幫我", "請協助", "協助", "幫我", "請", "麻煩", "可以幫我"):
+        if stripped.startswith(prefix):
+            stripped = stripped[len(prefix) :].strip()
+            break
+
+    compact = re.sub(r"\s+", "", stripped)
+    compare_match = re.search(r"比較([A-Za-z0-9_-]+)與([A-Za-z0-9_-]+)", compact, flags=re.IGNORECASE)
+    if compare_match:
+        left = compare_match.group(1)
+        right = compare_match.group(2)
+        action = "撰寫" if ("撰寫" in compact or "文章" in compact) else "比較"
+        suffix = "技術文章" if ("技術文章" in compact or "文章" in compact) else "比較"
+        return f"{action}{left}與{right}{suffix}"
+
+    return stripped
 
 
 def bootstrap_project_if_needed(

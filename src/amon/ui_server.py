@@ -1072,6 +1072,15 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             self.wfile.flush()
 
         try:
+            log_event(
+                {
+                    "level": "INFO",
+                    "event": "ui_chat_stream_received",
+                    "project_id": project_id,
+                    "chat_id": chat_id or None,
+                }
+            )
+            send_event("notice", {"text": "Amon：已收到你的需求，正在判斷意圖與專案。"})
             if project_id is None:
                 inferred_project_id = resolve_project_id_from_message(self.core, message)
                 if inferred_project_id:
@@ -1094,7 +1103,32 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 )
                 if created_project:
                     project_id = created_project.project_id
+                    log_event(
+                        {
+                            "level": "INFO",
+                            "event": "ui_chat_stream_project_bootstrapped",
+                            "project_id": project_id,
+                        }
+                    )
+                    send_event(
+                        "notice",
+                        {
+                            "text": f"Amon：已自動建立新專案「{created_project.name}」（{created_project.project_id}），並繼續執行你的需求。",
+                            "project_id": project_id,
+                        },
+                    )
                 else:
+                    log_event(
+                        {
+                            "level": "WARNING",
+                            "event": "ui_chat_stream_project_required",
+                            "project_id": project_id,
+                        }
+                    )
+                    send_event(
+                        "notice",
+                        {"text": "Amon：目前尚未指定專案，且無法自動判斷任務範圍。請補充任務目標，或先建立專案。"},
+                    )
                     send_event("error", {"message": "缺少 project_id"})
                     send_event("done", {"status": "project_required"})
                     return
@@ -1169,6 +1203,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 send_event("done", {"status": "ok", "chat_id": chat_id, "project_id": project_id})
                 return
             if router_result.type == "chat_response":
+                send_event("notice", {"text": "Amon：已判斷為對話回覆，開始產生內容。"})
                 config = self.core.load_config(self.core.get_project_path(project_id))
                 provider_name = config.get("amon", {}).get("provider", "openai")
                 provider_cfg = config.get("providers", {}).get(provider_name, {})
@@ -1196,6 +1231,14 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     },
                 )
                 return
+            send_event(
+                "notice",
+                {
+                    "text": "Amon：已收到你的訊息，但目前無法判斷可執行的意圖。請改用更明確的任務描述，我會立即繼續處理。",
+                    "chat_id": chat_id,
+                    "project_id": project_id,
+                },
+            )
             send_event("done", {"status": "unsupported", "chat_id": chat_id, "project_id": project_id})
         except Exception as exc:  # noqa: BLE001
             log_event(

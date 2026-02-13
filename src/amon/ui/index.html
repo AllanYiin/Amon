@@ -522,6 +522,12 @@
         graphPage: document.getElementById("graph-page"),
         uiShell: document.getElementById("ui-shell"),
         toggleContextPanel: document.getElementById("toggle-context-panel"),
+        shellRunStatus: document.getElementById("shell-run-status"),
+        shellDaemonStatus: document.getElementById("shell-daemon-status"),
+        shellBudgetStatus: document.getElementById("shell-budget-status"),
+        cardRunProgress: document.getElementById("card-run-progress"),
+        cardBilling: document.getElementById("card-billing"),
+        cardPendingConfirmations: document.getElementById("card-pending-confirmations"),
         thinkingMode: document.getElementById("thinking-mode"),
         thinkingSummary: document.getElementById("thinking-summary"),
         thinkingDetail: document.getElementById("thinking-detail"),
@@ -1048,6 +1054,9 @@
       function renderStoreSummary(storeState) {
         const runStatus = storeState.run?.status || (state.streaming ? "streaming" : "idle");
         const runProgress = storeState.run?.progress;
+        if (!elements.shellRunStatus || !elements.cardRunProgress || !elements.cardBilling || !elements.shellBudgetStatus || !elements.cardPendingConfirmations) {
+          return;
+        }
         elements.shellRunStatus.textContent = `Run：${runStatus}`;
         elements.cardRunProgress.textContent = Number.isFinite(runProgress) ? `${runProgress}%` : "--";
         elements.cardBilling.textContent = `NT$ ${storeState.billing.total_cost.toFixed(2)}`;
@@ -1932,6 +1941,7 @@
           onEvent: async (eventType, data) => {
             try {
               state.uiStore.applyEvent(eventType, data);
+              applySessionFromEvent(data);
               if (state.projectId && ["result", "done", "notice"].includes(eventType)) {
                 await loadContext();
               }
@@ -1944,7 +1954,6 @@
                 return;
               }
               if (eventType === "plan") {
-                applySessionFromEvent(data);
                 showPlanCard(data);
                 appendMessage("agent", "Amon：已產生 Plan Card，請確認。");
                 return;
@@ -1962,7 +1971,11 @@ ${JSON.stringify(data, null, 2)}
                 return;
               }
               if (eventType === "done") {
-                applySessionFromEvent(data);
+                const doneStatus = data.status || "ok";
+                if (doneStatus !== "ok" && doneStatus !== "confirm_required") {
+                  appendMessage("agent", `Amon：流程結束（${doneStatus}）。我已收到你的訊息，請調整描述後再送出，我會持續回應。`);
+                  appendTimelineStatus(`流程狀態：${doneStatus}`);
+                }
                 finalizeAssistantBubble();
                 state.streamClient?.stop();
                 state.streamClient = null;
