@@ -27,6 +27,24 @@ TASK_INTENT_KEYWORDS = (
     "修正",
 )
 
+PROFESSIONAL_WRITING_KEYWORDS = (
+    "技術文章",
+    "專業文件",
+    "白皮書",
+    "研究",
+    "報告",
+    "分析文",
+    "比較",
+)
+
+TEAM_WRITING_KEYWORDS = (
+    "研究報告",
+    "白皮書",
+    "論文",
+    "研究計畫",
+    "實驗設計",
+)
+
 
 def should_bootstrap_project(
     project_id: str | None,
@@ -116,6 +134,24 @@ def is_task_intent_message(message: str) -> bool:
     if lowered in {"hi", "hello", "哈囉", "你好", "早安", "晚安"}:
         return False
     return any(keyword in normalized for keyword in TASK_INTENT_KEYWORDS)
+
+
+def choose_execution_mode(message: str) -> str:
+    """Return suggested execution mode for chat tasks.
+
+    Professional writing tasks should be at least self_critique; research-scale
+    writing that implies multi-agent collaboration should run in team mode.
+    """
+
+    normalized = " ".join(message.split())
+    if not normalized:
+        return "single"
+    compact_lower = "".join(normalized.lower().split())
+    if any(keyword in compact_lower for keyword in TEAM_WRITING_KEYWORDS):
+        return "team"
+    if any(keyword in normalized for keyword in PROFESSIONAL_WRITING_KEYWORDS):
+        return "self_critique"
+    return "single"
 
 
 def resolve_project_id_from_message(core: AmonCore, message: str) -> str | None:

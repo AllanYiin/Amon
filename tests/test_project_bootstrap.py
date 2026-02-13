@@ -8,7 +8,13 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from amon.core import AmonCore
-from amon.chat.project_bootstrap import build_project_name, is_task_intent_message, resolve_project_id_from_message, should_bootstrap_project
+from amon.chat.project_bootstrap import (
+    build_project_name,
+    choose_execution_mode,
+    is_task_intent_message,
+    resolve_project_id_from_message,
+    should_bootstrap_project,
+)
 
 
 class ProjectBootstrapTests(unittest.TestCase):
@@ -55,6 +61,14 @@ class ProjectBootstrapTests(unittest.TestCase):
         )
 
         self.assertEqual(name, "Please create a concise execution")
+
+    def test_choose_execution_mode_prefers_self_critique_for_professional_writing(self) -> None:
+        mode = choose_execution_mode("協助撰寫比較OpenClaw與Manus在記憶機制以及多agent任務同步機制比較的技術文章")
+        self.assertEqual(mode, "self_critique")
+
+    def test_choose_execution_mode_prefers_team_for_research_report(self) -> None:
+        mode = choose_execution_mode("請撰寫多agent協作架構的研究報告，需含方法論與驗證計畫")
+        self.assertEqual(mode, "team")
 
     def test_resolve_project_id_from_message_by_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
