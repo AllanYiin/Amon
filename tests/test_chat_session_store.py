@@ -5,10 +5,12 @@ import unittest
 from pathlib import Path
 
 import sys
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from amon.chat.session_store import (
+    NOISY_EVENT_TYPES,
     append_event,
     build_prompt_with_history,
     create_chat_session,
@@ -17,6 +19,49 @@ from amon.chat.session_store import (
 
 
 class ChatSessionStoreTests(unittest.TestCase):
+    def test_assistant_chunk_does_not_emit_chat_session_event_log(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                project_id = "proj-log-001"
+                chat_id = create_chat_session(project_id)
+                with patch("amon.chat.session_store.log_event") as mock_log_event:
+                    append_event(
+                        chat_id,
+                        {"type": "assistant_chunk", "text": "第一段", "project_id": project_id},
+                    )
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+        self.assertIn("assistant_chunk", NOISY_EVENT_TYPES)
+        self.assertFalse(
+            any(
+                isinstance(call.args[0], dict)
+                and call.args[0].get("event") == "chat_session_event"
+                for call in mock_log_event.call_args_list
+            )
+        )
+
+    def test_user_event_still_emits_chat_session_event_log(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                project_id = "proj-log-002"
+                chat_id = create_chat_session(project_id)
+                with patch("amon.chat.session_store.log_event") as mock_log_event:
+                    append_event(chat_id, {"type": "user", "text": "哈囉", "project_id": project_id})
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+        self.assertTrue(
+            any(
+                isinstance(call.args[0], dict)
+                and call.args[0].get("event") == "chat_session_event"
+                and call.args[0].get("type") == "user"
+                for call in mock_log_event.call_args_list
+            )
+        )
+
     def test_create_chat_session_and_append_user_event(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir

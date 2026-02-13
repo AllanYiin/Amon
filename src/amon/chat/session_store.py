@@ -13,6 +13,9 @@ from amon.logging import log_event
 from amon.fs.safety import validate_project_id
 
 
+NOISY_EVENT_TYPES = {"assistant_chunk"}
+
+
 def create_chat_session(project_id: str) -> str:
     validate_project_id(project_id)
 
@@ -76,15 +79,16 @@ def append_event(chat_id: str, event: dict[str, Any]) -> None:
         )
         raise
 
-    log_event(
-        {
-            "event": "chat_session_event",
-            "project_id": payload["project_id"],
-            "session_id": chat_id,
-            "type": payload.get("type"),
-            "run_id": payload.get("run_id"),
-        }
-    )
+    if payload.get("type") not in NOISY_EVENT_TYPES:
+        log_event(
+            {
+                "event": "chat_session_event",
+                "project_id": payload["project_id"],
+                "session_id": chat_id,
+                "type": payload.get("type"),
+                "run_id": payload.get("run_id"),
+            }
+        )
 
 
 def load_recent_dialogue(project_id: str, chat_id: str, limit: int = 12) -> list[dict[str, str]]:
