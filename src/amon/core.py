@@ -134,6 +134,7 @@ class AmonCore:
             except OSError as exc:
                 self.logger.error("建立工具 registry 失敗：%s", exc, exc_info=True)
                 raise
+        self._sync_first_party_tool_registry(registry_path)
         toolforge_index = self._toolforge_index_path()
         if not toolforge_index.exists():
             try:
@@ -149,6 +150,45 @@ class AmonCore:
                 self.logger.error("建立排程資料失敗：%s", exc, exc_info=True)
                 raise
         self._install_packaged_skill_archives()
+
+    def _sync_first_party_tool_registry(self, registry_path: Path) -> None:
+        from .tooling.builtin import build_registry
+
+        try:
+            data = json.loads(registry_path.read_text(encoding="utf-8")) if registry_path.exists() else {"tools": []}
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.error("讀取工具 registry 失敗：%s", exc, exc_info=True)
+            raise
+
+        existing_tools = [item for item in data.get("tools", []) if isinstance(item, dict)]
+        registered_at_map = {
+            str(item.get("name")): str(item.get("registered_at"))
+            for item in existing_tools
+            if item.get("scope") == "builtin" and item.get("registered_at")
+        }
+        preserved_tools = [item for item in existing_tools if item.get("scope") != "builtin"]
+
+        builtin_registry = build_registry(Path.cwd())
+        first_party_tools: list[dict[str, Any]] = []
+        for spec in sorted(builtin_registry.list_specs(), key=lambda item: item.name):
+            tool_name = f"builtin:{spec.name}"
+            first_party_tools.append(
+                {
+                    "name": tool_name,
+                    "version": str((spec.annotations or {}).get("version") or "builtin"),
+                    "path": f"builtin://{spec.name}",
+                    "scope": "builtin",
+                    "project_id": None,
+                    "registered_at": registered_at_map.get(tool_name) or self._now(),
+                }
+            )
+
+        data["tools"] = preserved_tools + first_party_tools
+        try:
+            self._atomic_write_text(registry_path, json.dumps(data, ensure_ascii=False, indent=2))
+        except OSError as exc:
+            self.logger.error("寫入工具 registry 失敗：%s", exc, exc_info=True)
+            raise
 
     def _install_packaged_skill_archives(self) -> None:
         try:
@@ -2882,6 +2922,9 @@ if __name__ == "__main__":
             "若資訊不足，請在同一則訊息先列出暫定假設與立即可執行步驟，再補上最少必要問題。"
             "若任務需要網路資料，可優先使用第一方工具 web.search 與 web.fetch，不要直接宣稱無法上網。"
         )
+        tool_context = self._first_party_tool_context(project_path)
+        if tool_context:
+            system_message = f"{system_message}\n\n{tool_context}"
         skill_context = self._resolve_skill_context(
             prompt,
             project_path,
@@ -2891,6 +2934,22 @@ if __name__ == "__main__":
         if skill_context:
             system_message = f"{system_message}\n\n{skill_context}"
         return system_message
+
+    def _first_party_tool_context(self, project_path: Path | None) -> str:
+        from .tooling.builtin import build_registry
+
+        workspace_root = project_path or Path.cwd()
+        registry = build_registry(workspace_root)
+        specs = sorted(registry.list_specs(), key=lambda spec: spec.name)
+        if not specs:
+            return ""
+        lines = ["## First-party tools"]
+        for spec in specs:
+            schema = json.dumps(spec.input_schema or {}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            lines.append(
+                f"- {spec.name}｜risk={spec.risk}｜description={spec.description}｜input_schema={schema}"
+            )
+        return "\n".join(lines)
 
     def _prepare_session_path(self, project_path: Path | None, session_id: str) -> Path:
         if not project_path:

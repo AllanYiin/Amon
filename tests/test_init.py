@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import tempfile
@@ -36,6 +37,11 @@ class InitTests(unittest.TestCase):
             self.assertTrue((base_path / "logs" / "amon.log").exists())
             self.assertTrue((base_path / "logs" / "billing.log").exists())
             self.assertTrue((base_path / "config.yaml").exists())
+            registry_path = base_path / "cache" / "tool_registry.json"
+            self.assertTrue(registry_path.exists())
+            registry = json.loads(registry_path.read_text(encoding="utf-8"))
+            tools = registry.get("tools", [])
+            self.assertTrue(any(str(item.get("name", "")).startswith("builtin:") for item in tools))
             bundled_skill = base_path / "skills" / "spec-to-tasks.skill"
             self.assertTrue(bundled_skill.exists())
 
