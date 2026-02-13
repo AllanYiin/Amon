@@ -100,7 +100,6 @@
         reconnectMaxMs: 8000,
         maxReconnectAttempts: Infinity,
         preferSSE: true,
-        useMock: false,
         ...options,
       };
       this.lastEventId = null;
@@ -108,7 +107,6 @@
       this.shouldRun = false;
       this.connection = null;
       this.currentTransport = null;
-      this.mockController = null;
       this.params = null;
     }
 
@@ -116,11 +114,7 @@
       if (this.connection && typeof this.connection.close === "function") {
         this.connection.close();
       }
-      if (this.mockController && typeof this.mockController.stop === "function") {
-        this.mockController.stop();
-      }
       this.connection = null;
-      this.mockController = null;
       this.currentTransport = null;
       this.lastEventId = null;
       this.params = params || {};
@@ -136,20 +130,12 @@
         this.connection.close();
       }
       this.connection = null;
-      if (this.mockController && typeof this.mockController.stop === "function") {
-        this.mockController.stop();
-      }
-      this.mockController = null;
       this.currentTransport = null;
       this.lastEventId = null;
     }
 
     _connect() {
       if (!this.shouldRun) return;
-      if (this.options.useMock) {
-        this._connectMock();
-        return;
-      }
       if (this.options.preferSSE !== false && typeof EventSource !== "undefined") {
         this._connectSSE();
         return;
@@ -158,22 +144,7 @@
         this._connectWebSocket();
         return;
       }
-      if (this.options.mockFactory) {
-        this._connectMock();
-        return;
-      }
       this._setStatus("error", "No stream transport available");
-    }
-
-    _connectMock() {
-      const factory = this.options.mockFactory || defaultMockFactory;
-      this._setStatus("connecting", "mock");
-      this.currentTransport = "mock";
-      this.mockController = factory({
-        emit: (eventType, payload) => this._dispatch(eventType, payload, null),
-        close: () => this._scheduleReconnect(),
-      });
-      this._setStatus("connected", "mock");
     }
 
     _connectSSE() {
@@ -280,44 +251,8 @@
     }
   }
 
-  function defaultMockFactory({ emit }) {
-    const jobs = [
-      { job_id: "mock-job-1", status: "queued", progress: 0 },
-      { job_id: "mock-job-1", status: "running", progress: 35 },
-      { job_id: "mock-job-1", status: "running", progress: 72 },
-      { job_id: "mock-job-1", status: "completed", progress: 100 },
-    ];
-    const events = [
-      ["run", { run_id: "mock-run-1", status: "running", progress: 10 }],
-      ["job", jobs[0]],
-      ["billing", { item: "token_usage", cost: 0.02, currency: "USD" }],
-      ["docs", { op: "add", path: "specs/mock.md" }],
-      ["job", jobs[1]],
-      ["run", { run_id: "mock-run-1", status: "running", progress: 68 }],
-      ["job", jobs[2]],
-      ["run", { run_id: "mock-run-1", status: "completed", progress: 100 }],
-      ["job", jobs[3]],
-      ["done", { status: "ok", run_id: "mock-run-1" }],
-    ];
-    const timers = [];
-    events.forEach(([eventType, payload], index) => {
-      timers.push(
-        ((typeof window !== "undefined" && window.setTimeout) ? window.setTimeout.bind(window) : setTimeout)(() => {
-          emit(eventType, payload);
-        }, 250 * (index + 1))
-      );
-    });
-    return {
-      stop() {
-        const cancelTimeout = (typeof window !== "undefined" && window.clearTimeout) ? window.clearTimeout.bind(window) : clearTimeout;
-        timers.forEach((timerId) => cancelTimeout(timerId));
-      },
-    };
-  }
-
   return {
     EventStreamClient,
     createUiEventStore,
-    defaultMockFactory,
   };
 });

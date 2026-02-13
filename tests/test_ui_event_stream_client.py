@@ -25,16 +25,32 @@ class UIEventStreamClientTests(unittest.TestCase):
             """
             const { EventStreamClient, createUiEventStore } = require('./src/amon/ui/event_stream_client.js');
             const store = createUiEventStore();
+
+            class FakeEventSource {
+              constructor(_url) {
+                this.listeners = new Map();
+                setTimeout(() => {
+                  const emit = (eventType, payload) => {
+                    const handler = this.listeners.get(eventType);
+                    if (handler) {
+                      handler({ data: JSON.stringify(payload), lastEventId: null });
+                    }
+                  };
+                  emit('run', { run_id: 'run-1', status: 'running', progress: 15 });
+                  emit('job', { job_id: 'job-1', status: 'running', progress: 40 });
+                  emit('billing', { item: 'token_usage', cost: 1.25, currency: 'USD' });
+                  emit('docs', { op: 'add', path: 'docs/design.md' });
+                  emit('done', { status: 'ok' });
+                }, 0);
+              }
+              addEventListener(eventType, callback) { this.listeners.set(eventType, callback); }
+              close() {}
+            }
+            global.EventSource = FakeEventSource;
+
             const client = new EventStreamClient({
-              useMock: true,
-              mockFactory: ({ emit }) => {
-                emit('run', { run_id: 'run-1', status: 'running', progress: 15 });
-                emit('job', { job_id: 'job-1', status: 'running', progress: 40 });
-                emit('billing', { item: 'token_usage', cost: 1.25, currency: 'USD' });
-                emit('docs', { op: 'add', path: 'docs/design.md' });
-                emit('done', { status: 'ok' });
-                return { stop() {} };
-              },
+              preferSSE: true,
+              sseUrlBuilder: () => '/v1/chat/stream?message=demo',
               onEvent: (eventType, payload) => store.applyEvent(eventType, payload),
             });
 
@@ -65,12 +81,25 @@ class UIEventStreamClientTests(unittest.TestCase):
             """
             const { EventStreamClient } = require('./src/amon/ui/event_stream_client.js');
             let observedLastEventId = null;
+
+            class FakeEventSource {
+              constructor(_url) {
+                this.listeners = new Map();
+                setTimeout(() => {
+                  const run = this.listeners.get('run');
+                  if (run) {
+                    run({ data: JSON.stringify({ run_id: 'run-2' }), lastEventId: 'evt-99' });
+                  }
+                }, 0);
+              }
+              addEventListener(eventType, callback) { this.listeners.set(eventType, callback); }
+              close() {}
+            }
+            global.EventSource = FakeEventSource;
+
             const client = new EventStreamClient({
-              useMock: true,
-              mockFactory: ({ emit }) => {
-                emit('run', { run_id: 'run-2', last_event_id: 'evt-99' });
-                return { stop() {} };
-              },
+              preferSSE: true,
+              sseUrlBuilder: () => '/v1/chat/stream?message=resume+me',
               onEvent: (_eventType, _payload, lastEventId) => {
                 observedLastEventId = lastEventId;
               },
