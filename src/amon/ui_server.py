@@ -18,7 +18,11 @@ from typing import Any
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from amon.chat.cli import _build_plan_from_message
-from amon.chat.project_bootstrap import bootstrap_project_if_needed, resolve_project_id_from_message
+from amon.chat.project_bootstrap import (
+    bootstrap_project_if_needed,
+    choose_execution_mode,
+    resolve_project_id_from_message,
+)
 from amon.chat.router import route_intent
 from amon.chat.router_types import RouterResult
 from amon.chat.session_store import (
@@ -1211,9 +1215,8 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 return
             if router_result.type == "chat_response":
                 send_event("notice", {"text": "Amon：已判斷為對話回覆，開始產生內容。"})
-                config = self.core.load_config(self.core.get_project_path(project_id))
-                provider_name = config.get("amon", {}).get("provider", "openai")
-                provider_cfg = config.get("providers", {}).get(provider_name, {})
+                execution_mode = choose_execution_mode(message)
+                prompt_with_history = build_prompt_with_history(message, history)
 
                 def stream_handler(token: str) -> None:
                     send_event("token", {"text": token})
@@ -1222,11 +1225,28 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         {"type": "assistant_chunk", "text": token, "project_id": project_id},
                     )
 
-                result, response_text = self.core.run_single_stream(
-                    build_prompt_with_history(message, history),
-                    project_path=self.core.get_project_path(project_id),
-                    stream_handler=stream_handler,
-                )
+                run_id = ""
+                if execution_mode == "single":
+                    result, response_text = self.core.run_single_stream(
+                        prompt_with_history,
+                        project_path=self.core.get_project_path(project_id),
+                        stream_handler=stream_handler,
+                    )
+                    run_id = result.run_id
+                elif execution_mode == "self_critique":
+                    send_event("notice", {"text": "Amon：偵測為專業文件撰寫，改用 self_critique 流程。"})
+                    response_text = self.core.run_self_critique(
+                        prompt_with_history,
+                        project_path=self.core.get_project_path(project_id),
+                    )
+                    stream_handler(response_text)
+                else:
+                    send_event("notice", {"text": "Amon：偵測為研究級任務，改用 team 流程。"})
+                    response_text = self.core.run_team(
+                        prompt_with_history,
+                        project_path=self.core.get_project_path(project_id),
+                    )
+                    stream_handler(response_text)
                 append_event(chat_id, {"type": "assistant", "text": response_text, "project_id": project_id})
                 send_event(
                     "done",
@@ -1234,7 +1254,8 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         "status": "ok",
                         "chat_id": chat_id,
                         "project_id": project_id,
-                        "run_id": result.run_id,
+                        "run_id": run_id,
+                        "execution_mode": execution_mode,
                     },
                 )
                 return
