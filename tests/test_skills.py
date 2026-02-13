@@ -59,7 +59,9 @@ class SkillsTests(unittest.TestCase):
                 self.assertEqual(project_loaded.get("references")[0]["path"], "note.txt")
 
                 injected = core._resolve_skill_context("/global-skill 請幫忙", project_path=project_path)
-                self.assertIn("全域內容", injected)
+                self.assertIn("## Skills (frontmatter)", injected)
+                self.assertIn("- global-skill：全域技能", injected)
+                self.assertNotIn("全域內容", injected)
             finally:
                 os.environ.pop("AMON_HOME", None)
 
@@ -74,7 +76,10 @@ class SkillsTests(unittest.TestCase):
 
                 skill_dir = Path(temp_dir) / "skills" / "review-skill"
                 skill_dir.mkdir(parents=True, exist_ok=True)
-                (skill_dir / "SKILL.md").write_text("請專注 code review。", encoding="utf-8")
+                (skill_dir / "SKILL.md").write_text(
+                    "---\nname: review-skill\ndescription: 專注 code review\n---\n請專注 code review。",
+                    encoding="utf-8",
+                )
 
                 config = core.load_config(project_path)
                 base_message = core._build_system_message("測試", project_path, config=config)
@@ -85,14 +90,14 @@ class SkillsTests(unittest.TestCase):
                     skill_names=["review-skill"],
                 )
 
-                self.assertNotIn("## Skill: review-skill", base_message)
+                self.assertNotIn("## Skills (frontmatter)", base_message)
                 self.assertIn("回覆必須先交付可執行內容", base_message)
                 self.assertIn("## First-party tools", base_message)
                 self.assertIn("- filesystem.read", base_message)
-                self.assertIn("## Skill: review-skill", skill_message)
-                self.assertIn("請專注 code review。", skill_message)
+                self.assertIn("## Skills (frontmatter)", skill_message)
+                self.assertIn("- review-skill：專注 code review", skill_message)
                 self.assertIn("## First-party tools", skill_message)
-                self.assertLess(skill_message.index("## First-party tools"), skill_message.index("## Skill: review-skill"))
+                self.assertLess(skill_message.index("## First-party tools"), skill_message.index("## Skills (frontmatter)"))
             finally:
                 os.environ.pop("AMON_HOME", None)
 
