@@ -522,6 +522,12 @@
         graphPage: document.getElementById("graph-page"),
         uiShell: document.getElementById("ui-shell"),
         toggleContextPanel: document.getElementById("toggle-context-panel"),
+        shellRunStatus: document.getElementById("shell-run-status"),
+        shellDaemonStatus: document.getElementById("shell-daemon-status"),
+        shellBudgetStatus: document.getElementById("shell-budget-status"),
+        cardRunProgress: document.getElementById("card-run-progress"),
+        cardBilling: document.getElementById("card-billing"),
+        cardPendingConfirmations: document.getElementById("card-pending-confirmations"),
         thinkingMode: document.getElementById("thinking-mode"),
         thinkingSummary: document.getElementById("thinking-summary"),
         thinkingDetail: document.getElementById("thinking-detail"),
@@ -1048,6 +1054,9 @@
       function renderStoreSummary(storeState) {
         const runStatus = storeState.run?.status || (state.streaming ? "streaming" : "idle");
         const runProgress = storeState.run?.progress;
+        if (!elements.shellRunStatus || !elements.cardRunProgress || !elements.cardBilling || !elements.shellBudgetStatus || !elements.cardPendingConfirmations) {
+          return;
+        }
         elements.shellRunStatus.textContent = `Run：${runStatus}`;
         elements.cardRunProgress.textContent = Number.isFinite(runProgress) ? `${runProgress}%` : "--";
         elements.cardBilling.textContent = `NT$ ${storeState.billing.total_cost.toFixed(2)}`;
