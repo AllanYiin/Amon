@@ -1408,7 +1408,7 @@
           showToast("請先選擇專案。");
           return;
         }
-        const payload = await apiFetch(`/projects/${state.projectId}/context`);
+        const payload = await apiFetch(`/projects/${encodeURIComponent(state.projectId)}/context`);
         state.graph = payload.graph || { nodes: [], edges: [] };
         state.graphRunId = payload.run_id || null;
         state.graphNodeStates = payload.node_states || {};

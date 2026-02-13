@@ -15,7 +15,7 @@ import yaml
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from amon.chat.cli import _build_plan_from_message
 from amon.chat.project_bootstrap import bootstrap_project_if_needed, resolve_project_id_from_message
@@ -1013,7 +1013,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         parts = [part for part in path.split("/") if part]
         if len(parts) <= index:
             return None
-        return parts[index]
+        return unquote(parts[index])
 
     def _send_json(self, status: int, payload: dict[str, Any]) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -1756,6 +1756,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             run_id = inferred.get("run_id") or self._infer_run_id_from_path(relative_path)
             node_id = inferred.get("node_id") or "unknown"
             task_id = self._infer_task_id_from_path(relative_path)
+            encoded_project_id = quote(project_id, safe="")
             encoded_path = quote(relative_path, safe="")
             docs.append(
                 {
@@ -1764,8 +1765,8 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     "run_id": run_id or "unknown",
                     "node_id": node_id,
                     "task_id": task_id or "ungrouped",
-                    "download_url": f"/v1/projects/{project_id}/docs/download?path={encoded_path}",
-                    "open_url": f"/v1/projects/{project_id}/docs/content?path={encoded_path}",
+                    "download_url": f"/v1/projects/{encoded_project_id}/docs/download?path={encoded_path}",
+                    "open_url": f"/v1/projects/{encoded_project_id}/docs/content?path={encoded_path}",
                 }
             )
         return docs
