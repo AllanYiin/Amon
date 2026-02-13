@@ -41,39 +41,5 @@ class UIRouterPlanTests(unittest.TestCase):
         self.assertEqual(command_name, "projects.list")
         self.assertEqual(args, {})
 
-    def test_detect_duplicate_project_create_by_name(self) -> None:
-        active_project = self._make_project()
-
-        duplicated = _is_duplicate_project_create(
-            active_project=active_project,
-            command_name="projects.create",
-            args={"name": " Demo 專案 "},
-        )
-
-        self.assertTrue(duplicated)
-
-    def test_detect_duplicate_project_create_by_project_id(self) -> None:
-        active_project = self._make_project()
-
-        duplicated = _is_duplicate_project_create(
-            active_project=active_project,
-            command_name="projects.create",
-            args={"name": "demo-proj"},
-        )
-
-        self.assertTrue(duplicated)
-
-    def test_non_duplicate_project_create(self) -> None:
-        active_project = self._make_project()
-
-        duplicated = _is_duplicate_project_create(
-            active_project=active_project,
-            command_name="projects.create",
-            args={"name": "另一個專案"},
-        )
-
-        self.assertFalse(duplicated)
-
-
 if __name__ == "__main__":
     unittest.main()

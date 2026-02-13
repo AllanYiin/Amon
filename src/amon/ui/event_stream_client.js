@@ -227,6 +227,14 @@
     }
 
     _dispatch(eventType, payload, eventId) {
+      if (payload && typeof payload === "object") {
+        if (payload.project_id) {
+          this.params = { ...(this.params || {}), project_id: payload.project_id };
+        }
+        if (payload.chat_id) {
+          this.params = { ...(this.params || {}), chat_id: payload.chat_id };
+        }
+      }
       if (eventId) {
         this.lastEventId = eventId;
       } else if (payload && typeof payload.last_event_id === "string") {
