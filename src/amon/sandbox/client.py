@@ -6,6 +6,7 @@ import base64
 import json
 import os
 import socket
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -69,8 +70,10 @@ class SandboxRunnerClient:
         code: str,
         timeout_s: int | None = None,
         input_files: list[dict[str, Any]] | None = None,
+        request_id: str | None = None,
     ) -> dict[str, Any]:
         payload = {
+            "request_id": request_id or uuid.uuid4().hex,
             "language": language,
             "code": code,
             "timeout_s": timeout_s or self._settings.timeout_s,

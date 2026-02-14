@@ -76,6 +76,39 @@ class SandboxRunnerClientTests(unittest.TestCase):
         self.assertEqual(captured["timeout"], 15)
         self.assertEqual(captured["payload"]["input_files"], input_files)
         self.assertEqual(captured["payload"]["language"], "python")
+        self.assertTrue(captured["payload"]["request_id"])
+
+    def test_run_code_attaches_api_key_header(self) -> None:
+        captured = {}
+
+        def fake_urlopen(req, timeout):
+            captured["headers"] = dict(req.header_items())
+            return _FakeResponse(
+                {
+                    "id": "run-1",
+                    "exit_code": 0,
+                    "stdout": "ok",
+                    "stderr": "",
+                    "duration_ms": 10,
+                    "timed_out": False,
+                    "output_files": [],
+                }
+            )
+
+        settings = SandboxRunnerSettings(
+            base_url="http://runner.local:8088",
+            timeout_s=15,
+            api_key_env="SANDBOX_RUNNER_API_KEY",
+            limits={},
+            features={},
+        )
+        client = SandboxRunnerClient(settings)
+
+        with patch.dict("os.environ", {"SANDBOX_RUNNER_API_KEY": "token-123"}, clear=False):
+            with patch("amon.sandbox.client.request.urlopen", side_effect=fake_urlopen):
+                client.run_code(language="python", code="print('ok')")
+
+        self.assertEqual(captured["headers"].get("Authorization"), "Bearer token-123")
 
     def test_run_code_handles_http_500(self) -> None:
         http_error = error.HTTPError(

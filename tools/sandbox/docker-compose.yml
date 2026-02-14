@@ -1,0 +1,17 @@
+services:
+  sandbox-runner:
+    image: python:3.12-slim
+    working_dir: /app
+    command: >-
+      bash -lc "pip install -e .[sandbox-runner] && amon-sandbox-runner"
+    environment:
+      AMON_SANDBOX_HOST: 0.0.0.0
+      AMON_SANDBOX_PORT: 8088
+      # 可選：設置後 /run 需要 Authorization: Bearer <key>
+      # AMON_SANDBOX_API_KEY: change-me
+    ports:
+      - "8088:8088"
+    volumes:
+      - ../../:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped

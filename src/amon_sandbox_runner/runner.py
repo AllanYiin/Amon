@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+import json
+import logging
 import shutil
 import subprocess
 import time
@@ -14,6 +16,8 @@ from typing import Any
 from .config import RunnerSettings
 from .models import RunRequest, RunResponse
 from .paths import safe_join
+
+logger = logging.getLogger("amon_sandbox_runner")
 
 
 class SandboxRunner:
@@ -43,6 +47,7 @@ class SandboxRunner:
         if len(code_bytes) > self.settings.limits.max_code_bytes:
             raise ValueError("code 大小超過上限")
 
+        request_id = str(request.get("request_id", "")).strip() or uuid.uuid4().hex
         job_id = uuid.uuid4().hex
         root = self.settings.jobs_dir / job_id
         input_dir = root / "input"
@@ -51,14 +56,35 @@ class SandboxRunner:
         input_dir.mkdir(parents=True, exist_ok=True)
         output_dir.mkdir(parents=True, exist_ok=True)
 
+        input_count = 0
+        input_bytes = 0
+        output_count = 0
+        output_bytes = 0
+        exit_code = -1
+        timed_out = False
+        duration_ms = 0
+        status = "error"
+
+        self._log_event(
+            "sandbox.run.start",
+            request_id=request_id,
+            job_id=job_id,
+            timeout_s=timeout_s,
+            code_bytes=len(code_bytes),
+        )
+
         try:
-            self._materialize_inputs(input_dir, request.get("input_files", []))
+            input_count, input_bytes = self._materialize_inputs(input_dir, request.get("input_files", []))
             start = time.monotonic()
             exit_code, stdout, stderr, timed_out = self._execute_container(job_id, input_dir, output_dir, code_bytes, timeout_s)
             duration_ms = int((time.monotonic() - start) * 1000)
-            output_files = self._collect_outputs(output_dir)
+            output_files, output_bytes = self._collect_outputs(output_dir)
+            output_count = len(output_files)
+            status = "ok"
             return {
                 "id": job_id,
+                "job_id": job_id,
+                "request_id": request_id,
                 "exit_code": exit_code,
                 "stdout": stdout,
                 "stderr": stderr,
@@ -67,9 +93,22 @@ class SandboxRunner:
                 "output_files": output_files,
             }
         finally:
+            self._log_event(
+                "sandbox.run.finish",
+                request_id=request_id,
+                job_id=job_id,
+                status=status,
+                exit_code=exit_code,
+                timed_out=timed_out,
+                duration_ms=duration_ms,
+                input_files=input_count,
+                input_bytes=input_bytes,
+                output_files=output_count,
+                output_bytes=output_bytes,
+            )
             shutil.rmtree(root, ignore_errors=True)
 
-    def _materialize_inputs(self, input_dir: Path, input_files: list[dict[str, Any]]) -> None:
+    def _materialize_inputs(self, input_dir: Path, input_files: list[dict[str, Any]]) -> tuple[int, int]:
         if len(input_files) > self.settings.limits.max_file_count:
             raise ValueError("input_files 數量超過上限")
 
@@ -94,6 +133,8 @@ class SandboxRunner:
             if target.is_symlink() or target.parent.is_symlink():
                 raise ValueError("不允許 symlink path")
             target.write_bytes(data)
+
+        return (len(input_files), total)
 
     def _docker_command(self, job_id: str, input_dir: Path, output_dir: Path, timeout_s: int) -> list[str]:
         dcfg = self.settings.docker
@@ -160,7 +201,7 @@ class SandboxRunner:
             subprocess.run(["docker", "rm", "-f", container_name], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
             return (124, "", "sandbox timeout", True)
 
-    def _collect_outputs(self, output_dir: Path) -> list[dict[str, Any]]:
+    def _collect_outputs(self, output_dir: Path) -> tuple[list[dict[str, Any]], int]:
         files = [path for path in output_dir.rglob("*") if path.is_file()]
         if len(files) > self.settings.limits.max_file_count:
             raise ValueError("output files 數量超過上限")
@@ -170,10 +211,11 @@ class SandboxRunner:
         base = output_dir.resolve()
 
         for path in sorted(files):
+            if path.is_symlink():
+                raise ValueError("不允許 symlink output")
+
             resolved = path.resolve()
             resolved.relative_to(base)
-            if resolved.is_symlink():
-                raise ValueError("不允許 symlink output")
             data = resolved.read_bytes()
             size = len(data)
             if size > self.settings.limits.max_single_file_bytes:
@@ -188,4 +230,8 @@ class SandboxRunner:
                     "size": size,
                 }
             )
-        return payload
+        return (payload, total)
+
+    def _log_event(self, event: str, **fields: Any) -> None:
+        payload = {"event": event, **fields}
+        logger.info(json.dumps(payload, ensure_ascii=False, sort_keys=True))

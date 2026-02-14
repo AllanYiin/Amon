@@ -16,15 +16,18 @@ class RunOutputFile(TypedDict):
     size: int
 
 
-class RunRequest(TypedDict):
+class RunRequest(TypedDict, total=False):
+    request_id: str
     language: str
     code: str
     timeout_s: int
     input_files: list[RunInputFile]
 
 
-class RunResponse(TypedDict):
+class RunResponse(TypedDict, total=False):
     id: str
+    request_id: str
+    job_id: str
     exit_code: int
     stdout: str
     stderr: str

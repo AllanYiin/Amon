@@ -1003,6 +1003,8 @@ def _handle_sandbox(core: AmonCore, args: argparse.Namespace) -> None:
     written = decode_output_files(result.get("output_files", []), Path(args.out_dir))
 
     summary = {
+        "request_id": result.get("request_id"),
+        "job_id": result.get("job_id") or result.get("id"),
         "id": result.get("id"),
         "exit_code": result.get("exit_code"),
         "timed_out": result.get("timed_out"),
