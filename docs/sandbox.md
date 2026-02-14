@@ -284,3 +284,107 @@ Amon 端新增 `amon.sandbox` 模組，先放 interface 與 config schema：
 - 不在本 PR 導入任何實際 docker SDK / subprocess docker 呼叫。
 - 不修改既有工具執行主流程（避免高風險耦合）。
 - 不新增付費/計費邏輯。
+
+---
+
+## 最小可用版本（MVP）實作說明
+
+### 1) Build sandbox image
+
+在 repo root 執行：
+
+```bash
+docker build -t amon-sandbox-python:latest tools/sandbox/python
+```
+
+### 2) 啟動 shared runner（本機）
+
+先安裝 runner 依賴（不影響一般 amon 安裝）：
+
+```bash
+pip install -e .[sandbox-runner]
+```
+
+啟動：
+
+```bash
+amon-sandbox-runner
+```
+
+預設監聽 `127.0.0.1:8088`，可用環境變數覆蓋：
+
+- `AMON_SANDBOX_HOST`
+- `AMON_SANDBOX_PORT`
+- `AMON_SANDBOX_MAX_CONCURRENCY`
+- `AMON_SANDBOX_IMAGE`
+
+### 3) 啟動 shared runner（Docker）
+
+```bash
+docker run --rm -p 8088:8088 \
+  -e AMON_SANDBOX_HOST=0.0.0.0 \
+  -e AMON_SANDBOX_PORT=8088 \
+  -e AMON_SANDBOX_IMAGE=amon-sandbox-python:latest \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  amon-runner:latest
+```
+
+> 若 runner 以容器方式執行，需能存取 Docker daemon（例如掛載 docker.sock），並評估此部署模式的主機安全風險。
+
+### 4) docker compose 範例
+
+```yaml
+services:
+  amon-sandbox-runner:
+    image: amon-runner:latest
+    command: ["amon-sandbox-runner"]
+    ports:
+      - "8088:8088"
+    environment:
+      AMON_SANDBOX_HOST: 0.0.0.0
+      AMON_SANDBOX_PORT: 8088
+      AMON_SANDBOX_IMAGE: amon-sandbox-python:latest
+      AMON_SANDBOX_MAX_CONCURRENCY: 4
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+```
+
+### 5) API request/response（MVP）
+
+`POST /run`
+
+Request:
+
+```json
+{
+  "language": "python",
+  "code": "print('hello')",
+  "timeout_s": 10,
+  "input_files": [
+    {
+      "path": "data/input.txt",
+      "content_b64": "aGVsbG8="
+    }
+  ]
+}
+```
+
+Response:
+
+```json
+{
+  "id": "job-id",
+  "exit_code": 0,
+  "stdout": "hello\n",
+  "stderr": "",
+  "duration_ms": 15,
+  "timed_out": false,
+  "output_files": [
+    {
+      "path": "result/output.txt",
+      "content_b64": "aGVsbG8=",
+      "size": 5
+    }
+  ]
+}
+```

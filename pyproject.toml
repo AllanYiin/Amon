@@ -14,6 +14,13 @@ dependencies = [
 
 [project.scripts]
 amon = "amon.cli:main"
+amon-sandbox-runner = "amon_sandbox_runner.app:main"
+
+[project.optional-dependencies]
+sandbox-runner = [
+  "fastapi>=0.111",
+  "uvicorn>=0.30"
+]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
