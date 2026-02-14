@@ -65,6 +65,23 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "daily_budget": None,
         "per_project_budget": None,
     },
+    "sandbox": {
+        "runner": {
+            "base_url": "http://127.0.0.1:8088",
+            "timeout_s": 30,
+            "api_key_env": None,
+            "limits": {
+                "max_input_files": 32,
+                "max_input_total_kb": 5120,
+                "max_output_files": 32,
+                "max_output_total_kb": 5120,
+            },
+            "features": {
+                "enabled": False,
+                "allow_artifact_write": False,
+            },
+        }
+    },
 }
 
 

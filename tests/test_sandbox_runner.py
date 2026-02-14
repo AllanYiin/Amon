@@ -1,4 +1,5 @@
 import base64
+import json
 import subprocess
 import sys
 import tempfile
@@ -8,7 +9,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from amon_sandbox_runner.config import RunnerSettings
+from amon_sandbox_runner.config import RunnerLimits, RunnerSettings
 from amon_sandbox_runner.runner import SandboxRunner
 
 
@@ -64,7 +65,10 @@ class SandboxRunnerTests(unittest.TestCase):
             runner = SandboxRunner(RunnerSettings(jobs_dir=Path(temp_dir)))
 
             timeout = subprocess.TimeoutExpired(cmd=["docker", "run"], timeout=2)
-            with patch("amon_sandbox_runner.runner.subprocess.run", side_effect=[timeout, subprocess.CompletedProcess(args=[], returncode=0, stdout=b"", stderr=b"")]) as run_mock:
+            with patch(
+                "amon_sandbox_runner.runner.subprocess.run",
+                side_effect=[timeout, subprocess.CompletedProcess(args=[], returncode=0, stdout=b"", stderr=b"")],
+            ) as run_mock:
                 result = runner.run({"language": "python", "code": "while True: pass", "timeout_s": 2, "input_files": []})
 
             self.assertTrue(result["timed_out"])
@@ -88,6 +92,74 @@ class SandboxRunnerTests(unittest.TestCase):
             }
             with self.assertRaises(ValueError):
                 runner.run(payload)
+
+    def test_rejects_too_many_input_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            settings = RunnerSettings(jobs_dir=Path(temp_dir), limits=RunnerLimits(max_file_count=1))
+            runner = SandboxRunner(settings)
+            payload = {
+                "language": "python",
+                "code": "print('x')",
+                "timeout_s": 5,
+                "input_files": [
+                    {"path": "a.txt", "content_b64": base64.b64encode(b"a").decode("ascii")},
+                    {"path": "b.txt", "content_b64": base64.b64encode(b"b").decode("ascii")},
+                ],
+            }
+            with self.assertRaisesRegex(ValueError, "input_files 數量超過上限"):
+                runner.run(payload)
+
+    def test_rejects_output_total_too_large(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            settings = RunnerSettings(
+                jobs_dir=Path(temp_dir),
+                limits=RunnerLimits(max_output_total_bytes=4, max_single_file_bytes=4, max_file_count=4),
+            )
+            runner = SandboxRunner(settings)
+
+            def fake_run(cmd, **kwargs):  # type: ignore[no-untyped-def]
+                if cmd[:2] == ["docker", "run"]:
+                    output_host = None
+                    for idx, token in enumerate(cmd):
+                        if token == "-v" and cmd[idx + 1].endswith(":/output:rw"):
+                            output_host = cmd[idx + 1].split(":/output:rw", 1)[0]
+                            break
+                    assert output_host is not None
+                    (Path(output_host) / "1.txt").write_bytes(b"aa")
+                    (Path(output_host) / "2.txt").write_bytes(b"bbb")
+                    return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=b"done", stderr=b"")
+                return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=b"", stderr=b"")
+
+            with patch("amon_sandbox_runner.runner.subprocess.run", side_effect=fake_run):
+                with self.assertRaisesRegex(ValueError, "output files 總大小超過上限"):
+                    runner.run({"language": "python", "code": "print('ok')", "timeout_s": 5, "input_files": []})
+
+    def test_logs_include_request_and_job_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runner = SandboxRunner(RunnerSettings(jobs_dir=Path(temp_dir)))
+            with patch("amon_sandbox_runner.runner.subprocess.run") as run_mock:
+                run_mock.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout=b"ok", stderr=b"")
+                with self.assertLogs("amon_sandbox_runner", level="INFO") as logs:
+                    result = runner.run(
+                        {
+                            "request_id": "req-123",
+                            "language": "python",
+                            "code": "print('ok')",
+                            "timeout_s": 5,
+                            "input_files": [],
+                        }
+                    )
+
+            joined = "\n".join(logs.output)
+            self.assertIn("sandbox.run.start", joined)
+            self.assertIn("sandbox.run.finish", joined)
+            self.assertEqual(result["request_id"], "req-123")
+            self.assertTrue(result["job_id"])
+            self.assertTrue(result["id"])
+            self.assertNotEqual(result["job_id"], "")
+            for line in logs.output:
+                payload = json.loads(line.split(":", 2)[2].strip())
+                self.assertIn("event", payload)
 
 
 if __name__ == "__main__":

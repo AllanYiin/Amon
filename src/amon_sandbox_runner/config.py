@@ -31,6 +31,7 @@ class RunnerSettings:
     host: str = "127.0.0.1"
     port: int = 8088
     max_concurrency: int = 4
+    api_key: str | None = None
     jobs_dir: Path = Path(".sandbox_jobs")
     limits: RunnerLimits = RunnerLimits()
     docker: DockerPolicy = DockerPolicy()
@@ -43,6 +44,7 @@ def load_settings() -> RunnerSettings:
         host=os.environ.get("AMON_SANDBOX_HOST", "127.0.0.1"),
         port=int(os.environ.get("AMON_SANDBOX_PORT", "8088")),
         max_concurrency=int(os.environ.get("AMON_SANDBOX_MAX_CONCURRENCY", "4")),
+        api_key=os.environ.get("AMON_SANDBOX_API_KEY") or None,
         jobs_dir=jobs_dir,
         limits=RunnerLimits(
             max_code_bytes=int(os.environ.get("AMON_SANDBOX_MAX_CODE_BYTES", str(128 * 1024))),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import secrets
 import sys
 from typing import Any
 
@@ -14,19 +15,25 @@ logger = logging.getLogger("amon_sandbox_runner")
 
 def create_app(settings: RunnerSettings | None = None):
     try:
-        from fastapi import FastAPI, HTTPException
+        from fastapi import FastAPI, Header, HTTPException
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError("請先安裝 sandbox-runner 依賴：pip install -e .[sandbox-runner]") from exc
 
     app = FastAPI(title="Amon Sandbox Runner", version="0.1.0")
-    runner = SandboxRunner(settings or load_settings())
+    runtime_settings = settings or load_settings()
+    runner = SandboxRunner(runtime_settings)
 
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok", "service": "amon-sandbox-runner", "version": "0.1.0"}
 
     @app.post("/run")
-    def run(payload: dict[str, Any]) -> dict[str, Any]:
+    def run(payload: dict[str, Any], authorization: str | None = Header(default=None)) -> dict[str, Any]:
+        if runtime_settings.api_key:
+            expected = f"Bearer {runtime_settings.api_key}"
+            if not authorization or not secrets.compare_digest(authorization, expected):
+                raise HTTPException(status_code=401, detail="unauthorized")
+
         try:
             return runner.run(payload)  # type: ignore[arg-type]
         except ValueError as exc:
