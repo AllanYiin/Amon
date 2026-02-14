@@ -15,6 +15,12 @@ from .core import AmonCore
 from .events import emit_event
 from .fs.safety import make_change_plan, require_confirm
 from .mcp_client import MCPClientError
+from .sandbox import (
+    SandboxRunnerClient,
+    build_input_file,
+    decode_output_files,
+    parse_runner_settings,
+)
 
 
 def _print_project(record) -> None:
@@ -233,6 +239,21 @@ def build_parser() -> argparse.ArgumentParser:
     jobs_status = jobs_sub.add_parser("status", help="查看 job 狀態")
     jobs_status.add_argument("job_id", help="job ID")
 
+    sandbox_parser = subparsers.add_parser("sandbox", help="外部 sandbox runner")
+    sandbox_sub = sandbox_parser.add_subparsers(dest="sandbox_command")
+    sandbox_exec = sandbox_sub.add_parser("exec", help="送出程式到外部 runner 執行")
+    sandbox_exec.add_argument("--language", required=True, help="語言，例如 python")
+    sandbox_exec.add_argument("--code-file", required=True, help="程式碼檔案路徑")
+    sandbox_exec.add_argument("--project", help="指定專案 ID（讀取專案設定）")
+    sandbox_exec.add_argument(
+        "--in",
+        dest="input_files",
+        action="append",
+        default=[],
+        help="輸入檔案對應，格式：runner/path=local_file_path，可重複",
+    )
+    sandbox_exec.add_argument("--out-dir", required=True, help="runner output_files 解碼落地資料夾")
+
     return parser
 
 
@@ -290,6 +311,8 @@ def main() -> None:
             _handle_schedules(core, args)
         elif args.command == "jobs":
             _handle_jobs(core, args)
+        elif args.command == "sandbox":
+            _handle_sandbox(core, args)
         else:
             parser.print_help()
     except Exception as exc:  # noqa: BLE001
@@ -955,3 +978,37 @@ def _handle_jobs(core: AmonCore, args: argparse.Namespace) -> None:
         print(f"last_event_id：{status.last_event_id}")
         return
     raise ValueError("請指定 jobs 指令")
+
+
+def _handle_sandbox(core: AmonCore, args: argparse.Namespace) -> None:
+    if args.sandbox_command != "exec":
+        raise ValueError("請指定 sandbox 指令")
+
+    loader = ConfigLoader(data_dir=core.data_dir)
+    effective = loader.resolve(project_id=args.project).effective
+    settings = parse_runner_settings(effective)
+    client = SandboxRunnerClient(settings)
+
+    code = Path(args.code_file).read_text(encoding="utf-8")
+
+    inputs: list[dict[str, str]] = []
+    for mapping in args.input_files:
+        if "=" not in mapping:
+            raise ValueError("--in 格式錯誤，需為 runner/path=local_file_path")
+        runner_path, local_path = mapping.split("=", 1)
+        content = Path(local_path).read_bytes()
+        inputs.append(build_input_file(runner_path, content))
+
+    result = client.run_code(language=args.language, code=code, input_files=inputs)
+    written = decode_output_files(result.get("output_files", []), Path(args.out_dir))
+
+    summary = {
+        "id": result.get("id"),
+        "exit_code": result.get("exit_code"),
+        "timed_out": result.get("timed_out"),
+        "duration_ms": result.get("duration_ms"),
+        "stdout": result.get("stdout", ""),
+        "stderr": result.get("stderr", ""),
+        "written_files": [str(path) for path in written],
+    }
+    print(yaml.safe_dump(summary, allow_unicode=True, sort_keys=False))
