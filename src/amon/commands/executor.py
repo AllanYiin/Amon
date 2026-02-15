@@ -385,10 +385,14 @@ def _handle_graph_patch(core: AmonCore, plan: CommandPlan) -> dict[str, Any]:
     message = str(plan.args.get("message", "")).strip()
     if not message:
         raise ValueError("message 不可為空")
+    request_id = uuid.uuid4().hex
+    requested_at = core._now()
     project_path = core.get_project_path(plan.project_id)
     audit_path = project_path / "audits" / "graph_patch_requests.jsonl"
     audit_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
+        "request_id": request_id,
+        "requested_at": requested_at,
         "project_id": plan.project_id,
         "chat_id": plan.chat_id,
         "message": message,
@@ -406,6 +410,7 @@ def _handle_graph_patch(core: AmonCore, plan: CommandPlan) -> dict[str, Any]:
     )
     return {
         "status": "queued_for_review",
+        "request_id": request_id,
         "audit_path": str(audit_path),
         "message": message,
     }
