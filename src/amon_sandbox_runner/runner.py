@@ -10,7 +10,7 @@ import subprocess
 import time
 import uuid
 from pathlib import Path
-from threading import BoundedSemaphore
+from threading import BoundedSemaphore, Lock
 from typing import Any
 
 from .config import RunnerSettings
@@ -23,15 +23,76 @@ logger = logging.getLogger("amon_sandbox_runner")
 class SandboxRunner:
     def __init__(self, settings: RunnerSettings) -> None:
         self.settings = settings
-        self._semaphore = BoundedSemaphore(value=max(1, settings.max_concurrency))
+        self._max_concurrency = max(1, settings.max_concurrency)
+        self._semaphore = BoundedSemaphore(value=self._max_concurrency)
+        self._inflight_lock = Lock()
+        self._inflight = 0
 
     def run(self, request: RunRequest) -> RunResponse:
         if not self._semaphore.acquire(blocking=False):
             raise RuntimeError("runner busy, please retry")
+        with self._inflight_lock:
+            self._inflight += 1
         try:
             return self._run_locked(request)
         finally:
+            with self._inflight_lock:
+                self._inflight = max(0, self._inflight - 1)
             self._semaphore.release()
+
+    def health_snapshot(self) -> dict[str, Any]:
+        docker_available = self._check_docker_available()
+        image_present = False
+        image_error: str | None = None
+        if docker_available:
+            image_present, image_error = self._check_image_present()
+        else:
+            image_error = "docker not available"
+
+        with self._inflight_lock:
+            inflight = self._inflight
+        return {
+            "docker": {
+                "available": docker_available,
+                "image": self.settings.docker.image,
+                "image_present": image_present,
+                "error": image_error,
+            },
+            "concurrency": {
+                "max": self._max_concurrency,
+                "inflight": inflight,
+                "utilization": round(inflight / self._max_concurrency, 4),
+            },
+        }
+
+    def _check_docker_available(self) -> bool:
+        try:
+            completed = subprocess.run(
+                ["docker", "version", "--format", "{{.Server.Version}}"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=3,
+                check=False,
+            )
+        except OSError:
+            return False
+        return completed.returncode == 0
+
+    def _check_image_present(self) -> tuple[bool, str | None]:
+        try:
+            completed = subprocess.run(
+                ["docker", "image", "inspect", self.settings.docker.image],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=3,
+                check=False,
+            )
+        except OSError as exc:
+            return (False, str(exc))
+        if completed.returncode == 0:
+            return (True, None)
+        error = completed.stderr.decode("utf-8", errors="replace").strip() or "image not found"
+        return (False, error)
 
     def _run_locked(self, request: RunRequest) -> RunResponse:
         language = str(request.get("language", "")).strip().lower()

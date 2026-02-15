@@ -19,6 +19,44 @@ from http.server import ThreadingHTTPServer
 
 
 class UIAsyncAPITests(unittest.TestCase):
+
+    def test_health_endpoint_includes_queue_depth_and_error_rate(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                conn.request("GET", "/v1/projects/not-found/context")
+                err_resp = conn.getresponse()
+                err_resp.read()
+                self.assertEqual(err_resp.status, 500)
+
+                conn.request("GET", "/health")
+                response = conn.getresponse()
+                payload = json.loads(response.read().decode("utf-8"))
+
+                self.assertEqual(response.status, 200)
+                self.assertEqual(payload["status"], "ok")
+                self.assertIn("queue_depth", payload)
+                self.assertIn("recent_error_rate", payload)
+                self.assertGreaterEqual(payload["recent_error_rate"]["request_count"], 2)
+                self.assertGreaterEqual(payload["recent_error_rate"]["error_count"], 1)
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
     def test_chat_stream_emits_immediate_notice_without_project(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"
