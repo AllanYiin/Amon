@@ -82,10 +82,10 @@ def _first_match(call: ToolCall, patterns: Iterable[str]) -> str | None:
 
 
 def _matches_pattern(call: ToolCall, pattern: str) -> bool:
-    if pattern.startswith("process.exec:"):
-        if call.tool != "process.exec":
+    tool_name, sep, cmd_glob = pattern.partition(":")
+    if sep:
+        if call.tool != tool_name:
             return False
-        cmd_glob = pattern.split(":", 1)[1]
         command = call.args.get("command") or call.args.get("cmd")
         if not isinstance(command, str):
             return False

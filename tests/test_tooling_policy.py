@@ -104,6 +104,7 @@ class RuntimeRegistryTests(unittest.TestCase):
             self.assertEqual(registry.policy.decide(ToolCall(tool="filesystem.read", args={}, caller="tester")), "allow")
             self.assertEqual(registry.policy.decide(ToolCall(tool="web.fetch", args={}, caller="tester")), "ask")
             self.assertEqual(registry.policy.decide(ToolCall(tool="process.exec", args={"command": "pwd"}, caller="tester")), "deny")
+            self.assertEqual(registry.policy.decide(ToolCall(tool="terminal.exec", args={"command": "pwd"}, caller="tester")), "deny")
 
 
 class WorkspaceGuardTests(unittest.TestCase):
