@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import json
+import mimetypes
 import re
 import threading
 import time
@@ -407,6 +408,39 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "text/markdown; charset=utf-8")
             self.send_header("Content-Disposition", f'attachment; filename="{Path(doc_path).name}"')
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if parsed.path.endswith("/docs/raw") and parsed.path.startswith("/v1/projects/"):
+            project_id = self._get_path_segment(parsed.path, 2)
+            if not project_id:
+                self._send_json(400, {"message": "無效的 project_id"})
+                return
+            params = parse_qs(parsed.query)
+            doc_path = params.get("path", [""])[0].strip()
+            if not doc_path:
+                self._send_json(400, {"message": "請提供 path"})
+                return
+            try:
+                project_path = self.core.get_project_path(project_id)
+                resolved_path = self._resolve_doc_path(project_path, doc_path)
+                body = resolved_path.read_bytes()
+            except FileNotFoundError as exc:
+                self._handle_error(exc, status=404)
+                return
+            except ValueError as exc:
+                self._send_json(400, {"message": str(exc)})
+                return
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            content_type, _ = mimetypes.guess_type(str(resolved_path))
+            if not content_type:
+                content_type = "application/octet-stream"
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Disposition", f'attachment; filename="{resolved_path.name}"')
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -1822,6 +1856,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             if not path.is_file():
                 continue
             relative_path = str(path.relative_to(docs_dir))
+            mime_type, _ = mimetypes.guess_type(str(path))
             inferred = source_by_path.get(relative_path, {})
             run_id = inferred.get("run_id") or self._infer_run_id_from_path(relative_path)
             node_id = inferred.get("node_id") or "unknown"
@@ -1832,10 +1867,13 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 {
                     "path": relative_path,
                     "name": path.name,
+                    "mime_type": mime_type,
+                    "type": mime_type,
                     "run_id": run_id or "unknown",
                     "node_id": node_id,
                     "task_id": task_id or "ungrouped",
                     "download_url": f"/v1/projects/{encoded_project_id}/docs/download?path={encoded_path}",
+                    "raw_url": f"/v1/projects/{encoded_project_id}/docs/raw?path={encoded_path}",
                     "open_url": f"/v1/projects/{encoded_project_id}/docs/content?path={encoded_path}",
                 }
             )

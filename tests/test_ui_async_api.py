@@ -374,7 +374,7 @@ class UIAsyncAPITests(unittest.TestCase):
                     server.server_close()
                 os.environ.pop("AMON_HOME", None)
 
-    def test_docs_api_supports_catalog_preview_and_download(self) -> None:
+    def test_docs_api_supports_catalog_preview_download_and_raw_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"
             os.environ["AMON_HOME"] = str(data_dir)
@@ -388,11 +388,18 @@ class UIAsyncAPITests(unittest.TestCase):
                 docs_dir = project_path / "docs" / "tasks" / "task-a"
                 docs_dir.mkdir(parents=True, exist_ok=True)
                 (docs_dir / "result_run_001.md").write_text("# 任務結果\n- 測試", encoding="utf-8")
+                binary_bytes = bytes([0, 1, 2, 250, 255])
+                (docs_dir / "artifact.bin").write_bytes(binary_bytes)
 
                 run_dir = project_path / ".amon" / "runs" / "run-001"
                 run_dir.mkdir(parents=True, exist_ok=True)
                 (run_dir / "events.jsonl").write_text(
-                    json.dumps({"event": "node_output", "node_id": "writer", "output_path": "docs/tasks/task-a/result_run_001.md"}, ensure_ascii=False)
+                    "\n".join(
+                        [
+                            json.dumps({"event": "node_output", "node_id": "writer", "output_path": "docs/tasks/task-a/result_run_001.md"}, ensure_ascii=False),
+                            json.dumps({"event": "node_output", "node_id": "writer", "artifact_path": "docs/tasks/task-a/artifact.bin"}, ensure_ascii=False),
+                        ]
+                    )
                     + "\n",
                     encoding="utf-8",
                 )
@@ -405,27 +412,43 @@ class UIAsyncAPITests(unittest.TestCase):
 
                 conn = HTTPConnection("127.0.0.1", port)
                 encoded_project = quote(project.project_id)
-                encoded_path = quote("tasks/task-a/result_run_001.md")
+                encoded_markdown_path = quote("tasks/task-a/result_run_001.md")
+                encoded_binary_path = quote("tasks/task-a/artifact.bin")
                 conn.request("GET", f"/v1/projects/{encoded_project}/docs")
                 docs_resp = conn.getresponse()
                 docs_payload = json.loads(docs_resp.read().decode("utf-8"))
                 self.assertEqual(docs_resp.status, 200)
-                self.assertEqual(len(docs_payload["docs"]), 1)
-                self.assertEqual(docs_payload["docs"][0]["task_id"], "task-a")
-                self.assertEqual(docs_payload["docs"][0]["node_id"], "writer")
+                self.assertEqual(len(docs_payload["docs"]), 2)
 
-                conn.request("GET", f"/v1/projects/{encoded_project}/docs/content?path={encoded_path}")
+                markdown_doc = next(doc for doc in docs_payload["docs"] if doc["path"].endswith("result_run_001.md"))
+                binary_doc = next(doc for doc in docs_payload["docs"] if doc["path"].endswith("artifact.bin"))
+                self.assertEqual(markdown_doc["task_id"], "task-a")
+                self.assertEqual(markdown_doc["node_id"], "writer")
+                self.assertEqual(markdown_doc["mime_type"], "text/markdown")
+                self.assertEqual(markdown_doc["type"], "text/markdown")
+                self.assertIn("/docs/raw?path=", markdown_doc["raw_url"])
+                self.assertEqual(binary_doc["mime_type"], "application/octet-stream")
+                self.assertEqual(binary_doc["type"], "application/octet-stream")
+
+                conn.request("GET", f"/v1/projects/{encoded_project}/docs/content?path={encoded_markdown_path}")
                 preview_resp = conn.getresponse()
                 preview_payload = json.loads(preview_resp.read().decode("utf-8"))
                 self.assertEqual(preview_resp.status, 200)
                 self.assertIn("# 任務結果", preview_payload["content"])
 
-                conn.request("GET", f"/v1/projects/{encoded_project}/docs/download?path={encoded_path}")
+                conn.request("GET", f"/v1/projects/{encoded_project}/docs/download?path={encoded_markdown_path}")
                 download_resp = conn.getresponse()
                 download_body = download_resp.read().decode("utf-8")
                 self.assertEqual(download_resp.status, 200)
                 self.assertIn("text/markdown", download_resp.getheader("Content-Type"))
                 self.assertIn("任務結果", download_body)
+
+                conn.request("GET", f"/v1/projects/{encoded_project}/docs/raw?path={encoded_binary_path}")
+                raw_resp = conn.getresponse()
+                raw_body = raw_resp.read()
+                self.assertEqual(raw_resp.status, 200)
+                self.assertEqual(raw_resp.getheader("Content-Type"), "application/octet-stream")
+                self.assertEqual(raw_body, binary_bytes)
             finally:
                 if server:
                     server.shutdown()
