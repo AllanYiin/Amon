@@ -973,6 +973,8 @@
               <span class="risk-chip">risk: ${escapeHtml(String(tool.risk || "unknown"))}</span>
             </header>
             <p>allowed_paths：${escapeHtml((tool.allowed_paths || []).join(", ") || "workspace")}</p>
+            <p>預設策略：<strong>${escapeHtml(String(tool.policy_decision || "deny").toUpperCase())}</strong></p>
+            <p>策略說明：${escapeHtml(tool.policy_reason || "未命中 allow 規則，預設拒絕")}</p>
             <p>最近使用：${escapeHtml(formatRecentUsage(tool.recent_usage))}</p>
             <details><summary>inputs schema</summary>${renderSchema(tool.input_schema)}</details>
             <details><summary>outputs schema</summary>${renderSchema(tool.output_schema)}</details>

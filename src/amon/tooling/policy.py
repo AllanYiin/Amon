@@ -19,13 +19,25 @@ class ToolPolicy:
     deny: tuple[str, ...] = ()
 
     def decide(self, call: ToolCall) -> Decision:
-        if _matches_any(call, self.deny):
+        if _first_match(call, self.deny):
             return "deny"
-        if _matches_any(call, self.ask):
+        if _first_match(call, self.ask):
             return "ask"
-        if _matches_any(call, self.allow):
+        if _first_match(call, self.allow):
             return "allow"
         return "deny"
+
+    def explain(self, call: ToolCall) -> tuple[Decision, str]:
+        deny_match = _first_match(call, self.deny)
+        if deny_match:
+            return "deny", f"符合 deny 規則：{deny_match}"
+        ask_match = _first_match(call, self.ask)
+        if ask_match:
+            return "ask", f"符合 ask 規則：{ask_match}"
+        allow_match = _first_match(call, self.allow)
+        if allow_match:
+            return "allow", f"符合 allow 規則：{allow_match}"
+        return "deny", "未命中任何 allow 規則，預設拒絕"
 
 
 _DEFAULT_DENY_GLOBS = (
@@ -62,11 +74,11 @@ class WorkspaceGuard:
         return resolved
 
 
-def _matches_any(call: ToolCall, patterns: Iterable[str]) -> bool:
+def _first_match(call: ToolCall, patterns: Iterable[str]) -> str | None:
     for pattern in patterns:
         if _matches_pattern(call, pattern):
-            return True
-    return False
+            return pattern
+    return None
 
 
 def _matches_pattern(call: ToolCall, pattern: str) -> bool:

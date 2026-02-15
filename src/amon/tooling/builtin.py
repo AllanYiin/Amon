@@ -22,9 +22,20 @@ def build_registry(workspace_root: Path) -> ToolRegistry:
                 "filesystem.read",
                 "filesystem.list",
                 "filesystem.grep",
+                "filesystem.glob",
+                "memory.search",
+            ),
+            ask=(
+                "filesystem.write",
+                "filesystem.move",
+                "filesystem.copy",
                 "web.fetch",
                 "web.search",
-            )
+            ),
+            deny=(
+                "filesystem.delete",
+                "process.exec",
+            ),
         ),
         workspace_guard=WorkspaceGuard(workspace_root=workspace_root),
         audit_sink=FileAuditSink(default_audit_log_path()),

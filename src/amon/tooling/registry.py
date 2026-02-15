@@ -56,12 +56,12 @@ class ToolRegistry:
 
         spec = self._specs.get(call.tool)
         source = _resolve_source(spec)
-        decision = self.policy.decide(call)
+        decision, reason = self.policy.explain(call)
         if decision == "deny":
             result = ToolResult(
-                content=[{"type": "text", "text": "Tool execution denied."}],
+                content=[{"type": "text", "text": f"Tool execution denied: {reason}"}],
                 is_error=True,
-                meta={"status": "denied"},
+                meta={"status": "denied", "reason": reason},
             )
             self.audit_sink.record(
                 call,
@@ -74,9 +74,9 @@ class ToolRegistry:
         if decision == "ask":
             if require_approval:
                 result = ToolResult(
-                    content=[{"type": "text", "text": "Tool execution requires approval."}],
+                    content=[{"type": "text", "text": f"Tool execution requires approval: {reason}"}],
                     is_error=True,
-                    meta={"status": "approval_required"},
+                    meta={"status": "approval_required", "reason": reason},
                 )
                 self.audit_sink.record(
                     call,
@@ -87,9 +87,9 @@ class ToolRegistry:
                 )
                 return result
             result = ToolResult(
-                content=[{"type": "text", "text": "Tool execution not approved."}],
+                content=[{"type": "text", "text": f"Tool execution not approved: {reason}"}],
                 is_error=True,
-                meta={"status": "approval_missing"},
+                meta={"status": "approval_missing", "reason": reason},
             )
             self.audit_sink.record(
                 call,

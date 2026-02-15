@@ -12,6 +12,28 @@ from .policy import ToolPolicy, WorkspaceGuard
 from .registry import ToolRegistry
 
 
+LOW_RISK_ALLOW_TOOLS = (
+    "filesystem.read",
+    "filesystem.list",
+    "filesystem.grep",
+    "filesystem.glob",
+    "memory.search",
+)
+
+MEDIUM_RISK_ASK_TOOLS = (
+    "filesystem.write",
+    "filesystem.move",
+    "filesystem.copy",
+    "web.fetch",
+    "web.search",
+)
+
+HIGH_RISK_DENY_TOOLS = (
+    "filesystem.delete",
+    "process.exec",
+)
+
+
 def build_registry(
     workspace_root: Path,
     base_dirs: Iterable[tuple[str, Path]],
@@ -19,15 +41,9 @@ def build_registry(
     audit_sink: AuditSink | None = None,
 ) -> ToolRegistry:
     native_runtimes = load_native_runtimes(base_dirs)
-    allow = [
-        "filesystem.read",
-        "filesystem.list",
-        "filesystem.grep",
-        "web.fetch",
-        "web.search",
-    ]
-    ask: list[str] = []
-    deny: list[str] = []
+    allow = list(LOW_RISK_ALLOW_TOOLS)
+    ask: list[str] = list(MEDIUM_RISK_ASK_TOOLS)
+    deny: list[str] = list(HIGH_RISK_DENY_TOOLS)
     for runtime in native_runtimes:
         permission = runtime.manifest.effective_permission
         if permission == "allow":
