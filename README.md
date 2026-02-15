@@ -4,6 +4,18 @@
 
 ## CLI 快速開始
 
+### 安裝模式（重要）
+
+```bash
+# 只安裝 Amon CLI（不含 sandbox runner 服務依賴）
+pip install -e .
+
+# 安裝 Amon CLI + sandbox runner 服務依賴（FastAPI / uvicorn）
+pip install -e .[sandbox-runner]
+```
+
+> 注意：`pip install -e.`（少一個空白）是錯誤寫法，請使用 `pip install -e .`。
+
 ```bash
 # 安裝套件
 pip install -e .
