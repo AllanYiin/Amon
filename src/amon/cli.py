@@ -156,6 +156,13 @@ def build_parser() -> argparse.ArgumentParser:
     toolforge_install.add_argument("--project", help="指定專案 ID（安裝到專案）")
     toolforge_verify = toolforge_sub.add_parser("verify", help="驗證已安裝工具")
     toolforge_verify.add_argument("--project", help="指定專案 ID（包含專案工具）")
+    toolforge_verify.add_argument("--json", action="store_true", help="輸出機器可讀 JSON")
+    toolforge_revoke = toolforge_sub.add_parser("revoke", help="停用 toolforge 工具（soft delete）")
+    toolforge_revoke.add_argument("name", help="工具名稱")
+    toolforge_revoke.add_argument("--project", help="指定專案 ID")
+    toolforge_enable = toolforge_sub.add_parser("enable", help="重新啟用已停用工具")
+    toolforge_enable.add_argument("name", help="工具名稱")
+    toolforge_enable.add_argument("--project", help="指定專案 ID")
 
     ui_parser = subparsers.add_parser("ui", help="啟動 UI 預覽")
     ui_parser.add_argument("--port", type=int, default=8000, help="UI 服務埠號（預設 8000）")
@@ -511,7 +518,7 @@ def _handle_tools(core: AmonCore, args: argparse.Namespace) -> None:
             print(f"{tool['name']}｜{tool['version']}｜{tool['risk_level']}｜{tool['scope']}")
         for tool in native_tools:
             print(
-                f"native:{tool['name']}｜{tool['version']}｜{tool['risk']}｜native｜{tool['default_permission']}"
+                f"native:{tool['name']}｜{tool['version']}｜{tool['risk']}｜native｜{tool['default_permission']}｜{tool.get('status', 'active')}"
             )
         return
     if args.tools_command == "run":
@@ -611,17 +618,30 @@ def _handle_toolforge(core: AmonCore, args: argparse.Namespace) -> None:
         print(f"已安裝 toolforge 工具：{entry.get('name')} {entry.get('version')}")
         return
     if args.toolforge_command == "verify":
-        tools = core.toolforge_verify(project_id=args.project)
+        report = core.toolforge_verify_report(project_id=args.project)
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            return
+        tools = report.get("tools", [])
         if not tools:
             print("尚未安裝 toolforge 工具。")
             return
         for tool in tools:
             violations = tool.get("violations") or []
             violation_text = f"｜VIOLATION: {', '.join(violations)}" if violations else ""
+            test_status = tool.get("tests", {}).get("status", "unknown")
             print(
                 f"native:{tool['name']}｜{tool['version']}｜{tool['path']}｜{tool['sha256']}｜"
-                f"{tool['risk']}｜{tool['default_permission']}{violation_text}"
+                f"{tool['risk']}｜{tool['default_permission']}｜{tool.get('status', 'active')}｜tests={test_status}{violation_text}"
             )
+        return
+    if args.toolforge_command == "revoke":
+        entry = core.toolforge_set_status(args.name, "disabled", project_id=args.project)
+        print(f"已停用 toolforge 工具：{entry.get('name')} ({entry.get('scope')})")
+        return
+    if args.toolforge_command == "enable":
+        entry = core.toolforge_set_status(args.name, "active", project_id=args.project)
+        print(f"已啟用 toolforge 工具：{entry.get('name')} ({entry.get('scope')})")
         return
     raise ValueError("請指定 toolforge 指令")
 

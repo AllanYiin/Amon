@@ -136,7 +136,7 @@ class AmonCore:
             except OSError as exc:
                 self.logger.error("建立工具 registry 失敗：%s", exc, exc_info=True)
                 raise
-        self._sync_first_party_tool_registry(registry_path)
+        self._sync_tool_registry(registry_path)
         toolforge_index = self._toolforge_index_path()
         if not toolforge_index.exists():
             try:
@@ -153,7 +153,7 @@ class AmonCore:
                 raise
         self._install_packaged_skill_archives()
 
-    def _sync_first_party_tool_registry(self, registry_path: Path) -> None:
+    def _sync_tool_registry(self, registry_path: Path) -> None:
         from .tooling.builtin import build_registry
 
         try:
@@ -163,29 +163,54 @@ class AmonCore:
             raise
 
         existing_tools = [item for item in data.get("tools", []) if isinstance(item, dict)]
-        registered_at_map = {
-            str(item.get("name")): str(item.get("registered_at"))
+        preserved_tools = [
+            item
             for item in existing_tools
-            if item.get("scope") == "builtin" and item.get("registered_at")
+            if item.get("scope") not in {"builtin", "global", "project"} or item.get("kind") not in {"builtin", "native"}
+        ]
+        registered_at_map = {
+            (str(item.get("name")), str(item.get("scope")), item.get("project_id")): str(item.get("registered_at"))
+            for item in existing_tools
+            if item.get("registered_at")
         }
-        preserved_tools = [item for item in existing_tools if item.get("scope") != "builtin"]
 
         builtin_registry = build_registry(Path.cwd())
-        first_party_tools: list[dict[str, Any]] = []
+        builtin_entries: list[dict[str, Any]] = []
         for spec in sorted(builtin_registry.list_specs(), key=lambda item: item.name):
             tool_name = f"builtin:{spec.name}"
-            first_party_tools.append(
+            builtin_entries.append(
                 {
                     "name": tool_name,
                     "version": str((spec.annotations or {}).get("version") or "builtin"),
                     "path": f"builtin://{spec.name}",
                     "scope": "builtin",
+                    "kind": "builtin",
                     "project_id": None,
-                    "registered_at": registered_at_map.get(tool_name) or self._now(),
+                    "status": "active",
+                    "registered_at": registered_at_map.get((tool_name, "builtin", None)) or self._now(),
                 }
             )
 
-        data["tools"] = preserved_tools + first_party_tools
+        native_status_lookup = self._toolforge_status_lookup()
+        native_entries = []
+        for entry in scan_native_tools(self._native_tool_base_dirs(None), status_lookup=native_status_lookup):
+            native_entries.append(
+                {
+                    "name": f"native:{entry.name}",
+                    "version": entry.version,
+                    "path": str(entry.path),
+                    "scope": entry.scope,
+                    "kind": "native",
+                    "project_id": entry.project_id,
+                    "status": entry.status,
+                    "sha256": entry.sha256,
+                    "risk": entry.risk,
+                    "default_permission": entry.default_permission,
+                    "registered_at": registered_at_map.get((f"native:{entry.name}", entry.scope, entry.project_id)) or self._now(),
+                }
+            )
+
+        data["tools"] = preserved_tools + builtin_entries + native_entries
         try:
             self._atomic_write_text(registry_path, json.dumps(data, ensure_ascii=False, indent=2))
         except OSError as exc:
@@ -2272,6 +2297,8 @@ class AmonCore:
                 "required": ["result"],
             },
             "default_permission": "allow",
+            "permissions": {"allow": [f"native:{name}"]},
+            "examples": [{"name": "basic", "input": {"text": "hello"}}],
         }
         tool_py = self._render_native_tool_template(name)
         readme = self._render_native_tool_readme(name)
@@ -2318,8 +2345,11 @@ class AmonCore:
             "risk": manifest.risk,
             "default_permission": manifest.default_permission,
             "installed_at": self._now(),
+            "status": "active",
+            "revoked_at": None,
         }
         self._update_toolforge_index(entry)
+        self._sync_tool_registry(self.cache_dir / "tool_registry.json")
         log_event(
             {
                 "level": "INFO",
@@ -2330,14 +2360,72 @@ class AmonCore:
         )
         return entry
 
-    def toolforge_verify(self, project_id: str | None = None) -> list[dict[str, Any]]:
+    def toolforge_set_status(self, name: str, status: str, project_id: str | None = None) -> dict[str, Any]:
+        if status not in {"active", "disabled"}:
+            raise ValueError("status 必須為 active 或 disabled")
         self.ensure_base_structure()
         project_path = self.get_project_path(project_id) if project_id else None
-        entries = scan_native_tools(self._native_tool_base_dirs(project_path), project_id=project_id)
-        return [entry.to_dict() for entry in entries]
+        scope = "project" if project_path else "global"
+        index_path = self._toolforge_index_path()
+        try:
+            data = json.loads(index_path.read_text(encoding="utf-8")) if index_path.exists() else {"tools": []}
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.error("讀取 toolforge index 失敗：%s", exc, exc_info=True)
+            raise
+        matched = None
+        for item in data.get("tools", []):
+            if item.get("name") == name and item.get("scope") == scope and item.get("project_id") == (project_path.name if project_path else None):
+                item["status"] = status
+                item["revoked_at"] = self._now() if status == "disabled" else None
+                matched = item
+                break
+        if matched is None:
+            raise FileNotFoundError(f"找不到工具：{name}")
+        self._atomic_write_text(index_path, json.dumps(data, ensure_ascii=False, indent=2))
+        self._sync_tool_registry(self.cache_dir / "tool_registry.json")
+        return matched
+
+    def toolforge_verify(self, project_id: str | None = None) -> list[dict[str, Any]]:
+        report = self.toolforge_verify_report(project_id=project_id)
+        return report.get("tools", [])
+
+    def toolforge_verify_report(self, project_id: str | None = None) -> dict[str, Any]:
+        self.ensure_base_structure()
+        project_path = self.get_project_path(project_id) if project_id else None
+        entries = scan_native_tools(
+            self._native_tool_base_dirs(project_path),
+            project_id=project_id,
+            status_lookup=self._toolforge_status_lookup(),
+        )
+        results: list[dict[str, Any]] = []
+        for entry in entries:
+            payload = entry.to_dict()
+            test_summary = self._run_toolforge_tests(entry.path)
+            payload["tests"] = test_summary
+            payload["status"] = entry.status
+            payload["ok"] = not payload.get("violations") and test_summary.get("status") in {"passed", "skipped"}
+            results.append(payload)
+        summary = {
+            "total": len(results),
+            "ok": sum(1 for item in results if item.get("ok")),
+            "failed": sum(1 for item in results if not item.get("ok")),
+        }
+        return {
+            "status": "ok" if summary["failed"] == 0 else "failed",
+            "project_id": project_id,
+            "summary": summary,
+            "tools": results,
+            "updated_at": self._now(),
+        }
 
     def list_native_tools(self, project_id: str | None = None) -> list[dict[str, Any]]:
-        return self.toolforge_verify(project_id=project_id)
+        project_path = self.get_project_path(project_id) if project_id else None
+        entries = scan_native_tools(
+            self._native_tool_base_dirs(project_path),
+            project_id=project_id,
+            status_lookup=self._toolforge_status_lookup(),
+        )
+        return [entry.to_dict() for entry in entries]
 
     def native_tool_dirs(self, project_id: str | None = None) -> list[tuple[str, Path]]:
         project_path = self.get_project_path(project_id) if project_id else None
@@ -2376,6 +2464,8 @@ class AmonCore:
             or item.get("scope") != entry.get("scope")
             or item.get("project_id") != entry.get("project_id")
         ]
+        entry.setdefault("status", "active")
+        entry.setdefault("revoked_at", None)
         tools.append(entry)
         data["tools"] = tools
         try:
@@ -2383,6 +2473,36 @@ class AmonCore:
         except OSError as exc:
             self.logger.error("寫入 toolforge index 失敗：%s", exc, exc_info=True)
             raise
+
+    def _toolforge_status_lookup(self) -> dict[tuple[str, str, str | None], str]:
+        index_path = self._toolforge_index_path()
+        try:
+            data = json.loads(index_path.read_text(encoding="utf-8")) if index_path.exists() else {"tools": []}
+        except (OSError, json.JSONDecodeError):
+            return {}
+        lookup: dict[tuple[str, str, str | None], str] = {}
+        for entry in data.get("tools", []):
+            if not isinstance(entry, dict):
+                continue
+            key = (str(entry.get("name", "")), str(entry.get("scope", "global")), entry.get("project_id"))
+            if not key[0]:
+                continue
+            lookup[key] = str(entry.get("status") or "active")
+        return lookup
+
+    def _run_toolforge_tests(self, tool_dir: Path) -> dict[str, Any]:
+        tests_dir = tool_dir / "tests"
+        if not tests_dir.exists() or not tests_dir.is_dir():
+            return {"status": "skipped", "command": None, "returncode": None, "output": ""}
+        command = [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"]
+        result = subprocess.run(command, cwd=tool_dir, capture_output=True, text=True, check=False)
+        output = (result.stdout or "") + (result.stderr or "")
+        return {
+            "status": "passed" if result.returncode == 0 else "failed",
+            "command": " ".join(command),
+            "returncode": result.returncode,
+            "output": output.strip(),
+        }
 
     def _resolve_tool_dir(self, tool_name: str, project_id: str | None) -> tuple[Path, str, Path | None]:
         ensure_tool_name(tool_name)
