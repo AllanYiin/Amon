@@ -39,6 +39,7 @@ from .logging_utils import setup_logger
 from .mcp_client import MCPClientError, MCPServerConfig, MCPStdioClient
 from .models import ProviderError, build_provider
 from .graph_runtime import GraphRuntime, GraphRunResult
+from .sandbox.service import run_sandbox_step
 from .tooling import (
     ToolingError,
     build_confirm_plan,
@@ -2114,14 +2115,49 @@ class AmonCore:
             if not require_confirm(plan):
                 raise RuntimeError("已取消執行工具")
         env = build_tool_env(self.logs_dir if not project_path else project_path / "logs", resolved_allowed, project_path)
-        output = run_tool_process(
-            tool_dir / "tool.py",
-            payload,
-            env=env,
-            cwd=project_path,
-            timeout_s=timeout_s or 60,
-            cancel_event=cancel_event,
-        )
+        execution_backend = str((spec.execution or {}).get("backend") or "host").strip().lower()
+        if execution_backend == "sandbox":
+            tool_code = (tool_dir / "tool.py").read_text(encoding="utf-8")
+            payload_text = json.dumps(payload, ensure_ascii=False)
+            wrapped_code = "\n".join(
+                [
+                    "import io",
+                    "import sys",
+                    f"sys.stdin = io.StringIO({payload_text!r})",
+                    tool_code,
+                ]
+            )
+            run_id = uuid.uuid4().hex
+            safe_tool_name = re.sub(r"[^a-zA-Z0-9_-]", "_", tool_name)
+            output_prefix = f"docs/artifacts/{run_id}/tool_{safe_tool_name}/"
+            sandbox_result = run_sandbox_step(
+                project_path=project_path or self.data_dir,
+                config=self.load_config(project_path),
+                run_id=run_id,
+                step_id=f"tool_{safe_tool_name}",
+                language="python",
+                code=wrapped_code,
+                input_paths=[],
+                output_prefix=output_prefix,
+                timeout_s=timeout_s,
+            )
+            output = {
+                "exit_code": sandbox_result.get("exit_code"),
+                "timed_out": bool(sandbox_result.get("timed_out", False)),
+                "duration_ms": sandbox_result.get("duration_ms"),
+                "stdout": sandbox_result.get("stdout", ""),
+                "stderr": sandbox_result.get("stderr", ""),
+                "manifest_path": sandbox_result.get("manifest_path"),
+            }
+        else:
+            output = run_tool_process(
+                tool_dir / "tool.py",
+                payload,
+                env=env,
+                cwd=project_path,
+                timeout_s=timeout_s or 60,
+                cancel_event=cancel_event,
+            )
         log_event(
             {
                 "level": "INFO",

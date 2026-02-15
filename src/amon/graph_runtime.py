@@ -19,6 +19,7 @@ from .fs.atomic import append_jsonl, atomic_write_text
 from .fs.safety import canonicalize_path
 from .events import emit_event
 from .run.context import get_effective_constraints
+from .sandbox.service import run_sandbox_step
 
 
 @dataclass
@@ -165,10 +166,10 @@ class GraphRuntime:
                 state["nodes"][node_id]["status"] = "completed"
                 state["nodes"][node_id]["ended_at"] = self._now_iso()
                 state["nodes"][node_id]["output"] = result
-                self._append_event(
-                    events_path,
-                    {"event": "node_complete", "node_id": node_id, "output": result},
-                )
+                self._emit_artifact_written_events(events_path, node_id, result)
+                node_complete_event = {"event": "node_complete", "node_id": node_id, "output": result}
+                node_complete_event.update(self._promote_output_paths(result))
+                self._append_event(events_path, node_complete_event)
                 completed.add(node_id)
 
                 for edge in adjacency.get(node_id, []):
@@ -358,6 +359,47 @@ class GraphRuntime:
             if store_key := node.get("store_output"):
                 variables[store_key] = result
             return {"result": result}
+        if node_type == "sandbox_run":
+            language = self._render_template(str(node.get("language") or "python"), node_vars)
+            code = self._render_template(str(node.get("code") or ""), node_vars)
+            if not code.strip():
+                raise ValueError("sandbox_run node 缺少 code")
+            raw_input_paths = node.get("input_paths") or []
+            input_paths = [self._render_template(str(path), node_vars) for path in raw_input_paths]
+            output_prefix = node.get("output_prefix")
+            if output_prefix:
+                output_prefix = self._render_template(str(output_prefix), node_vars)
+            else:
+                output_prefix = f"docs/artifacts/{run_id}/{node.get('id')}/"
+            service_result = run_sandbox_step(
+                project_path=self.project_path,
+                config=self.core.load_config(self.project_path),
+                run_id=run_id,
+                step_id=str(node.get("id") or "sandbox_step"),
+                language=language,
+                code=code,
+                input_paths=input_paths,
+                output_prefix=output_prefix,
+                timeout_s=timeout_s,
+            )
+            manifest_path = self._to_relative_project_path(service_result.get("manifest_path"))
+            artifact_files = [self._to_relative_project_path(path) for path in service_result.get("written_files", [])]
+            result = {
+                "exit_code": service_result.get("exit_code"),
+                "timed_out": bool(service_result.get("timed_out", False)),
+                "duration_ms": service_result.get("duration_ms"),
+                "stdout": service_result.get("stdout", ""),
+                "stderr": service_result.get("stderr", ""),
+                "artifact_path": manifest_path,
+                "artifacts": {
+                    "manifest_path": manifest_path,
+                    "files": artifact_files,
+                    "outputs": service_result.get("outputs", []),
+                },
+            }
+            if store_key := node.get("store_output"):
+                variables[store_key] = result
+            return result
         raise ValueError(f"不支援的 node type：{node_type}")
 
     def _inject_run_constraints(self, prompt: str, run_id: str) -> str:
@@ -631,6 +673,39 @@ class GraphRuntime:
         if isinstance(payload, str):
             return self._render_template(payload, variables)
         return payload
+
+    def _to_relative_project_path(self, path_value: Any) -> str:
+        if not path_value:
+            return ""
+        target_path = Path(str(path_value))
+        if not target_path.is_absolute():
+            target_path = self.project_path / target_path
+        safe_path = canonicalize_path(target_path, [self.project_path])
+        return safe_path.relative_to(self.project_path).as_posix()
+
+    def _emit_artifact_written_events(self, events_path: Path, node_id: str, result: dict[str, Any]) -> None:
+        artifacts = result.get("artifacts") if isinstance(result, dict) else None
+        if not isinstance(artifacts, dict):
+            return
+        artifact_paths = artifacts.get("files", [])
+        if not isinstance(artifact_paths, list):
+            return
+        for artifact_path in artifact_paths:
+            rel_path = self._to_relative_project_path(artifact_path)
+            if not rel_path:
+                continue
+            self._append_event(
+                events_path,
+                {"event": "artifact_written", "node_id": node_id, "artifact_path": rel_path},
+            )
+
+    def _promote_output_paths(self, result: dict[str, Any]) -> dict[str, str]:
+        promoted: dict[str, str] = {}
+        for key in ("path", "output_path", "doc_path", "artifact_path"):
+            value = result.get(key)
+            if isinstance(value, str) and value:
+                promoted[key] = value
+        return promoted
 
 
     def _append_event(self, path: Path, payload: dict[str, Any]) -> None:

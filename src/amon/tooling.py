@@ -10,7 +10,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from threading import Event
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -28,6 +28,7 @@ class ToolSpec:
     outputs_schema: dict[str, Any]
     risk_level: str
     allowed_paths: list[str]
+    execution: dict[str, Any] = field(default_factory=dict)
 
 
 class ToolingError(RuntimeError):
@@ -55,6 +56,9 @@ def load_tool_spec(tool_dir: Path) -> ToolSpec:
     allowed_paths = data.get("allowed_paths")
     if not isinstance(allowed_paths, list) or any(not isinstance(path, str) for path in allowed_paths):
         raise ToolingError("tool.yaml allowed_paths 必須為字串陣列")
+    execution = data.get("execution") or {}
+    if not isinstance(execution, dict):
+        raise ToolingError("tool.yaml execution 必須為物件")
     return ToolSpec(
         name=str(data["name"]),
         version=str(data["version"]),
@@ -62,6 +66,7 @@ def load_tool_spec(tool_dir: Path) -> ToolSpec:
         outputs_schema=data["outputs_schema"] or {},
         risk_level=str(data["risk_level"]),
         allowed_paths=list(allowed_paths or []),
+        execution=dict(execution),
     )
 
 
