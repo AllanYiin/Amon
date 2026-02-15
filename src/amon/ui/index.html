@@ -413,7 +413,7 @@
             </section>
 
             <section class="skills-preview-section">
-              <h3>手動觸發（UI + API stub）</h3>
+              <h3>注入預覽（不觸發模型）</h3>
               <div class="skills-preview-controls">
                 <select id="skill-trigger-select"></select>
                 <button type="button" class="primary-btn" id="skill-trigger-preview">預覽注入內容</button>
@@ -2041,7 +2041,7 @@ ${JSON.stringify(data, null, 2)}
             body: JSON.stringify({ skill_name: skillName, project_id: state.projectId || "" }),
           });
           elements.skillInjectionPreview.textContent = JSON.stringify(payload, null, 2);
-          showToast("已產生 skill 注入預覽（stub）。");
+          showToast("已產生 skill 注入預覽。");
         } catch (error) {
           showToast(`技能預覽失敗：${error.message}`);
         }

@@ -52,6 +52,7 @@ from .tooling import (
     write_tool_spec,
 )
 from .tooling.native import compute_tool_sha256, parse_native_manifest, scan_native_tools
+from .skills import build_system_prefix_injection
 
 
 @dataclass
@@ -1882,14 +1883,26 @@ class AmonCore:
             if not skills:
                 skills = self.scan_skills()
         for skill in skills:
-            if skill.get("name") == name:
+            if skill.get("name") != name:
+                continue
+            if skill.get("entry_path"):
+                archive_path = Path(skill["path"])
+                entry_path = str(skill["entry_path"])
+                try:
+                    with zipfile.ZipFile(archive_path, "r") as archive:
+                        content = archive.read(entry_path).decode("utf-8")
+                        references = self._list_skill_references_archive(archive, entry_path)
+                except (OSError, zipfile.BadZipFile, KeyError, UnicodeDecodeError) as exc:
+                    self.logger.error("讀取技能壓縮檔失敗：%s", exc, exc_info=True)
+                    raise
+            else:
                 try:
                     content = Path(skill["path"]).read_text(encoding="utf-8")
                 except OSError as exc:
                     self.logger.error("讀取技能檔案失敗：%s", exc, exc_info=True)
                     raise
                 references = self._list_skill_references(Path(skill["path"]).parent)
-                return {**skill, "content": content, "references": references}
+            return {**skill, "content": content, "references": references}
         raise KeyError(f"找不到技能：{name}")
 
     def get_project_path(self, project_id: str) -> Path:
@@ -2804,12 +2817,17 @@ if __name__ == "__main__":
     def _scan_skill_dir(self, base_dir: Path, source: str) -> list[dict[str, Any]]:
         skills = []
         for child in sorted(base_dir.iterdir(), key=lambda path: path.name):
-            if not child.is_dir():
+            if child.is_dir():
+                skill_file = child / "SKILL.md"
+                if not skill_file.exists():
+                    continue
+                skills.append(self._read_skill(skill_file, child.name, source))
                 continue
-            skill_file = child / "SKILL.md"
-            if not skill_file.exists():
+            if not (child.is_file() and child.suffix == ".skill"):
                 continue
-            skills.append(self._read_skill(skill_file, child.name, source))
+            loaded = self._read_skill_archive(child, source)
+            if loaded:
+                skills.append(loaded)
         return skills
 
     def _read_skill(self, skill_file: Path, fallback_name: str, source: str) -> dict[str, Any]:
@@ -2818,6 +2836,43 @@ if __name__ == "__main__":
         except OSError as exc:
             self.logger.error("讀取技能檔案失敗：%s", exc, exc_info=True)
             raise
+        return self._build_skill_metadata(
+            content=content,
+            fallback_name=fallback_name,
+            source=source,
+            path=skill_file,
+            updated_at=datetime.fromtimestamp(skill_file.stat().st_mtime, tz=ZoneInfo("UTC")).isoformat(),
+        )
+
+    def _read_skill_archive(self, archive_path: Path, source: str) -> dict[str, Any] | None:
+        try:
+            with zipfile.ZipFile(archive_path, "r") as archive:
+                skill_entry = next((name for name in archive.namelist() if name.endswith("/SKILL.md")), "")
+                if not skill_entry:
+                    return None
+                content = archive.read(skill_entry).decode("utf-8")
+        except (OSError, zipfile.BadZipFile, KeyError, UnicodeDecodeError) as exc:
+            self.logger.warning("讀取技能壓縮檔失敗：%s", exc, exc_info=True)
+            return None
+        return self._build_skill_metadata(
+            content=content,
+            fallback_name=archive_path.stem,
+            source=source,
+            path=archive_path,
+            updated_at=datetime.fromtimestamp(archive_path.stat().st_mtime, tz=ZoneInfo("UTC")).isoformat(),
+            entry_path=skill_entry,
+        )
+
+    def _build_skill_metadata(
+        self,
+        *,
+        content: str,
+        fallback_name: str,
+        source: str,
+        path: Path,
+        updated_at: str,
+        entry_path: str | None = None,
+    ) -> dict[str, Any]:
         name = fallback_name
         description = ""
         frontmatter: dict[str, Any] = {}
@@ -2831,15 +2886,17 @@ if __name__ == "__main__":
                     frontmatter = {}
                 name = frontmatter.get("name", name)
                 description = frontmatter.get("description", "")
-        updated_at = datetime.fromtimestamp(skill_file.stat().st_mtime, tz=ZoneInfo("UTC")).isoformat()
-        return {
+        metadata = {
             "name": name,
             "description": description,
-            "path": str(skill_file),
+            "path": str(path),
             "source": source,
             "updated_at": updated_at,
             "frontmatter": frontmatter,
         }
+        if entry_path:
+            metadata["entry_path"] = entry_path
+        return metadata
 
     def _split_frontmatter(self, content: str) -> tuple[str | None, str]:
         if not content.startswith("---"):
@@ -2865,6 +2922,20 @@ if __name__ == "__main__":
                 continue
             rel_path = path.relative_to(references_dir).as_posix()
             entries.append({"path": rel_path, "size": path.stat().st_size})
+            if len(entries) >= 200:
+                break
+        return entries
+
+    def _list_skill_references_archive(self, archive: zipfile.ZipFile, skill_entry_path: str) -> list[dict[str, Any]]:
+        skill_root = skill_entry_path.rsplit("/", 1)[0]
+        references_prefix = f"{skill_root}/references/"
+        entries: list[dict[str, Any]] = []
+        for name in sorted(archive.namelist()):
+            if not name.startswith(references_prefix) or name.endswith("/"):
+                continue
+            rel_path = name.removeprefix(references_prefix)
+            info = archive.getinfo(name)
+            entries.append({"path": rel_path, "size": info.file_size})
             if len(entries) >= 200:
                 break
         return entries
@@ -2903,13 +2974,7 @@ if __name__ == "__main__":
         return skills
 
     def _format_skill_context(self, skills: list[dict[str, Any]]) -> str:
-        lines = ["## Skills (frontmatter)"]
-        for skill in skills:
-            frontmatter = skill.get("frontmatter") if isinstance(skill.get("frontmatter"), dict) else {}
-            name = str(frontmatter.get("name") or skill.get("name") or "")
-            description = str(frontmatter.get("description") or skill.get("description") or "").strip() or "無描述"
-            lines.append(f"- {name}：{description}")
-        return "\n".join(lines)
+        return build_system_prefix_injection(skills)
 
     def _collect_skill_names(
         self,
