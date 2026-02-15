@@ -120,7 +120,7 @@ class ToolRegistry:
                 value = call.args.get(key)
                 if isinstance(value, str):
                     self.workspace_guard.assert_in_workspace(value)
-        if call.tool in {"process.exec", "terminal.exec"}:
+        if call.tool in {"process.exec", "terminal.exec", "terminal.session.start"}:
             cwd = call.args.get("cwd")
             if isinstance(cwd, str):
                 self.workspace_guard.assert_in_workspace(cwd)

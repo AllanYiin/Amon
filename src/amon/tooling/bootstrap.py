@@ -32,6 +32,9 @@ DEFAULT_ASK = (
     "process.exec",
     "process.spawn",
     "terminal.exec",
+    "terminal.session.start",
+    "terminal.session.exec",
+    "terminal.session.stop",
     "process.kill",
     "memory.put",
     "memory.delete",
@@ -62,7 +65,10 @@ def build_default_registry(workspace_root: Path, config: dict[str, Any] | None =
         registry,
         allowlist=tuple(config.get("process_allowlist", ())),
     )
-    register_terminal_tools(registry)
+    register_terminal_tools(
+        registry,
+        allowlist=tuple(config.get("terminal_allowlist", config.get("tooling", {}).get("terminal", {}).get("allowlist", ()))),
+    )
     register_web_tools(
         registry,
         policy=WebPolicy(
