@@ -24,6 +24,7 @@ from .config_keys import (
     parse_sandbox_config,
 )
 from .path_rules import validate_relative_path
+from .staging import pack_input_files, rewrite_output_paths, unpack_output_files
 from .types import SandboxArtifact, SandboxRunRequest, SandboxRunResponse
 
 __all__ = [
@@ -50,4 +51,7 @@ __all__ = [
     "SandboxArtifact",
     "SandboxRunRequest",
     "SandboxRunResponse",
+    "pack_input_files",
+    "rewrite_output_paths",
+    "unpack_output_files",
 ]
