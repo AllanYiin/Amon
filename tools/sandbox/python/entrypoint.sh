@@ -2,11 +2,15 @@
 set -eu
 
 TIMEOUT_S="${1:-10}"
+LANGUAGE="${2:-python}"
 CODE_FILE="/tmp/code.py"
+if [ "$LANGUAGE" = "bash" ]; then
+  CODE_FILE="/tmp/code.sh"
+fi
 
 cat > "$CODE_FILE"
 
-python - <<'PY' "$TIMEOUT_S" "$CODE_FILE"
+python - <<'PY' "$TIMEOUT_S" "$CODE_FILE" "$LANGUAGE"
 import signal
 import subprocess
 import sys
@@ -14,9 +18,14 @@ import sys
 
 timeout_s = int(sys.argv[1])
 code_file = sys.argv[2]
+language = sys.argv[3]
+
+command = [sys.executable, "-u", code_file]
+if language == "bash":
+    command = ["bash", code_file]
 
 proc = subprocess.Popen(
-    [sys.executable, "-u", code_file],
+    command,
     cwd="/work",
     stdout=subprocess.PIPE,
     stderr=subprocess.PIPE,

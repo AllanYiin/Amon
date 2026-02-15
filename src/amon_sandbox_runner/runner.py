@@ -96,8 +96,8 @@ class SandboxRunner:
 
     def _run_locked(self, request: RunRequest) -> RunResponse:
         language = str(request.get("language", "")).strip().lower()
-        if language != "python":
-            raise ValueError("目前僅支援 language=python")
+        if language not in {"python", "bash"}:
+            raise ValueError("目前僅支援 language=python|bash")
 
         timeout_s = int(request.get("timeout_s", 10))
         if timeout_s <= 0 or timeout_s > 120:
@@ -137,7 +137,14 @@ class SandboxRunner:
         try:
             input_count, input_bytes = self._materialize_inputs(input_dir, request.get("input_files", []))
             start = time.monotonic()
-            exit_code, stdout, stderr, timed_out = self._execute_container(job_id, input_dir, output_dir, code_bytes, timeout_s)
+            exit_code, stdout, stderr, timed_out = self._execute_container(
+                job_id,
+                input_dir,
+                output_dir,
+                code_bytes,
+                timeout_s,
+                language,
+            )
             duration_ms = int((time.monotonic() - start) * 1000)
             output_files, output_bytes = self._collect_outputs(output_dir)
             output_count = len(output_files)
@@ -197,7 +204,7 @@ class SandboxRunner:
 
         return (len(input_files), total)
 
-    def _docker_command(self, job_id: str, input_dir: Path, output_dir: Path, timeout_s: int) -> list[str]:
+    def _docker_command(self, job_id: str, input_dir: Path, output_dir: Path, timeout_s: int, language: str) -> list[str]:
         dcfg = self.settings.docker
         tmpfs_opt = f"rw,nosuid,nodev,noexec,size={dcfg.tmpfs_size}"
         return [
@@ -231,6 +238,7 @@ class SandboxRunner:
             f"{output_dir.resolve()}:/output:rw",
             dcfg.image,
             str(timeout_s),
+            language,
         ]
 
     def _execute_container(
@@ -240,8 +248,9 @@ class SandboxRunner:
         output_dir: Path,
         code_bytes: bytes,
         timeout_s: int,
+        language: str,
     ) -> tuple[int, str, str, bool]:
-        cmd = self._docker_command(job_id, input_dir, output_dir, timeout_s)
+        cmd = self._docker_command(job_id, input_dir, output_dir, timeout_s, language)
         container_name = f"amon-sandbox-{job_id[:12]}"
         try:
             completed = subprocess.run(

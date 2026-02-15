@@ -33,7 +33,12 @@ def run_sandbox_step(
 
     run_step_dir, artifacts_dir = ensure_run_step_dirs(project_path, run_id, step_id)
 
-    code_path = run_step_dir / "code.py"
+    normalized_language = str(language).strip().lower()
+    if normalized_language not in {"python", "bash"}:
+        raise ValueError("language 只支援 python 或 bash")
+
+    code_filename = "code.py" if normalized_language == "python" else "code.sh"
+    code_path = run_step_dir / code_filename
     atomic_write_text(code_path, code + "\n")
 
     runtime = parse_sandbox_config(config)
@@ -45,7 +50,7 @@ def run_sandbox_step(
     request_record = {
         "run_id": run_id,
         "step_id": step_id,
-        "language": language,
+        "language": normalized_language,
         "timeout_s": timeout_s or settings.timeout_s,
         "input_files": input_meta.get("files", []),
         "input_total_bytes": input_meta.get("total_bytes", 0),
@@ -53,7 +58,7 @@ def run_sandbox_step(
     write_json(run_step_dir / "request.json", request_record)
 
     result = client.run_code(
-        language=language,
+        language=normalized_language,
         code=code,
         timeout_s=timeout_s,
         input_files=packed_inputs,

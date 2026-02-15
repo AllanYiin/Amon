@@ -135,6 +135,17 @@ class SandboxRunnerTests(unittest.TestCase):
                     runner.run({"language": "python", "code": "print('ok')", "timeout_s": 5, "input_files": []})
 
 
+    def test_supports_bash_language(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runner = SandboxRunner(RunnerSettings(jobs_dir=Path(temp_dir)))
+            with patch("amon_sandbox_runner.runner.subprocess.run") as run_mock:
+                run_mock.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout=b"ok", stderr=b"")
+                result = runner.run({"language": "bash", "code": "echo ok", "timeout_s": 5, "input_files": []})
+
+            self.assertEqual(result["exit_code"], 0)
+            docker_args = run_mock.call_args_list[0].args[0]
+            self.assertEqual(docker_args[-1], "bash")
+
     def test_health_snapshot_reports_docker_and_concurrency(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             runner = SandboxRunner(RunnerSettings(jobs_dir=Path(temp_dir), max_concurrency=3))
