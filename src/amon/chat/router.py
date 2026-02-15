@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from amon.commands.executor import _ensure_default_commands
 from amon.commands.registry import list_commands
 from amon.config import ConfigLoader
 
@@ -19,6 +20,8 @@ def route_intent(
     context: dict[str, Any] | None = None,
     llm_client: LLMClient | None = None,
 ) -> RouterResult:
+    _ensure_default_commands()
+
     if message is None:
         message = ""
 

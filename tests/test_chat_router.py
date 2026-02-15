@@ -6,7 +6,7 @@ from typing import Iterable
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from amon.chat.router import route_intent
-from amon.commands.registry import clear_commands, register_command
+from amon.commands.registry import clear_commands, get_command, register_command
 
 
 class MockLLM:
@@ -73,6 +73,18 @@ class ChatRouterTests(unittest.TestCase):
         )
         self.assertEqual(len(mock.last_messages), 2)
         self.assertIn("conversation_history", mock.last_messages[1]["content"])
+
+    def test_route_intent_initializes_default_commands(self) -> None:
+        clear_commands()
+        self.assertIsNone(get_command("projects.list"))
+
+        route_intent(
+            "請列出專案",
+            project_id="proj",
+            llm_client=MockLLM('{"type":"chat_response","confidence":0.9}'),
+        )
+
+        self.assertIsNotNone(get_command("projects.list"))
 
 
 if __name__ == "__main__":
