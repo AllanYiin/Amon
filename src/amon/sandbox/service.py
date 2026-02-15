@@ -10,6 +10,7 @@ from amon.fs.atomic import atomic_write_text
 
 from .client import SandboxRunnerClient, parse_runner_settings
 from .config_keys import parse_sandbox_config
+from .path_rules import validate_relative_path
 from .records import ensure_run_step_dirs, truncate_text, write_json
 from .staging import pack_input_files, rewrite_output_paths, unpack_output_files
 
@@ -25,6 +26,7 @@ def run_sandbox_step(
     language: str,
     code: str,
     input_paths: list[str] | None = None,
+    output_prefix: str | None = None,
     timeout_s: int | None = None,
 ) -> dict[str, Any]:
     """Run code via sandbox runner and persist request/result/artifact records."""
@@ -57,7 +59,12 @@ def run_sandbox_step(
         input_files=packed_inputs,
     )
 
-    rewritten = rewrite_output_paths(result.get("output_files", []), artifacts_dir.relative_to(project_path.resolve()).as_posix())
+    output_base = _resolve_output_base(
+        project_path=project_path.resolve(),
+        default_dir=artifacts_dir,
+        output_prefix=output_prefix,
+    )
+    rewritten = rewrite_output_paths(result.get("output_files", []), output_base)
     written = unpack_output_files(project_path, rewritten, allowed_prefixes=_ALLOWED_PREFIXES)
 
     result_record = {
@@ -82,7 +89,8 @@ def run_sandbox_step(
             "duration_ms": result_record["duration_ms"],
         },
     }
-    write_json(artifacts_dir / "manifest.json", manifest)
+    manifest_path = project_path.resolve() / output_base / "manifest.json"
+    write_json(manifest_path, manifest)
 
     return {
         "run_id": run_id,
@@ -92,7 +100,8 @@ def run_sandbox_step(
         "duration_ms": result_record["duration_ms"],
         "stdout": result_record["stdout"],
         "stderr": result_record["stderr"],
-        "manifest_path": str((artifacts_dir / "manifest.json").resolve()),
+        "manifest_path": str(manifest_path.resolve()),
+        "written_files": [str(path.resolve()) for path in written],
         "outputs": outputs_meta,
     }
 
@@ -104,3 +113,14 @@ def _file_metadata(path: Path, project_root: Path) -> dict[str, Any]:
         "size": len(content),
         "sha256": hashlib.sha256(content).hexdigest(),
     }
+
+
+def _resolve_output_base(*, project_path: Path, default_dir: Path, output_prefix: str | None) -> str:
+    if output_prefix:
+        normalized = validate_relative_path(output_prefix.rstrip("/"))
+    else:
+        normalized = default_dir.relative_to(project_path).as_posix()
+
+    if not any(normalized == prefix.rstrip("/") or normalized.startswith(prefix.rstrip("/") + "/") for prefix in _ALLOWED_PREFIXES):
+        raise ValueError("output_prefix 不在允許前綴內（docs/、audits/）")
+    return normalized

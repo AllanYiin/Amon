@@ -19,7 +19,9 @@ from .sandbox import (
     SandboxRunnerClient,
     build_input_file,
     decode_output_files,
+    parse_sandbox_config,
     parse_runner_settings,
+    run_sandbox_step,
 )
 
 
@@ -253,6 +255,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="輸入檔案對應，格式：runner/path=local_file_path，可重複",
     )
     sandbox_exec.add_argument("--out-dir", required=True, help="runner output_files 解碼落地資料夾")
+
+    sandbox_run = sandbox_sub.add_parser("run", help="以高階流程執行 sandbox 並落地紀錄")
+    sandbox_run.add_argument("--project", required=True, help="指定專案 ID（讀取專案設定）")
+    sandbox_run.add_argument("--language", required=True, help="語言，例如 python")
+    code_group = sandbox_run.add_mutually_exclusive_group(required=True)
+    code_group.add_argument("--code-file", help="程式碼檔案路徑")
+    code_group.add_argument("--code", help="直接提供程式碼內容")
+    sandbox_run.add_argument("--input", action="append", default=[], help="專案相對輸入路徑，可重複")
+    sandbox_run.add_argument("--output-prefix", help="輸出前綴（僅允許 docs/ 或 audits/）")
+    sandbox_run.add_argument("--timeout-s", type=int, help="覆蓋此次執行 timeout（秒）")
 
     return parser
 
@@ -981,36 +993,70 @@ def _handle_jobs(core: AmonCore, args: argparse.Namespace) -> None:
 
 
 def _handle_sandbox(core: AmonCore, args: argparse.Namespace) -> None:
-    if args.sandbox_command != "exec":
+    if args.sandbox_command not in {"exec", "run"}:
         raise ValueError("請指定 sandbox 指令")
 
     loader = ConfigLoader(data_dir=core.data_dir)
     effective = loader.resolve(project_id=args.project).effective
-    settings = parse_runner_settings(effective)
-    client = SandboxRunnerClient(settings)
 
-    code = Path(args.code_file).read_text(encoding="utf-8")
+    if args.sandbox_command == "exec":
+        settings = parse_runner_settings(effective)
+        runtime = parse_sandbox_config(effective)
+        client = SandboxRunnerClient(settings)
 
-    inputs: list[dict[str, str]] = []
-    for mapping in args.input_files:
-        if "=" not in mapping:
-            raise ValueError("--in 格式錯誤，需為 runner/path=local_file_path")
-        runner_path, local_path = mapping.split("=", 1)
-        content = Path(local_path).read_bytes()
-        inputs.append(build_input_file(runner_path, content))
+        code = Path(args.code_file).read_text(encoding="utf-8")
 
-    result = client.run_code(language=args.language, code=code, input_files=inputs)
-    written = decode_output_files(result.get("output_files", []), Path(args.out_dir))
+        input_mappings = args.input_files or []
+        max_files = int(runtime.limits.get("max_input_files", settings.limits.get("max_input_files", 0)) or 0)
+        if max_files and len(input_mappings) > max_files:
+            raise ValueError("input_files 數量超過限制")
 
-    summary = {
-        "request_id": result.get("request_id"),
-        "job_id": result.get("job_id") or result.get("id"),
-        "id": result.get("id"),
-        "exit_code": result.get("exit_code"),
-        "timed_out": result.get("timed_out"),
-        "duration_ms": result.get("duration_ms"),
-        "stdout": result.get("stdout", ""),
-        "stderr": result.get("stderr", ""),
-        "written_files": [str(path) for path in written],
-    }
+        inputs: list[dict[str, str]] = []
+        total_bytes = 0
+        for mapping in input_mappings:
+            if "=" not in mapping:
+                raise ValueError("--in 格式錯誤，需為 runner/path=local_file_path")
+            runner_path, local_path = mapping.split("=", 1)
+            content = Path(local_path).read_bytes()
+            total_bytes += len(content)
+            inputs.append(build_input_file(runner_path, content))
+
+        max_total_kb = float(runtime.limits.get("max_input_total_kb", settings.limits.get("max_input_total_kb", 0)) or 0)
+        if max_total_kb and total_bytes > max_total_kb * 1024:
+            raise ValueError("input_files 總大小超過限制")
+
+        result = client.run_code(language=args.language, code=code, input_files=inputs)
+        written = decode_output_files(result.get("output_files", []), Path(args.out_dir))
+
+        summary = {
+            "request_id": result.get("request_id"),
+            "job_id": result.get("job_id") or result.get("id"),
+            "id": result.get("id"),
+            "exit_code": result.get("exit_code"),
+            "timed_out": result.get("timed_out"),
+            "duration_ms": result.get("duration_ms"),
+            "stdout": result.get("stdout", ""),
+            "stderr": result.get("stderr", ""),
+            "written_files": [str(path) for path in written],
+        }
+        print(yaml.safe_dump(summary, allow_unicode=True, sort_keys=False))
+        return
+
+    project_record = core.get_project(args.project)
+    code = args.code if args.code is not None else Path(args.code_file).read_text(encoding="utf-8")
+    run_id = datetime.now().strftime("run-%Y%m%d%H%M%S")
+    step_id = "cli"
+    output_prefix = args.output_prefix or f"docs/artifacts/{run_id}/{step_id}"
+
+    summary = run_sandbox_step(
+        project_path=project_record.path,
+        config=effective,
+        run_id=run_id,
+        step_id=step_id,
+        language=args.language,
+        code=code,
+        input_paths=args.input,
+        output_prefix=output_prefix,
+        timeout_s=args.timeout_s,
+    )
     print(yaml.safe_dump(summary, allow_unicode=True, sort_keys=False))
