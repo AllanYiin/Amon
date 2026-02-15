@@ -40,6 +40,7 @@ from amon.jobs.runner import start_job
 from amon.tooling.audit import default_audit_log_path
 from .core import AmonCore, ProjectRecord
 from .logging import log_event
+from .skills import build_skill_injection_preview
 
 
 class _TaskManager:
@@ -981,8 +982,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
     def _build_skill_trigger_preview(self, *, skill_name: str, project_id: str | None) -> dict[str, Any]:
         project_path = self.core.get_project_path(project_id) if project_id else None
         skill = self.core.load_skill(skill_name, project_path=project_path)
-        content = str(skill.get("content") or "")
-        preview = content.strip()[:1600]
+        preview = build_skill_injection_preview([skill])
         return {
             "skill": {
                 "name": skill.get("name"),
@@ -991,10 +991,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 "frontmatter": skill.get("frontmatter") or {},
             },
             "injection_preview": preview,
-            "stub": {
-                "status": "not_executed",
-                "message": "目前為 UI + API stub，尚未真正觸發模型注入。",
-            },
+            "note": "此 API 僅回傳可重現的注入預覽，不會觸發模型呼叫。",
         }
 
     def _apply_tool_policy_update(self, *, action: str, tool_name: str, require_confirm: bool) -> None:
