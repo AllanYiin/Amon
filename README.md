@@ -141,7 +141,7 @@ amon sandbox exec --language python --code-file ./script.py --in data/input.txt=
 
 ## 外部 Sandbox Runner 整合（shared runner）
 
-詳細維運文件請見：`docs/sandbox_runner.md`（包含 threat model、限制清單、docker-compose 風險與錯誤排除）。
+詳細維運文件請見：`docs/sandbox_runner.md`（包含 threat model、限制清單、rootless 建議路徑、docker-compose 風險與錯誤排除）。
 
 1. 安裝 runner 依賴並啟動：
 

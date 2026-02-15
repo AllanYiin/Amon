@@ -13,13 +13,64 @@ export AMON_SANDBOX_API_KEY='change-me'
 amon-sandbox-runner
 ```
 
+> 建議使用 rootless Docker。官方文件：
+> - Rootless mode: https://docs.docker.com/engine/security/rootless/
+> - Linux post-install（含非 root 使用建議）: https://docs.docker.com/engine/install/linux-postinstall/
+
+#### 方式 A-1：systemd user service（完整範例）
+
+建立 `~/.config/systemd/user/amon-sandbox-runner.service`：
+
+```ini
+[Unit]
+Description=Amon Sandbox Runner (user)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Amon
+Environment=AMON_SANDBOX_HOST=127.0.0.1
+Environment=AMON_SANDBOX_PORT=8088
+Environment=AMON_SANDBOX_IMAGE=amon-sandbox-python:latest
+ExecStart=%h/.local/bin/amon-sandbox-runner
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+```
+
+啟用與啟動：
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now amon-sandbox-runner
+systemctl --user status amon-sandbox-runner
+```
+
+#### 方式 A-2：一鍵腳本（host process + rootless docker）
+
+可直接使用：`tools/sandbox/setup_rootless_runner.sh`
+
+```bash
+bash tools/sandbox/setup_rootless_runner.sh --project-dir "$PWD"
+systemctl --user status amon-sandbox-runner
+```
+
 ### 方式 B：docker-compose（一鍵啟動）
 
 ```bash
 docker compose -f tools/sandbox/docker-compose.yml up
 ```
 
-> `tools/sandbox/docker-compose.yml` 預設掛載 `/var/run/docker.sock`。這代表容器可控制 host Docker，**風險等同 root 級別主機操作權限**。生產環境優先使用「方式 A」搭配 rootless docker，避免把 docker socket 暴露到容器。
+> 這個預設 compose **不會**掛載 `/var/run/docker.sock`。
+> 若你確定理解風險、且必須使用 socket 模式，才手動改用：
+
+```bash
+docker compose -f tools/sandbox/docker-compose.with-docker-sock.yml up
+```
+
+> ⚠️ 高風險警告：掛載 `/var/run/docker.sock` 代表容器內 process 可直接控制 host Docker（透過 Unix socket），在多數部署下可等同主機權限升級。此模式僅建議本機短期除錯，且需顯式 opt-in。
 
 ## Amon 端設定
 
@@ -69,7 +120,7 @@ runner 會輸出結構化 JSON log：
 
 2. **docker permission denied**
    - host process 模式：確認執行者有 docker 權限（rootless / docker group）。
-   - compose 模式：確認 `/var/run/docker.sock` 可被容器使用。
+   - compose + docker.sock 模式：確認 `/var/run/docker.sock` 可被容器使用。
 
 3. **rootless docker 問題**
    - 建議先在主機端直接跑 `docker run hello-world` 驗證 rootless 正常。
