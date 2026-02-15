@@ -199,7 +199,13 @@ def build_parser() -> argparse.ArgumentParser:
     template_param.add_argument("--var_name", required=True, help="變數名稱")
 
     chat_parser = subparsers.add_parser("chat", help="互動式 Chat")
-    chat_parser.add_argument("--project", required=True, help="指定專案 ID")
+    chat_parser.add_argument("--project", help="指定專案 ID")
+    chat_sub = chat_parser.add_subparsers(dest="chat_command")
+    chat_attach = chat_sub.add_parser("attach", help="將附件落地到 chat inbox")
+    chat_attach.add_argument("--project", required=True, help="指定專案 ID")
+    chat_attach.add_argument("--chat-id", required=True, help="指定 chat session ID")
+    chat_attach.add_argument("--file", required=True, help="來源檔案路徑")
+    chat_attach.add_argument("--name", help="落地檔名（可選）")
 
     hooks_parser = subparsers.add_parser("hooks", help="Hook 管理")
     hooks_sub = hooks_parser.add_subparsers(dest="hooks_command")
@@ -754,6 +760,22 @@ def _handle_graph(core: AmonCore, args: argparse.Namespace) -> None:
 
 
 def _handle_chat(core: AmonCore, args: argparse.Namespace) -> None:
+    if args.chat_command == "attach":
+        from .chat.attachments import save_attachment
+
+        project_path = core.get_project_path(args.project)
+        manifest = save_attachment(
+            project_path=project_path,
+            chat_id=args.chat_id,
+            source_file_path=args.file,
+            target_name=args.name,
+        )
+        print(json.dumps(manifest, ensure_ascii=False, indent=2))
+        return
+
+    if not args.project:
+        raise ValueError("chat REPL 需要指定 --project")
+
     from .chat.cli import run_chat_repl
 
     run_chat_repl(core, args.project)
