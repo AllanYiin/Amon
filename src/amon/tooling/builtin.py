@@ -12,6 +12,7 @@ from .builtins.audit_tools import register_audit_tools
 from .builtins.filesystem import register_filesystem_tools
 from .builtins.memory import MemoryStore, register_memory_tools
 from .builtins.process import register_process_tools
+from .builtins.terminal import register_terminal_tools
 from .builtins.web import WebPolicy, register_web_tools
 
 
@@ -35,6 +36,7 @@ def build_registry(workspace_root: Path) -> ToolRegistry:
             deny=(
                 "filesystem.delete",
                 "process.exec",
+                "terminal.exec",
             ),
         ),
         workspace_guard=WorkspaceGuard(workspace_root=workspace_root),
@@ -47,6 +49,7 @@ def build_registry(workspace_root: Path) -> ToolRegistry:
 def register_builtin_tools(registry: ToolRegistry) -> None:
     register_filesystem_tools(registry)
     register_process_tools(registry)
+    register_terminal_tools(registry)
     register_web_tools(registry, policy=WebPolicy())
     register_memory_tools(registry, store=MemoryStore(base_dir=Path("~/.amon/memory").expanduser()))
     register_artifacts_tools(registry, guard=registry.workspace_guard)

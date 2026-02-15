@@ -31,6 +31,7 @@ MEDIUM_RISK_ASK_TOOLS = (
 HIGH_RISK_DENY_TOOLS = (
     "filesystem.delete",
     "process.exec",
+    "terminal.exec",
 )
 
 
