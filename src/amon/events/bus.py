@@ -9,9 +9,10 @@ from pathlib import Path
 from typing import Any
 
 from amon.fs.atomic import append_jsonl
+from amon.observability import ensure_correlation_fields
 
 
-REQUIRED_FIELDS = {"event_id", "ts", "type", "scope", "actor", "payload", "risk"}
+REQUIRED_FIELDS = {"event_id", "ts", "type", "scope", "actor", "payload", "risk", "project_id", "run_id", "node_id", "request_id", "tool"}
 def emit_event(event: dict[str, Any], *, dispatch_hooks: bool | None = None) -> str:
     """Emit an event to the JSONL bus and return the event_id."""
     payload = dict(event or {})
@@ -19,12 +20,10 @@ def emit_event(event: dict[str, Any], *, dispatch_hooks: bool | None = None) -> 
         raise ValueError("event 必須為 dict")
     payload.setdefault("event_id", _generate_event_id())
     payload.setdefault("ts", _now_iso())
-    payload.setdefault("project_id", None)
+    payload = ensure_correlation_fields(payload, project_id=str(payload.get("project_id") or ""))
     missing = sorted(field for field in REQUIRED_FIELDS if field not in payload)
     if missing:
         raise ValueError(f"event 缺少必要欄位：{', '.join(missing)}")
-    if "project_id" in payload and payload["project_id"] == "":
-        payload["project_id"] = None
     append_jsonl(_events_path(), payload)
     if dispatch_hooks is None:
         dispatch_hooks = os.environ.get("AMON_DISABLE_HOOK_DISPATCH") != "1"

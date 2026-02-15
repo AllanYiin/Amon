@@ -9,6 +9,8 @@ import os
 from pathlib import Path
 from typing import Protocol
 
+from amon.observability import normalize_project_id
+
 from .types import ToolCall, ToolResult
 
 
@@ -66,8 +68,12 @@ class FileAuditSink:
         payload = {
             "ts_ms": call.ts_ms,
             "tool": call.tool,
-            "project_id": call.project_id,
+            "project_id": normalize_project_id(call.project_id),
             "session_id": call.session_id,
+            "run_id": call.run_id,
+            "node_id": call.node_id,
+            "event_id": call.event_id,
+            "request_id": call.request_id,
             "decision": decision,
             "duration_ms": duration_ms,
             "args_sha256": _hash_payload(call.args),

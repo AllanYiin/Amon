@@ -18,6 +18,7 @@ from typing import Any
 from .fs.atomic import append_jsonl, atomic_write_text
 from .fs.safety import canonicalize_path
 from .events import emit_event
+from .observability import ensure_correlation_fields, normalize_project_id
 from .run.context import get_effective_constraints
 from .sandbox.service import run_sandbox_step
 
@@ -40,6 +41,7 @@ class GraphRuntime:
         run_id: str | None = None,
         cancel_event: threading.Event | None = None,
         node_timeout_s: int | None = None,
+        request_id: str | None = None,
     ) -> None:
         self.core = core
         self.project_path = project_path
@@ -51,9 +53,12 @@ class GraphRuntime:
         self.cancel_event = cancel_event or threading.Event()
         self.node_timeout_s = node_timeout_s
         self._cancel_path: Path | None = None
+        self.request_id = request_id
+        self._active_run_id: str | None = run_id
 
     def run(self) -> GraphRunResult:
         run_id = self.run_id or uuid.uuid4().hex
+        self._active_run_id = run_id
         run_dir = self.project_path / ".amon" / "runs" / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
         events_path = run_dir / "events.jsonl"
@@ -73,9 +78,11 @@ class GraphRuntime:
             {
                 "type": "run.started",
                 "scope": "graph",
-                "project_id": self.project_path.name,
+                "project_id": normalize_project_id(self.project_path.name),
                 "actor": "system",
                 "payload": {"run_id": run_id, "graph_path": str(self.graph_path)},
+                "run_id": run_id,
+                "request_id": self.request_id,
                 "risk": "low",
             }
         )
@@ -206,9 +213,11 @@ class GraphRuntime:
                     {
                         "type": "run.completed",
                         "scope": "graph",
-                        "project_id": self.project_path.name,
+                        "project_id": normalize_project_id(self.project_path.name),
                         "actor": "system",
                         "payload": {"run_id": run_id, "graph_path": str(self.graph_path)},
+                        "run_id": run_id,
+                        "request_id": self.request_id,
                         "risk": "low",
                     }
                 )
@@ -358,7 +367,7 @@ class GraphRuntime:
             )
             if store_key := node.get("store_output"):
                 variables[store_key] = result
-            return {"result": result}
+            return {"result": result, "tool": tool_name}
         if node_type == "sandbox_run":
             language = self._render_template(str(node.get("language") or "python"), node_vars)
             code = self._render_template(str(node.get("code") or ""), node_vars)
@@ -709,8 +718,16 @@ class GraphRuntime:
 
 
     def _append_event(self, path: Path, payload: dict[str, Any]) -> None:
-        payload = {**payload, "ts": self._now_iso()}
-        append_jsonl(path, payload)
+        enriched = {**payload, "ts": self._now_iso()}
+        enriched = ensure_correlation_fields(
+            enriched,
+            project_id=self.project_path.name,
+            run_id=self._active_run_id,
+            node_id=str(payload.get("node_id") or "") or None,
+            request_id=self.request_id,
+            tool=str(payload.get("tool") or "") or None,
+        )
+        append_jsonl(path, enriched)
 
     def _write_json(self, path: Path, payload: dict[str, Any]) -> None:
         atomic_write_text(path, json.dumps(payload, ensure_ascii=False, indent=2))

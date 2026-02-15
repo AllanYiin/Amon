@@ -62,6 +62,51 @@ class UIAsyncAPITests(unittest.TestCase):
                     server.server_close()
                 os.environ.pop("AMON_HOME", None)
 
+
+    def test_chat_stream_payload_contains_request_id_and_virtual_project_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                conn.request("GET", f"/v1/chat/stream?message={quote('哈囉')}")
+                response = conn.getresponse()
+
+                self.assertEqual(response.status, 200)
+                event_type = ""
+                payload = None
+                for _ in range(50):
+                    raw_line = response.fp.readline()
+                    if not raw_line:
+                        break
+                    decoded = raw_line.decode("utf-8", errors="ignore").strip()
+                    if decoded.startswith("event: "):
+                        event_type = decoded.split(":", 1)[1].strip()
+                    if decoded.startswith("data: ") and event_type == "notice":
+                        payload = json.loads(decoded.split(": ", 1)[1])
+                        break
+
+                self.assertIsNotNone(payload)
+                for key in ("project_id", "run_id", "node_id", "event_id", "request_id", "tool"):
+                    self.assertIn(key, payload)
+                self.assertEqual(payload["project_id"], "__virtual__")
+                self.assertTrue(payload["request_id"])
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
     def test_run_request_is_non_blocking_and_cancelable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"

@@ -38,6 +38,8 @@ class ToolingAuditTests(unittest.TestCase):
             )
             self.assertNotIn("secret-value", json.dumps(payload, ensure_ascii=False))
             self.assertNotIn("secret-result", json.dumps(payload, ensure_ascii=False))
+            for key in ("run_id", "node_id", "event_id", "request_id"):
+                self.assertIn(key, payload)
 
     def test_default_audit_log_path_respects_env(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
