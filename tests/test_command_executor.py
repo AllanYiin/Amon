@@ -129,10 +129,13 @@ class CommandExecutorTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["result"]["status"], "queued_for_review")
+        self.assertTrue(result["result"]["request_id"])
         audit_path = Path(result["result"]["audit_path"])
         self.assertTrue(audit_path.exists())
         audit_records = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines() if line.strip()]
         self.assertEqual(len(audit_records), 1)
+        self.assertEqual(audit_records[0]["request_id"], result["result"]["request_id"])
+        self.assertTrue(audit_records[0]["requested_at"])
         self.assertEqual(audit_records[0]["project_id"], record.project_id)
         self.assertEqual(audit_records[0]["chat_id"], chat_id)
         self.assertEqual(audit_records[0]["message"], "請將節點 A 連到節點 B")
@@ -143,6 +146,7 @@ class CommandExecutorTests(unittest.TestCase):
         graph_patch_events = [event for event in events if event.get("type") == "graph.patch_requested"]
         self.assertEqual(len(graph_patch_events), 1)
         self.assertEqual(graph_patch_events[0]["project_id"], record.project_id)
+        self.assertEqual(graph_patch_events[0]["payload"]["request_id"], result["result"]["request_id"])
         self.assertEqual(graph_patch_events[0]["payload"]["chat_id"], chat_id)
 
 
