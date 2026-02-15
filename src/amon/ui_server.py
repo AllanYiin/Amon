@@ -10,6 +10,7 @@ import threading
 import time
 import traceback
 import uuid
+from collections import deque
 from datetime import date, datetime
 
 import yaml
@@ -200,6 +201,52 @@ class _TaskManager:
 _TASK_MANAGER = _TaskManager()
 
 
+class _HealthMetrics:
+    def __init__(self, window_seconds: int = 300) -> None:
+        self._window_seconds = max(1, window_seconds)
+        self._lock = threading.Lock()
+        self._started_at = time.time()
+        self._request_timestamps: deque[float] = deque()
+        self._error_timestamps: deque[float] = deque()
+
+    def record_request(self, ts: float | None = None) -> None:
+        now = ts if ts is not None else time.time()
+        with self._lock:
+            self._request_timestamps.append(now)
+            self._trim(now)
+
+    def record_error(self, ts: float | None = None) -> None:
+        now = ts if ts is not None else time.time()
+        with self._lock:
+            self._error_timestamps.append(now)
+            self._trim(now)
+
+    def summary(self) -> dict[str, Any]:
+        now = time.time()
+        with self._lock:
+            self._trim(now)
+            request_count = len(self._request_timestamps)
+            error_count = len(self._error_timestamps)
+        error_rate = (error_count / request_count) if request_count else 0.0
+        return {
+            "window_seconds": self._window_seconds,
+            "request_count": request_count,
+            "error_count": error_count,
+            "error_rate": round(error_rate, 4),
+            "uptime_seconds": int(now - self._started_at),
+        }
+
+    def _trim(self, now: float) -> None:
+        cutoff = now - self._window_seconds
+        while self._request_timestamps and self._request_timestamps[0] < cutoff:
+            self._request_timestamps.popleft()
+        while self._error_timestamps and self._error_timestamps[0] < cutoff:
+            self._error_timestamps.popleft()
+
+
+_HEALTH_METRICS = _HealthMetrics()
+
+
 def _resolve_command_plan_from_router(message: str, router_result: RouterResult) -> tuple[str, dict[str, Any]]:
     if router_result.api and isinstance(router_result.args, dict):
         return router_result.api, dict(router_result.args)
@@ -229,24 +276,40 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         super().__init__(*args, **kwargs)
 
     def do_GET(self) -> None:  # noqa: N802
+        _HEALTH_METRICS.record_request()
+        parsed = urlparse(self.path)
+        if parsed.path == "/health":
+            self._send_json(
+                200,
+                {
+                    "status": "ok",
+                    "service": "amon-ui-server",
+                    "queue_depth": get_queue_depth(),
+                    "recent_error_rate": _HEALTH_METRICS.summary(),
+                },
+            )
+            return
         if self.path.startswith("/v1/"):
             self._handle_api_get()
             return
         super().do_GET()
 
     def do_POST(self) -> None:  # noqa: N802
+        _HEALTH_METRICS.record_request()
         if self.path.startswith("/v1/"):
             self._handle_api_post()
             return
         self.send_error(404, "Not Found")
 
     def do_PATCH(self) -> None:  # noqa: N802
+        _HEALTH_METRICS.record_request()
         if self.path.startswith("/v1/"):
             self._handle_api_patch()
             return
         self.send_error(404, "Not Found")
 
     def do_DELETE(self) -> None:  # noqa: N802
+        _HEALTH_METRICS.record_request()
         if self.path.startswith("/v1/"):
             self._handle_api_delete()
             return
@@ -1084,6 +1147,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def _handle_error(self, exc: Exception, status: int = 500) -> None:
+        _HEALTH_METRICS.record_error()
         log_event(
             {
                 "level": "ERROR",

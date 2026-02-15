@@ -134,6 +134,27 @@ class SandboxRunnerTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "output files 總大小超過上限"):
                     runner.run({"language": "python", "code": "print('ok')", "timeout_s": 5, "input_files": []})
 
+
+    def test_health_snapshot_reports_docker_and_concurrency(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runner = SandboxRunner(RunnerSettings(jobs_dir=Path(temp_dir), max_concurrency=3))
+
+            def fake_run(cmd, **kwargs):  # type: ignore[no-untyped-def]
+                if cmd[:3] == ["docker", "version", "--format"]:
+                    return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=b"24.0.0", stderr=b"")
+                if cmd[:3] == ["docker", "image", "inspect"]:
+                    return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=b"[]", stderr=b"")
+                return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=b"", stderr=b"")
+
+            with patch("amon_sandbox_runner.runner.subprocess.run", side_effect=fake_run):
+                snapshot = runner.health_snapshot()
+
+            self.assertTrue(snapshot["docker"]["available"])
+            self.assertTrue(snapshot["docker"]["image_present"])
+            self.assertEqual(snapshot["concurrency"]["max"], 3)
+            self.assertEqual(snapshot["concurrency"]["inflight"], 0)
+            self.assertEqual(snapshot["concurrency"]["utilization"], 0.0)
+
     def test_logs_include_request_and_job_ids(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             runner = SandboxRunner(RunnerSettings(jobs_dir=Path(temp_dir)))

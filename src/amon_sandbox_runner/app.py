@@ -24,8 +24,13 @@ def create_app(settings: RunnerSettings | None = None):
     runner = SandboxRunner(runtime_settings)
 
     @app.get("/health")
-    def health() -> dict[str, str]:
-        return {"status": "ok", "service": "amon-sandbox-runner", "version": "0.1.0"}
+    def health() -> dict[str, Any]:
+        return {
+            "status": "ok",
+            "service": "amon-sandbox-runner",
+            "version": "0.1.0",
+            **runner.health_snapshot(),
+        }
 
     @app.post("/run")
     def run(payload: dict[str, Any], authorization: str | None = Header(default=None)) -> dict[str, Any]:
