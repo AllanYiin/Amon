@@ -49,6 +49,13 @@ class UIAsyncAPITests(unittest.TestCase):
                 self.assertEqual(payload["status"], "ok")
                 self.assertIn("queue_depth", payload)
                 self.assertIn("recent_error_rate", payload)
+                self.assertIn("observability", payload)
+                self.assertEqual(payload["observability"]["schema_version"], "v0.1")
+                self.assertEqual(payload["observability"]["links"]["metrics"], "/metrics")
+                self.assertEqual(
+                    payload["recent_error_rate"]["window_seconds"],
+                    payload["observability"]["metrics_window_seconds"],
+                )
                 self.assertGreaterEqual(payload["recent_error_rate"]["request_count"], 2)
                 self.assertGreaterEqual(payload["recent_error_rate"]["error_count"], 1)
             finally:
@@ -56,6 +63,44 @@ class UIAsyncAPITests(unittest.TestCase):
                     server.shutdown()
                     server.server_close()
                 os.environ.pop("AMON_HOME", None)
+
+    def test_metrics_endpoint_exposes_health_counters(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                conn.request("GET", "/health")
+                health_response = conn.getresponse()
+                health_response.read()
+                self.assertEqual(health_response.status, 200)
+
+                conn.request("GET", "/metrics")
+                response = conn.getresponse()
+                payload = response.read().decode("utf-8")
+
+                self.assertEqual(response.status, 200)
+                self.assertIn("text/plain", response.getheader("Content-Type", ""))
+                self.assertIn("amon_ui_queue_depth", payload)
+                self.assertIn("amon_ui_request_total", payload)
+                self.assertIn("amon_ui_error_total", payload)
+                self.assertIn("amon_ui_error_rate", payload)
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
 
     def test_chat_stream_emits_immediate_notice_without_project(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

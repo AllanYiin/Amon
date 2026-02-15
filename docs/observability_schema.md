@@ -1,37 +1,54 @@
-# Observability Schema Contract
+# Observability Schema（Phase C 小步）
 
-此文件定義 Amon logs/events 的最小關聯欄位契約，目標是讓重要行為可跨模組追蹤與關聯。
+本文定義 Amon 現階段可觀測性最小 schema，先覆蓋 UI server 的 `/health` 與 `/metrics`。
 
-## 必備關聯欄位
+## 1. `/health` JSON schema（v0.1）
 
-以下欄位在重要事件中應存在（可為 `null`，但鍵不可缺漏）：
+`GET /health`
 
-- `project_id`：專案 ID。無專案情境時使用虛擬值 `__virtual__`。
-- `run_id`：graph/runtime 的執行批次 ID。
-- `node_id`：graph node ID。
-- `event_id`：事件唯一 ID。
-- `request_id`：UI task、SSE 或 sandbox runner request 追蹤 ID。
-- `tool`：工具呼叫名稱（例如 `filesystem.read`）。
+```json
+{
+  "status": "ok",
+  "service": "amon-ui-server",
+  "queue_depth": 0,
+  "recent_error_rate": {
+    "window_seconds": 300,
+    "request_count": 12,
+    "error_count": 1,
+    "error_rate": 0.0833,
+    "uptime_seconds": 42
+  },
+  "observability": {
+    "schema_version": "v0.1",
+    "metrics_window_seconds": 300,
+    "links": {
+      "metrics": "/metrics"
+    }
+  }
+}
+```
 
-## 模組對應
+### 欄位關聯
 
-- `amon.events`（event bus）
-  - 透過 `emit_event(...)` 落地到 `~/.amon/events/events.jsonl`。
-  - 會補齊關聯欄位，並對 `project_id` 套用虛擬專案 fallback。
+- `recent_error_rate.window_seconds` 與 `observability.metrics_window_seconds` 應一致（同一個 rolling window）。
+- `queue_depth` 與 `/metrics` 的 `amon_ui_queue_depth` 對應。
+- `recent_error_rate.request_count` / `error_count` / `error_rate` 分別對應 `/metrics` 的：
+  - `amon_ui_request_total`
+  - `amon_ui_error_total`
+  - `amon_ui_error_rate`
 
-- `graph_runtime`
-  - `runs/<run_id>/events.jsonl` 的每筆 run/node 事件都包含關聯欄位。
-  - 若由 UI 任務觸發，`request_id` 會從 API task 帶入 runtime。
+## 2. `/metrics` 指標（Prometheus text format）
 
-- `tooling.audit`
-  - `logs/tool_audit.jsonl` 保留工具稽核資訊，並新增 run/node/event/request 關聯鍵。
+`GET /metrics`
 
-- `ui_server`
-  - `/v1/chat/stream` 的 SSE payload 會補齊關聯欄位。
-  - 未帶 project 時，自動補 `project_id=__virtual__` 以便串接追蹤。
+目前最小集合：
 
-## 相容性原則
+- `amon_ui_queue_depth`（gauge）
+- `amon_ui_request_total`（rolling window gauge）
+- `amon_ui_error_total`（rolling window gauge）
+- `amon_ui_error_rate`（rolling window gauge）
 
-- 新欄位以「補齊不破壞」方式加入，不移除既有欄位。
-- 既有消費端只讀取既有鍵仍可運作。
-- 所有識別欄位禁止寫入敏感資訊（token/key/password/PII）。
+## 3. 相容性策略
+
+- `schema_version` 採明示版本，未來新增欄位以「向後相容」為原則。
+- 現有欄位不移除；若需汰換欄位，先新增替代欄位並標記 deprecated。
