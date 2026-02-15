@@ -37,6 +37,7 @@ from amon.config import ConfigLoader
 from amon.daemon.queue import get_queue_depth
 from amon.events import emit_event
 from amon.jobs.runner import start_job
+from amon.observability import ensure_correlation_fields, normalize_project_id
 from amon.tooling.audit import default_audit_log_path
 from .core import AmonCore, ProjectRecord
 from .logging import log_event
@@ -82,6 +83,7 @@ class _TaskManager:
                     graph_path=resolved_graph_path,
                     variables=variables,
                     run_id=run_id,
+                    request_id=request_id,
                 )
                 with self._lock:
                     self._tasks[request_id]["status"] = "completed"
@@ -1098,6 +1100,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         chat_id = params.get("chat_id", [""])[0].strip()
         message = params.get("message", [""])[0].strip()
         last_event_id_raw = params.get("last_event_id", [""])[0].strip()
+        request_id = uuid.uuid4().hex
 
         if not message:
             self.send_error(400, "缺少 message")
@@ -1121,7 +1124,13 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         def send_event(event: str, data: dict[str, Any] | str) -> None:
             nonlocal event_seq
             event_seq += 1
-            payload = data if isinstance(data, str) else json.dumps(data, ensure_ascii=False)
+            payload_obj = {"text": data} if isinstance(data, str) else dict(data)
+            payload_obj = ensure_correlation_fields(
+                payload_obj,
+                project_id=project_id,
+                request_id=request_id,
+            )
+            payload = json.dumps(payload_obj, ensure_ascii=False)
             self.wfile.write(f"id: {event_seq}\n".encode("utf-8"))
             self.wfile.write(f"event: {event}\n".encode("utf-8"))
             for line in payload.splitlines() or [""]:
@@ -1165,7 +1174,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         {
                             "level": "INFO",
                             "event": "ui_chat_stream_project_bootstrapped",
-                            "project_id": project_id,
+                            "project_id": normalize_project_id(project_id),
                         }
                     )
                     send_event(

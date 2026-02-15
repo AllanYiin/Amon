@@ -70,6 +70,53 @@ class GraphRuntimeTests(unittest.TestCase):
             self.assertTrue(output_path.exists())
             self.assertEqual(output_path.read_text(encoding="utf-8"), "Hello Amon")
 
+
+    def test_graph_runtime_events_include_correlation_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("Graph 關聯欄位")
+                project_path = Path(project.path)
+                graph = {
+                    "nodes": [
+                        {
+                            "id": "write",
+                            "type": "write_file",
+                            "path": "docs/check.txt",
+                            "content": "ok",
+                        }
+                    ],
+                    "edges": [],
+                }
+                graph_path = project_path / "graph.json"
+                graph_path.write_text(json.dumps(graph, ensure_ascii=False), encoding="utf-8")
+                runtime = GraphRuntime(
+                    core=core,
+                    project_path=project_path,
+                    graph_path=graph_path,
+                    run_id="run-correlation",
+                    request_id="req-correlation",
+                )
+                result = runtime.run()
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+            events_path = result.run_dir / "events.jsonl"
+            events = [
+                json.loads(line)
+                for line in events_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertGreaterEqual(len(events), 2)
+            for item in events:
+                for key in ("project_id", "run_id", "node_id", "event_id", "request_id", "tool"):
+                    self.assertIn(key, item)
+                self.assertEqual(item["project_id"], project.project_id)
+                self.assertEqual(item["run_id"], "run-correlation")
+                self.assertEqual(item["request_id"], "req-correlation")
+
     def test_graph_template_parametrize_and_run(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir

@@ -47,5 +47,28 @@ class EventBusTests(unittest.TestCase):
             self.assertIsNotNone(parsed_ts.tzinfo)
 
 
+    def test_emit_event_uses_virtual_project_id_when_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                emit_event(
+                    {
+                        "type": "system.ping",
+                        "scope": "system",
+                        "actor": "system",
+                        "payload": {"ok": True},
+                        "risk": "low",
+                    }
+                )
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+            events_path = Path(temp_dir) / "events" / "events.jsonl"
+            payload = json.loads(events_path.read_text(encoding="utf-8").strip().splitlines()[0])
+            self.assertEqual(payload["project_id"], "__virtual__")
+            for key in ("run_id", "node_id", "request_id", "tool"):
+                self.assertIn(key, payload)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -33,6 +33,10 @@ class ToolCall:
     caller: str = "agent"
     project_id: str | None = None
     session_id: str | None = None
+    run_id: str | None = None
+    node_id: str | None = None
+    event_id: str | None = None
+    request_id: str | None = None
     ts_ms: int = field(
         default_factory=lambda: int(datetime.now(tz=timezone.utc).timestamp() * 1000)
     )
