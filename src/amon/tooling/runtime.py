@@ -32,6 +32,9 @@ HIGH_RISK_DENY_TOOLS = (
     "filesystem.delete",
     "process.exec",
     "terminal.exec",
+    "terminal.session.start",
+    "terminal.session.exec",
+    "terminal.session.stop",
 )
 
 
