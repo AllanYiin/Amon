@@ -82,13 +82,10 @@ def _first_match(call: ToolCall, patterns: Iterable[str]) -> str | None:
 
 
 def _matches_pattern(call: ToolCall, pattern: str) -> bool:
-    tool_name, sep, cmd_glob = pattern.partition(":")
-    if sep:
-        if call.tool != tool_name:
-            return False
-        command = call.args.get("command") or call.args.get("cmd")
-        if not isinstance(command, str):
-            return False
+    command = call.args.get("command") or call.args.get("cmd")
+    command_pattern_prefix = f"{call.tool}:"
+    if isinstance(command, str) and pattern.startswith(command_pattern_prefix):
+        cmd_glob = pattern[len(command_pattern_prefix) :]
         return fnmatch(command, cmd_glob)
     return fnmatch(call.tool, pattern)
 
