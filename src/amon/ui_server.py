@@ -248,6 +248,44 @@ class _HealthMetrics:
 _HEALTH_METRICS = _HealthMetrics()
 
 
+def _build_health_payload() -> dict[str, Any]:
+    metrics = _HEALTH_METRICS.summary()
+    return {
+        "status": "ok",
+        "service": "amon-ui-server",
+        "queue_depth": get_queue_depth(),
+        "recent_error_rate": metrics,
+        "observability": {
+            "schema_version": "v0.1",
+            "metrics_window_seconds": metrics["window_seconds"],
+            "links": {
+                "metrics": "/metrics",
+            },
+        },
+    }
+
+
+def _build_metrics_text() -> str:
+    summary = _HEALTH_METRICS.summary()
+    queue_depth = get_queue_depth()
+    lines = [
+        "# HELP amon_ui_queue_depth Number of pending UI async tasks.",
+        "# TYPE amon_ui_queue_depth gauge",
+        f"amon_ui_queue_depth {queue_depth}",
+        "# HELP amon_ui_request_total Number of HTTP requests seen in the rolling window.",
+        "# TYPE amon_ui_request_total gauge",
+        f"amon_ui_request_total {summary['request_count']}",
+        "# HELP amon_ui_error_total Number of HTTP error responses seen in the rolling window.",
+        "# TYPE amon_ui_error_total gauge",
+        f"amon_ui_error_total {summary['error_count']}",
+        "# HELP amon_ui_error_rate Recent HTTP error rate in the rolling window.",
+        "# TYPE amon_ui_error_rate gauge",
+        f"amon_ui_error_rate {summary['error_rate']}",
+        "",
+    ]
+    return "\n".join(lines)
+
+
 def _resolve_command_plan_from_router(message: str, router_result: RouterResult) -> tuple[str, dict[str, Any]]:
     if router_result.api and isinstance(router_result.args, dict):
         return router_result.api, dict(router_result.args)
@@ -280,15 +318,15 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         _HEALTH_METRICS.record_request()
         parsed = urlparse(self.path)
         if parsed.path == "/health":
-            self._send_json(
-                200,
-                {
-                    "status": "ok",
-                    "service": "amon-ui-server",
-                    "queue_depth": get_queue_depth(),
-                    "recent_error_rate": _HEALTH_METRICS.summary(),
-                },
-            )
+            self._send_json(200, _build_health_payload())
+            return
+        if parsed.path == "/metrics":
+            body = _build_metrics_text().encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
             return
         if self.path.startswith("/v1/"):
             self._handle_api_get()
