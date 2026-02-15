@@ -371,15 +371,24 @@ class GraphRuntime:
         if node_type == "sandbox_run":
             language = self._render_template(str(node.get("language") or "python"), node_vars)
             code = self._render_template(str(node.get("code") or ""), node_vars)
+            code_file = self._render_template(str(node.get("code_file") or ""), node_vars)
+            if code.strip() and code_file:
+                raise ValueError("sandbox_run node 只能提供 code 或 code_file 其中之一")
+            if not code.strip() and code_file:
+                code_path = canonicalize_path(self.project_path / code_file, [self.project_path])
+                code = code_path.read_text(encoding="utf-8")
             if not code.strip():
-                raise ValueError("sandbox_run node 缺少 code")
-            raw_input_paths = node.get("input_paths") or []
-            input_paths = [self._render_template(str(path), node_vars) for path in raw_input_paths]
+                raise ValueError("sandbox_run node 缺少 code 或 code_file")
+            raw_input_files = node.get("input_files")
+            if raw_input_files is None:
+                raw_input_files = node.get("input_paths") or []
+            input_paths = [self._render_template(str(path), node_vars) for path in raw_input_files]
             output_prefix = node.get("output_prefix")
             if output_prefix:
                 output_prefix = self._render_template(str(output_prefix), node_vars)
             else:
                 output_prefix = f"docs/artifacts/{run_id}/{node.get('id')}/"
+            overwrite = bool(node.get("overwrite", False))
             service_result = run_sandbox_step(
                 project_path=self.project_path,
                 config=self.core.load_config(self.project_path),
@@ -390,6 +399,7 @@ class GraphRuntime:
                 input_paths=input_paths,
                 output_prefix=output_prefix,
                 timeout_s=timeout_s,
+                overwrite=overwrite,
             )
             manifest_path = self._to_relative_project_path(service_result.get("manifest_path"))
             artifact_files = [self._to_relative_project_path(path) for path in service_result.get("written_files", [])]
@@ -406,6 +416,16 @@ class GraphRuntime:
                     "outputs": service_result.get("outputs", []),
                 },
             }
+            self._append_event(
+                self.project_path / ".amon" / "runs" / run_id / "events.jsonl",
+                {
+                    "event": "sandbox_run_summary",
+                    "node_id": node.get("id"),
+                    "exit_code": result.get("exit_code"),
+                    "manifest_path": manifest_path,
+                    "written_files": artifact_files,
+                },
+            )
             if store_key := node.get("store_output"):
                 variables[store_key] = result
             return result

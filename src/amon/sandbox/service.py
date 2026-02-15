@@ -28,6 +28,7 @@ def run_sandbox_step(
     input_paths: list[str] | None = None,
     output_prefix: str | None = None,
     timeout_s: int | None = None,
+    overwrite: bool = False,
 ) -> dict[str, Any]:
     """Run code via sandbox runner and persist request/result/artifact records."""
 
@@ -70,6 +71,11 @@ def run_sandbox_step(
         output_prefix=output_prefix,
     )
     rewritten = rewrite_output_paths(result.get("output_files", []), output_base)
+    _ensure_output_targets(
+        project_root=project_path.resolve(),
+        rewritten_output_files=rewritten,
+        overwrite=overwrite,
+    )
     written = unpack_output_files(project_path, rewritten, allowed_prefixes=_ALLOWED_PREFIXES)
 
     result_record = {
@@ -109,6 +115,16 @@ def run_sandbox_step(
         "written_files": [str(path.resolve()) for path in written],
         "outputs": outputs_meta,
     }
+
+
+def _ensure_output_targets(*, project_root: Path, rewritten_output_files: list[dict[str, Any]], overwrite: bool) -> None:
+    if overwrite:
+        return
+    for item in rewritten_output_files:
+        rel_path = validate_relative_path(str(item.get("path", "")))
+        target = (project_root / rel_path).resolve()
+        if target.exists():
+            raise FileExistsError(f"output 檔案已存在，請設定 overwrite=true：{rel_path}")
 
 
 def _file_metadata(path: Path, project_root: Path) -> dict[str, Any]:
