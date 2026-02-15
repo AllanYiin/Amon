@@ -18,7 +18,7 @@
 ## Smoke 測試
 
 ```bash
-amon projects create "Quickstart"
+amon project create "Quickstart"
 amon graph run --project <project_id> --graph examples/quickstart_project/graph.json
 ```
 
@@ -32,3 +32,10 @@ amon graph run --project <project_id> --graph examples/quickstart_project/graph.
 - `docs/artifacts/<run_id>/sandbox_transform/result.txt`
 
 如果 `agent_task` 或 `sandbox_run` 失敗，請先確認 provider 與 sandbox 設定，再重新執行。
+
+
+## 一鍵驗證腳本
+
+```bash
+bash scripts/verify_usable.sh
+```
