@@ -5,6 +5,7 @@ from pathlib import Path
 
 from amon.core import AmonCore
 from amon.tooling.builtin import build_registry as build_builtin_registry
+from amon.tooling.runtime import build_registry as build_runtime_registry
 from amon.tooling.policy import ToolPolicy, WorkspaceGuard
 from amon.tooling.registry import ToolRegistry
 from amon.tooling.types import ToolCall, ToolResult, ToolSpec
@@ -31,6 +32,13 @@ class ToolPolicyTests(unittest.TestCase):
         policy = ToolPolicy(allow=("process.exec:git *",))
         call = ToolCall(tool="process.exec", args={"command": "git status"}, caller="tester")
         self.assertEqual(policy.decide(call), "allow")
+
+    def test_explain_returns_reason_with_match(self) -> None:
+        policy = ToolPolicy(allow=("filesystem.*",), ask=("web.*",), deny=("process.exec",))
+        decision, reason = policy.explain(ToolCall(tool="web.fetch", args={}, caller="tester"))
+
+        self.assertEqual(decision, "ask")
+        self.assertIn("符合 ask 規則", reason)
 
     def test_skill_context_does_not_change_policy_decision(self) -> None:
         policy = ToolPolicy(deny=("filesystem.*",))
@@ -63,7 +71,7 @@ class ToolPolicyTests(unittest.TestCase):
 
 
 class BuiltinRegistryTests(unittest.TestCase):
-    def test_web_tools_allowed_by_default_policy(self) -> None:
+    def test_web_tools_require_approval_by_default_policy(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             registry = build_builtin_registry(Path(tmpdir))
             fetch_result = registry.call(
@@ -71,9 +79,31 @@ class BuiltinRegistryTests(unittest.TestCase):
                     tool="web.fetch",
                     args={"url": "https://example.com"},
                     caller="tester",
+                ),
+                require_approval=True,
+            )
+            self.assertEqual(fetch_result.meta.get("status"), "approval_required")
+
+    def test_process_exec_denied_by_default_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            registry = build_builtin_registry(Path(tmpdir))
+            result = registry.call(
+                ToolCall(
+                    tool="process.exec",
+                    args={"command": "echo hi"},
+                    caller="tester",
                 )
             )
-            self.assertNotEqual(fetch_result.meta.get("status"), "denied")
+            self.assertEqual(result.meta.get("status"), "denied")
+
+
+class RuntimeRegistryTests(unittest.TestCase):
+    def test_runtime_defaults_follow_three_tiers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            registry = build_runtime_registry(Path(tmpdir), base_dirs=[])
+            self.assertEqual(registry.policy.decide(ToolCall(tool="filesystem.read", args={}, caller="tester")), "allow")
+            self.assertEqual(registry.policy.decide(ToolCall(tool="web.fetch", args={}, caller="tester")), "ask")
+            self.assertEqual(registry.policy.decide(ToolCall(tool="process.exec", args={"command": "pwd"}, caller="tester")), "deny")
 
 
 class WorkspaceGuardTests(unittest.TestCase):

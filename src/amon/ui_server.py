@@ -40,6 +40,7 @@ from amon.events import emit_event
 from amon.jobs.runner import start_job
 from amon.observability import ensure_correlation_fields, normalize_project_id
 from amon.tooling.audit import default_audit_log_path
+from amon.tooling.types import ToolCall
 from .core import AmonCore, ProjectRecord
 from .logging import log_event
 from .skills import build_skill_injection_preview
@@ -942,6 +943,13 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 if not tool_name:
                     continue
                 full_name = f"{server_name}:{tool_name}"
+                tool_risk = "high" if self.core._is_high_risk_tool(tool_name) else "medium"
+                decision = "deny" if tool_risk == "high" else "ask"
+                reason = (
+                    "高風險工具（可能寫入檔案、刪除資料或觸及機敏資訊）預設拒絕"
+                    if decision == "deny"
+                    else "中風險工具需人工確認後才可執行"
+                )
                 tools.append(
                     {
                         "type": "mcp",
@@ -949,16 +957,21 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         "version": tool.get("version") or "unknown",
                         "input_schema": tool.get("inputSchema") or tool.get("input_schema") or {},
                         "output_schema": tool.get("outputSchema") or tool.get("output_schema") or {},
-                        "risk": "high" if self.core._is_high_risk_tool(tool_name) else "medium",
+                        "risk": tool_risk,
                         "allowed_paths": config.get("tools", {}).get("allowed_paths", ["workspace"]),
                         "enabled": self.core._is_tool_allowed(full_name, config, server_map[server_name]) if server_name in server_map else True,
-                        "require_confirm": self.core._is_high_risk_tool(tool_name),
+                        "require_confirm": decision == "ask",
+                        "policy_decision": decision,
+                        "policy_reason": reason,
                         "recent_usage": recent_usage.get(full_name),
                     }
                 )
 
         for spec in self.core.tool_registry.list_specs():
             source = "forged" if spec.name.startswith("native:") else "built-in"
+            decision, reason = self.core.tool_registry.policy.explain(
+                ToolCall(tool=spec.name, args={}, caller="ui")
+            )
             tools.append(
                 {
                     "type": source,
@@ -969,7 +982,9 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     "risk": spec.risk,
                     "allowed_paths": config.get("tools", {}).get("allowed_paths", ["workspace"]),
                     "enabled": self._is_internal_tool_enabled(spec.name, config),
-                    "require_confirm": spec.name in set(self.core.tool_registry.policy.ask),
+                    "require_confirm": decision == "ask",
+                    "policy_decision": decision,
+                    "policy_reason": reason,
                     "recent_usage": recent_usage.get(spec.name),
                 }
             )
