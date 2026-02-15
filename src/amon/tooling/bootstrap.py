@@ -11,6 +11,7 @@ from .builtins.audit_tools import register_audit_tools
 from .builtins.filesystem import register_filesystem_tools
 from .builtins.memory import MemoryStore, register_memory_tools
 from .builtins.process import register_process_tools
+from .builtins.terminal import register_terminal_tools
 from .builtins.web import WebPolicy, register_web_tools
 from .policy import ToolPolicy, WorkspaceGuard
 from .registry import ToolRegistry
@@ -30,6 +31,7 @@ DEFAULT_ASK = (
     "filesystem.delete",
     "process.exec",
     "process.spawn",
+    "terminal.exec",
     "process.kill",
     "memory.put",
     "memory.delete",
@@ -60,6 +62,7 @@ def build_default_registry(workspace_root: Path, config: dict[str, Any] | None =
         registry,
         allowlist=tuple(config.get("process_allowlist", ())),
     )
+    register_terminal_tools(registry)
     register_web_tools(
         registry,
         policy=WebPolicy(

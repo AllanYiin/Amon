@@ -33,6 +33,11 @@ class ToolPolicyTests(unittest.TestCase):
         call = ToolCall(tool="process.exec", args={"command": "git status"}, caller="tester")
         self.assertEqual(policy.decide(call), "allow")
 
+    def test_namespaced_tool_pattern_still_matches_tool_name(self) -> None:
+        policy = ToolPolicy(allow=("native:*",))
+        call = ToolCall(tool="native:hello", args={"text": "hi"}, caller="tester")
+        self.assertEqual(policy.decide(call), "allow")
+
     def test_explain_returns_reason_with_match(self) -> None:
         policy = ToolPolicy(allow=("filesystem.*",), ask=("web.*",), deny=("process.exec",))
         decision, reason = policy.explain(ToolCall(tool="web.fetch", args={}, caller="tester"))
@@ -104,6 +109,7 @@ class RuntimeRegistryTests(unittest.TestCase):
             self.assertEqual(registry.policy.decide(ToolCall(tool="filesystem.read", args={}, caller="tester")), "allow")
             self.assertEqual(registry.policy.decide(ToolCall(tool="web.fetch", args={}, caller="tester")), "ask")
             self.assertEqual(registry.policy.decide(ToolCall(tool="process.exec", args={"command": "pwd"}, caller="tester")), "deny")
+            self.assertEqual(registry.policy.decide(ToolCall(tool="terminal.exec", args={"command": "pwd"}, caller="tester")), "deny")
 
 
 class WorkspaceGuardTests(unittest.TestCase):
