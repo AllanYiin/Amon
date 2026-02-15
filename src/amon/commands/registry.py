@@ -42,3 +42,11 @@ def get_command(name: str) -> CommandDefinition | None:
 
 def clear_commands() -> None:
     _COMMANDS.clear()
+
+
+def ensure_default_commands_initialized() -> None:
+    """Bootstrap built-in commands into registry if needed."""
+
+    from .executor import _ensure_default_commands
+
+    _ensure_default_commands()
