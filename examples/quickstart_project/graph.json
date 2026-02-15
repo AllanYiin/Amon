@@ -1,0 +1,46 @@
+{
+  "nodes": [
+    {
+      "id": "write_hello",
+      "type": "write_file",
+      "path": "docs/hello.txt",
+      "content": "Hello from Amon quickstart!"
+    },
+    {
+      "id": "agent_brief",
+      "type": "agent_task",
+      "prompt": "請用 2 句話說明這個 Quickstart graph 會做什麼，語氣簡潔。",
+      "output_path": "docs/agent_brief.md"
+    },
+    {
+      "id": "sandbox_transform",
+      "type": "sandbox_run",
+      "language": "python",
+      "input_paths": [
+        "docs/hello.txt"
+      ],
+      "code": "from pathlib import Path\n\ninput_path = Path('/input/docs/hello.txt')\ntext = input_path.read_text(encoding='utf-8').strip()\nresult = f'Processed by sandbox: {text}'\noutput_path = Path('/output/result.txt')\noutput_path.parent.mkdir(parents=True, exist_ok=True)\noutput_path.write_text(result + '\\n', encoding='utf-8')\nprint('sandbox done')"
+    },
+    {
+      "id": "write_result_note",
+      "type": "write_file",
+      "path": "docs/quickstart_result.md",
+      "content": "Quickstart 完成：請查看 docs/hello.txt、docs/agent_brief.md，以及 sandbox 輸出 docs/artifacts/<run_id>/sandbox_transform/result.txt。"
+    }
+  ],
+  "edges": [
+    {
+      "from": "write_hello",
+      "to": "agent_brief"
+    },
+    {
+      "from": "agent_brief",
+      "to": "sandbox_transform"
+    },
+    {
+      "from": "sandbox_transform",
+      "to": "write_result_note"
+    }
+  ],
+  "variables": {}
+}
