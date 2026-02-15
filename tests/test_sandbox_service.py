@@ -98,6 +98,38 @@ class SandboxServiceTests(unittest.TestCase):
             self.assertEqual(summary["exit_code"], 0)
             self.assertEqual(summary["outputs"][0]["path"], "docs/artifacts/run-1/step-1/hello.txt")
 
+    @patch("amon.sandbox.client.request.urlopen")
+    def test_run_sandbox_step_writes_bash_source_file(self, mock_urlopen) -> None:
+        mock_urlopen.return_value = _MockHTTPResponse(
+            {
+                "request_id": "req-bash",
+                "job_id": "job-bash",
+                "exit_code": 0,
+                "timed_out": False,
+                "duration_ms": 10,
+                "stdout": "ok",
+                "stderr": "",
+                "output_files": [],
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project = Path(temp_dir)
+            (project / "audits").mkdir(parents=True, exist_ok=True)
+            summary = run_sandbox_step(
+                project_path=project,
+                config={"sandbox": {"runner": {"base_url": "http://sandbox.local"}}},
+                run_id="run-bash",
+                step_id="step-bash",
+                language="bash",
+                code="echo ok",
+                output_prefix="audits/artifacts/run-bash/step-bash/",
+            )
+
+            run_step_dir = project / ".amon" / "runs" / "run-bash" / "sandbox" / "step-bash"
+            self.assertTrue((run_step_dir / "code.sh").exists())
+            self.assertEqual(summary["exit_code"], 0)
+
     def test_records_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             project = Path(temp_dir)

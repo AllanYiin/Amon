@@ -94,7 +94,7 @@ sandbox:
 
 ## 限制清單（預設）
 
-- `language` 目前只支援 `python`
+- `language` 目前支援 `python`、`bash`
 - `timeout_s`：1 ~ 120 秒
 - code 大小：128 KiB
 - input/output 檔案數量：最多 32

@@ -26,6 +26,7 @@ MEDIUM_RISK_ASK_TOOLS = (
     "filesystem.copy",
     "web.fetch",
     "web.search",
+    "sandbox.run",
 )
 
 HIGH_RISK_DENY_TOOLS = (
