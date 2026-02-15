@@ -330,6 +330,7 @@ docker run --rm -p 8088:8088 \
 ```
 
 > 若 runner 以容器方式執行，需能存取 Docker daemon（例如掛載 docker.sock），並評估此部署模式的主機安全風險。
+> 建議優先使用 host process + rootless docker，避免在容器中直接暴露 host docker socket。
 
 ### 4) docker compose 範例
 
@@ -345,8 +346,18 @@ services:
       AMON_SANDBOX_PORT: 8088
       AMON_SANDBOX_IMAGE: amon-sandbox-python:latest
       AMON_SANDBOX_MAX_CONCURRENCY: 4
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+```
+
+安全預設（不掛 docker.sock）：
+
+```bash
+docker compose -f tools/sandbox/docker-compose.yml up
+```
+
+高風險模式（手動 opt-in，才掛 docker.sock）：
+
+```bash
+docker compose -f tools/sandbox/docker-compose.with-docker-sock.yml up
 ```
 
 ### 5) API request/response（MVP）
