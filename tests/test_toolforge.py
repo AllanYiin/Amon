@@ -33,6 +33,8 @@ def _write_sample_tool(tool_dir: Path, name: str = "sample", risk: str = "low") 
             "required": ["result"],
         },
         "default_permission": "allow" if risk != "high" else "ask",
+        "permissions": {"allow": [f"native:{name}"]},
+        "examples": [{"name": "basic", "input": {"text": "demo"}}],
     }
     tool_dir.mkdir(parents=True, exist_ok=True)
     (tool_dir / "tool.yaml").write_text(
@@ -77,7 +79,22 @@ class ToolforgeTests(unittest.TestCase):
             _write_sample_tool(tool_dir, name="demo")
             manifest, violations = parse_native_manifest(tool_dir, strict=True)
             self.assertEqual(manifest.name, "demo")
+            self.assertEqual(manifest.permissions, {"allow": ["native:demo"]})
+            self.assertEqual(len(manifest.examples or []), 1)
             self.assertEqual(violations, [])
+
+    def test_manifest_permissions_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tool_dir = Path(temp_dir)
+            _write_sample_tool(tool_dir, name="demo")
+            tool_yaml = yaml.safe_load((tool_dir / "tool.yaml").read_text(encoding="utf-8"))
+            tool_yaml["permissions"] = {"allow": "native:demo"}
+            (tool_dir / "tool.yaml").write_text(
+                yaml.safe_dump(tool_yaml, allow_unicode=True, sort_keys=False),
+                encoding="utf-8",
+            )
+            with self.assertRaises(Exception):
+                parse_native_manifest(tool_dir, strict=True)
 
     def test_rejects_high_risk_allow(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -120,6 +137,65 @@ class ToolforgeTests(unittest.TestCase):
                 payload = json.loads(output)
                 self.assertEqual(payload.get("status"), "ok")
                 self.assertEqual(payload.get("text"), "HI")
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+    def test_toolforge_syncs_registry(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                source = Path(temp_dir) / "source"
+                _write_sample_tool(source, name="hello")
+                core.toolforge_install(source)
+                registry_path = Path(temp_dir) / "cache" / "tool_registry.json"
+                payload = json.loads(registry_path.read_text(encoding="utf-8"))
+                native_entries = [item for item in payload.get("tools", []) if item.get("kind") == "native"]
+                self.assertEqual(len(native_entries), 1)
+                self.assertEqual(native_entries[0]["status"], "active")
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+    def test_toolforge_verify_report_with_tests(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                source = Path(temp_dir) / "source"
+                _write_sample_tool(source, name="hello")
+                core.toolforge_install(source)
+                report = core.toolforge_verify_report()
+                self.assertEqual(report["summary"]["total"], 1)
+                self.assertEqual(report["tools"][0]["tests"]["status"], "skipped")
+
+                tests_dir = Path(report["tools"][0]["path"]) / "tests"
+                tests_dir.mkdir(exist_ok=True)
+                (tests_dir / "test_tool.py").write_text("""import unittest
+
+
+class T(unittest.TestCase):
+    def test_ok(self):
+        self.assertTrue(True)
+""", encoding="utf-8")
+                report2 = core.toolforge_verify_report()
+                self.assertEqual(report2["tools"][0]["tests"]["status"], "passed")
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+    def test_toolforge_revoke_and_enable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                source = Path(temp_dir) / "source"
+                _write_sample_tool(source, name="hello")
+                core.toolforge_install(source)
+                disabled = core.toolforge_set_status("hello", "disabled")
+                self.assertEqual(disabled["status"], "disabled")
+                report = core.toolforge_verify_report()
+                self.assertEqual(report["tools"][0]["status"], "disabled")
+                enabled = core.toolforge_set_status("hello", "active")
+                self.assertEqual(enabled["status"], "active")
             finally:
                 os.environ.pop("AMON_HOME", None)
 

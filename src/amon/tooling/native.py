@@ -29,6 +29,8 @@ class NativeToolManifest:
     input_schema: dict[str, Any]
     default_permission: str
     output_schema: dict[str, Any] | None = None
+    examples: list[dict[str, Any]] | None = None
+    permissions: dict[str, list[str]] | None = None
 
     @property
     def namespaced_name(self) -> str:
@@ -53,6 +55,7 @@ class NativeToolInfo:
     project_id: str | None
     sha256: str
     violations: list[str]
+    status: str = "active"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -66,6 +69,7 @@ class NativeToolInfo:
             "project_id": self.project_id,
             "sha256": self.sha256,
             "violations": list(self.violations),
+            "status": self.status,
         }
 
 
@@ -113,6 +117,39 @@ def parse_native_manifest(tool_dir: Path, *, strict: bool = True) -> tuple[Nativ
     if output_schema is not None and not isinstance(output_schema, dict):
         violations.append("output_schema 必須為物件")
         output_schema = None
+    examples = raw.get("examples")
+    if examples is not None:
+        if not isinstance(examples, list):
+            violations.append("examples 必須為陣列")
+            examples = None
+        else:
+            normalized_examples: list[dict[str, Any]] = []
+            for idx, example in enumerate(examples):
+                if not isinstance(example, dict):
+                    violations.append(f"examples[{idx}] 必須為物件")
+                    continue
+                normalized_examples.append(example)
+            examples = normalized_examples
+
+    permissions = raw.get("permissions")
+    if permissions is not None:
+        if not isinstance(permissions, dict):
+            violations.append("permissions 必須為物件")
+            permissions = None
+        else:
+            normalized_permissions: dict[str, list[str]] = {}
+            unknown_keys = sorted(set(permissions) - {"allow", "ask", "deny"})
+            if unknown_keys:
+                violations.append(f"permissions 不支援欄位：{', '.join(unknown_keys)}")
+            for key in ("allow", "ask", "deny"):
+                value = permissions.get(key)
+                if value is None:
+                    continue
+                if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+                    violations.append(f"permissions.{key} 必須為字串陣列")
+                    continue
+                normalized_permissions[key] = value
+            permissions = normalized_permissions
     if strict and violations:
         raise ToolingError("; ".join(violations))
     manifest = NativeToolManifest(
@@ -123,6 +160,8 @@ def parse_native_manifest(tool_dir: Path, *, strict: bool = True) -> tuple[Nativ
         input_schema=input_schema,
         default_permission=default_permission,
         output_schema=output_schema,
+        examples=examples,
+        permissions=permissions,
     )
     return manifest, violations
 
@@ -131,6 +170,7 @@ def scan_native_tools(
     base_dirs: Iterable[tuple[str, Path]],
     *,
     project_id: str | None = None,
+    status_lookup: dict[tuple[str, str, str | None], str] | None = None,
 ) -> list[NativeToolInfo]:
     tools: list[NativeToolInfo] = []
     for scope, base in base_dirs:
@@ -161,6 +201,11 @@ def scan_native_tools(
                     project_id=project_id if scope == "project" else None,
                     sha256=sha256,
                     violations=violations,
+                    status=(
+                        status_lookup.get((manifest.name, scope, project_id if scope == "project" else None), "active")
+                        if status_lookup
+                        else "active"
+                    ),
                 )
             )
     return tools
