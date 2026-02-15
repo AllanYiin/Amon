@@ -130,6 +130,44 @@ class SandboxServiceTests(unittest.TestCase):
             self.assertTrue((run_step_dir / "code.sh").exists())
             self.assertEqual(summary["exit_code"], 0)
 
+
+    @patch("amon.sandbox.client.request.urlopen")
+    def test_run_sandbox_step_rejects_existing_output_when_overwrite_disabled(self, mock_urlopen) -> None:
+        mock_urlopen.return_value = _MockHTTPResponse(
+            {
+                "request_id": "req-overwrite",
+                "job_id": "job-overwrite",
+                "exit_code": 0,
+                "timed_out": False,
+                "duration_ms": 8,
+                "stdout": "ok",
+                "stderr": "",
+                "output_files": [
+                    {
+                        "path": "exists.txt",
+                        "content_b64": "bmV3",
+                    }
+                ],
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project = Path(temp_dir)
+            (project / "docs" / "artifacts" / "run-1" / "step-1").mkdir(parents=True, exist_ok=True)
+            (project / "docs" / "artifacts" / "run-1" / "step-1" / "exists.txt").write_text("old", encoding="utf-8")
+
+            with self.assertRaises(FileExistsError):
+                run_sandbox_step(
+                    project_path=project,
+                    config={"sandbox": {"runner": {"base_url": "http://sandbox.local"}}},
+                    run_id="run-1",
+                    step_id="step-1",
+                    language="python",
+                    code="print('ok')",
+                    output_prefix="docs/artifacts/run-1/step-1/",
+                    overwrite=False,
+                )
+
     def test_records_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             project = Path(temp_dir)
