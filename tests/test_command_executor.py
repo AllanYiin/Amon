@@ -115,6 +115,36 @@ class CommandExecutorTests(unittest.TestCase):
                 confirmed=True,
             )
 
+    def test_graph_patch_writes_audit_and_emits_event(self) -> None:
+        record = self.core.create_project("圖補丁專案")
+        chat_id = create_chat_session(record.project_id)
+        plan = CommandPlan(
+            name="graph.patch",
+            args={"message": "請將節點 A 連到節點 B"},
+            project_id=record.project_id,
+            chat_id=chat_id,
+        )
+
+        result = execute(plan, confirmed=True)
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["result"]["status"], "queued_for_review")
+        audit_path = Path(result["result"]["audit_path"])
+        self.assertTrue(audit_path.exists())
+        audit_records = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        self.assertEqual(len(audit_records), 1)
+        self.assertEqual(audit_records[0]["project_id"], record.project_id)
+        self.assertEqual(audit_records[0]["chat_id"], chat_id)
+        self.assertEqual(audit_records[0]["message"], "請將節點 A 連到節點 B")
+
+        events_path = self.core.data_dir / "events" / "events.jsonl"
+        self.assertTrue(events_path.exists())
+        events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        graph_patch_events = [event for event in events if event.get("type") == "graph.patch_requested"]
+        self.assertEqual(len(graph_patch_events), 1)
+        self.assertEqual(graph_patch_events[0]["project_id"], record.project_id)
+        self.assertEqual(graph_patch_events[0]["payload"]["chat_id"], chat_id)
+
 
 if __name__ == "__main__":
     unittest.main()
