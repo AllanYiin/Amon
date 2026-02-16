@@ -1,16 +1,18 @@
+import { t } from "../../../i18n.js";
+
 export function createTimelineRenderer({ executionAccordion, executionTimeline, escapeHtml, shortenId, getRunId }) {
   function executionStatusMeta(status = "pending") {
-    if (status === "succeeded") return { icon: "✅", label: "已完成" };
-    if (status === "running") return { icon: "🔄", label: "執行中" };
-    if (status === "failed") return { icon: "❌", label: "失敗" };
-    return { icon: "⚪", label: "等待中" };
+    if (status === "succeeded") return { icon: "✅", label: t("timeline.status.succeeded") };
+    if (status === "running") return { icon: "🔄", label: t("timeline.status.running") };
+    if (status === "failed") return { icon: "❌", label: t("timeline.status.failed") };
+    return { icon: "⚪", label: t("timeline.status.pending") };
   }
 
   function renderExecutionTimeline() {
     if (!executionAccordion) return;
     const items = Array.from(executionTimeline.values());
     if (!items.length) {
-      executionAccordion.innerHTML = '<p class="empty-context">尚無執行步驟。</p>';
+      executionAccordion.innerHTML = `<p class="empty-context">${t("timeline.empty")}</p>`;
       return;
     }
     executionAccordion.innerHTML = "";
@@ -22,8 +24,8 @@ export function createTimelineRenderer({ executionAccordion, executionTimeline, 
       details.innerHTML = `
         <summary>${statusMeta.icon} ${escapeHtml(item.title)} <span>${statusMeta.label}</span></summary>
         <div class="execution-step__body">
-          <p>${escapeHtml(item.details || "尚無詳細資訊")}</p>
-          <small>${item.inferred ? "推測來源（非結構化）" : "結構化事件"} · ${new Date(item.updatedAt).toLocaleTimeString("zh-TW", { hour12: false })}</small>
+          <p>${escapeHtml(item.details || t("timeline.noDetails"))}</p>
+          <small>${item.inferred ? t("timeline.inferred") : t("timeline.structured")} · ${new Date(item.updatedAt).toLocaleTimeString("zh-TW", { hour12: false })}</small>
         </div>
       `;
       executionAccordion.appendChild(details);
@@ -45,26 +47,27 @@ export function createTimelineRenderer({ executionAccordion, executionTimeline, 
 
   function applyExecutionEvent(eventType, data = {}) {
     if (eventType === "token") {
-      updateExecutionStep("thinking", { title: "Thinking", status: "running", details: "模型正在輸出 token", inferred: false });
+      updateExecutionStep("thinking", { title: t("timeline.step.thinking"), status: "running", details: t("timeline.tokenOutput"), inferred: false });
       return;
     }
     if (eventType === "plan") {
-      updateExecutionStep("planning", { title: "Planning", status: "running", details: "已產生 Plan Card，等待確認", inferred: false });
+      updateExecutionStep("planning", { title: t("timeline.step.planning"), status: "running", details: t("timeline.planWaiting"), inferred: false });
       return;
     }
     if (eventType === "result") {
-      updateExecutionStep("tool_execution", { title: "Tool execution", status: "succeeded", details: "工具呼叫已回傳結果", inferred: false });
+      updateExecutionStep("tool_execution", { title: t("timeline.step.toolExecution"), status: "succeeded", details: t("timeline.toolReturned"), inferred: false });
       return;
     }
     if (eventType === "done") {
-      updateExecutionStep("thinking", { title: "Thinking", status: "succeeded", details: `流程完成（${data.status || "ok"}）`, inferred: false });
-      updateExecutionStep("planning", { title: "Planning", status: data.status === "confirm_required" ? "running" : "succeeded", details: data.status === "confirm_required" ? "等待使用者確認" : "規劃流程已完成", inferred: false });
+      const status = data.status || "ok";
+      updateExecutionStep("thinking", { title: t("timeline.step.thinking"), status: "succeeded", details: t("timeline.done", "", { status }), inferred: false });
+      updateExecutionStep("planning", { title: t("timeline.step.planning"), status: status === "confirm_required" ? "running" : "succeeded", details: status === "confirm_required" ? t("timeline.waitingConfirm") : t("timeline.planDone"), inferred: false });
       const runId = getRunId();
-      updateExecutionStep("node_status", { title: "Node 狀態", status: data.status === "ok" ? "succeeded" : "running", details: runId ? `Run ${shortenId(runId)} 已更新` : "等待下一次 context refresh", inferred: true });
+      updateExecutionStep("node_status", { title: t("timeline.step.nodeStatus"), status: status === "ok" ? "succeeded" : "running", details: runId ? t("timeline.runUpdated", "", { runId: shortenId(runId) }) : t("timeline.waitingContextRefresh"), inferred: true });
       return;
     }
     if (eventType === "error") {
-      updateExecutionStep("tool_execution", { title: "Tool execution", status: "failed", details: data.message || "執行時發生錯誤", inferred: false });
+      updateExecutionStep("tool_execution", { title: t("timeline.step.toolExecution"), status: "failed", details: data.message || t("timeline.error"), inferred: false });
     }
   }
 

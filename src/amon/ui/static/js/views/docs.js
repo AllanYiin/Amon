@@ -1,3 +1,5 @@
+import { t } from "../i18n.js";
+
 function getProjectId(ctx) {
   return ctx.store?.getState?.()?.layout?.projectId || "";
 }
@@ -45,7 +47,7 @@ export const DOCS_VIEW = {
       state.filtered = q
         ? state.docs.filter((doc) => `${doc.name} ${doc.path}`.toLowerCase().includes(q))
         : [...state.docs];
-      metaEl.textContent = `共 ${state.filtered.length} / ${state.docs.length} 份文件`;
+      metaEl.textContent = t("view.docs.meta", "", { filtered: state.filtered.length, total: state.docs.length });
       viewport.innerHTML = "";
       state.filtered.forEach((doc) => {
         const row = document.createElement("button");
@@ -66,7 +68,7 @@ export const DOCS_VIEW = {
       if (!doc) return;
       state.selected = docId;
       titleEl.textContent = doc.path || doc.name;
-      previewEl.innerHTML = '<p class="empty-context">載入中...</p>';
+      previewEl.innerHTML = `<p class="empty-context">${t("view.docs.loading")}</p>`;
       try {
         const projectId = getProjectId(ctx);
         const current = await ctx.services.docs.getDoc(projectId, doc.path || doc.id);
@@ -74,16 +76,16 @@ export const DOCS_VIEW = {
         previewEl.querySelectorAll("pre code").forEach((block) => window.hljs?.highlightElement?.(block));
         dispatch({ list: state.filtered, current });
       } catch (error) {
-        previewEl.innerHTML = `<p class="empty-context">預覽失敗：${escapeHtml(error.message)}</p>`;
+        previewEl.innerHTML = `<p class="empty-context">${t("view.docs.previewFailed", "", { message: escapeHtml(error.message) })}</p>`;
       }
     }
 
     async function loadDocs() {
       const projectId = getProjectId(ctx);
       if (!projectId) {
-        metaEl.textContent = "請先選擇專案。";
-        viewport.innerHTML = '<p class="empty-context">尚未選擇專案。</p>';
-        previewEl.innerHTML = '<p class="empty-context">尚未選擇文件。</p>';
+        metaEl.textContent = t("view.docs.selectProject");
+        viewport.innerHTML = `<p class="empty-context">${t("view.docs.emptyProject")}</p>`;
+        previewEl.innerHTML = `<p class="empty-context">${t("view.docs.emptySelection")}</p>`;
         return;
       }
       state.docs = await ctx.services.docs.listDocs(projectId);

@@ -9,6 +9,10 @@ const dictionary = {
   "nav.billing": "計費",
   "topbar.project": "專案",
   "topbar.toggleContext": "收合右側面板",
+  "topbar.toggleContext.expand": "展開右側面板",
+  "topbar.toggleContext.collapse": "收合右側面板",
+  "topbar.toggleSidebar": "收合側欄",
+  "topbar.noProject": "無專案",
   "status.run.idle": "尚未有 Run",
   "status.run.running": "執行中",
   "status.run.completed": "已完成",
@@ -19,9 +23,9 @@ const dictionary = {
   "status.run.unavailable": "不可用",
   "status.daemon.idle": "尚未連線",
   "status.daemon.connected": "已連線",
-  "status.daemon.healthy": "Healthy",
+  "status.daemon.healthy": "連線正常",
   "status.daemon.reconnecting": "重新連線中",
-  "status.daemon.unavailable": "Unavailable",
+  "status.daemon.unavailable": "不可用",
   "status.daemon.disconnected": "已中斷",
   "status.daemon.error": "錯誤",
   "status.node.idle": "閒置",
@@ -32,15 +36,95 @@ const dictionary = {
   "status.node.unavailable": "不可用",
   "empty.docs.title": "尚無文件",
   "action.deleteContext.confirmTitle": "確認刪除 Context",
+  "a11y.sidebar": "主要導覽",
+  "a11y.topbar": "工作列",
+  "a11y.inspector.tablist": "Inspector 檢視器切換",
+  "a11y.executionTimeline": "執行時間軸",
+  "a11y.contextResizer": "調整右側面板寬度",
+  "placeholder.chatInput": "輸入你的需求，例如：建立專案 Amon Demo",
+  "placeholder.docsFilter": "搜尋檔名或路徑（僅前端篩選）",
+  "modal.confirm.title": "請再次確認",
+  "modal.confirm.description": "這個動作無法復原，是否繼續？",
+  "modal.confirm.cancel": "取消",
+  "modal.confirm.ok": "確認",
+  "tab.run": "Run",
+  "tab.graph": "Graph",
+  "tab.artifacts": "Artifacts",
+  "tab.logs": "Logs",
+  "button.copyRunId": "複製 Run ID",
+  "button.copyRunIdAria": "複製目前 Run ID",
+  "button.collapseGraphNode": "關閉節點詳情",
+  "tooltip.runIdle": "尚未有 Run",
+  "tooltip.daemonIdle": "尚未連線 daemon",
+  "toast.default": "已完成操作",
+  "view.context.empty": "尚未載入 Context，請先輸入專案背景。",
+  "view.context.create": "新增 Context",
+  "toast.context.selectProject": "請先選擇專案後再儲存 Context。",
+  "toast.context.saved": "Context 已儲存。",
+  "toast.context.saveFailed": "儲存失敗：{message}",
+  "modal.context.clearTitle": "確認清空 Context",
+  "modal.context.clearDescription.project": "確定要清空專案 Context 嗎？",
+  "modal.context.clearDescription.chat": "確定要清空本次對話 Context 嗎？",
+  "modal.context.clearConfirm": "清空",
+  "modal.context.clearCancel": "取消",
+  "toast.context.cleared": "Context 已清空。",
+  "toast.context.clearFailed": "清空失敗：{message}",
+  "toast.context.loadFailed": "載入 Context 失敗：{message}",
+  "view.logs.loading": "載入中...",
+  "view.logs.loadingList": "正在查詢 logs。",
+  "view.logs.loadFailed": "載入失敗",
+  "view.logs.total": "共 {total} 筆",
+  "view.logs.empty": "查無資料",
+  "view.docs.meta": "共 {filtered} / {total} 份文件",
+  "view.docs.loading": "載入中...",
+  "view.docs.previewFailed": "預覽失敗：{message}",
+  "view.docs.selectProject": "請先選擇專案。",
+  "view.docs.emptyProject": "尚未選擇專案。",
+  "view.docs.emptySelection": "尚未選擇文件。",
+  "chat.role.user": "你",
+  "chat.role.agent": "Amon",
+  "chat.status.streaming": "streaming",
+  "timeline.status.succeeded": "已完成",
+  "timeline.status.running": "執行中",
+  "timeline.status.failed": "失敗",
+  "timeline.status.pending": "等待中",
+  "timeline.empty": "尚無執行步驟。",
+  "timeline.noDetails": "尚無詳細資訊",
+  "timeline.inferred": "推測來源（非結構化）",
+  "timeline.structured": "結構化事件",
+  "timeline.step.thinking": "Thinking",
+  "timeline.step.planning": "Planning",
+  "timeline.step.toolExecution": "Tool execution",
+  "timeline.step.nodeStatus": "Node 狀態",
+  "timeline.tokenOutput": "模型正在輸出 token",
+  "timeline.planWaiting": "已產生 Plan Card，等待確認",
+  "timeline.toolReturned": "工具呼叫已回傳結果",
+  "timeline.done": "流程完成（{status}）",
+  "timeline.waitingConfirm": "等待使用者確認",
+  "timeline.planDone": "規劃流程已完成",
+  "timeline.runUpdated": "Run {runId} 已更新",
+  "timeline.waitingContextRefresh": "等待下一次 context refresh",
+  "timeline.error": "執行時發生錯誤",
 };
 
-export function t(key, fallback = "") {
-  return dictionary[key] || fallback || key;
+export function t(key, fallback = "", vars = {}) {
+  const template = dictionary[key] || fallback || key;
+  return template.replace(/\{(\w+)\}/g, (_, token) => String(vars[token] ?? `{${token}}`));
 }
 
 export function applyI18n(root = document) {
   root.querySelectorAll("[data-i18n]").forEach((node) => {
     const key = node.getAttribute("data-i18n");
     node.textContent = t(key, node.textContent);
+  });
+
+  root.querySelectorAll("[data-i18n-attr]").forEach((node) => {
+    const mapping = (node.getAttribute("data-i18n-attr") || "").split(";").map((item) => item.trim()).filter(Boolean);
+    mapping.forEach((entry) => {
+      const [attrName, key] = entry.split(":").map((part) => part.trim());
+      if (!attrName || !key) return;
+      const fallback = node.getAttribute(attrName) || "";
+      node.setAttribute(attrName, t(key, fallback));
+    });
   });
 }

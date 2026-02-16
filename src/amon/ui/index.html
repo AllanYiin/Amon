@@ -20,7 +20,7 @@
   <body>
     <main class="page">
       <div class="ui-shell" id="ui-shell">
-        <aside class="shell-sidebar" aria-label="主要導覽">
+        <aside class="shell-sidebar" aria-label="主要導覽" data-i18n-attr="aria-label:a11y.sidebar">
           <h2>Amon UI</h2>
           <nav class="shell-nav" id="shell-nav">
             <a class="shell-nav__item shell-nav__link" data-shell-view="chat" data-route="chat" href="#/chat" data-i18n="nav.chat">對話</a>
@@ -35,18 +35,18 @@
         </aside>
 
         <section class="shell-main">
-          <header class="shell-topbar" aria-label="工作列">
+          <header class="shell-topbar" aria-label="工作列" data-i18n-attr="aria-label:a11y.topbar">
             <div class="shell-topbar__group">
               <label class="field-label shell-topbar__field">
                 <span data-i18n="topbar.project">專案</span>
                 <select id="project-select"></select>
               </label>
-              <span class="shell-status shell-status--run pill--neutral" id="shell-run-status" title="尚未有 Run">Run：尚未有 Run</span>
-              <span class="shell-status shell-status--daemon pill--neutral" id="shell-daemon-status" title="尚未連線 daemon">Daemon：尚未連線</span>
+              <span class="shell-status shell-status--run pill--neutral" id="shell-run-status" title="尚未有 Run" data-i18n="status.run.idle" data-i18n-attr="title:tooltip.runIdle">尚未有 Run</span>
+              <span class="shell-status shell-status--daemon pill--neutral" id="shell-daemon-status" title="尚未連線 daemon" data-i18n="status.daemon.idle" data-i18n-attr="title:tooltip.daemonIdle">尚未連線</span>
               <span class="shell-status shell-status--budget" id="shell-budget-status">Budget：NT$ 0 / NT$ 5,000</span>
             </div>
             <div class="shell-topbar__actions">
-              <button type="button" class="secondary-btn shell-sidebar-toggle" id="toggle-sidebar" aria-label="收合側欄">☰</button>
+              <button type="button" class="secondary-btn shell-sidebar-toggle" id="toggle-sidebar" aria-label="收合側欄" data-i18n-attr="aria-label:topbar.toggleSidebar">☰</button>
               <button type="button" class="secondary-btn shell-context-toggle" id="toggle-context-panel" aria-expanded="true" data-i18n="topbar.toggleContext">收合右側面板</button>
             </div>
           </header>
@@ -129,7 +129,7 @@
 
           <form id="chat-form" class="chat-input">
             <div class="chat-input__main">
-              <textarea id="chat-input" rows="4" placeholder="輸入你的需求，例如：建立專案 Amon Demo"></textarea>
+              <textarea id="chat-input" rows="4" placeholder="輸入你的需求，例如：建立專案 Amon Demo" data-i18n-attr="placeholder:placeholder.chatInput"></textarea>
               <div class="chat-input__toolbar">
                 <label class="file-btn">
                   加入附件
@@ -165,23 +165,23 @@
             </div>
           </div>
           <div class="context-project" id="context-project">目前專案：未選擇</div>
-          <div class="context-tabs" role="tablist" aria-label="Inspector 檢視器切換">
-            <button type="button" class="context-tab is-active" data-context-tab="run" role="tab" aria-selected="true">Run</button>
-            <button type="button" class="context-tab" data-context-tab="graph" role="tab" aria-selected="false">Graph</button>
-            <button type="button" class="context-tab" data-context-tab="artifacts" role="tab" aria-selected="false">Artifacts</button>
-            <button type="button" class="context-tab" data-context-tab="logs" role="tab" aria-selected="false">Logs</button>
+          <div class="context-tabs" role="tablist" aria-label="Inspector 檢視器切換" data-i18n-attr="aria-label:a11y.inspector.tablist">
+            <button type="button" class="context-tab is-active" id="tab-run" data-context-tab="run" role="tab" aria-selected="true" aria-controls="panel-run" tabindex="0" data-i18n="tab.run">Run</button>
+            <button type="button" class="context-tab" id="tab-graph" data-context-tab="graph" role="tab" aria-selected="false" aria-controls="panel-graph" tabindex="-1" data-i18n="tab.graph">Graph</button>
+            <button type="button" class="context-tab" id="tab-artifacts" data-context-tab="artifacts" role="tab" aria-selected="false" aria-controls="panel-artifacts" tabindex="-1" data-i18n="tab.artifacts">Artifacts</button>
+            <button type="button" class="context-tab" id="tab-logs" data-context-tab="logs" role="tab" aria-selected="false" aria-controls="panel-logs" tabindex="-1" data-i18n="tab.logs">Logs</button>
           </div>
 
-          <section class="context-section" data-context-panel="run">
+          <section class="context-section" id="panel-run" data-context-panel="run" role="tabpanel" aria-labelledby="tab-run">
             <h3>Run Inspector</h3>
             <p id="context-overview" class="context-overview">請先在上方選擇專案，右側內容會自動同步。</p>
           </section>
-          <section class="context-section" data-context-panel="graph" hidden>
+          <section class="context-section" id="panel-graph" data-context-panel="graph" role="tabpanel" aria-labelledby="tab-graph" hidden>
             <h3>Graph Preview</h3>
             <div class="graph-toolbar">
               <div class="graph-run-meta-wrap">
                 <span id="graph-run-meta" class="graph-run-meta">尚未偵測到 Run</span>
-                <button type="button" class="secondary-btn small" id="copy-run-id" disabled>複製 Run ID</button>
+                <button type="button" class="secondary-btn small" id="copy-run-id" disabled data-i18n="button.copyRunId" data-i18n-attr="aria-label:button.copyRunIdAria">複製 Run ID</button>
               </div>
               <div class="graph-toolbar__actions">
                 <button type="button" class="secondary-btn" id="graph-create-template">Create template</button>
@@ -191,7 +191,7 @@
             <ul id="graph-node-list" class="graph-node-list"></ul>
             <pre id="graph-code" class="graph-code"></pre>
           </section>
-          <section class="context-section" data-context-panel="artifacts" hidden>
+          <section class="context-section" id="panel-artifacts" data-context-panel="artifacts" role="tabpanel" aria-labelledby="tab-artifacts" hidden>
             <h3>Artifacts Inspector</h3>
             <p class="context-overview" id="artifacts-overview">請先執行 run，完成後會顯示可預覽與下載的產出物。</p>
             <div id="artifacts-inspector-list" class="artifacts-inspector-list"></div>
@@ -203,7 +203,7 @@
               </div>
             </div>
           </section>
-          <section class="context-section" data-context-panel="logs" hidden>
+          <section class="context-section" id="panel-logs" data-context-panel="logs" role="tabpanel" aria-labelledby="tab-logs" hidden>
             <h3>Logs Inspector</h3>
             <p class="empty-context">顯示同一個 run 的 logs 摘要（Phase 1 先提供框架）。</p>
           </section>
@@ -434,7 +434,7 @@
             <div class="docs-layout">
               <aside class="docs-tree" id="docs-tree-wrap">
                 <div class="docs-tree__meta" id="docs-tree-meta">尚未載入。</div>
-                <input type="search" id="docs-filter" class="docs-filter" placeholder="搜尋檔名或路徑（client-side）" />
+                <input type="search" id="docs-filter" class="docs-filter" placeholder="搜尋檔名或路徑（client-side）" data-i18n-attr="placeholder:placeholder.docsFilter" />
                 <div class="docs-tree__viewport" id="docs-tree-viewport" role="list"></div>
               </aside>
               <article class="docs-preview">
@@ -490,13 +490,13 @@
     </main>
 
     <div id="toast" class="toast toast--info" role="status" aria-live="polite"></div>
-    <div id="confirm-modal" class="confirm-modal" role="dialog" aria-modal="true" aria-hidden="true" hidden>
+    <div id="confirm-modal" class="confirm-modal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="confirm-modal-title" aria-describedby="confirm-modal-description" hidden>
       <div class="confirm-modal__panel">
-        <h3 class="confirm-modal__title" data-confirm-title>請再次確認</h3>
-        <p class="confirm-modal__description" data-confirm-description>這個動作無法復原，是否繼續？</p>
+        <h3 class="confirm-modal__title" id="confirm-modal-title" data-confirm-title data-i18n="modal.confirm.title">請再次確認</h3>
+        <p class="confirm-modal__description" id="confirm-modal-description" data-confirm-description data-i18n="modal.confirm.description">這個動作無法復原，是否繼續？</p>
         <div class="confirm-modal__actions">
-          <button type="button" class="secondary-btn" data-confirm-cancel>取消</button>
-          <button type="button" class="primary-btn" data-confirm-ok>確認</button>
+          <button type="button" class="secondary-btn" data-confirm-cancel data-i18n="modal.confirm.cancel">取消</button>
+          <button type="button" class="primary-btn" data-confirm-ok data-i18n="modal.confirm.ok">確認</button>
         </div>
       </div>
     </div>
@@ -517,7 +517,7 @@
     <aside id="graph-node-drawer" class="graph-node-drawer" hidden>
       <header class="graph-node-drawer__header">
         <h3 id="graph-node-title">Node 詳細</h3>
-        <button type="button" class="secondary-btn" id="graph-node-close">關閉</button>
+        <button type="button" class="secondary-btn" id="graph-node-close" data-i18n-attr="aria-label:button.collapseGraphNode">關閉</button>
       </header>
       <div class="graph-node-drawer__meta" id="graph-node-meta"></div>
       <section>

@@ -2137,3 +2137,38 @@ textarea:focus-visible {
   max-width: 720px;
   margin: 48px auto;
 }
+
+.chat-panel {
+  padding-bottom: clamp(84px, 12vh, 132px);
+}
+
+@media (max-width: 767px) {
+  .ui-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .shell-sidebar {
+    display: none;
+  }
+
+  .ui-shell.is-sidebar-collapsed .shell-sidebar {
+    display: none;
+  }
+
+  .chat-input {
+    position: sticky;
+    bottom: 0;
+    background: var(--card);
+    border-top: 1px solid var(--stroke);
+    padding-top: 10px;
+    z-index: 5;
+  }
+
+  .chat-timeline {
+    padding-bottom: 72px;
+  }
+
+  .context-panel {
+    width: min(96vw, 420px);
+  }
+}
