@@ -426,6 +426,17 @@
     </main>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <div id="confirm-modal" class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title" hidden>
+      <div class="confirm-modal__backdrop" data-modal-close="true"></div>
+      <section class="confirm-modal__card">
+        <h3 id="confirm-modal-title">確認操作</h3>
+        <p id="confirm-modal-description">請確認是否繼續。</p>
+        <div class="confirm-modal__actions">
+          <button type="button" class="secondary-btn" id="confirm-modal-cancel">取消</button>
+          <button type="button" class="danger-btn" id="confirm-modal-confirm">確認</button>
+        </div>
+      </section>
+    </div>
     <aside id="graph-node-drawer" class="graph-node-drawer" hidden>
       <header class="graph-node-drawer__header">
         <h3 id="graph-node-title">Node 詳細</h3>
@@ -598,7 +609,28 @@
         configProject: document.getElementById("config-project"),
         configEffectiveSummary: document.getElementById("config-effective-summary"),
         configTableBody: document.getElementById("config-table-body"),
+        confirmModal: document.getElementById("confirm-modal"),
+        confirmModalTitle: document.getElementById("confirm-modal-title"),
+        confirmModalDescription: document.getElementById("confirm-modal-description"),
+        confirmModalCancel: document.getElementById("confirm-modal-cancel"),
+        confirmModalConfirm: document.getElementById("confirm-modal-confirm"),
       };
+
+      const MODAL_DEFAULTS = {
+        title: "確認操作",
+        description: "請確認是否繼續。",
+        confirmText: "確認",
+        cancelText: "取消",
+      };
+
+      const TOAST_VARIANT_CLASS = {
+        info: "toast--info",
+        success: "toast--success",
+        warning: "toast--warning",
+        error: "toast--error",
+      };
+
+      let modalResolver = null;
 
       function syncContextPanelToggle() {
         if (!elements.uiShell || !elements.toggleContextPanel) {
@@ -1036,14 +1068,65 @@
         });
       }
 
-      function showToast(message) {
+      function showToast(message, durationMs = 9000, type = "info") {
+        const variantClass = TOAST_VARIANT_CLASS[type] || TOAST_VARIANT_CLASS.info;
+        elements.toast.classList.remove("toast--info", "toast--success", "toast--warning", "toast--error");
+        elements.toast.classList.add(variantClass);
         elements.toast.textContent = message;
         elements.toast.classList.add("visible");
         window.clearTimeout(elements.toast._timer);
         elements.toast._timer = window.setTimeout(() => {
           elements.toast.classList.remove("visible");
-        }, 9000);
+        }, durationMs);
       }
+
+      function closeConfirmModal(result) {
+        if (!elements.confirmModal) {
+          return;
+        }
+        elements.confirmModal.hidden = true;
+        const resolver = modalResolver;
+        modalResolver = null;
+        if (resolver) {
+          resolver(result);
+        }
+      }
+
+      function openConfirmModal(options = {}) {
+        if (!elements.confirmModal) {
+          return Promise.resolve(false);
+        }
+        const modalOptions = { ...MODAL_DEFAULTS, ...options };
+        elements.confirmModalTitle.textContent = modalOptions.title;
+        elements.confirmModalDescription.textContent = modalOptions.description;
+        elements.confirmModalCancel.textContent = modalOptions.cancelText;
+        elements.confirmModalConfirm.textContent = modalOptions.confirmText;
+        elements.confirmModal.hidden = false;
+        return new Promise((resolve) => {
+          modalResolver = resolve;
+        });
+      }
+
+      elements.confirmModal?.addEventListener("click", (event) => {
+        const target = event.target;
+        if (target instanceof HTMLElement && target.dataset.modalClose === "true") {
+          closeConfirmModal(false);
+        }
+      });
+
+      elements.confirmModalCancel?.addEventListener("click", () => closeConfirmModal(false));
+      elements.confirmModalConfirm?.addEventListener("click", () => closeConfirmModal(true));
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && elements.confirmModal && !elements.confirmModal.hidden) {
+          closeConfirmModal(false);
+        }
+      });
+
+      window.AmonUIPrimitives = {
+        showToast,
+        openConfirmModal,
+      };
 
       function renderStoreSummary(storeState) {
         const runStatus = storeState.run?.status || (state.streaming ? "streaming" : "idle");
