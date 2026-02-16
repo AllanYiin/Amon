@@ -328,7 +328,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
-        if self.path.startswith("/v1/"):
+        if self.path.startswith("/v1/") or self.path.startswith("/api/"):
             self._handle_api_get()
             return
         super().do_GET()
@@ -376,6 +376,114 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 self._handle_error(exc, status=500)
                 return
             self._send_json(200, {"run": status})
+            return
+        if parsed.path.startswith("/v1/runs/") and parsed.path.endswith("/artifacts"):
+            run_id = self._get_path_segment(parsed.path, 2)
+            if not run_id:
+                self._send_json(400, {"message": "無效的 run_id"})
+                return
+            params = parse_qs(parsed.query)
+            project_id = params.get("project_id", [""])[0].strip() or None
+            try:
+                _, project_path, artifacts = self._resolve_run_artifacts(run_id, project_id=project_id)
+            except FileNotFoundError as exc:
+                self._handle_error(exc, status=404)
+                return
+            except ValueError as exc:
+                self._send_json(400, {"message": str(exc)})
+                return
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, {"artifacts": [self._artifact_public_fields(item) for item in artifacts]})
+            return
+        if parsed.path.startswith("/v1/runs/") and "/artifacts/" in parsed.path:
+            run_id = self._get_path_segment(parsed.path, 2)
+            artifact_id = self._get_path_segment(parsed.path, 4)
+            if not run_id or not artifact_id:
+                self._send_json(400, {"message": "缺少 run_id 或 artifact_id"})
+                return
+            params = parse_qs(parsed.query)
+            project_id = params.get("project_id", [""])[0].strip() or None
+            inline = params.get("inline", ["false"])[0].lower() == "true"
+            try:
+                _, project_path, artifacts = self._resolve_run_artifacts(run_id, project_id=project_id)
+                target = next((item for item in artifacts if item.get("id") == artifact_id or item.get("path") == artifact_id), None)
+                if not target:
+                    raise FileNotFoundError("找不到 artifact")
+                body = self._resolve_allowed_project_path(Path(project_path), str(target["path"]), [Path(project_path) / "docs", Path(project_path) / "audits"]).read_bytes()
+            except FileNotFoundError as exc:
+                self._handle_error(exc, status=404)
+                return
+            except ValueError as exc:
+                self._send_json(400, {"message": str(exc)})
+                return
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            filename = str(target["name"])
+            content_type = str(target.get("mime") or "application/octet-stream")
+            disposition = "inline" if inline else "attachment"
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Disposition", f'{disposition}; filename="{filename}"')
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if parsed.path.startswith("/api/runs/") and parsed.path.endswith("/artifacts"):
+            run_id = self._get_path_segment(parsed.path, 2)
+            if not run_id:
+                self._send_json(400, {"message": "無效的 run_id"})
+                return
+            params = parse_qs(parsed.query)
+            project_id = params.get("project_id", [""])[0].strip() or None
+            try:
+                _, project_path, artifacts = self._resolve_run_artifacts(run_id, project_id=project_id, route_prefix="/api")
+            except FileNotFoundError as exc:
+                self._handle_error(exc, status=404)
+                return
+            except ValueError as exc:
+                self._send_json(400, {"message": str(exc)})
+                return
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, {"artifacts": [self._artifact_public_fields(item) for item in artifacts]})
+            return
+        if parsed.path.startswith("/api/runs/") and "/artifacts/" in parsed.path:
+            run_id = self._get_path_segment(parsed.path, 2)
+            artifact_id = self._get_path_segment(parsed.path, 4)
+            if not run_id or not artifact_id:
+                self._send_json(400, {"message": "缺少 run_id 或 artifact_id"})
+                return
+            params = parse_qs(parsed.query)
+            project_id = params.get("project_id", [""])[0].strip() or None
+            inline = params.get("inline", ["false"])[0].lower() == "true"
+            try:
+                _, project_path, artifacts = self._resolve_run_artifacts(run_id, project_id=project_id, route_prefix="/api")
+                target = next((item for item in artifacts if item.get("id") == artifact_id or item.get("path") == artifact_id), None)
+                if not target:
+                    raise FileNotFoundError("找不到 artifact")
+                body = self._resolve_allowed_project_path(Path(project_path), str(target["path"]), [Path(project_path) / "docs", Path(project_path) / "audits"]).read_bytes()
+            except FileNotFoundError as exc:
+                self._handle_error(exc, status=404)
+                return
+            except ValueError as exc:
+                self._send_json(400, {"message": str(exc)})
+                return
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            filename = str(target["name"])
+            content_type = str(target.get("mime") or "application/octet-stream")
+            disposition = "inline" if inline else "attachment"
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Disposition", f'{disposition}; filename="{filename}"')
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
             return
         if parsed.path.startswith("/v1/jobs/") and parsed.path.endswith("/status"):
             job_id = self._get_path_segment(parsed.path, 2)
@@ -2010,6 +2118,127 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         if not candidate.exists() or not candidate.is_file():
             raise FileNotFoundError("找不到文件")
         return candidate
+
+    def _resolve_run_artifacts(
+        self,
+        run_id: str,
+        *,
+        project_id: str | None,
+        route_prefix: str = "/v1",
+    ) -> tuple[str, Path, list[dict[str, Any]]]:
+        if not run_id or "/" in run_id or ".." in run_id:
+            raise ValueError("run_id 格式不正確")
+
+        matched_projects: list[ProjectRecord] = []
+        if project_id:
+            matched_projects = [self.core.get_project(project_id)]
+        else:
+            for record in self.core.list_projects(include_deleted=False):
+                run_dir = Path(record.path) / ".amon" / "runs" / run_id
+                if run_dir.exists() and run_dir.is_dir():
+                    matched_projects.append(record)
+            if len(matched_projects) > 1:
+                raise ValueError("run_id 對應多個專案，請提供 project_id")
+
+        if not matched_projects:
+            raise FileNotFoundError("找不到指定的 run")
+
+        project = matched_projects[0]
+        run_dir = Path(project.path) / ".amon" / "runs" / run_id
+        if not run_dir.exists() or not run_dir.is_dir():
+            raise FileNotFoundError("找不到指定的 run")
+
+        artifacts = self._build_run_artifacts_catalog(
+            project_id=project.project_id,
+            project_path=Path(project.path),
+            run_id=run_id,
+            route_prefix=route_prefix,
+        )
+        return project.project_id, Path(project.path), artifacts
+
+    def _build_run_artifacts_catalog(
+        self,
+        *,
+        project_id: str,
+        project_path: Path,
+        run_id: str,
+        route_prefix: str = "/v1",
+    ) -> list[dict[str, Any]]:
+        run_dir = project_path / ".amon" / "runs" / run_id
+        if not run_dir.exists() or not run_dir.is_dir():
+            raise FileNotFoundError("找不到指定的 run")
+
+        allowed_dirs = [project_path / "docs", project_path / "audits"]
+        candidates: dict[str, Path] = {}
+
+        event_path = run_dir / "events.jsonl"
+        for event in self._read_jsonl_records(event_path):
+            for key in ("path", "output_path", "doc_path", "artifact_path"):
+                raw_path = str(event.get(key) or "").strip()
+                if not raw_path:
+                    continue
+                try:
+                    resolved = self._resolve_allowed_project_path(project_path, raw_path, allowed_dirs)
+                except (FileNotFoundError, ValueError):
+                    continue
+                candidates.setdefault(raw_path, resolved)
+
+        artifacts_hint_dir = project_path / "docs" / "artifacts" / run_id
+        if artifacts_hint_dir.exists() and artifacts_hint_dir.is_dir():
+            for file_path in artifacts_hint_dir.rglob("*"):
+                if not file_path.is_file():
+                    continue
+                rel = str(file_path.relative_to(project_path))
+                candidates.setdefault(rel, file_path)
+
+        artifacts: list[dict[str, Any]] = []
+        encoded_project_id = quote(project_id, safe="")
+        for relative_path, resolved_path in sorted(candidates.items()):
+            stat = resolved_path.stat()
+            mime_type, _ = mimetypes.guess_type(str(resolved_path))
+            artifact_id = quote(relative_path, safe="")
+            encoded_run_id = quote(run_id, safe="")
+            base_url = f"{route_prefix}/runs/{encoded_run_id}/artifacts/{artifact_id}"
+            artifacts.append(
+                {
+                    "id": artifact_id,
+                    "name": resolved_path.name,
+                    "path": relative_path,
+                    "size": stat.st_size,
+                    "mime": mime_type or "application/octet-stream",
+                    "created_at": datetime.fromtimestamp(stat.st_mtime).astimezone().isoformat(timespec="seconds"),
+                    "url": f"{base_url}?project_id={encoded_project_id}&inline=true",
+                    "download_url": f"{base_url}?project_id={encoded_project_id}",
+                    "_resolved_path": str(resolved_path),
+                }
+            )
+        return artifacts
+
+    def _resolve_allowed_project_path(
+        self,
+        project_path: Path,
+        relative_path: str,
+        allowed_dirs: list[Path],
+    ) -> Path:
+        candidate = (project_path / relative_path).resolve()
+        allowed_roots = [allowed_dir.resolve() for allowed_dir in allowed_dirs]
+        if not any(candidate == root or root in candidate.parents for root in allowed_roots):
+            raise ValueError("artifact path 不在允許目錄")
+        if not candidate.exists() or not candidate.is_file():
+            raise FileNotFoundError("找不到 artifact")
+        return candidate
+
+    def _artifact_public_fields(self, item: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": item.get("id"),
+            "name": item.get("name"),
+            "path": item.get("path"),
+            "size": item.get("size"),
+            "mime": item.get("mime"),
+            "created_at": item.get("created_at"),
+            "url": item.get("url"),
+            "download_url": item.get("download_url"),
+        }
 
     def _infer_run_id_from_path(self, relative_path: str) -> str | None:
         matched = re.search(r"(?:^|[_-])run[_-]?([a-zA-Z0-9]+)", relative_path)
