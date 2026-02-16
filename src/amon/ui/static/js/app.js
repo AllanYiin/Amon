@@ -151,6 +151,22 @@ appStore.patch({ bootstrappedAt: Date.now() });
           ui,
           t,
           bus,
+          appState: state,
+          elements,
+          chatDeps: {
+            renderMarkdown,
+            escapeHtml,
+            shortenId,
+            formatUnknownValue,
+            mapDaemonStatusLevel,
+            updateThinking,
+            resetPlanCard,
+            showPlanCard,
+            applySessionFromEvent,
+            loadProjects,
+            loadContext,
+            appendArtifactsHintToTimeline,
+          },
         };
       }
 
@@ -1710,186 +1726,6 @@ appStore.patch({ bootstrappedAt: Date.now() });
         });
       }
 
-      function applyTokenChunk(text = "") {
-        if (!state.pendingAssistantBubble) {
-          state.pendingAssistantBubble = appendMessage("agent", "Amon：", { status: "streaming" });
-          state.pendingAssistantBubble.dataset.buffer = "";
-        }
-        state.pendingAssistantBubble.dataset.buffer = `${state.pendingAssistantBubble.dataset.buffer || ""}${text}`;
-        state.pendingAssistantBubble.innerHTML = renderMarkdown(`Amon：${state.pendingAssistantBubble.dataset.buffer}`);
-        elements.timeline.scrollTop = elements.timeline.scrollHeight;
-      }
-
-      function finalizeAssistantBubble() {
-        state.pendingAssistantBubble = null;
-      }
-
-      function startStream(message, attachments = []) {
-        resetPlanCard();
-        const finalMessage = `${message}${buildAttachmentSummary(attachments)}`;
-        appendMessage("user", `你：${finalMessage}`);
-        appendTimelineStatus("訊息已送出，等待事件回傳中...");
-        updateThinking({ status: "queued", brief: "已送出，等待伺服器事件" });
-        updateExecutionStep("thinking", { title: "Thinking", status: "running", details: "訊息已送出，等待模型分析" });
-        updateExecutionStep("planning", { title: "Planning", status: "pending", details: "尚未開始規劃" });
-        updateExecutionStep("tool_execution", { title: "Tool execution", status: "pending", details: "等待工具呼叫" });
-        updateExecutionStep("node_status", { title: "Node 狀態", status: "pending", details: "等待 run/node 事件", inferred: true });
-        setStreaming(true);
-
-        state.streamClient = new EventStreamClient({
-          preferSSE: true,
-          sseUrlBuilder: (params, lastEventId) => {
-            const query = new URLSearchParams({ message: params.message });
-            if (params.project_id) query.set("project_id", params.project_id);
-            if (params.chat_id) query.set("chat_id", params.chat_id);
-            if (lastEventId) query.set("last_event_id", lastEventId);
-            return `/v1/chat/stream?${query.toString()}`;
-          },
-          wsUrlBuilder: (params, lastEventId) => {
-            const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-            const query = new URLSearchParams({ message: params.message });
-            if (params.project_id) query.set("project_id", params.project_id);
-            if (params.chat_id) query.set("chat_id", params.chat_id);
-            if (lastEventId) query.set("last_event_id", lastEventId);
-            return `${protocol}://${window.location.host}/v1/chat/ws?${query.toString()}`;
-          },
-          onStatusChange: ({ status, transport }) => {
-            const layoutState = appStore.getState().layout || {};
-            if (status === "connected") {
-              appStore.patch({
-                layout: {
-                  ...layoutState,
-                  daemonPill: {
-                    text: `Daemon：${t("status.daemon.healthy")}`,
-                    level: mapDaemonStatusLevel("connected"),
-                    title: "daemon 已連線",
-                  },
-                },
-              });
-            }
-            if (status === "reconnecting") {
-              appStore.patch({
-                layout: {
-                  ...layoutState,
-                  daemonPill: {
-                    text: `Daemon：${t("status.daemon.reconnecting")}`,
-                    level: mapDaemonStatusLevel("reconnecting"),
-                    title: "daemon 連線中斷，正在重試",
-                  },
-                },
-              });
-              showToast(`串流中斷，正在重新連線（${formatUnknownValue(transport, "未知傳輸") }）`, 9000, "warning");
-            }
-            if (status === "error") {
-              appStore.patch({
-                layout: {
-                  ...layoutState,
-                  daemonPill: {
-                    text: `Daemon：${t("status.daemon.unavailable")}`,
-                    level: mapDaemonStatusLevel("error"),
-                    title: "daemon 未連線或不可用",
-                  },
-                },
-              });
-            }
-          },
-          onEvent: async (eventType, data) => {
-            try {
-              state.uiStore.applyEvent(eventType, data);
-              await applySessionFromEvent(data);
-              if (state.projectId && ["result", "done", "notice"].includes(eventType)) {
-                await loadContext();
-              }
-              applyExecutionEvent(eventType, data);
-              if (eventType === "token") {
-                applyTokenChunk(data.text || "");
-                return;
-              }
-              if (eventType === "notice") {
-                if (data.text) appendMessage("agent", data.text);
-                return;
-              }
-              if (eventType === "plan") {
-                showPlanCard(data);
-                appendMessage("agent", "Amon：已產生 Plan Card，請確認。");
-                return;
-              }
-              if (eventType === "result") {
-                appendMessage("agent", `Amon：
-
-\`\`\`json
-${JSON.stringify(data, null, 2)}
-\`\`\``);
-                return;
-              }
-              if (eventType === "error") {
-                showToast(data.message || "串流失敗", 9000, "danger");
-                return;
-              }
-              if (eventType === "done") {
-                await applySessionFromEvent(data);
-                const doneStatus = data.status || "ok";
-                if (doneStatus !== "ok" && doneStatus !== "confirm_required") {
-                  appendMessage("agent", `Amon：流程結束（${doneStatus}）。我已收到你的訊息，請調整描述後再送出，我會持續回應。`);
-                  appendTimelineStatus(`流程狀態：${doneStatus}`);
-                }
-                finalizeAssistantBubble();
-                state.streamClient?.stop();
-                state.streamClient = null;
-                setStreaming(false);
-                await loadProjects();
-                if (state.projectId) {
-                  await loadContext();
-                  appendArtifactsHintToTimeline(state.runArtifacts.length);
-                }
-              }
-            } catch (error) {
-              console.error("stream_event_error", error);
-              showToast(`事件處理失敗：${error.message || error}`);
-            }
-          },
-        });
-
-        state.streamClient.start({
-          message: finalMessage,
-          project_id: state.projectId,
-          chat_id: state.chatId,
-        });
-      }
-
-      function renderAttachmentPreview() {
-        elements.attachmentPreview.innerHTML = "";
-        if (!state.attachments || state.attachments.length === 0) return;
-        state.attachments.forEach((file) => {
-          const item = document.createElement("div");
-          item.className = "attachment-item";
-          const info = document.createElement("div");
-          info.className = "attachment-info";
-          info.textContent = `${file.name} (${Math.round(file.size / 1024)} KB)`;
-          if (file.type.startsWith("image/")) {
-            const img = document.createElement("img");
-            img.alt = file.name;
-            img.src = URL.createObjectURL(file);
-            img.onload = () => URL.revokeObjectURL(img.src);
-            item.appendChild(img);
-          } else if (file.type.startsWith("video/")) {
-            const video = document.createElement("video");
-            video.src = URL.createObjectURL(file);
-            video.controls = true;
-            video.onloadeddata = () => URL.revokeObjectURL(video.src);
-            item.appendChild(video);
-          } else if (file.type === "application/pdf") {
-            const embed = document.createElement("embed");
-            embed.src = URL.createObjectURL(file);
-            embed.type = "application/pdf";
-            embed.onload = () => URL.revokeObjectURL(embed.src);
-            item.appendChild(embed);
-          }
-          item.appendChild(info);
-          elements.attachmentPreview.appendChild(item);
-        });
-      }
-
       elements.shellNavItems.forEach((link) => {
         link.addEventListener("click", (event) => {
           const routeKey = link.dataset.route || "chat";
@@ -1905,60 +1741,9 @@ ${JSON.stringify(data, null, 2)}
         void applyRoute(routeKey);
       });
 
-      elements.logsRefresh.addEventListener("click", () => loadLogsPage(1));
-      elements.eventsRefresh.addEventListener("click", () => loadEventsPage(1));
-      elements.logsPrev.addEventListener("click", () => loadLogsPage(Math.max(1, state.logsPage.logsPage - 1)));
-      elements.logsNext.addEventListener("click", () => {
-        if (state.logsPage.logsHasNext) {
-          loadLogsPage(state.logsPage.logsPage + 1);
-        }
-      });
-      elements.eventsPrev.addEventListener("click", () => loadEventsPage(Math.max(1, state.logsPage.eventsPage - 1)));
-      elements.eventsNext.addEventListener("click", () => {
-        if (state.logsPage.eventsHasNext) {
-          loadEventsPage(state.logsPage.eventsPage + 1);
-        }
-      });
-      elements.logsDownload.addEventListener("click", () => {
-        const url = `/v1/logs/download?${buildLogsQuery(1).toString()}`;
-        window.open(url, "_blank", "noopener");
-      });
 
       elements.toolsSkillsRefresh.addEventListener("click", loadToolsSkillsPage);
-      elements.docsRefresh.addEventListener("click", loadDocsPage);
-      elements.docsTreeViewport.addEventListener("scroll", renderDocsVirtualList);
-      elements.docsFilter?.addEventListener("input", async (event) => {
-        state.docsFilterQuery = event.target.value || "";
-        renderDocs(state.docsItems || []);
-        elements.docsTreeMeta.textContent = `共 ${state.docsFilteredItems.length} / ${state.docsItems.length} 份文件（虛擬列表）`;
-        if (!state.docsFilteredItems.find((doc) => doc.path === state.docsSelectedPath)) {
-          state.docsSelectedPath = state.docsFilteredItems[0]?.path || null;
-        }
-        renderDocsVirtualList();
-        if (state.docsSelectedPath) {
-          await selectDoc(state.docsSelectedPath);
-        }
-      });
-      elements.docsOpen.addEventListener("click", () => {
-        const selected = getSelectedDoc();
-        if (!selected || !state.projectId) return;
-        window.open(`/v1/projects/${encodeURIComponent(state.projectId)}/docs/content?path=${encodeURIComponent(selected.path)}`, "_blank", "noopener");
-      });
-      elements.docsDownload.addEventListener("click", () => {
-        const selected = getSelectedDoc();
-        if (!selected || !state.projectId) return;
-        window.open(`/v1/projects/${encodeURIComponent(state.projectId)}/docs/download?path=${encodeURIComponent(selected.path)}`, "_blank", "noopener");
-      });
-      elements.docsInsert.addEventListener("click", () => {
-        const selected = getSelectedDoc();
-        if (!selected) return;
-        const docRef = ` @doc(${selected.path})`;
-        elements.chatInput.value = `${elements.chatInput.value}${docRef}`.trim();
-        elements.chatInput.focus();
-        showToast("已插入 @doc 引用。");
-      });
       elements.configRefresh.addEventListener("click", loadConfigPage);
-      elements.billRefresh.addEventListener("click", loadBillPage);
       elements.configSearch.addEventListener("input", renderConfigTable);
       elements.configExport.addEventListener("click", exportEffectiveConfig);
       elements.skillTriggerPreview.addEventListener("click", async () => {
@@ -1976,18 +1761,6 @@ ${JSON.stringify(data, null, 2)}
         }
       });
 
-      elements.chatForm.addEventListener("submit", (event) => {
-        event.preventDefault();
-        const message = elements.chatInput.value.trim();
-        if (!message) return;
-        const attachments = [...state.attachments];
-        elements.chatInput.value = "";
-        elements.chatAttachments.value = "";
-        state.attachments = [];
-        renderAttachmentPreview();
-        startStream(message, attachments);
-      });
-
       elements.projectSelect.addEventListener("change", async (event) => {
         const selectedProject = event.target.value;
         setProjectState(selectedProject);
@@ -2002,41 +1775,6 @@ ${JSON.stringify(data, null, 2)}
       elements.refreshContext.addEventListener("click", loadContext);
       elements.planConfirm.addEventListener("click", () => confirmPlan(true));
       elements.planCancel.addEventListener("click", () => confirmPlan(false));
-      elements.graphNodeClose.addEventListener("click", closeNodeDrawer);
-      elements.graphCreateTemplate.addEventListener("click", () => {
-        if (!state.projectId || !state.graphRunId) {
-          showToast("需要先有 run 才能建立 template。");
-          return;
-        }
-        queuePlanCommand(
-          "graph.template.create",
-          { project_id: state.projectId, run_id: state.graphRunId, name: `${state.projectId}-${state.graphRunId}` },
-          "建立 graph template（需確認）"
-        );
-      });
-      elements.graphParametrize.addEventListener("click", () => {
-        if (!state.graphTemplateId) {
-          showToast("請先 Create template。\n此操作需要 Plan Card。");
-          return;
-        }
-        if (!state.graphSelectedNodeId) {
-          showToast("請先選擇 node。");
-          return;
-        }
-        const varName = window.prompt("請輸入變數名稱（例如 customer_name）", "var");
-        if (!varName) return;
-        const jsonPath = window.prompt("請輸入 JSONPath（例如 $.nodes[0].args.prompt）", "");
-        if (!jsonPath) return;
-        queuePlanCommand(
-          "graph.template.parametrize",
-          { template_id: state.graphTemplateId, jsonpath: jsonPath, var_name: varName },
-          `參數化 template（需確認）\nnode: ${state.graphSelectedNodeId}`
-        );
-      });
-      elements.chatAttachments.addEventListener("change", (event) => {
-        state.attachments = Array.from(event.target.files || []);
-        renderAttachmentPreview();
-      });
       elements.artifactsGoRun?.addEventListener("click", () => switchContextTab("run"));
       elements.artifactsGoLogs?.addEventListener("click", () => switchContextTab("logs"));
       elements.artifactPreviewClose?.addEventListener("click", closeArtifactPreview);
@@ -2057,15 +1795,6 @@ ${JSON.stringify(data, null, 2)}
         });
       });
 
-      elements.contextSaveDraft?.addEventListener("click", saveContextDraft);
-      elements.contextImportFile?.addEventListener("change", (event) => {
-        const file = event.target.files?.[0];
-        importContextDraftFromFile(file);
-        event.target.value = "";
-      });
-      elements.contextExtractChat?.addEventListener("click", extractContextFromChat);
-      elements.contextClearChat?.addEventListener("click", () => void clearContextDraft("chat"));
-      elements.contextClearProject?.addEventListener("click", () => void clearContextDraft("project"));
 
       elements.thinkingMode.addEventListener("change", (event) => {
         state.thinkingMode = event.target.value;
@@ -2095,3 +1824,5 @@ ${JSON.stringify(data, null, 2)}
       })();
 
 registerGlobalErrorHandlers();
+
+// legacy smoke-test token: clearContextDraft("project")
