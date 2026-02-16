@@ -29,15 +29,20 @@
   - 操作 DOM
   - 直接改寫全域 state
 
-## C) Composition Root（`app.js`）
+## C) Composition Root（`bootstrap.js` + `app.js`）
 
-`app.js` 只負責組裝與初始化：
+`bootstrap.js` 只負責組裝與初始化：
 
 - 建立 `api / store / bus / i18n / ui components`
 - 建立 router 與註冊 views
 - 建立 layout 控制（sidebar / inspector / header）
 
-`app.js` 不應新增以下內容：
+`app.js` 僅保留入口 bootstrap：
+
+- import `bootstrapApp`
+- 呼叫 `bootstrapApp()`
+
+`bootstrap.js` 不應新增以下內容：
 
 - 某單一 view 的大量 render 細節
 - 某單一 domain 的複雜資料組裝
