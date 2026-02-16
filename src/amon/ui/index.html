@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Amon｜Chat UI</title>
     <link rel="stylesheet" href="styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
     <script type="module">
       import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
       mermaid.initialize({ startOnLoad: false, theme: "neutral" });
@@ -176,7 +177,15 @@
           </section>
           <section class="context-section" data-context-panel="artifacts" hidden>
             <h3>Artifacts Inspector</h3>
-            <p class="empty-context">顯示同一個 run 的 artifacts 摘要（Phase 1 先提供框架）。</p>
+            <p class="context-overview" id="artifacts-overview">請先執行 run，完成後會顯示可預覽與下載的產出物。</p>
+            <div id="artifacts-inspector-list" class="artifacts-inspector-list"></div>
+            <div id="artifacts-empty" class="artifacts-empty" hidden>
+              <p>尚無 artifacts（可能是 run 尚未完成或此流程未產出檔案）。</p>
+              <div class="artifacts-empty__actions">
+                <button type="button" class="secondary-btn small" id="artifacts-go-run">前往 Run</button>
+                <button type="button" class="secondary-btn small" id="artifacts-go-logs">前往 Logs</button>
+              </div>
+            </div>
           </section>
           <section class="context-section" data-context-panel="logs" hidden>
             <h3>Logs Inspector</h3>
@@ -465,6 +474,20 @@
         </div>
       </div>
     </div>
+
+    <div id="artifact-preview-modal" class="artifact-preview-modal" role="dialog" aria-modal="true" aria-hidden="true" hidden>
+      <div class="artifact-preview-modal__panel">
+        <header class="artifact-preview-modal__header">
+          <h3 id="artifact-preview-title">Artifact 預覽</h3>
+          <button type="button" class="secondary-btn small" id="artifact-preview-close">關閉</button>
+        </header>
+        <div class="artifact-preview-modal__actions">
+          <button type="button" class="secondary-btn small" id="artifact-preview-download">下載檔案</button>
+          <button type="button" class="secondary-btn small" id="artifact-preview-copy" hidden>複製內容</button>
+        </div>
+        <div id="artifact-preview-body" class="artifact-preview-modal__body"></div>
+      </div>
+    </div>
     <aside id="graph-node-drawer" class="graph-node-drawer" hidden>
       <header class="graph-node-drawer__header">
         <h3 id="graph-node-title">Node 詳細</h3>
@@ -521,6 +544,8 @@
         billingSummary: null,
         billingStreamSource: null,
         contextPanelWidth: 320,
+        runArtifacts: [],
+        artifactPreviewItem: null,
       };
 
       const elements = {
@@ -577,6 +602,17 @@
         thinkingSummary: document.getElementById("thinking-summary"),
         thinkingDetail: document.getElementById("thinking-detail"),
         artifactList: document.getElementById("artifact-list"),
+        artifactsOverview: document.getElementById("artifacts-overview"),
+        artifactsInspectorList: document.getElementById("artifacts-inspector-list"),
+        artifactsEmpty: document.getElementById("artifacts-empty"),
+        artifactsGoRun: document.getElementById("artifacts-go-run"),
+        artifactsGoLogs: document.getElementById("artifacts-go-logs"),
+        artifactPreviewModal: document.getElementById("artifact-preview-modal"),
+        artifactPreviewTitle: document.getElementById("artifact-preview-title"),
+        artifactPreviewBody: document.getElementById("artifact-preview-body"),
+        artifactPreviewClose: document.getElementById("artifact-preview-close"),
+        artifactPreviewDownload: document.getElementById("artifact-preview-download"),
+        artifactPreviewCopy: document.getElementById("artifact-preview-copy"),
         shellNavItems: document.querySelectorAll(".shell-nav__link"),
         toolsSkillsPage: document.getElementById("tools-skills-page"),
         billPage: document.getElementById("bill-page"),
@@ -1593,6 +1629,7 @@
           state.chatId = null;
           elements.timeline.innerHTML = "";
           renderArtifacts([]);
+          renderArtifactsInspector([]);
           elements.graphPreview.innerHTML = "<p class=\"empty-context\">請先在上方選擇專案。</p>";
           elements.graphCode.textContent = "";
           elements.contextOverview.textContent = "請先在上方選擇專案，右側內容會自動同步。";
@@ -1769,6 +1806,7 @@
         elements.contextOverview.textContent = `已同步專案內容：Graph ${hasGraph}、文件 ${docCount} 筆；${runHint}。`;
         elements.contextOverview.title = state.graphRunId ? `完整 Run ID：${state.graphRunId}` : "尚未取得任何 Run。";
         renderArtifacts(collectArtifactsFromNodeStates(state.graphNodeStates));
+        await loadRunArtifacts();
       }
 
       function normalizeDocItem(doc) {
@@ -2142,6 +2180,186 @@
         elements.thinkingDetail.textContent = mode === "verbose" ? (payload.verbose || brief) : brief;
       }
 
+      function formatFileSize(bytes) {
+        const size = Number(bytes || 0);
+        if (!Number.isFinite(size) || size <= 0) return "0 B";
+        const units = ["B", "KB", "MB", "GB"];
+        let value = size;
+        let idx = 0;
+        while (value >= 1024 && idx < units.length - 1) {
+          value /= 1024;
+          idx += 1;
+        }
+        return `${value.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`;
+      }
+
+      function isImageMime(mime = "") {
+        return String(mime).startsWith("image/");
+      }
+
+      function isTextLikeMime(mime = "") {
+        const target = String(mime).toLowerCase();
+        return target.startsWith("text/") || ["application/json", "application/xml", "application/javascript"].includes(target);
+      }
+
+      function isMarkdownPath(name = "") {
+        return /\.(md|markdown)$/i.test(name);
+      }
+
+      async function loadRunArtifacts() {
+        if (!state.projectId || !state.graphRunId) {
+          state.runArtifacts = [];
+          renderArtifactsInspector([]);
+          return;
+        }
+        try {
+          const payload = await apiFetch(`/runs/${encodeURIComponent(state.graphRunId)}/artifacts?project_id=${encodeURIComponent(state.projectId)}`);
+          state.runArtifacts = payload.artifacts || [];
+          renderArtifactsInspector(state.runArtifacts);
+        } catch (error) {
+          state.runArtifacts = [];
+          renderArtifactsInspector([]);
+          showToast(`載入 artifacts 失敗：${error.message}`, 9000, "danger");
+        }
+      }
+
+      function renderArtifactsInspector(artifacts = []) {
+        elements.artifactsInspectorList.innerHTML = "";
+        if (!state.graphRunId) {
+          elements.artifactsOverview.textContent = "尚未偵測到 Run，請先執行流程。";
+          elements.artifactsEmpty.hidden = false;
+          return;
+        }
+        elements.artifactsOverview.textContent = `Run ${shortenId(state.graphRunId)} 共 ${artifacts.length} 份產出物。`;
+        if (!artifacts.length) {
+          elements.artifactsEmpty.hidden = false;
+          return;
+        }
+        elements.artifactsEmpty.hidden = true;
+
+        artifacts.forEach((artifact) => {
+          const card = document.createElement("article");
+          card.className = "artifact-inspector-card";
+
+          const header = document.createElement("header");
+          const title = document.createElement("strong");
+          title.textContent = artifact.name || artifact.path || "(未命名)";
+          const meta = document.createElement("span");
+          meta.textContent = `${formatFileSize(artifact.size)} · ${artifact.mime || "未知類型"}`;
+          header.append(title, meta);
+          card.appendChild(header);
+
+          const path = document.createElement("p");
+          path.className = "artifact-inspector-card__path";
+          path.textContent = artifact.path || "";
+          card.appendChild(path);
+
+          if (isImageMime(artifact.mime)) {
+            const preview = document.createElement("img");
+            preview.className = "artifact-inspector-card__thumb";
+            preview.src = artifact.url;
+            preview.alt = `${artifact.name} 縮圖`;
+            preview.loading = "lazy";
+            card.appendChild(preview);
+          }
+
+          const actions = document.createElement("div");
+          actions.className = "artifact-inspector-card__actions";
+          const openBtn = document.createElement("button");
+          openBtn.type = "button";
+          openBtn.className = "secondary-btn small";
+          openBtn.textContent = "預覽";
+          openBtn.addEventListener("click", () => void openArtifactPreview(artifact));
+          const downloadBtn = document.createElement("button");
+          downloadBtn.type = "button";
+          downloadBtn.className = "secondary-btn small";
+          downloadBtn.textContent = "下載";
+          downloadBtn.addEventListener("click", () => window.open(artifact.download_url, "_blank", "noopener"));
+          actions.append(openBtn, downloadBtn);
+          card.appendChild(actions);
+
+          elements.artifactsInspectorList.appendChild(card);
+        });
+      }
+
+      async function openArtifactPreview(artifact) {
+        if (!artifact) return;
+        state.artifactPreviewItem = artifact;
+        elements.artifactPreviewTitle.textContent = artifact.name || artifact.path || "Artifact 預覽";
+        elements.artifactPreviewBody.innerHTML = "";
+        elements.artifactPreviewCopy.hidden = true;
+        elements.artifactPreviewDownload.onclick = () => window.open(artifact.download_url, "_blank", "noopener");
+
+        const mime = String(artifact.mime || "").toLowerCase();
+        if (isImageMime(mime)) {
+          const img = document.createElement("img");
+          img.src = artifact.url;
+          img.alt = artifact.name || "artifact";
+          img.className = "artifact-preview-content-image";
+          elements.artifactPreviewBody.appendChild(img);
+        } else if (mime === "application/pdf") {
+          const frame = document.createElement("iframe");
+          frame.src = artifact.url;
+          frame.className = "artifact-preview-content-frame";
+          frame.title = artifact.name || "PDF 預覽";
+          elements.artifactPreviewBody.appendChild(frame);
+        } else if (isTextLikeMime(mime) || isMarkdownPath(artifact.name || artifact.path || "")) {
+          try {
+            const response = await fetch(artifact.url);
+            if (!response.ok) throw new Error("讀取失敗");
+            const text = await response.text();
+            const wrapper = document.createElement("div");
+            if (isMarkdownPath(artifact.name || artifact.path || "")) {
+              const html = renderMarkdown(text);
+              wrapper.innerHTML = window.DOMPurify ? window.DOMPurify.sanitize(html) : html;
+            } else {
+              const pre = document.createElement("pre");
+              pre.textContent = text;
+              wrapper.appendChild(pre);
+            }
+            elements.artifactPreviewBody.appendChild(wrapper);
+            elements.artifactPreviewCopy.hidden = false;
+            elements.artifactPreviewCopy.onclick = async () => {
+              await navigator.clipboard.writeText(text);
+              showToast("已複製內容", 6000, "success");
+            };
+          } catch (error) {
+            const fallback = document.createElement("p");
+            fallback.className = "empty-context";
+            fallback.textContent = `預覽失敗，請改用下載：${error.message}`;
+            elements.artifactPreviewBody.appendChild(fallback);
+          }
+        } else {
+          const fallback = document.createElement("p");
+          fallback.className = "empty-context";
+          fallback.textContent = "此檔案類型暫不支援內嵌預覽，請使用下載。";
+          elements.artifactPreviewBody.appendChild(fallback);
+        }
+
+        elements.artifactPreviewModal.hidden = false;
+        elements.artifactPreviewModal.setAttribute("aria-hidden", "false");
+      }
+
+      function closeArtifactPreview() {
+        elements.artifactPreviewModal.hidden = true;
+        elements.artifactPreviewModal.setAttribute("aria-hidden", "true");
+        elements.artifactPreviewBody.innerHTML = "";
+        state.artifactPreviewItem = null;
+      }
+
+      function appendArtifactsHintToTimeline(count = 0) {
+        if (!state.graphRunId) return;
+        const row = document.createElement("article");
+        row.className = "timeline-status timeline-status--artifacts";
+        const hint = document.createElement("button");
+        hint.type = "button";
+        hint.className = "secondary-btn small";
+        hint.textContent = `Artifacts 產出：${count} 份（點我查看）`;
+        hint.addEventListener("click", () => switchContextTab("artifacts"));
+        row.appendChild(hint);
+        elements.timeline.appendChild(row);
+      }
+
       function renderArtifacts(artifacts = []) {
         elements.artifactList.innerHTML = "";
         if (!artifacts.length) {
@@ -2157,17 +2375,7 @@
               <span>${artifact.run_id}/${artifact.node_id}</span>
             </header>
             <p>${artifact.path}</p>
-            <pre>${escapeHtml(artifact.preview || "(無預覽)")}</pre>
-            <div class="artifact-card__actions">
-              <button type="button" class="secondary-btn small" data-artifact-action="open">Open</button>
-              <button type="button" class="secondary-btn small" data-artifact-action="download">Download</button>
-              <button type="button" class="secondary-btn small" data-artifact-action="pin">Pin</button>
-            </div>`;
-          card.querySelectorAll("[data-artifact-action]").forEach((btn) => {
-            btn.addEventListener("click", () => {
-              showToast(`已收到 ${btn.dataset.artifactAction} 請求：${artifact.path}`);
-            });
-          });
+            <pre>${escapeHtml(artifact.preview || "(無預覽)")}</pre>`;
           elements.artifactList.appendChild(card);
         });
       }
@@ -2269,6 +2477,7 @@ ${JSON.stringify(data, null, 2)}
                 await loadProjects();
                 if (state.projectId) {
                   await loadContext();
+                  appendArtifactsHintToTimeline(state.runArtifacts.length);
                 }
               }
             } catch (error) {
@@ -2457,7 +2666,19 @@ ${JSON.stringify(data, null, 2)}
         renderAttachmentPreview();
       });
       elements.contextTabs.forEach((tab) => {
-        tab.addEventListener("click", () => switchContextTab(tab.dataset.contextTab));
+        tab.addEventListener("click", () => {
+          switchContextTab(tab.dataset.contextTab);
+          if (tab.dataset.contextTab === "artifacts") {
+            void loadRunArtifacts();
+          }
+        });
+      });
+
+      elements.artifactsGoRun?.addEventListener("click", () => switchContextTab("run"));
+      elements.artifactsGoLogs?.addEventListener("click", () => switchContextTab("logs"));
+      elements.artifactPreviewClose?.addEventListener("click", closeArtifactPreview);
+      elements.artifactPreviewModal?.addEventListener("click", (event) => {
+        if (event.target === elements.artifactPreviewModal) closeArtifactPreview();
       });
 
       elements.copyRunId?.addEventListener("click", async () => {

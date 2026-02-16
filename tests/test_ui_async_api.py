@@ -691,6 +691,95 @@ class UIAsyncAPITests(unittest.TestCase):
                     server.server_close()
                 os.environ.pop("AMON_HOME", None)
 
+    def test_run_artifacts_api_lists_and_downloads_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("artifacts-api")
+                project_path = Path(project.path)
+                run_id = "run_art_001"
+                run_dir = project_path / ".amon" / "runs" / run_id
+                run_dir.mkdir(parents=True, exist_ok=True)
+                (project_path / "docs" / "artifacts" / run_id).mkdir(parents=True, exist_ok=True)
+                artifact_path = project_path / "docs" / "artifacts" / run_id / "result.txt"
+                artifact_path.write_text("hello artifact", encoding="utf-8")
+                (run_dir / "events.jsonl").write_text(
+                    json.dumps({"event": "artifact_written", "artifact_path": f"docs/artifacts/{run_id}/result.txt"}, ensure_ascii=False) + "\n",
+                    encoding="utf-8",
+                )
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                conn.request("GET", f"/v1/runs/{run_id}/artifacts?project_id={quote(project.project_id)}")
+                response = conn.getresponse()
+                payload = json.loads(response.read().decode("utf-8"))
+                self.assertEqual(response.status, 200)
+                self.assertEqual(len(payload["artifacts"]), 1)
+                artifact = payload["artifacts"][0]
+                self.assertEqual(artifact["name"], "result.txt")
+
+                conn.request("GET", artifact["download_url"])
+                download = conn.getresponse()
+                self.assertEqual(download.status, 200)
+                self.assertIn("attachment", download.getheader("Content-Disposition", ""))
+                self.assertEqual(download.read().decode("utf-8"), "hello artifact")
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
+    def test_run_artifacts_api_blocks_path_traversal(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("artifacts-traversal")
+                project_path = Path(project.path)
+                run_id = "run_art_bad"
+                run_dir = project_path / ".amon" / "runs" / run_id
+                run_dir.mkdir(parents=True, exist_ok=True)
+                (project_path / "docs").mkdir(parents=True, exist_ok=True)
+                (run_dir / "events.jsonl").write_text(
+                    json.dumps({"event": "artifact_written", "artifact_path": "../../secret.txt"}, ensure_ascii=False) + "\n",
+                    encoding="utf-8",
+                )
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                conn.request("GET", f"/v1/runs/{run_id}/artifacts?project_id={quote(project.project_id)}")
+                response = conn.getresponse()
+                payload = json.loads(response.read().decode("utf-8"))
+                self.assertEqual(response.status, 200)
+                self.assertEqual(payload["artifacts"], [])
+
+                encoded = quote("..%2F..%2Fsecret.txt")
+                conn.request("GET", f"/v1/runs/{run_id}/artifacts/{encoded}?project_id={quote(project.project_id)}")
+                blocked = conn.getresponse()
+                self.assertEqual(blocked.status, 404)
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
 
 if __name__ == "__main__":
     unittest.main()
