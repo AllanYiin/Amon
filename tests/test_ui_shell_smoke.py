@@ -9,25 +9,25 @@ class UIShellSmokeTests(unittest.TestCase):
         for token in [
             "shell-sidebar",
             "toggle-context-panel",
+            "toggle-sidebar",
             "Memory Used",
-            "Tools &amp; Skills",
-            "data-shell-view=\"bill\"",
-            "id=\"bill-page\"",
-            "id=\"bill-breakdown-provider\"",
-            "id=\"shell-run-status\"",
-            "id=\"shell-daemon-status\"",
-            "id=\"shell-budget-status\"",
-            "id=\"card-run-progress\"",
-            "id=\"card-billing\"",
-            "id=\"card-pending-confirmations\"",
-            "Daemon：尚未連線",
+            'data-i18n="nav.tools"',
+            'data-shell-view="bill"',
+            'id="bill-page"',
+            'id="bill-breakdown-provider"',
+            'id="shell-run-status"',
+            'id="shell-daemon-status"',
+            'id="shell-budget-status"',
+            'id="card-run-progress"',
+            'id="card-billing"',
+            'id="card-pending-confirmations"',
+            'script type="module" src="/static/js/app.js"',
         ]:
             self.assertIn(token, html)
 
-
-
     def test_shell_navigation_uses_hash_routes(self) -> None:
         html = Path("src/amon/ui/index.html").read_text(encoding="utf-8")
+        app_js = Path("src/amon/ui/static/js/app.js").read_text(encoding="utf-8")
 
         for token in [
             'href="#/chat"',
@@ -38,29 +38,34 @@ class UIShellSmokeTests(unittest.TestCase):
             'href="#/logs"',
             'href="#/docs"',
             'href="#/billing"',
+        ]:
+            self.assertIn(token, html)
+
+        for token in [
             'window.addEventListener("hashchange"',
             'function resolveRouteFromHash',
             'function navigateToRoute(routeKey)',
+            'createHashRouter',
         ]:
-            self.assertIn(token, html)
+            self.assertIn(token, app_js)
 
     def test_project_and_single_pages_redirect_to_index_hash_routes(self) -> None:
         project_html = Path("src/amon/ui/project.html").read_text(encoding="utf-8")
         single_html = Path("src/amon/ui/single.html").read_text(encoding="utf-8")
 
-        self.assertIn('target.hash = "#/context"', project_html)
+        self.assertIn('url=./index.html#/context', project_html)
         self.assertIn('href="./index.html#/context"', project_html)
-        self.assertIn('target.hash = "#/chat"', single_html)
+        self.assertIn('url=./index.html#/chat', single_html)
         self.assertIn('href="./index.html#/chat"', single_html)
 
     def test_chat_stream_uses_defined_render_paths(self) -> None:
-        html = Path("src/amon/ui/index.html").read_text(encoding="utf-8")
+        app_js = Path("src/amon/ui/static/js/app.js").read_text(encoding="utf-8")
 
-        self.assertIn("state.streamClient.start({", html)
-        self.assertIn('applyTokenChunk(data.text || "")', html)
-        self.assertIn("applySessionFromEvent(data);", html)
-        self.assertNotIn("agentBubble.innerHTML", html)
-        self.assertNotIn("buffer += data.text", html)
+        self.assertIn("state.streamClient.start({", app_js)
+        self.assertIn('applyTokenChunk(data.text || "")', app_js)
+        self.assertIn("applySessionFromEvent(data);", app_js)
+        self.assertNotIn("agentBubble.innerHTML", app_js)
+        self.assertNotIn("buffer += data.text", app_js)
 
     def test_styles_force_hidden_attribute_to_behave_like_tabs(self) -> None:
         css = Path("src/amon/ui/styles.css").read_text(encoding="utf-8")
@@ -69,6 +74,7 @@ class UIShellSmokeTests(unittest.TestCase):
 
     def test_context_page_has_actionable_cta_and_safe_clear_controls(self) -> None:
         html = Path("src/amon/ui/index.html").read_text(encoding="utf-8")
+        app_js = Path("src/amon/ui/static/js/app.js").read_text(encoding="utf-8")
 
         for token in [
             'id="context-draft-input"',
@@ -77,18 +83,20 @@ class UIShellSmokeTests(unittest.TestCase):
             'id="context-extract-chat"',
             'id="context-clear-chat"',
             'id="context-clear-project"',
-            'clearContextDraft("project")',
-            'confirmModal.open({',
         ]:
             self.assertIn(token, html)
+
+        for token in ['clearContextDraft("project")', 'confirmModal.open({']:
+            self.assertIn(token, app_js)
 
     def test_status_semantics_and_run_copy_controls_exist(self) -> None:
         html = Path("src/amon/ui/index.html").read_text(encoding="utf-8")
         css = Path("src/amon/ui/styles.css").read_text(encoding="utf-8")
+        app_js = Path("src/amon/ui/static/js/app.js").read_text(encoding="utf-8")
 
         self.assertIn('id="copy-run-id"', html)
-        self.assertIn('mapDaemonStatusLevel', html)
-        self.assertIn('setStatusText(elements.shellDaemonStatus, "Daemon：Unavailable"', html)
+        self.assertIn('mapDaemonStatusLevel', app_js)
+        self.assertIn('setStatusText(elements.shellDaemonStatus, "Daemon：尚未連線"', app_js)
         self.assertIn('.context-resizer', css)
 
 
