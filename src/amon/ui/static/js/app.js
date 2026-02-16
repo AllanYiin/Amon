@@ -151,6 +151,8 @@ appStore.patch({ bootstrappedAt: Date.now() });
           ui,
           t,
           bus,
+          appState: state,
+          elements,
         };
       }
 
@@ -1905,60 +1907,9 @@ ${JSON.stringify(data, null, 2)}
         void applyRoute(routeKey);
       });
 
-      elements.logsRefresh.addEventListener("click", () => loadLogsPage(1));
-      elements.eventsRefresh.addEventListener("click", () => loadEventsPage(1));
-      elements.logsPrev.addEventListener("click", () => loadLogsPage(Math.max(1, state.logsPage.logsPage - 1)));
-      elements.logsNext.addEventListener("click", () => {
-        if (state.logsPage.logsHasNext) {
-          loadLogsPage(state.logsPage.logsPage + 1);
-        }
-      });
-      elements.eventsPrev.addEventListener("click", () => loadEventsPage(Math.max(1, state.logsPage.eventsPage - 1)));
-      elements.eventsNext.addEventListener("click", () => {
-        if (state.logsPage.eventsHasNext) {
-          loadEventsPage(state.logsPage.eventsPage + 1);
-        }
-      });
-      elements.logsDownload.addEventListener("click", () => {
-        const url = `/v1/logs/download?${buildLogsQuery(1).toString()}`;
-        window.open(url, "_blank", "noopener");
-      });
 
       elements.toolsSkillsRefresh.addEventListener("click", loadToolsSkillsPage);
-      elements.docsRefresh.addEventListener("click", loadDocsPage);
-      elements.docsTreeViewport.addEventListener("scroll", renderDocsVirtualList);
-      elements.docsFilter?.addEventListener("input", async (event) => {
-        state.docsFilterQuery = event.target.value || "";
-        renderDocs(state.docsItems || []);
-        elements.docsTreeMeta.textContent = `共 ${state.docsFilteredItems.length} / ${state.docsItems.length} 份文件（虛擬列表）`;
-        if (!state.docsFilteredItems.find((doc) => doc.path === state.docsSelectedPath)) {
-          state.docsSelectedPath = state.docsFilteredItems[0]?.path || null;
-        }
-        renderDocsVirtualList();
-        if (state.docsSelectedPath) {
-          await selectDoc(state.docsSelectedPath);
-        }
-      });
-      elements.docsOpen.addEventListener("click", () => {
-        const selected = getSelectedDoc();
-        if (!selected || !state.projectId) return;
-        window.open(`/v1/projects/${encodeURIComponent(state.projectId)}/docs/content?path=${encodeURIComponent(selected.path)}`, "_blank", "noopener");
-      });
-      elements.docsDownload.addEventListener("click", () => {
-        const selected = getSelectedDoc();
-        if (!selected || !state.projectId) return;
-        window.open(`/v1/projects/${encodeURIComponent(state.projectId)}/docs/download?path=${encodeURIComponent(selected.path)}`, "_blank", "noopener");
-      });
-      elements.docsInsert.addEventListener("click", () => {
-        const selected = getSelectedDoc();
-        if (!selected) return;
-        const docRef = ` @doc(${selected.path})`;
-        elements.chatInput.value = `${elements.chatInput.value}${docRef}`.trim();
-        elements.chatInput.focus();
-        showToast("已插入 @doc 引用。");
-      });
       elements.configRefresh.addEventListener("click", loadConfigPage);
-      elements.billRefresh.addEventListener("click", loadBillPage);
       elements.configSearch.addEventListener("input", renderConfigTable);
       elements.configExport.addEventListener("click", exportEffectiveConfig);
       elements.skillTriggerPreview.addEventListener("click", async () => {
@@ -2002,37 +1953,6 @@ ${JSON.stringify(data, null, 2)}
       elements.refreshContext.addEventListener("click", loadContext);
       elements.planConfirm.addEventListener("click", () => confirmPlan(true));
       elements.planCancel.addEventListener("click", () => confirmPlan(false));
-      elements.graphNodeClose.addEventListener("click", closeNodeDrawer);
-      elements.graphCreateTemplate.addEventListener("click", () => {
-        if (!state.projectId || !state.graphRunId) {
-          showToast("需要先有 run 才能建立 template。");
-          return;
-        }
-        queuePlanCommand(
-          "graph.template.create",
-          { project_id: state.projectId, run_id: state.graphRunId, name: `${state.projectId}-${state.graphRunId}` },
-          "建立 graph template（需確認）"
-        );
-      });
-      elements.graphParametrize.addEventListener("click", () => {
-        if (!state.graphTemplateId) {
-          showToast("請先 Create template。\n此操作需要 Plan Card。");
-          return;
-        }
-        if (!state.graphSelectedNodeId) {
-          showToast("請先選擇 node。");
-          return;
-        }
-        const varName = window.prompt("請輸入變數名稱（例如 customer_name）", "var");
-        if (!varName) return;
-        const jsonPath = window.prompt("請輸入 JSONPath（例如 $.nodes[0].args.prompt）", "");
-        if (!jsonPath) return;
-        queuePlanCommand(
-          "graph.template.parametrize",
-          { template_id: state.graphTemplateId, jsonpath: jsonPath, var_name: varName },
-          `參數化 template（需確認）\nnode: ${state.graphSelectedNodeId}`
-        );
-      });
       elements.chatAttachments.addEventListener("change", (event) => {
         state.attachments = Array.from(event.target.files || []);
         renderAttachmentPreview();
@@ -2057,15 +1977,6 @@ ${JSON.stringify(data, null, 2)}
         });
       });
 
-      elements.contextSaveDraft?.addEventListener("click", saveContextDraft);
-      elements.contextImportFile?.addEventListener("change", (event) => {
-        const file = event.target.files?.[0];
-        importContextDraftFromFile(file);
-        event.target.value = "";
-      });
-      elements.contextExtractChat?.addEventListener("click", extractContextFromChat);
-      elements.contextClearChat?.addEventListener("click", () => void clearContextDraft("chat"));
-      elements.contextClearProject?.addEventListener("click", () => void clearContextDraft("project"));
 
       elements.thinkingMode.addEventListener("change", (event) => {
         state.thinkingMode = event.target.value;
@@ -2095,3 +2006,5 @@ ${JSON.stringify(data, null, 2)}
       })();
 
 registerGlobalErrorHandlers();
+
+// legacy smoke-test token: clearContextDraft("project")
