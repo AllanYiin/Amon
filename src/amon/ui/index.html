@@ -425,7 +425,17 @@
       </div>
     </main>
 
-    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <div id="toast" class="toast toast--info" role="status" aria-live="polite"></div>
+    <div id="confirm-modal" class="confirm-modal" role="dialog" aria-modal="true" aria-hidden="true" hidden>
+      <div class="confirm-modal__panel">
+        <h3 class="confirm-modal__title" data-confirm-title>請再次確認</h3>
+        <p class="confirm-modal__description" data-confirm-description>這個動作無法復原，是否繼續？</p>
+        <div class="confirm-modal__actions">
+          <button type="button" class="secondary-btn" data-confirm-cancel>取消</button>
+          <button type="button" class="primary-btn" data-confirm-ok>確認</button>
+        </div>
+      </div>
+    </div>
     <aside id="graph-node-drawer" class="graph-node-drawer" hidden>
       <header class="graph-node-drawer__header">
         <h3 id="graph-node-title">Node 詳細</h3>
@@ -456,8 +466,10 @@
     </aside>
 
     <script src="/event_stream_client.js"></script>
+    <script src="/ui_components.js"></script>
     <script>
       const { EventStreamClient, createUiEventStore } = window.AmonUIEventStream;
+      const { createToastManager, createConfirmModal } = window.AmonUIComponents;
       const state = {
         chatId: null,
         projectId: null,
@@ -489,6 +501,7 @@
         chatAttachments: document.getElementById("chat-attachments"),
         attachmentPreview: document.getElementById("attachment-preview"),
         toast: document.getElementById("toast"),
+        confirmModal: document.getElementById("confirm-modal"),
         planCard: document.getElementById("plan-card"),
         planContent: document.getElementById("plan-content"),
         planCommands: document.getElementById("plan-commands"),
@@ -599,6 +612,9 @@
         configEffectiveSummary: document.getElementById("config-effective-summary"),
         configTableBody: document.getElementById("config-table-body"),
       };
+
+      const toastManager = createToastManager(elements.toast);
+      const confirmModal = createConfirmModal(elements.confirmModal);
 
       function syncContextPanelToggle() {
         if (!elements.uiShell || !elements.toggleContextPanel) {
@@ -1036,14 +1052,14 @@
         });
       }
 
-      function showToast(message) {
-        elements.toast.textContent = message;
-        elements.toast.classList.add("visible");
-        window.clearTimeout(elements.toast._timer);
-        elements.toast._timer = window.setTimeout(() => {
-          elements.toast.classList.remove("visible");
-        }, 9000);
+      function showToast(message, duration = 9000, type = "info") {
+        toastManager.show(message, { duration, type });
       }
+
+      window.amonUiDebug = {
+        showToast,
+        showConfirmModal: (options) => confirmModal.open(options),
+      };
 
       function renderStoreSummary(storeState) {
         const runStatus = storeState.run?.status || (state.streaming ? "streaming" : "idle");
