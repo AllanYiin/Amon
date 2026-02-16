@@ -10,6 +10,7 @@ import { readStorage, writeStorage, removeStorage } from "./domain/storage.js";
 import { formatUnknownValue, shortenId, setStatusText, mapRunStatusLevel, mapDaemonStatusLevel, statusToI18nKey } from "./domain/status.js";
 import { createShellLayoutController } from "./domain/shell_layout.js";
 import { createAdminService } from "./domain/adminService.js";
+import { createServices } from "./domain/services.js";
 import { registerGlobalErrorHandlers } from "./domain/error_boundary.js";
 import { routeToShellView, setActiveShellNav, switchShellView } from "./views/shell.js";
 import { CHAT_VIEW } from "./views/chat.js";
@@ -80,13 +81,15 @@ appStore.patch({ bootstrappedAt: Date.now() });
       const apiClient = {
         /** @param {string} path @param {RequestInit & {quiet?: boolean}} [options] */
         request(path, options = {}) {
-          return apiFetch(path, options);
+          return requestJson(`/v1${path}`, options);
         },
       };
       const bus = createEventBus();
       const ui = { toast: toastManager, modal: confirmModal };
       const adminService = createAdminService({ api: apiClient });
+      const domainServices = createServices({ api: apiClient });
       const services = {
+        ...domainServices,
         admin: {
           ...adminService,
           loadDocsPage,
@@ -518,10 +521,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
       }
 
       function queueToolPolicyPlan(toolName, action, requireConfirm) {
-        apiFetch("/tools/policy/plan", {
-          method: "POST",
-          body: JSON.stringify({ tool_name: toolName, action, require_confirm: requireConfirm }),
-        })
+        services.admin.planToolPolicy({ toolName, action, requireConfirm })
           .then((payload) => {
             showPlanCard({
               ...payload.plan,
@@ -648,23 +648,6 @@ appStore.patch({ bootstrappedAt: Date.now() });
       });
       renderStoreSummary(state.uiStore.getState());
 
-      async function apiFetch(path, options = {}) {
-        const response = await fetch(`/v1${path}`, {
-          headers: { "Content-Type": "application/json" },
-          ...options,
-        });
-        let payload = {};
-        try {
-          payload = await response.json();
-        } catch (error) {
-          payload = {};
-        }
-        if (!response.ok) {
-          throw new Error(payload.message || "API 發生錯誤");
-        }
-        return payload;
-      }
-
       function appendMessage(role, text, meta = {}) {
         const row = document.createElement("article");
         row.className = "timeline-row";
@@ -787,7 +770,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
           appendTimelineStatus("目前為無專案模式。輸入任務後會自動建立新專案並切換。");
           return;
         }
-        const payload = await apiFetch(`/projects/${encodeURIComponent(state.projectId)}/chat-history`);
+        const payload = await services.runs.getProjectHistory(state.projectId);
         state.chatId = payload.chat_id || state.chatId;
         const messages = Array.isArray(payload.messages) ? payload.messages : [];
         if (!messages.length) {
@@ -1034,8 +1017,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
       async function loadProjects() {
         let projects = [];
         try {
-          const payload = await apiFetch("/projects");
-          projects = payload.projects || [];
+          projects = await services.runs.listProjects();
         } catch (error) {
           throw error;
         }
@@ -1064,10 +1046,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
 
       async function ensureChatSession() {
         if (!state.projectId) return;
-        const payload = await apiFetch("/chat/sessions", {
-          method: "POST",
-          body: JSON.stringify({ project_id: state.projectId }),
-        });
+        const payload = await services.runs.ensureChatSession(state.projectId);
         state.chatId = payload.chat_id;
       }
 
@@ -1076,7 +1055,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
           showToast("請先選擇專案。");
           return;
         }
-        const payload = await apiFetch(`/projects/${encodeURIComponent(state.projectId)}/context`);
+        const payload = await services.context.getContext(state.projectId);
         state.graph = payload.graph || { nodes: [], edges: [] };
         state.graphRunId = payload.run_id || null;
         state.graphNodeStates = payload.node_states || {};
@@ -1244,7 +1223,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
         elements.docsDownload.disabled = false;
         elements.docsInsert.disabled = false;
         try {
-          const payload = await apiFetch(`/projects/${encodeURIComponent(state.projectId)}/docs/content?path=${encodeURIComponent(selected.path)}`);
+          const payload = await services.docs.getDoc(state.projectId, selected.path);
           const lowerPath = selected.path.toLowerCase();
           if (/\.(md|markdown)$/i.test(lowerPath)) {
             elements.docsPreviewContent.innerHTML = renderMarkdown(payload.content || "");
@@ -1271,8 +1250,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
           renderDocsVirtualList();
           return;
         }
-        const payload = await apiFetch(`/projects/${encodeURIComponent(state.projectId)}/docs`);
-        const docs = (payload.docs || []).map(normalizeDocItem);
+        const docs = (await services.docs.listDocs(state.projectId)).map(normalizeDocItem);
         renderDocs(docs);
         elements.docsTreeMeta.textContent = `共 ${state.docsFilteredItems.length} / ${docs.length} 份文件（虛擬列表）`;
         if (!state.docsFilteredItems.find((doc) => doc.path === state.docsSelectedPath)) {
@@ -1446,20 +1424,14 @@ appStore.patch({ bootstrappedAt: Date.now() });
           const path = state.plan.confirm_api || "/chat/plan/confirm";
           const payload =
             path === "/chat/plan/confirm"
-              ? await apiFetch(path, {
-                  method: "POST",
-                  body: JSON.stringify({
-                    project_id: state.projectId,
-                    chat_id: state.chatId,
-                    command: state.plan.command,
-                    args: state.plan.args || {},
-                    confirmed,
-                  }),
+              ? await services.admin.confirmPlan(path, {
+                  project_id: state.projectId,
+                  chat_id: state.chatId,
+                  command: state.plan.command,
+                  args: state.plan.args || {},
+                  confirmed,
                 })
-              : await apiFetch(path, {
-                  method: "POST",
-                  body: JSON.stringify({ ...state.plan.args, confirmed }),
-                });
+              : await services.admin.confirmPlan(path, { ...state.plan.args, confirmed });
           appendMessage("agent", confirmed ? "已確認執行。" : "已取消執行。");
           if (confirmed && state.plan?.command === "graph.template.create") {
             state.graphTemplateId = payload.result?.template_id || state.graphTemplateId;
@@ -1534,8 +1506,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
           return;
         }
         try {
-          const payload = await apiFetch(`/runs/${encodeURIComponent(state.graphRunId)}/artifacts?project_id=${encodeURIComponent(state.projectId)}`);
-          state.runArtifacts = payload.artifacts || [];
+          state.runArtifacts = await services.artifacts.listArtifacts(state.graphRunId, state.projectId);
           renderArtifactsInspector(state.runArtifacts);
         } catch (error) {
           state.runArtifacts = [];
@@ -1932,10 +1903,7 @@ ${JSON.stringify(data, null, 2)}
           return;
         }
         try {
-          const payload = await apiFetch("/skills/trigger-preview", {
-            method: "POST",
-            body: JSON.stringify({ skill_name: skillName, project_id: state.projectId || "" }),
-          });
+          const payload = await services.admin.getSkillTriggerPreview(skillName, state.projectId || "");
           elements.skillInjectionPreview.textContent = JSON.stringify(payload, null, 2);
           showToast("已產生 skill 注入預覽。");
         } catch (error) {
