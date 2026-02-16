@@ -1075,6 +1075,17 @@ appStore.patch({ bootstrappedAt: Date.now() });
         elements.copyRunId.dataset.runId = runId;
       }
 
+      function normalizeProjectRecord(project = {}) {
+        if (!project || typeof project !== "object") return null;
+        const projectId = project.project_id || project.id || "";
+        if (!projectId) return null;
+        return {
+          ...project,
+          project_id: projectId,
+          name: project.name || project.title || projectId,
+        };
+      }
+
       async function loadProjects() {
         let projects = [];
         try {
@@ -1082,6 +1093,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
         } catch (error) {
           throw error;
         }
+        projects = projects.map(normalizeProjectRecord).filter(Boolean);
         const availableIds = new Set(projects.map((project) => project.project_id));
         if (state.projectId && !availableIds.has(state.projectId)) {
           state.projectId = null;
@@ -1731,11 +1743,9 @@ appStore.patch({ bootstrappedAt: Date.now() });
 
       elements.shellNavItems.forEach((link) => {
         link.addEventListener("click", (event) => {
+          event.preventDefault();
           const routeKey = link.dataset.route || "chat";
-          if (window.location.hash === `#/${routeKey}`) {
-            event.preventDefault();
-            void applyRoute(routeKey);
-          }
+          navigateToRoute(routeKey);
         });
       });
 

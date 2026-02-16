@@ -774,7 +774,8 @@ def _handle_doctor(core: AmonCore) -> None:
 def _handle_ui(args: argparse.Namespace) -> None:
     from .ui_server import serve_ui
 
-    serve_ui(port=args.port)
+    data_dir = Path(args.data_dir).expanduser() if getattr(args, "data_dir", None) else None
+    serve_ui(port=args.port, data_dir=data_dir)
 
 
 def _handle_fs(core: AmonCore, args: argparse.Namespace) -> None:

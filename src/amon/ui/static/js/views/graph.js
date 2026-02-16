@@ -35,9 +35,9 @@ export const GRAPH_VIEW = {
       if (graph?.mermaid && window.__mermaid) {
         const { svg } = await window.__mermaid.render(`graph-preview-${Date.now()}`, graph.mermaid);
         previewEl.innerHTML = svg;
-        const svg = previewEl.querySelector("svg");
-        if (svg && window.svgPanZoom) {
-          local.panZoom = window.svgPanZoom(svg, { controlIconsEnabled: true, fit: true, center: true });
+        const svgEl = previewEl.querySelector("svg");
+        if (svgEl && window.svgPanZoom) {
+          local.panZoom = window.svgPanZoom(svgEl, { controlIconsEnabled: true, fit: true, center: true });
         }
       }
     }
