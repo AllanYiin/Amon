@@ -1,13 +1,13 @@
 import { requestJson } from "./api.js";
 import { createHashRouter } from "./router.js";
 import { createStore } from "./state.js";
-import { applyI18n } from "./i18n.js";
+import { applyI18n, t } from "./i18n.js";
 import { createToastManager } from "./ui/toast.js";
 import { createConfirmModal } from "./ui/modal.js";
 import { createInitialUiState } from "./store/app_state.js";
 import { collectElements } from "./store/elements.js";
 import { readStorage, writeStorage, removeStorage } from "./domain/storage.js";
-import { formatUnknownValue, shortenId, setStatusText, mapRunStatusLevel, mapDaemonStatusLevel } from "./domain/status.js";
+import { formatUnknownValue, shortenId, setStatusText, mapRunStatusLevel, mapDaemonStatusLevel, statusToI18nKey } from "./domain/status.js";
 import { createShellLayoutController } from "./domain/shell_layout.js";
 import { createAdminService } from "./domain/adminService.js";
 import { registerGlobalErrorHandlers } from "./domain/error_boundary.js";
@@ -20,6 +20,8 @@ import { BILLING_VIEW } from "./views/billing.js";
 import { LOGS_VIEW } from "./views/logs.js";
 import { CONFIG_VIEW } from "./views/config.js";
 import { TOOLS_VIEW } from "./views/tools.js";
+import { createEventBus } from "./core/bus.js";
+import { copyText } from "./utils/clipboard.js";
 
 const { EventStreamClient, createUiEventStore } = window.AmonUIEventStream || {};
 if (!EventStreamClient || !createUiEventStore) {
@@ -81,8 +83,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
           return apiFetch(path, options);
         },
       };
-      const bus = new EventTarget();
-      const t = (key) => key;
+      const bus = createEventBus();
       const ui = { toast: toastManager, modal: confirmModal };
       const adminService = createAdminService({ api: apiClient });
       const services = {
@@ -140,6 +141,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
         if (!mountedViews.has(view) && typeof viewDef.mount === "function") {
           viewDef.mount(buildViewContext(view));
           mountedViews.add(view);
+          bus.emit("view:mounted", { view });
         }
         if (typeof viewDef.onRoute === "function") {
           await viewDef.onRoute({}, buildViewContext(view));
@@ -160,6 +162,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
       async function applyRoute(routeKey) {
         const view = routeToShellView[routeKey] || "chat";
         switchShellView({ view, state, elements, closeBillingStream });
+        bus.emit("run:changed", { view });
         setActiveShellNav(elements, routeKey);
         await loadShellViewDependencies(view);
         unmountInactiveViews(view);
@@ -619,12 +622,14 @@ appStore.patch({ bootstrappedAt: Date.now() });
       };
 
       function renderStoreSummary(storeState) {
-        const runStatus = formatUnknownValue(storeState.run?.status || (state.streaming ? "running" : "idle"), "尚未有 Run");
+        const runStatusRaw = storeState.run?.status || (state.streaming ? "running" : "idle");
+        const runStatus = formatUnknownValue(runStatusRaw, t("status.run.idle"));
         const runProgress = storeState.run?.progress;
         if (!elements.shellRunStatus || !elements.cardRunProgress || !elements.cardBilling || !elements.shellBudgetStatus || !elements.cardPendingConfirmations) {
           return;
         }
-        setStatusText(elements.shellRunStatus, `Run：${runStatus}`, mapRunStatusLevel(runStatus), `目前執行狀態：${runStatus}`);
+        const runStatusLabel = t(statusToI18nKey("run", runStatusRaw, "status.run.idle"), runStatus);
+        setStatusText(elements.shellRunStatus, `Run：${runStatusLabel}`, mapRunStatusLevel(runStatusRaw), `目前執行狀態：${runStatusLabel}`);
         elements.cardRunProgress.textContent = Number.isFinite(runProgress) ? `${runProgress}%` : "尚未有 Run";
         elements.cardRunProgress.title = Number.isFinite(runProgress) ? "目前 Run 進度" : "尚未有 Run 可顯示進度";
         elements.cardBilling.textContent = `NT$ ${Number(storeState.billing.total_cost || 0).toFixed(2)}`;
@@ -1636,8 +1641,9 @@ appStore.patch({ bootstrappedAt: Date.now() });
             elements.artifactPreviewBody.appendChild(wrapper);
             elements.artifactPreviewCopy.hidden = false;
             elements.artifactPreviewCopy.onclick = async () => {
-              await navigator.clipboard.writeText(text);
-              showToast("已複製內容", 6000, "success");
+              await copyText(text, {
+                toast: (message, options = {}) => showToast(message, options.duration || 6000, options.type || "success"),
+              });
             };
           } catch (error) {
             const fallback = document.createElement("p");
@@ -1741,14 +1747,14 @@ appStore.patch({ bootstrappedAt: Date.now() });
           },
           onStatusChange: ({ status, transport }) => {
             if (status === "connected") {
-              setStatusText(elements.shellDaemonStatus, "Daemon：Healthy", mapDaemonStatusLevel("connected"), "daemon 已連線");
+              setStatusText(elements.shellDaemonStatus, `Daemon：${t("status.daemon.healthy")}`, mapDaemonStatusLevel("connected"), "daemon 已連線");
             }
             if (status === "reconnecting") {
-              setStatusText(elements.shellDaemonStatus, "Daemon：重新連線中", mapDaemonStatusLevel("reconnecting"), "daemon 連線中斷，正在重試");
+              setStatusText(elements.shellDaemonStatus, `Daemon：${t("status.daemon.reconnecting")}`, mapDaemonStatusLevel("reconnecting"), "daemon 連線中斷，正在重試");
               showToast(`串流中斷，正在重新連線（${formatUnknownValue(transport, "未知傳輸") }）`, 9000, "warning");
             }
             if (status === "error") {
-              setStatusText(elements.shellDaemonStatus, "Daemon：Unavailable", mapDaemonStatusLevel("error"), "daemon 未連線或不可用");
+              setStatusText(elements.shellDaemonStatus, `Daemon：${t("status.daemon.unavailable")}`, mapDaemonStatusLevel("error"), "daemon 未連線或不可用");
             }
           },
           onEvent: async (eventType, data) => {
@@ -2020,12 +2026,11 @@ ${JSON.stringify(data, null, 2)}
           showToast("目前沒有可複製的 Run ID。", 7000, "warning");
           return;
         }
-        try {
-          await navigator.clipboard.writeText(runId);
-          showToast("已複製完整 Run ID。", 7000, "success");
-        } catch (error) {
-          showToast(`複製失敗：${error.message || error}`, 9000, "danger");
-        }
+        await copyText(runId, {
+          toast: (message, options = {}) => showToast(message, options.duration || 7000, options.type || "success"),
+          successMessage: "已複製完整 Run ID。",
+          errorMessage: "複製失敗，請手動複製 Run ID。",
+        });
       });
 
       elements.contextSaveDraft?.addEventListener("click", saveContextDraft);
