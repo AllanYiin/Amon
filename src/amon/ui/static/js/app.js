@@ -9,6 +9,7 @@ import { collectElements } from "./store/elements.js";
 import { readStorage, writeStorage, removeStorage } from "./domain/storage.js";
 import { formatUnknownValue, shortenId, setStatusText, mapRunStatusLevel, mapDaemonStatusLevel } from "./domain/status.js";
 import { createShellLayoutController } from "./domain/shell_layout.js";
+import { createAdminService } from "./domain/adminService.js";
 import { registerGlobalErrorHandlers } from "./domain/error_boundary.js";
 import { routeToShellView, setActiveShellNav, switchShellView } from "./views/shell.js";
 import { CHAT_VIEW } from "./views/chat.js";
@@ -74,6 +75,38 @@ appStore.patch({ bootstrappedAt: Date.now() });
         return router.parse(hashValue);
       }
 
+      const apiClient = {
+        /** @param {string} path @param {RequestInit & {quiet?: boolean}} [options] */
+        request(path, options = {}) {
+          return apiFetch(path, options);
+        },
+      };
+      const bus = new EventTarget();
+      const t = (key) => key;
+      const ui = { toast: toastManager, modal: confirmModal };
+      const adminService = createAdminService({ api: apiClient });
+      const services = {
+        admin: {
+          ...adminService,
+          loadDocsPage,
+          loadBillPage,
+          loadLogsEventsPage,
+          loadConfigPage,
+          loadToolsSkillsPage,
+        },
+      };
+
+      const VIEW_ROOTS = {
+        chat: elements.chatLayout,
+        context: elements.contextPage,
+        graph: elements.graphPage,
+        "tools-skills": elements.toolsSkillsPage,
+        bill: elements.billPage,
+        config: elements.configPage,
+        "logs-events": elements.logsEventsPage,
+        docs: elements.docsPage,
+      };
+
       const SHELL_VIEW_HANDLERS = [
         CHAT_VIEW,
         CONTEXT_VIEW,
@@ -84,21 +117,43 @@ appStore.patch({ bootstrappedAt: Date.now() });
         CONFIG_VIEW,
         TOOLS_VIEW,
       ].reduce((acc, viewDef) => {
-        acc[viewDef.key] = viewDef;
+        acc[viewDef.id] = viewDef;
         return acc;
       }, {});
 
+      const mountedViews = new Set();
+
+      function buildViewContext(viewId) {
+        return {
+          rootEl: VIEW_ROOTS[viewId],
+          store: appStore,
+          services,
+          ui,
+          t,
+          bus,
+        };
+      }
+
       async function loadShellViewDependencies(view) {
         const viewDef = SHELL_VIEW_HANDLERS[view];
-        if (!viewDef || typeof viewDef.onEnter !== "function") {
-          return;
+        if (!viewDef) return;
+        if (!mountedViews.has(view) && typeof viewDef.mount === "function") {
+          viewDef.mount(buildViewContext(view));
+          mountedViews.add(view);
         }
-        await viewDef.onEnter({
-          loadDocsPage,
-          loadBillPage,
-          loadLogsEventsPage,
-          loadConfigPage,
-          loadToolsSkillsPage,
+        if (typeof viewDef.onRoute === "function") {
+          await viewDef.onRoute({}, buildViewContext(view));
+        }
+      }
+
+      function unmountInactiveViews(activeView) {
+        mountedViews.forEach((viewId) => {
+          if (viewId === activeView) return;
+          const viewDef = SHELL_VIEW_HANDLERS[viewId];
+          if (viewDef && typeof viewDef.unmount === "function") {
+            viewDef.unmount();
+          }
+          mountedViews.delete(viewId);
         });
       }
 
@@ -107,6 +162,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
         switchShellView({ view, state, elements, closeBillingStream });
         setActiveShellNav(elements, routeKey);
         await loadShellViewDependencies(view);
+        unmountInactiveViews(view);
       }
 
       function navigateToRoute(routeKey) {
@@ -174,8 +230,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
       }
 
       async function loadConfigPage() {
-        const projectParam = state.projectId ? `?project_id=${encodeURIComponent(state.projectId)}` : "";
-        const payload = await apiFetch(`/config/view${projectParam}`);
+        const payload = await services.admin.getConfigView(state.projectId);
         state.configView = payload;
         renderConfigTable();
       }
@@ -292,8 +347,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
       }
 
       async function loadBillPage() {
-        const projectParam = state.projectId ? `?project_id=${encodeURIComponent(state.projectId)}` : "";
-        const payload = await apiFetch(`/billing/summary${projectParam}`);
+        const payload = await services.admin.getBillingSummary(state.projectId);
         state.billingSummary = payload;
         renderBillPage();
         openBillingStream();
@@ -418,14 +472,14 @@ appStore.patch({ bootstrappedAt: Date.now() });
       }
 
       async function loadLogsPage(page = 1) {
-        const payload = await apiFetch(`/logs/query?${buildLogsQuery(page).toString()}`);
+        const payload = await services.admin.getLogs(buildLogsQuery(page));
         state.logsPage.logsPage = payload.page;
         state.logsPage.logsHasNext = payload.has_next;
         renderLogsPage(payload);
       }
 
       async function loadEventsPage(page = 1) {
-        const payload = await apiFetch(`/events/query?${buildEventsQuery(page).toString()}`);
+        const payload = await services.admin.getEvents(buildEventsQuery(page));
         state.logsPage.eventsPage = payload.page;
         state.logsPage.eventsHasNext = payload.has_next;
         renderEventsPage(payload);
@@ -442,9 +496,8 @@ appStore.patch({ bootstrappedAt: Date.now() });
       }
 
       async function loadToolsSkillsPage() {
-        const projectParam = state.projectId ? `?project_id=${encodeURIComponent(state.projectId)}` : "";
-        const toolsPayload = await apiFetch(`/tools/catalog${projectParam}`);
-        const skillsPayload = await apiFetch(`/skills/catalog${projectParam}`);
+        const toolsPayload = await services.admin.getToolsCatalog(state.projectId);
+        const skillsPayload = await services.admin.getSkillsCatalog(state.projectId);
         state.toolsCatalog = toolsPayload.tools || [];
         state.skillsCatalog = skillsPayload.skills || [];
         renderToolsList(state.toolsCatalog, toolsPayload.policy_editable);

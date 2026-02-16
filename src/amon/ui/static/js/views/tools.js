@@ -1,6 +1,10 @@
+/** @type {import('./contracts.js').ViewContract} */
 export const TOOLS_VIEW = {
-  key: "tools-skills",
-  onEnter: async ({ loadToolsSkillsPage }) => {
-    await loadToolsSkillsPage();
+  id: "tools-skills",
+  route: "/tools",
+  mount: () => {},
+  unmount: () => {},
+  onRoute: async (_params = {}, ctx) => {
+    await ctx.services?.admin?.loadToolsSkillsPage?.();
   },
 };

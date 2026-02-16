@@ -1,6 +1,10 @@
+/** @type {import('./contracts.js').ViewContract} */
 export const LOGS_VIEW = {
-  key: "logs-events",
-  onEnter: async ({ loadLogsEventsPage }) => {
-    await loadLogsEventsPage();
+  id: "logs-events",
+  route: "/logs",
+  mount: () => {},
+  unmount: () => {},
+  onRoute: async (_params = {}, ctx) => {
+    await ctx.services?.admin?.loadLogsEventsPage?.();
   },
 };

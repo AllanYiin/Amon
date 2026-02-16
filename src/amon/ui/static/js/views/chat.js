@@ -1,4 +1,8 @@
+/** @type {import('./contracts.js').ViewContract} */
 export const CHAT_VIEW = {
-  key: "chat",
-  onEnter: async () => {},
+  id: "chat",
+  route: "/chat",
+  mount: () => {},
+  unmount: () => {},
+  onRoute: async (_params = {}, _ctx) => {},
 };

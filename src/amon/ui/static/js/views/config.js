@@ -1,6 +1,10 @@
+/** @type {import('./contracts.js').ViewContract} */
 export const CONFIG_VIEW = {
-  key: "config",
-  onEnter: async ({ loadConfigPage }) => {
-    await loadConfigPage();
+  id: "config",
+  route: "/config",
+  mount: () => {},
+  unmount: () => {},
+  onRoute: async (_params = {}, ctx) => {
+    await ctx.services?.admin?.loadConfigPage?.();
   },
 };
