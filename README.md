@@ -82,6 +82,8 @@ amon toolforge verify
 # 啟動 UI 預覽（瀏覽 http://localhost:8000）
 amon ui --port 8000
 
+> UI 唯一入口為 `src/amon/ui/index.html`（以 hash route 切換），`project.html` / `single.html` 僅保留導向用途。
+
 # 互動式 Chat
 amon chat --project <project_id>
 

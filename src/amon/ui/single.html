@@ -5,21 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Amon｜入口整併中</title>
     <link rel="stylesheet" href="styles.css" />
+    <meta http-equiv="refresh" content="0;url=./index.html#/chat" />
   </head>
   <body>
     <main class="page">
-      <section class="main-card" style="max-width: 720px; margin: 48px auto;">
+      <section class="main-card merged-entry-card">
         <h1 class="main-title">此頁已整併到主入口</h1>
-        <p class="subtitle">為避免功能斷裂，你將自動導向至 <strong>index.html#/chat</strong>。</p>
-        <p>若未自動跳轉，請點擊下方按鈕繼續。</p>
-        <p><a class="primary-btn" href="./index.html#/chat">前往主入口（Chat）</a></p>
+        <p class="subtitle">唯一入口為 <strong>index.html + hash route</strong>。</p>
+        <p><a class="primary-btn" href="./index.html#/chat">前往主入口（對話）</a></p>
       </section>
     </main>
-    <script>
-      const target = new URL("./index.html", window.location.href);
-      target.search = window.location.search;
-      target.hash = "#/chat";
-      window.location.replace(target.toString());
-    </script>
   </body>
 </html>
