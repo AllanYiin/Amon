@@ -1985,3 +1985,81 @@ body.is-resizing-context-panel {
 }
 
 .timeline-status--artifacts { margin-top: 6px; }
+
+.execution-timeline {
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  padding: 12px;
+  background: #f8fbff;
+}
+
+.execution-timeline__header h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.execution-timeline__header p {
+  margin: 4px 0 10px;
+  color: #475467;
+  font-size: 12px;
+}
+
+.execution-accordion {
+  display: grid;
+  gap: 8px;
+}
+
+.execution-step {
+  border: 1px solid #d0d5dd;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.execution-step summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 10px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.execution-step__body {
+  border-top: 1px solid #e4e7ec;
+  padding: 8px 10px;
+}
+
+.execution-step--failed { border-color: #fecaca; }
+.execution-step--running { border-color: #bfdbfe; }
+.execution-step--succeeded { border-color: #bbf7d0; }
+
+.docs-filter {
+  width: 100%;
+  margin: 8px 0;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.docs-preview__content pre {
+  background: #0b1020;
+  color: #e2e8f0;
+  padding: 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.graph-preview {
+  min-height: 260px;
+}
+
+.graph-preview svg {
+  width: 100%;
+  height: 100%;
+}
+
+.bill-page .config-card canvas {
+  width: 100% !important;
+  min-height: 220px;
+}
