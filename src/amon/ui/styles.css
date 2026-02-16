@@ -12,6 +12,10 @@
   --success: #10b981;
   --warning: #f59e0b;
   --highlight: #eef2ff;
+  --color-success: #15803d;
+  --color-warning: #b45309;
+  --color-danger: #b91c1c;
+  --color-neutral: #475569;
 }
 
 [hidden] {
@@ -798,16 +802,48 @@ body {
   color: var(--primary);
 }
 
+.pill--success,
+.pill--warning,
+.pill--danger,
+.pill--neutral {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 8px;
+  border: 1px solid currentColor;
+  font-size: 12px;
+  font-weight: 600;
+  background: #fff;
+}
+
+.pill--success {
+  color: var(--color-success);
+}
+
+.pill--warning {
+  color: var(--color-warning);
+}
+
+.pill--danger {
+  color: var(--color-danger);
+}
+
+.pill--neutral {
+  color: var(--color-neutral);
+}
+
 .toast {
   position: fixed;
   right: 24px;
   bottom: 24px;
-  max-width: 320px;
+  max-width: 360px;
   background: #0f172a;
   color: #f8fafc;
+  border: 1px solid transparent;
   padding: 12px 16px;
   border-radius: 12px;
-  font-size: 12px;
+  font-size: 13px;
+  line-height: 1.4;
   opacity: 0;
   transform: translateY(10px);
   transition: all 0.2s ease;
@@ -815,9 +851,72 @@ body {
   pointer-events: none;
 }
 
+.toast--success {
+  background: #ecfdf3;
+  color: var(--color-success);
+  border-color: #86efac;
+}
+
+.toast--warning {
+  background: #fff7ed;
+  color: var(--color-warning);
+  border-color: #fdba74;
+}
+
+.toast--danger {
+  background: #fef2f2;
+  color: var(--color-danger);
+  border-color: #fca5a5;
+}
+
+.toast--info,
+.toast--neutral {
+  background: #f8fafc;
+  color: #1e293b;
+  border-color: #cbd5e1;
+}
+
 .toast.visible {
   opacity: 1;
   transform: translateY(0);
+}
+
+.confirm-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(15, 23, 42, 0.45);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.confirm-modal__panel {
+  width: min(420px, 100%);
+  background: var(--card);
+  border: 1px solid var(--stroke);
+  border-radius: 14px;
+  padding: 18px;
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.2);
+}
+
+.confirm-modal__title {
+  margin: 0;
+  color: var(--title);
+  font-size: 18px;
+}
+
+.confirm-modal__description {
+  margin: 10px 0 0;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.confirm-modal__actions {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .chat-layout {
