@@ -2345,11 +2345,11 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         return "\n".join(lines)
 
 
-def serve_ui(port: int = 8000) -> None:
+def serve_ui(port: int = 8000, data_dir: Path | None = None) -> None:
     ui_dir = Path(__file__).resolve().parent / "ui"
     if not ui_dir.exists():
         raise FileNotFoundError(f"找不到 UI 資料夾：{ui_dir}")
-    core = AmonCore()
+    core = AmonCore(data_dir=data_dir)
     core.ensure_base_structure()
     handler = functools.partial(AmonUIHandler, directory=str(ui_dir), core=core)
     server = ThreadingHTTPServer(("0.0.0.0", port), handler)

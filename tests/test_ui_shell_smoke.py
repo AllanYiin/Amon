@@ -46,6 +46,9 @@ class UIShellSmokeTests(unittest.TestCase):
             'function resolveRouteFromHash',
             'function navigateToRoute(routeKey)',
             'createHashRouter',
+            'event.preventDefault();',
+            'navigateToRoute(routeKey);',
+            'function normalizeProjectRecord(project = {})',
         ]:
             self.assertIn(token, bootstrap_js)
 
