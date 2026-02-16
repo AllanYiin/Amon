@@ -99,6 +99,16 @@ body {
   font-weight: 700;
 }
 
+.shell-nav__link {
+  text-decoration: none;
+  display: block;
+}
+
+.shell-nav__item:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
 .shell-main {
   display: grid;
   gap: 16px;

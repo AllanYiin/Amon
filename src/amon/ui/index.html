@@ -17,14 +17,14 @@
         <aside class="shell-sidebar" aria-label="主要導覽">
           <h2>Amon UI</h2>
           <nav class="shell-nav" id="shell-nav">
-            <button type="button" class="shell-nav__item is-active" data-shell-view="chat">Chat</button>
-            <button type="button" class="shell-nav__item" data-shell-view="context">Context</button>
-            <button type="button" class="shell-nav__item" data-shell-view="graph">Graph</button>
-            <button type="button" class="shell-nav__item" data-shell-view="tools-skills">Tools &amp; Skills</button>
-            <button type="button" class="shell-nav__item" data-shell-view="config">Config</button>
-            <button type="button" class="shell-nav__item" data-shell-view="logs-events">Logs &amp; Events</button>
-            <button type="button" class="shell-nav__item" data-shell-view="docs">Docs</button>
-            <button type="button" class="shell-nav__item" data-shell-view="bill">Bill</button>
+            <a class="shell-nav__item shell-nav__link" data-shell-view="chat" data-route="chat" href="#/chat">Chat</a>
+            <a class="shell-nav__item shell-nav__link" data-shell-view="context" data-route="context" href="#/context">Context</a>
+            <a class="shell-nav__item shell-nav__link" data-shell-view="graph" data-route="graph" href="#/graph">Graph</a>
+            <a class="shell-nav__item shell-nav__link" data-shell-view="tools-skills" data-route="tools" href="#/tools">Tools &amp; Skills</a>
+            <a class="shell-nav__item shell-nav__link" data-shell-view="config" data-route="config" href="#/config">Config</a>
+            <a class="shell-nav__item shell-nav__link" data-shell-view="logs-events" data-route="logs" href="#/logs">Logs &amp; Events</a>
+            <a class="shell-nav__item shell-nav__link" data-shell-view="docs" data-route="docs" href="#/docs">Docs</a>
+            <a class="shell-nav__item shell-nav__link" data-shell-view="bill" data-route="billing" href="#/billing">Bill</a>
           </nav>
         </aside>
 
@@ -147,14 +147,15 @@
             </div>
           </div>
           <div class="context-project" id="context-project">目前專案：未選擇</div>
-          <div class="context-tabs" role="tablist" aria-label="右側資訊切換">
-            <button type="button" class="context-tab is-active" data-context-tab="context" role="tab" aria-selected="true">Context</button>
+          <div class="context-tabs" role="tablist" aria-label="Inspector 檢視器切換">
+            <button type="button" class="context-tab is-active" data-context-tab="run" role="tab" aria-selected="true">Run</button>
             <button type="button" class="context-tab" data-context-tab="graph" role="tab" aria-selected="false">Graph</button>
-            <button type="button" class="context-tab" data-context-tab="docs" role="tab" aria-selected="false">Docs</button>
+            <button type="button" class="context-tab" data-context-tab="artifacts" role="tab" aria-selected="false">Artifacts</button>
+            <button type="button" class="context-tab" data-context-tab="logs" role="tab" aria-selected="false">Logs</button>
           </div>
 
-          <section class="context-section" data-context-panel="context">
-            <h3>Context</h3>
+          <section class="context-section" data-context-panel="run">
+            <h3>Run Inspector</h3>
             <p id="context-overview" class="context-overview">請先在上方選擇專案，右側內容會自動同步。</p>
           </section>
           <section class="context-section" data-context-panel="graph" hidden>
@@ -169,9 +170,13 @@
             <ul id="graph-node-list" class="graph-node-list"></ul>
             <pre id="graph-code" class="graph-code"></pre>
           </section>
-          <section class="context-section" data-context-panel="docs" hidden>
-            <h3>Docs</h3>
-            <ul id="docs-list" class="docs-list"></ul>
+          <section class="context-section" data-context-panel="artifacts" hidden>
+            <h3>Artifacts Inspector</h3>
+            <p class="empty-context">顯示同一個 run 的 artifacts 摘要（Phase 1 先提供框架）。</p>
+          </section>
+          <section class="context-section" data-context-panel="logs" hidden>
+            <h3>Logs Inspector</h3>
+            <p class="empty-context">顯示同一個 run 的 logs 摘要（Phase 1 先提供框架）。</p>
           </section>
             </aside>
           </div>
@@ -523,7 +528,6 @@
         graphNodeOutputs: document.getElementById("graph-node-outputs"),
         graphNodeEvents: document.getElementById("graph-node-events"),
         graphParametrize: document.getElementById("graph-parametrize"),
-        docsList: document.getElementById("docs-list"),
         chatProjectLabel: document.getElementById("chat-project-label"),
         contextProject: document.getElementById("context-project"),
         contextOverview: document.getElementById("context-overview"),
@@ -545,7 +549,7 @@
         thinkingSummary: document.getElementById("thinking-summary"),
         thinkingDetail: document.getElementById("thinking-detail"),
         artifactList: document.getElementById("artifact-list"),
-        shellNavItems: document.querySelectorAll(".shell-nav__item"),
+        shellNavItems: document.querySelectorAll(".shell-nav__link"),
         toolsSkillsPage: document.getElementById("tools-skills-page"),
         billPage: document.getElementById("bill-page"),
         billRefresh: document.getElementById("bill-refresh"),
@@ -632,6 +636,31 @@
 
       syncContextPanelToggle();
 
+      const routeToShellView = {
+        chat: "chat",
+        context: "context",
+        graph: "graph",
+        tools: "tools-skills",
+        config: "config",
+        logs: "logs-events",
+        docs: "docs",
+        billing: "bill",
+      };
+
+      function resolveRouteFromHash(hashValue = window.location.hash) {
+        const raw = (hashValue || "").replace(/^#\/?/, "").trim().toLowerCase();
+        const routeKey = raw.split("/")[0];
+        return routeToShellView[routeKey] ? routeKey : "chat";
+      }
+
+      function setActiveShellNav(routeKey) {
+        elements.shellNavItems.forEach((item) => {
+          const isActive = item.dataset.route === routeKey;
+          item.classList.toggle("is-active", isActive);
+          item.setAttribute("aria-current", isActive ? "page" : "false");
+        });
+      }
+
       function switchShellView(view) {
         if (view !== "bill") {
           closeBillingStream();
@@ -645,6 +674,41 @@
         elements.configPage.hidden = view !== "config";
         elements.logsEventsPage.hidden = view !== "logs-events";
         elements.docsPage.hidden = view !== "docs";
+      }
+
+      async function loadShellViewDependencies(view) {
+        if (view === "tools-skills") {
+          await loadToolsSkillsPage();
+        }
+        if (view === "config") {
+          await loadConfigPage();
+        }
+        if (view === "logs-events") {
+          await loadLogsEventsPage();
+        }
+        if (view === "docs") {
+          await loadDocsPage();
+        }
+        if (view === "bill") {
+          await loadBillPage();
+        }
+      }
+
+      async function applyRoute(routeKey) {
+        const view = routeToShellView[routeKey] || "chat";
+        switchShellView(view);
+        setActiveShellNav(routeKey);
+        await loadShellViewDependencies(view);
+      }
+
+      function navigateToRoute(routeKey) {
+        const normalized = routeToShellView[routeKey] ? routeKey : "chat";
+        const targetHash = `#/${normalized}`;
+        if (window.location.hash === targetHash) {
+          void applyRoute(normalized);
+          return;
+        }
+        window.location.hash = targetHash;
       }
 
       function formatConfigCell(value) {
@@ -900,7 +964,7 @@
                 setProjectState(item.project_id);
                 await loadContext();
               }
-              switchShellView("chat");
+              navigateToRoute("chat");
               showToast(`已切換至 Chat，可依 ${key}=${value} 追蹤。`);
             });
             drilldown.appendChild(button);
@@ -1339,7 +1403,6 @@
           elements.graphPreview.innerHTML = "<p class=\"empty-context\">請先在上方選擇專案。</p>";
           elements.graphCode.textContent = "";
           elements.contextOverview.textContent = "請先在上方選擇專案，右側內容會自動同步。";
-          renderDocs([]);
         }
       }
 
@@ -1447,7 +1510,6 @@
       }
 
       function renderDocs(docs) {
-        elements.docsList.innerHTML = "";
         const normalized = (docs || []).map(normalizeDocItem);
         state.docsItems = normalized;
         if (!normalized.length) {
@@ -1458,16 +1520,8 @@
           elements.docsPreviewTitle.textContent = "請從左側選擇文件";
           elements.docsPreviewMeta.textContent = "來源 run / node 將顯示於此。";
           elements.docsPreviewContent.innerHTML = '<p class="empty-context">尚未選擇文件。</p>';
-          const item = document.createElement("li");
-          item.textContent = state.projectId ? "尚無文件" : "請先選擇專案";
-          elements.docsList.appendChild(item);
           return;
         }
-        normalized.slice(0, 8).forEach((doc) => {
-          const item = document.createElement("li");
-          item.textContent = doc.path;
-          elements.docsList.appendChild(item);
-        });
       }
 
       function buildDocsTree(items = []) {
@@ -1979,28 +2033,19 @@ ${JSON.stringify(data, null, 2)}
         });
       }
 
-      elements.shellNavItems.forEach((button) => {
-        button.addEventListener("click", async () => {
-          elements.shellNavItems.forEach((item) => item.classList.remove("is-active"));
-          button.classList.add("is-active");
-          const view = button.dataset.shellView || "chat";
-          switchShellView(view);
-          if (view === "tools-skills") {
-            await loadToolsSkillsPage();
-          }
-          if (view === "config") {
-            await loadConfigPage();
-          }
-          if (view === "logs-events") {
-            await loadLogsEventsPage();
-          }
-          if (view === "docs") {
-            await loadDocsPage();
-          }
-          if (view === "bill") {
-            await loadBillPage();
+      elements.shellNavItems.forEach((link) => {
+        link.addEventListener("click", (event) => {
+          const routeKey = link.dataset.route || "chat";
+          if (window.location.hash === `#/${routeKey}`) {
+            event.preventDefault();
+            void applyRoute(routeKey);
           }
         });
+      });
+
+      window.addEventListener("hashchange", () => {
+        const routeKey = resolveRouteFromHash();
+        void applyRoute(routeKey);
       });
 
       elements.logsRefresh.addEventListener("click", () => loadLogsPage(1));
@@ -2085,21 +2130,7 @@ ${JSON.stringify(data, null, 2)}
           await ensureChatSession();
           await loadContext();
         }
-        if (state.shellView === "tools-skills") {
-          await loadToolsSkillsPage();
-        }
-        if (state.shellView === "config") {
-          await loadConfigPage();
-        }
-        if (state.shellView === "logs-events") {
-          await loadLogsEventsPage();
-        }
-        if (state.shellView === "docs") {
-          await loadDocsPage();
-        }
-        if (state.shellView === "bill") {
-          await loadBillPage();
-        }
+        await loadShellViewDependencies(state.shellView);
       });
 
       elements.refreshContext.addEventListener("click", loadContext);
@@ -2151,7 +2182,6 @@ ${JSON.stringify(data, null, 2)}
 
       (async () => {
         try {
-          switchShellView("chat");
           await loadProjects();
           setProjectState(state.projectId);
           renderArtifacts([]);
@@ -2160,6 +2190,12 @@ ${JSON.stringify(data, null, 2)}
           if (state.projectId) {
             await ensureChatSession();
             await loadContext();
+          }
+          const routeKey = resolveRouteFromHash();
+          if (!window.location.hash) {
+            navigateToRoute(routeKey);
+          } else {
+            await applyRoute(routeKey);
           }
         } catch (error) {
           showToast(`初始化失敗：${error.message}`);

@@ -25,6 +25,34 @@ class UIShellSmokeTests(unittest.TestCase):
             self.assertIn(token, html)
 
 
+
+    def test_shell_navigation_uses_hash_routes(self) -> None:
+        html = Path("src/amon/ui/index.html").read_text(encoding="utf-8")
+
+        for token in [
+            'href="#/chat"',
+            'href="#/context"',
+            'href="#/graph"',
+            'href="#/tools"',
+            'href="#/config"',
+            'href="#/logs"',
+            'href="#/docs"',
+            'href="#/billing"',
+            'window.addEventListener("hashchange"',
+            'function resolveRouteFromHash',
+            'function navigateToRoute(routeKey)',
+        ]:
+            self.assertIn(token, html)
+
+    def test_project_and_single_pages_redirect_to_index_hash_routes(self) -> None:
+        project_html = Path("src/amon/ui/project.html").read_text(encoding="utf-8")
+        single_html = Path("src/amon/ui/single.html").read_text(encoding="utf-8")
+
+        self.assertIn('target.hash = "#/context"', project_html)
+        self.assertIn('href="./index.html#/context"', project_html)
+        self.assertIn('target.hash = "#/chat"', single_html)
+        self.assertIn('href="./index.html#/chat"', single_html)
+
     def test_chat_stream_uses_defined_render_paths(self) -> None:
         html = Path("src/amon/ui/index.html").read_text(encoding="utf-8")
 
