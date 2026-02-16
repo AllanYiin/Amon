@@ -1,3 +1,5 @@
+import { t } from "../i18n.js";
+
 function getProjectId(ctx) {
   return ctx.store?.getState?.()?.layout?.projectId || "";
 }
@@ -12,7 +14,7 @@ function ensureEmptyCta(rootEl) {
     box = document.createElement("div");
     box.className = "empty-context";
     box.dataset.contextEmpty = "true";
-    box.innerHTML = '<p>尚未載入 Context，請先輸入專案背景。</p><button type="button" class="primary-btn" data-context-create>新增 Context</button>';
+    box.innerHTML = `<p>${t("view.context.empty")}</p><button type="button" class="primary-btn" data-context-create>${t("view.context.create")}</button>`;
     rootEl.prepend(box);
   }
   return box;
@@ -41,34 +43,34 @@ export const CONTEXT_VIEW = {
       if (target.id === "context-save-draft") {
         const projectId = getProjectId(ctx);
         if (!projectId) {
-          ctx.ui.toast?.show("請先選擇專案後再儲存 Context。", { type: "warning", duration: 9000 });
+          ctx.ui.toast?.show(t("toast.context.selectProject"), { type: "warning", duration: 9000 });
           return;
         }
         try {
           await ctx.services.context.saveContext(projectId, editor?.value || "");
           dispatchContext(ctx, { context: editor?.value || "", lastSavedAt: Date.now() });
-          ctx.ui.toast?.show("Context 已儲存。", { type: "success", duration: 9000 });
+          ctx.ui.toast?.show(t("toast.context.saved"), { type: "success", duration: 9000 });
         } catch (error) {
-          ctx.ui.toast?.show(`儲存失敗：${error.message}`, { type: "danger", duration: 12000 });
+          ctx.ui.toast?.show(t("toast.context.saveFailed", "", { message: error.message }), { type: "danger", duration: 12000 });
         }
       }
 
       if (target.id === "context-clear-chat" || target.id === "context-clear-project") {
         const scope = target.id === "context-clear-project" ? "project" : "chat";
         const confirmed = await ctx.ui.modal?.open({
-          title: "確認清空 Context",
-          description: `確定要清空 ${scope === "project" ? "專案" : "本次對話"} Context 嗎？`,
-          confirmText: "清空",
-          cancelText: "取消",
+          title: t("modal.context.clearTitle"),
+          description: t(scope === "project" ? "modal.context.clearDescription.project" : "modal.context.clearDescription.chat"),
+          confirmText: t("modal.context.clearConfirm"),
+          cancelText: t("modal.context.clearCancel"),
         });
         if (!confirmed) return;
         try {
           await ctx.services.context.clearContext(scope, getProjectId(ctx));
           if (editor) editor.value = "";
           dispatchContext(ctx, { context: "", clearedScope: scope, clearedAt: Date.now() });
-          ctx.ui.toast?.show("Context 已清空。", { type: "success", duration: 9000 });
+          ctx.ui.toast?.show(t("toast.context.cleared"), { type: "success", duration: 9000 });
         } catch (error) {
-          ctx.ui.toast?.show(`清空失敗：${error.message}`, { type: "danger", duration: 12000 });
+          ctx.ui.toast?.show(t("toast.context.clearFailed", "", { message: error.message }), { type: "danger", duration: 12000 });
         }
       }
     };
@@ -100,7 +102,7 @@ export const CONTEXT_VIEW = {
       emptyCta.hidden = Boolean(contextText);
       dispatchContext(ctx, { context: contextText, projectId, loadedAt: Date.now() });
     } catch (error) {
-      ctx.ui.toast?.show(`載入 Context 失敗：${error.message}`, { type: "danger", duration: 12000 });
+      ctx.ui.toast?.show(t("toast.context.loadFailed", "", { message: error.message }), { type: "danger", duration: 12000 });
     }
   },
 };

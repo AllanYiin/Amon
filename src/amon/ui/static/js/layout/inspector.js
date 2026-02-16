@@ -1,4 +1,5 @@
 import { createSplitPane } from "./splitPane.js";
+import { t } from "../i18n.js";
 
 export function createInspectorLayout({ elements, store, storage, storageKeys, onTabChange }) {
   const { readStorage, writeStorage } = storage;
@@ -15,6 +16,7 @@ export function createInspectorLayout({ elements, store, storage, storageKeys, o
       const isActive = tab.dataset.contextTab === activeTab;
       tab.classList.toggle("is-active", isActive);
       tab.setAttribute("aria-selected", String(isActive));
+      tab.setAttribute("tabindex", isActive ? "0" : "-1");
     });
     elements.contextPanels.forEach((panel) => {
       panel.hidden = panel.dataset.contextPanel !== activeTab;
@@ -31,7 +33,7 @@ export function createInspectorLayout({ elements, store, storage, storageKeys, o
     elements.uiShell?.classList.toggle("is-context-collapsed", collapsed);
     elements.toggleContextPanel?.setAttribute("aria-expanded", String(!collapsed));
     if (elements.toggleContextPanel) {
-      elements.toggleContextPanel.textContent = collapsed ? "展開右側面板" : "收合右側面板";
+      elements.toggleContextPanel.textContent = collapsed ? t("topbar.toggleContext.expand") : t("topbar.toggleContext.collapse");
     }
     renderTabs(activeTab);
 
@@ -73,6 +75,25 @@ export function createInspectorLayout({ elements, store, storage, storageKeys, o
         const nextTab = tab.dataset.contextTab || "run";
         updateInspector({ activeTab: nextTab });
         if (typeof onTabChange === "function") onTabChange(nextTab);
+      });
+
+      tab.addEventListener("keydown", (event) => {
+        if (!["ArrowRight", "ArrowLeft", "Home", "End"].includes(event.key)) return;
+        const tabs = Array.from(elements.contextTabs || []);
+        const currentIndex = tabs.indexOf(tab);
+        if (currentIndex < 0) return;
+        event.preventDefault();
+        let nextIndex = currentIndex;
+        if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % tabs.length;
+        if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+        if (event.key === "Home") nextIndex = 0;
+        if (event.key === "End") nextIndex = tabs.length - 1;
+        const nextTab = tabs[nextIndex];
+        nextTab?.focus();
+        if (nextTab?.dataset.contextTab) {
+          updateInspector({ activeTab: nextTab.dataset.contextTab });
+          if (typeof onTabChange === "function") onTabChange(nextTab.dataset.contextTab);
+        }
       });
     });
 

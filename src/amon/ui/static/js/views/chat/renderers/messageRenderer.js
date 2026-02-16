@@ -1,3 +1,5 @@
+import { t } from "../../../i18n.js";
+
 export function createMessageRenderer({ timelineEl, renderMarkdown }) {
   const state = {
     pendingAssistantBubble: null,
@@ -13,7 +15,7 @@ export function createMessageRenderer({ timelineEl, renderMarkdown }) {
 
     const footer = document.createElement("footer");
     footer.className = "timeline-meta";
-    const roleLabel = role === "user" ? "你" : "Amon";
+    const roleLabel = role === "user" ? t("chat.role.user") : t("chat.role.agent");
     const status = meta.status ? `・${meta.status}` : "";
     footer.textContent = `${new Date().toLocaleTimeString("zh-TW", { hour12: false })}・${roleLabel}${status}`;
 
@@ -34,11 +36,11 @@ export function createMessageRenderer({ timelineEl, renderMarkdown }) {
 
   function applyTokenChunk(text = "") {
     if (!state.pendingAssistantBubble) {
-      state.pendingAssistantBubble = appendMessage("agent", "Amon：", { status: "streaming" });
+      state.pendingAssistantBubble = appendMessage("agent", `${t("chat.role.agent")}：`, { status: t("chat.status.streaming") });
       state.pendingAssistantBubble.dataset.buffer = "";
     }
     state.pendingAssistantBubble.dataset.buffer = `${state.pendingAssistantBubble.dataset.buffer || ""}${text}`;
-    state.pendingAssistantBubble.innerHTML = renderMarkdown(`Amon：${state.pendingAssistantBubble.dataset.buffer}`);
+    state.pendingAssistantBubble.innerHTML = renderMarkdown(`${t("chat.role.agent")}：${state.pendingAssistantBubble.dataset.buffer}`);
     timelineEl.scrollTop = timelineEl.scrollHeight;
   }
 

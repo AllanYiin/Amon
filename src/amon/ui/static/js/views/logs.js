@@ -1,9 +1,11 @@
+import { t } from "../i18n.js";
+
 function getProjectId(ctx) {
   return ctx.store?.getState?.()?.layout?.projectId || "";
 }
 
 function esc(v) {
-  return String(v || "").replace(/[&<>"']/g, (s) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[s]));
+  return String(v || "").replace(/[&<>"']/g, (s) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[s]));
 }
 
 /** @type {import('./contracts.js').ViewContract} */
@@ -21,27 +23,27 @@ export const LOGS_VIEW = {
     const controller = { current: null };
 
     function renderLoading() {
-      summaryEl.textContent = "載入中...";
-      listEl.innerHTML = '<p class="empty-context">正在查詢 logs。</p>';
+      summaryEl.textContent = t("view.logs.loading");
+      listEl.innerHTML = `<p class="empty-context">${t("view.logs.loadingList")}</p>`;
     }
 
     function renderError(message) {
-      summaryEl.textContent = "載入失敗";
+      summaryEl.textContent = t("view.logs.loadFailed");
       listEl.innerHTML = `<p class="empty-context">${esc(message)}</p>`;
     }
 
     function renderLogs(payload = {}) {
       const items = payload.items || payload.logs || [];
-      summaryEl.textContent = `共 ${payload.total || items.length} 筆`;
+      summaryEl.textContent = t("view.logs.total", "", { total: payload.total || items.length });
       listEl.innerHTML = "";
       items.forEach((item) => {
         const card = document.createElement("article");
         card.className = "log-item";
-        card.innerHTML = `<header><strong>${esc(item.level || item.severity || 'INFO')}</strong> · <code>${esc(item.ts || '-')}</code></header><pre>${esc(JSON.stringify(item, null, 2))}</pre>`;
+        card.innerHTML = `<header><strong>${esc(item.level || item.severity || "INFO")}</strong> · <code>${esc(item.ts || "-")}</code></header><pre>${esc(JSON.stringify(item, null, 2))}</pre>`;
         listEl.appendChild(card);
       });
       if (!items.length) {
-        listEl.innerHTML = '<p class="empty-context">查無資料</p>';
+        listEl.innerHTML = `<p class="empty-context">${t("view.logs.empty")}</p>`;
       }
     }
 

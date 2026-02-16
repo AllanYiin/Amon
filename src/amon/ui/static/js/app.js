@@ -47,18 +47,19 @@ appStore.patch({ bootstrappedAt: Date.now() });
         contextDraftPrefix: "amon.ui.contextDraft:",
       };
 
+      const isMobileViewport = window.innerWidth < 768;
       appStore.patch({
         layout: {
           activeRoute: "chat",
-          sidebarCollapsed: false,
+          sidebarCollapsed: isMobileViewport,
           projectId: state.projectId,
           projects: [],
-          runPill: { text: "Run：尚未有 Run", level: "neutral", title: "目前尚未執行任何 Run" },
-          daemonPill: { text: "Daemon：尚未連線", level: "neutral", title: "尚未建立串流連線" },
+          runPill: { text: t("status.run.idle"), level: "neutral", title: t("tooltip.runIdle") },
+          daemonPill: { text: "Daemon：尚未連線", level: "neutral", title: t("tooltip.daemonIdle") },
           budgetPill: "Budget：NT$ 0.00 / NT$ 5,000",
           inspector: {
             activeTab: "run",
-            collapsed: false,
+            collapsed: isMobileViewport,
             width: state.contextPanelWidth,
           },
         },

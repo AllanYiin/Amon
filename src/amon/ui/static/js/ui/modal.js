@@ -1,3 +1,5 @@
+import { t } from "../i18n.js";
+
 export function createConfirmModal(modalElement) {
   if (!modalElement) return { open: async () => false, close() {} };
   const panel = modalElement.querySelector(".confirm-modal__panel");
@@ -28,7 +30,7 @@ export function createConfirmModal(modalElement) {
     modalElement.hidden = true;
     modalElement.setAttribute("aria-hidden", "true");
     modalElement.removeEventListener("keydown", trapFocus);
-    if (previousActive) previousActive.focus();
+    if (previousActive instanceof HTMLElement) previousActive.focus();
     if (resolver) {
       resolver(Boolean(result));
       resolver = null;
@@ -44,10 +46,10 @@ export function createConfirmModal(modalElement) {
 
   return {
     open(options = {}) {
-      titleElement && (titleElement.textContent = options.title || "請再次確認");
-      descriptionElement && (descriptionElement.textContent = options.description || "此操作無法復原，是否繼續？");
-      confirmButton && (confirmButton.textContent = options.confirmText || "確認");
-      cancelButton && (cancelButton.textContent = options.cancelText || "取消");
+      titleElement && (titleElement.textContent = options.title || t("modal.confirm.title"));
+      descriptionElement && (descriptionElement.textContent = options.description || t("modal.confirm.description"));
+      confirmButton && (confirmButton.textContent = options.confirmText || t("modal.confirm.ok"));
+      cancelButton && (cancelButton.textContent = options.cancelText || t("modal.confirm.cancel"));
       previousActive = document.activeElement;
       modalElement.hidden = false;
       modalElement.setAttribute("aria-hidden", "false");

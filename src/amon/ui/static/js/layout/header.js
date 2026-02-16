@@ -1,4 +1,5 @@
 import { setStatusText } from "../domain/status.js";
+import { t } from "../i18n.js";
 
 const LEVEL_BY_PILL = {
   run: "neutral",
@@ -13,7 +14,7 @@ export function createHeaderLayout({ elements, store }) {
 
     const emptyOption = document.createElement("option");
     emptyOption.value = "";
-    emptyOption.textContent = "無專案";
+    emptyOption.textContent = t("topbar.noProject", "無專案");
     projectSelect.appendChild(emptyOption);
 
     projects.forEach((project) => {
@@ -35,8 +36,8 @@ export function createHeaderLayout({ elements, store }) {
       elements.projectSelect.value = layout.projectId || "";
     }
 
-    const run = layout.runPill || { text: "Run：尚未有 Run", level: LEVEL_BY_PILL.run, title: "目前尚未執行任何 Run" };
-    const daemon = layout.daemonPill || { text: "Daemon：尚未連線", level: LEVEL_BY_PILL.daemon, title: "尚未建立串流連線" };
+    const run = layout.runPill || { text: t("status.run.idle"), level: LEVEL_BY_PILL.run, title: t("tooltip.runIdle") };
+    const daemon = layout.daemonPill || { text: t("status.daemon.idle"), level: LEVEL_BY_PILL.daemon, title: t("tooltip.daemonIdle") };
     const budget = layout.budgetPill || "Budget：NT$ 0.00 / NT$ 5,000";
 
     setStatusText(elements.shellRunStatus, run.text, run.level || LEVEL_BY_PILL.run, run.title || "");
