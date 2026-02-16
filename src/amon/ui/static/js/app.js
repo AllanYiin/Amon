@@ -7,12 +7,11 @@ import { createConfirmModal } from "./ui/modal.js";
 import { createInitialUiState } from "./store/app_state.js";
 import { collectElements } from "./store/elements.js";
 import { readStorage, writeStorage, removeStorage } from "./domain/storage.js";
-import { formatUnknownValue, shortenId, setStatusText, mapRunStatusLevel, mapDaemonStatusLevel, statusToI18nKey } from "./domain/status.js";
-import { createShellLayoutController } from "./domain/shell_layout.js";
+import { formatUnknownValue, shortenId, mapRunStatusLevel, mapDaemonStatusLevel, statusToI18nKey } from "./domain/status.js";
 import { createAdminService } from "./domain/adminService.js";
 import { createServices } from "./domain/services.js";
 import { registerGlobalErrorHandlers } from "./domain/error_boundary.js";
-import { routeToShellView, setActiveShellNav, switchShellView } from "./views/shell.js";
+import { routeToShellView, switchShellView } from "./views/shell.js";
 import { CHAT_VIEW } from "./views/chat.js";
 import { CONTEXT_VIEW } from "./views/context.js";
 import { GRAPH_VIEW } from "./views/graph.js";
@@ -23,6 +22,9 @@ import { CONFIG_VIEW } from "./views/config.js";
 import { TOOLS_VIEW } from "./views/tools.js";
 import { createEventBus } from "./core/bus.js";
 import { copyText } from "./utils/clipboard.js";
+import { createSidebarLayout } from "./layout/sidebar.js";
+import { createHeaderLayout } from "./layout/header.js";
+import { createInspectorLayout } from "./layout/inspector.js";
 
 const { EventStreamClient, createUiEventStore } = window.AmonUIEventStream || {};
 if (!EventStreamClient || !createUiEventStore) {
@@ -45,26 +47,40 @@ appStore.patch({ bootstrappedAt: Date.now() });
         contextDraftPrefix: "amon.ui.contextDraft:",
       };
 
-      const shellLayoutController = createShellLayoutController({
-        elements,
-        state,
-        storage: { readStorage, writeStorage },
-        storageKeys: STORAGE_KEYS,
+      appStore.patch({
+        layout: {
+          activeRoute: "chat",
+          sidebarCollapsed: false,
+          projectId: state.projectId,
+          projects: [],
+          runPill: { text: "Run：尚未有 Run", level: "neutral", title: "目前尚未執行任何 Run" },
+          daemonPill: { text: "Daemon：尚未連線", level: "neutral", title: "尚未建立串流連線" },
+          budgetPill: "Budget：NT$ 0.00 / NT$ 5,000",
+          inspector: {
+            activeTab: "run",
+            collapsed: false,
+            width: state.contextPanelWidth,
+          },
+        },
       });
 
-      const {
-        syncContextPanelToggle,
-        applyContextPanelWidth,
-        restoreContextPanelState,
-        setupContextResizer,
-        bindToggles,
-      } = shellLayoutController;
+      const sidebarLayout = createSidebarLayout({ elements, store: appStore });
+      const headerLayout = createHeaderLayout({ elements, store: appStore });
+      const inspectorLayout = createInspectorLayout({
+        elements,
+        store: appStore,
+        storage: { readStorage, writeStorage },
+        storageKeys: STORAGE_KEYS,
+        onTabChange: (tabName) => {
+          if (tabName === "artifacts") {
+            void loadRunArtifacts();
+          }
+        },
+      });
 
-      bindToggles();
-      restoreContextPanelState();
-      setupContextResizer();
-      setStatusText(elements.shellDaemonStatus, "Daemon：尚未連線", "neutral", "尚未建立串流連線");
-      setStatusText(elements.shellRunStatus, "Run：尚未有 Run", "neutral", "目前尚未執行任何 Run");
+      sidebarLayout.mount();
+      headerLayout.mount();
+      inspectorLayout.mount();
 
       const router = createHashRouter({
         routes: routeToShellView,
@@ -166,7 +182,12 @@ appStore.patch({ bootstrappedAt: Date.now() });
         const view = routeToShellView[routeKey] || "chat";
         switchShellView({ view, state, elements, closeBillingStream });
         bus.emit("run:changed", { view });
-        setActiveShellNav(elements, routeKey);
+        appStore.patch({
+          layout: {
+            ...(appStore.getState().layout || {}),
+            activeRoute: routeKey,
+          },
+        });
         await loadShellViewDependencies(view);
         unmountInactiveViews(view);
       }
@@ -625,17 +646,29 @@ appStore.patch({ bootstrappedAt: Date.now() });
         const runStatusRaw = storeState.run?.status || (state.streaming ? "running" : "idle");
         const runStatus = formatUnknownValue(runStatusRaw, t("status.run.idle"));
         const runProgress = storeState.run?.progress;
-        if (!elements.shellRunStatus || !elements.cardRunProgress || !elements.cardBilling || !elements.shellBudgetStatus || !elements.cardPendingConfirmations) {
+        if (!elements.cardRunProgress || !elements.cardBilling || !elements.cardPendingConfirmations) {
           return;
         }
         const runStatusLabel = t(statusToI18nKey("run", runStatusRaw, "status.run.idle"), runStatus);
-        setStatusText(elements.shellRunStatus, `Run：${runStatusLabel}`, mapRunStatusLevel(runStatusRaw), `目前執行狀態：${runStatusLabel}`);
+        const totalCost = Number(storeState.billing.total_cost || 0);
+        const pendingJobs = Object.values(storeState.jobs).filter((job) => job.status && job.status !== "completed").length;
+
+        appStore.patch({
+          layout: {
+            ...(appStore.getState().layout || {}),
+            runPill: {
+              text: `Run：${runStatusLabel}`,
+              level: mapRunStatusLevel(runStatusRaw),
+              title: `目前執行狀態：${runStatusLabel}`,
+            },
+            budgetPill: `Budget：NT$ ${totalCost.toFixed(2)} / NT$ 5,000`,
+          },
+        });
+
         elements.cardRunProgress.textContent = Number.isFinite(runProgress) ? `${runProgress}%` : "尚未有 Run";
         elements.cardRunProgress.title = Number.isFinite(runProgress) ? "目前 Run 進度" : "尚未有 Run 可顯示進度";
-        elements.cardBilling.textContent = `NT$ ${Number(storeState.billing.total_cost || 0).toFixed(2)}`;
+        elements.cardBilling.textContent = `NT$ ${totalCost.toFixed(2)}`;
         elements.cardBilling.title = "目前已累計費用";
-        elements.shellBudgetStatus.textContent = `Budget：NT$ ${Number(storeState.billing.total_cost || 0).toFixed(2)} / NT$ 5,000`;
-        const pendingJobs = Object.values(storeState.jobs).filter((job) => job.status && job.status !== "completed").length;
         elements.cardPendingConfirmations.textContent = pendingJobs > 0 ? `${pendingJobs} 項任務進行中` : "0 項";
         elements.cardPendingConfirmations.title = pendingJobs > 0 ? "仍有任務等待確認或完成" : "目前沒有待確認任務";
       }
@@ -883,6 +916,13 @@ appStore.patch({ bootstrappedAt: Date.now() });
 
       function setProjectState(projectId) {
         state.projectId = projectId || null;
+        const layoutState = appStore.getState().layout || {};
+        appStore.patch({
+          layout: {
+            ...layoutState,
+            projectId: state.projectId,
+          },
+        });
         elements.refreshContext.disabled = !state.projectId;
         if (state.projectId && !elements.projectSelect.querySelector(`option[value="${CSS.escape(state.projectId)}"]`)) {
           const dynamicOption = document.createElement("option");
@@ -914,13 +954,15 @@ appStore.patch({ bootstrappedAt: Date.now() });
       }
 
       function switchContextTab(tabName) {
-        elements.contextTabs.forEach((tab) => {
-          const isActive = tab.dataset.contextTab === tabName;
-          tab.classList.toggle("is-active", isActive);
-          tab.setAttribute("aria-selected", String(isActive));
-        });
-        elements.contextPanels.forEach((panel) => {
-          panel.hidden = panel.dataset.contextPanel !== tabName;
+        const layoutState = appStore.getState().layout || {};
+        appStore.patch({
+          layout: {
+            ...layoutState,
+            inspector: {
+              ...(layoutState.inspector || {}),
+              activeTab: tabName,
+            },
+          },
         });
       }
 
@@ -1021,22 +1063,17 @@ appStore.patch({ bootstrappedAt: Date.now() });
         } catch (error) {
           throw error;
         }
-        elements.projectSelect.innerHTML = "";
-        const emptyOption = document.createElement("option");
-        emptyOption.value = "";
-        emptyOption.textContent = "無專案";
-        elements.projectSelect.appendChild(emptyOption);
-        projects.forEach((project) => {
-          const option = document.createElement("option");
-          option.value = project.project_id;
-          option.textContent = `${project.name}（${project.project_id}）`;
-          elements.projectSelect.appendChild(option);
-        });
         const availableIds = new Set(projects.map((project) => project.project_id));
         if (state.projectId && !availableIds.has(state.projectId)) {
           state.projectId = null;
         }
-        elements.projectSelect.value = state.projectId || "";
+        appStore.patch({
+          layout: {
+            ...(appStore.getState().layout || {}),
+            projects,
+            projectId: state.projectId,
+          },
+        });
         syncContextHeader();
         if (!projects.length) {
           showToast("尚無專案，請在聊天輸入：建立專案 <名稱>");
@@ -1717,15 +1754,43 @@ appStore.patch({ bootstrappedAt: Date.now() });
             return `${protocol}://${window.location.host}/v1/chat/ws?${query.toString()}`;
           },
           onStatusChange: ({ status, transport }) => {
+            const layoutState = appStore.getState().layout || {};
             if (status === "connected") {
-              setStatusText(elements.shellDaemonStatus, `Daemon：${t("status.daemon.healthy")}`, mapDaemonStatusLevel("connected"), "daemon 已連線");
+              appStore.patch({
+                layout: {
+                  ...layoutState,
+                  daemonPill: {
+                    text: `Daemon：${t("status.daemon.healthy")}`,
+                    level: mapDaemonStatusLevel("connected"),
+                    title: "daemon 已連線",
+                  },
+                },
+              });
             }
             if (status === "reconnecting") {
-              setStatusText(elements.shellDaemonStatus, `Daemon：${t("status.daemon.reconnecting")}`, mapDaemonStatusLevel("reconnecting"), "daemon 連線中斷，正在重試");
+              appStore.patch({
+                layout: {
+                  ...layoutState,
+                  daemonPill: {
+                    text: `Daemon：${t("status.daemon.reconnecting")}`,
+                    level: mapDaemonStatusLevel("reconnecting"),
+                    title: "daemon 連線中斷，正在重試",
+                  },
+                },
+              });
               showToast(`串流中斷，正在重新連線（${formatUnknownValue(transport, "未知傳輸") }）`, 9000, "warning");
             }
             if (status === "error") {
-              setStatusText(elements.shellDaemonStatus, `Daemon：${t("status.daemon.unavailable")}`, mapDaemonStatusLevel("error"), "daemon 未連線或不可用");
+              appStore.patch({
+                layout: {
+                  ...layoutState,
+                  daemonPill: {
+                    text: `Daemon：${t("status.daemon.unavailable")}`,
+                    level: mapDaemonStatusLevel("error"),
+                    title: "daemon 未連線或不可用",
+                  },
+                },
+              });
             }
           },
           onEvent: async (eventType, data) => {
@@ -1972,15 +2037,6 @@ ${JSON.stringify(data, null, 2)}
         state.attachments = Array.from(event.target.files || []);
         renderAttachmentPreview();
       });
-      elements.contextTabs.forEach((tab) => {
-        tab.addEventListener("click", () => {
-          switchContextTab(tab.dataset.contextTab);
-          if (tab.dataset.contextTab === "artifacts") {
-            void loadRunArtifacts();
-          }
-        });
-      });
-
       elements.artifactsGoRun?.addEventListener("click", () => switchContextTab("run"));
       elements.artifactsGoLogs?.addEventListener("click", () => switchContextTab("logs"));
       elements.artifactPreviewClose?.addEventListener("click", closeArtifactPreview);

@@ -96,7 +96,8 @@ class UIShellSmokeTests(unittest.TestCase):
 
         self.assertIn('id="copy-run-id"', html)
         self.assertIn('mapDaemonStatusLevel', app_js)
-        self.assertIn('setStatusText(elements.shellDaemonStatus, "Daemon：尚未連線"', app_js)
+        self.assertIn('createHeaderLayout', app_js)
+        self.assertIn('daemonPill: { text: "Daemon：尚未連線"', app_js)
         self.assertIn('.context-resizer', css)
 
     def test_app_is_composition_root_with_domain_store_modules(self) -> None:
@@ -105,7 +106,9 @@ class UIShellSmokeTests(unittest.TestCase):
         for token in [
             'createInitialUiState',
             'collectElements',
-            'createShellLayoutController',
+            'createSidebarLayout',
+            'createHeaderLayout',
+            'createInspectorLayout',
             'routeToShellView',
             'SHELL_VIEW_HANDLERS',
             'registerGlobalErrorHandlers',
@@ -117,7 +120,10 @@ class UIShellSmokeTests(unittest.TestCase):
             "src/amon/ui/static/js/store/elements.js",
             "src/amon/ui/static/js/domain/storage.js",
             "src/amon/ui/static/js/domain/status.js",
-            "src/amon/ui/static/js/domain/shell_layout.js",
+            "src/amon/ui/static/js/layout/sidebar.js",
+            "src/amon/ui/static/js/layout/header.js",
+            "src/amon/ui/static/js/layout/inspector.js",
+            "src/amon/ui/static/js/layout/splitPane.js",
             "src/amon/ui/static/js/views/shell.js",
             "src/amon/ui/static/js/views/config.js",
             "src/amon/ui/static/js/views/tools.js",
