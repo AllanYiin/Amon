@@ -52,6 +52,17 @@ class UIShellSmokeTests(unittest.TestCase):
         ]:
             self.assertIn(token, bootstrap_js)
 
+    def test_graph_route_reuses_chat_layout_and_right_panel_has_no_tab_menu(self) -> None:
+        html = Path("src/amon/ui/index.html").read_text(encoding="utf-8")
+        shell_js = Path("src/amon/ui/static/js/views/shell.js").read_text(encoding="utf-8")
+        bootstrap_js = Path("src/amon/ui/static/js/bootstrap.js").read_text(encoding="utf-8")
+
+        self.assertNotIn('class="context-tabs"', html)
+        self.assertIn('id="thinking-panel"', html)
+        self.assertIn('graph: "chat"', shell_js)
+        self.assertIn('function syncInspectorTabByRoute(routeKey)', bootstrap_js)
+        self.assertIn('switchContextTab("graph")', bootstrap_js)
+
     def test_project_and_single_pages_redirect_to_index_hash_routes(self) -> None:
         project_html = Path("src/amon/ui/project.html").read_text(encoding="utf-8")
         single_html = Path("src/amon/ui/single.html").read_text(encoding="utf-8")
