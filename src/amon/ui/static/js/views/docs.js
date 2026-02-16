@@ -1,3 +1,6 @@
-export function initDocsView() {
-  return { mount() {}, unmount() {} };
-}
+export const DOCS_VIEW = {
+  key: "docs",
+  onEnter: async ({ loadDocsPage }) => {
+    await loadDocsPage();
+  },
+};

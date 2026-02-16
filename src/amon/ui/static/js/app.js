@@ -4,6 +4,21 @@ import { createStore } from "./state.js";
 import { applyI18n } from "./i18n.js";
 import { createToastManager } from "./ui/toast.js";
 import { createConfirmModal } from "./ui/modal.js";
+import { createInitialUiState } from "./store/app_state.js";
+import { collectElements } from "./store/elements.js";
+import { readStorage, writeStorage, removeStorage } from "./domain/storage.js";
+import { formatUnknownValue, shortenId, setStatusText, mapRunStatusLevel, mapDaemonStatusLevel } from "./domain/status.js";
+import { createShellLayoutController } from "./domain/shell_layout.js";
+import { registerGlobalErrorHandlers } from "./domain/error_boundary.js";
+import { routeToShellView, setActiveShellNav, switchShellView } from "./views/shell.js";
+import { CHAT_VIEW } from "./views/chat.js";
+import { CONTEXT_VIEW } from "./views/context.js";
+import { GRAPH_VIEW } from "./views/graph.js";
+import { DOCS_VIEW } from "./views/docs.js";
+import { BILLING_VIEW } from "./views/billing.js";
+import { LOGS_VIEW } from "./views/logs.js";
+import { CONFIG_VIEW } from "./views/config.js";
+import { TOOLS_VIEW } from "./views/tools.js";
 
 const { EventStreamClient, createUiEventStore } = window.AmonUIEventStream || {};
 if (!EventStreamClient || !createUiEventStore) {
@@ -11,187 +26,11 @@ if (!EventStreamClient || !createUiEventStore) {
 }
 applyI18n(document);
 const appStore = createStore({ locale: "zh-TW" });
+appStore.patch({ bootstrappedAt: Date.now() });
 
-      const state = {
-        chatId: null,
-        projectId: null,
-        plan: null,
-        streaming: false,
-        attachments: [],
-        uiStore: createUiEventStore(),
-        streamClient: null,
-        graph: null,
-        graphRunId: null,
-        graphNodeStates: {},
-        graphEvents: [],
-        graphSelectedNodeId: null,
-        graphTemplateId: null,
-        shellView: "chat",
-        toolsCatalog: [],
-        skillsCatalog: [],
-        configView: null,
-        logsPage: { logsPage: 1, eventsPage: 1, logsHasNext: false, eventsHasNext: false },
-        billingSummary: null,
-        billingStreamSource: null,
-        contextPanelWidth: 320,
-        runArtifacts: [],
-        artifactPreviewItem: null,
-        docsItems: [],
-        docsFlatItems: [],
-        docsFilteredItems: [],
-        docsSelectedPath: null,
-        docsFilterQuery: "",
-        docsVirtual: { rowHeight: 40, buffer: 8 },
-        thinkingMode: "brief",
-        executionTimeline: new Map(),
-        graphPanZoom: null,
-        billRunChart: null,
-      };
+      const state = createInitialUiState(createUiEventStore);
 
-      const elements = {
-        projectSelect: document.getElementById("project-select"),
-        timeline: document.getElementById("timeline"),
-        executionAccordion: document.getElementById("execution-accordion"),
-        chatForm: document.getElementById("chat-form"),
-        chatInput: document.getElementById("chat-input"),
-        chatAttachments: document.getElementById("chat-attachments"),
-        attachmentPreview: document.getElementById("attachment-preview"),
-        toast: document.getElementById("toast"),
-        confirmModal: document.getElementById("confirm-modal"),
-        planCard: document.getElementById("plan-card"),
-        planContent: document.getElementById("plan-content"),
-        planCommands: document.getElementById("plan-commands"),
-        planPatches: document.getElementById("plan-patches"),
-        planRisk: document.getElementById("plan-risk"),
-        planConfirm: document.getElementById("plan-confirm"),
-        planCancel: document.getElementById("plan-cancel"),
-        refreshContext: document.getElementById("refresh-context"),
-        graphPreview: document.getElementById("graph-preview"),
-        graphCode: document.getElementById("graph-code"),
-        graphNodeList: document.getElementById("graph-node-list"),
-        graphRunMeta: document.getElementById("graph-run-meta"),
-        copyRunId: document.getElementById("copy-run-id"),
-        graphCreateTemplate: document.getElementById("graph-create-template"),
-        graphNodeDrawer: document.getElementById("graph-node-drawer"),
-        graphNodeClose: document.getElementById("graph-node-close"),
-        graphNodeTitle: document.getElementById("graph-node-title"),
-        graphNodeMeta: document.getElementById("graph-node-meta"),
-        graphNodeInputs: document.getElementById("graph-node-inputs"),
-        graphNodeOutputs: document.getElementById("graph-node-outputs"),
-        graphNodeEvents: document.getElementById("graph-node-events"),
-        graphParametrize: document.getElementById("graph-parametrize"),
-        chatProjectLabel: document.getElementById("chat-project-label"),
-        contextProject: document.getElementById("context-project"),
-        contextOverview: document.getElementById("context-overview"),
-        contextTabs: document.querySelectorAll(".context-tab"),
-        contextPanels: document.querySelectorAll("[data-context-panel]"),
-        streamProgress: document.getElementById("stream-progress"),
-        chatLayout: document.getElementById("chat-layout"),
-        contextPage: document.getElementById("context-page"),
-        graphPage: document.getElementById("graph-page"),
-        uiShell: document.getElementById("ui-shell"),
-        toggleSidebar: document.getElementById("toggle-sidebar"),
-        toggleContextPanel: document.getElementById("toggle-context-panel"),
-        contextPanel: document.getElementById("context-panel"),
-        contextResizer: document.getElementById("context-resizer"),
-        shellRunStatus: document.getElementById("shell-run-status"),
-        shellDaemonStatus: document.getElementById("shell-daemon-status"),
-        shellBudgetStatus: document.getElementById("shell-budget-status"),
-        cardRunProgress: document.getElementById("card-run-progress"),
-        cardBilling: document.getElementById("card-billing"),
-        cardPendingConfirmations: document.getElementById("card-pending-confirmations"),
-        thinkingMode: document.getElementById("thinking-mode"),
-        thinkingSummary: document.getElementById("thinking-summary"),
-        thinkingDetail: document.getElementById("thinking-detail"),
-        artifactList: document.getElementById("artifact-list"),
-        artifactsOverview: document.getElementById("artifacts-overview"),
-        artifactsInspectorList: document.getElementById("artifacts-inspector-list"),
-        artifactsEmpty: document.getElementById("artifacts-empty"),
-        artifactsGoRun: document.getElementById("artifacts-go-run"),
-        artifactsGoLogs: document.getElementById("artifacts-go-logs"),
-        artifactPreviewModal: document.getElementById("artifact-preview-modal"),
-        artifactPreviewTitle: document.getElementById("artifact-preview-title"),
-        artifactPreviewBody: document.getElementById("artifact-preview-body"),
-        artifactPreviewClose: document.getElementById("artifact-preview-close"),
-        artifactPreviewDownload: document.getElementById("artifact-preview-download"),
-        artifactPreviewCopy: document.getElementById("artifact-preview-copy"),
-        shellNavItems: document.querySelectorAll(".shell-nav__link"),
-        toolsSkillsPage: document.getElementById("tools-skills-page"),
-        billPage: document.getElementById("bill-page"),
-        billRefresh: document.getElementById("bill-refresh"),
-        billToday: document.getElementById("bill-today"),
-        billProjectTotal: document.getElementById("bill-project-total"),
-        billModeSummary: document.getElementById("bill-mode-summary"),
-        billCurrentRun: document.getElementById("bill-current-run"),
-        billRunChart: document.getElementById("bill-run-chart"),
-        billBudgets: document.getElementById("bill-budgets"),
-        billExceeded: document.getElementById("bill-exceeded"),
-        billBreakdownProvider: document.getElementById("bill-breakdown-provider"),
-        billBreakdownModel: document.getElementById("bill-breakdown-model"),
-        billBreakdownAgent: document.getElementById("bill-breakdown-agent"),
-        billBreakdownNode: document.getElementById("bill-breakdown-node"),
-        toolsSkillsRefresh: document.getElementById("tools-skills-refresh"),
-        toolsList: document.getElementById("tools-list"),
-        skillsList: document.getElementById("skills-list"),
-        skillsCollisions: document.getElementById("skills-collisions"),
-        skillTriggerSelect: document.getElementById("skill-trigger-select"),
-        skillTriggerPreview: document.getElementById("skill-trigger-preview"),
-        skillInjectionPreview: document.getElementById("skill-injection-preview"),
-        configPage: document.getElementById("config-page"),
-        logsEventsPage: document.getElementById("logs-events-page"),
-        docsPage: document.getElementById("docs-page"),
-        docsRefresh: document.getElementById("docs-refresh"),
-        docsTreeMeta: document.getElementById("docs-tree-meta"),
-        docsFilter: document.getElementById("docs-filter"),
-        docsTreeViewport: document.getElementById("docs-tree-viewport"),
-        docsPreviewTitle: document.getElementById("docs-preview-title"),
-        docsPreviewMeta: document.getElementById("docs-preview-meta"),
-        docsPreviewContent: document.getElementById("docs-preview-content"),
-        docsOpen: document.getElementById("docs-open"),
-        docsDownload: document.getElementById("docs-download"),
-        docsInsert: document.getElementById("docs-insert"),
-        logsSource: document.getElementById("logs-source"),
-        logsTimeFrom: document.getElementById("logs-time-from"),
-        logsTimeTo: document.getElementById("logs-time-to"),
-        logsFilterProject: document.getElementById("logs-filter-project"),
-        logsFilterRun: document.getElementById("logs-filter-run"),
-        logsFilterNode: document.getElementById("logs-filter-node"),
-        logsFilterSeverity: document.getElementById("logs-filter-severity"),
-        logsFilterComponent: document.getElementById("logs-filter-component"),
-        logsRefresh: document.getElementById("logs-refresh"),
-        logsDownload: document.getElementById("logs-download"),
-        logsSummary: document.getElementById("logs-summary"),
-        logsList: document.getElementById("logs-list"),
-        logsPrev: document.getElementById("logs-prev"),
-        logsNext: document.getElementById("logs-next"),
-        logsPageLabel: document.getElementById("logs-page-label"),
-        eventsFilterType: document.getElementById("events-filter-type"),
-        eventsTimeFrom: document.getElementById("events-time-from"),
-        eventsTimeTo: document.getElementById("events-time-to"),
-        eventsFilterProject: document.getElementById("events-filter-project"),
-        eventsFilterRun: document.getElementById("events-filter-run"),
-        eventsFilterNode: document.getElementById("events-filter-node"),
-        eventsRefresh: document.getElementById("events-refresh"),
-        eventsSummary: document.getElementById("events-summary"),
-        eventsList: document.getElementById("events-list"),
-        eventsPrev: document.getElementById("events-prev"),
-        eventsNext: document.getElementById("events-next"),
-        eventsPageLabel: document.getElementById("events-page-label"),
-        configRefresh: document.getElementById("config-refresh"),
-        configSearch: document.getElementById("config-search"),
-        configExport: document.getElementById("config-export"),
-        configGlobal: document.getElementById("config-global"),
-        configProject: document.getElementById("config-project"),
-        configEffectiveSummary: document.getElementById("config-effective-summary"),
-        configTableBody: document.getElementById("config-table-body"),
-        contextDraftInput: document.getElementById("context-draft-input"),
-        contextDraftMeta: document.getElementById("context-draft-meta"),
-        contextSaveDraft: document.getElementById("context-save-draft"),
-        contextImportFile: document.getElementById("context-import-file"),
-        contextExtractChat: document.getElementById("context-extract-chat"),
-        contextClearChat: document.getElementById("context-clear-chat"),
-        contextClearProject: document.getElementById("context-clear-project"),
-      };
+      const elements = collectElements(document);
 
       const toastManager = createToastManager(elements.toast);
       const confirmModal = createConfirmModal(elements.confirmModal);
@@ -202,163 +41,26 @@ const appStore = createStore({ locale: "zh-TW" });
         contextDraftPrefix: "amon.ui.contextDraft:",
       };
 
-      function readStorage(key) {
-        try {
-          return window.localStorage.getItem(key);
-        } catch (error) {
-          return null;
-        }
-      }
-
-      function writeStorage(key, value) {
-        try {
-          window.localStorage.setItem(key, value);
-        } catch (error) {
-          console.warn("storage_write_failed", key, error);
-        }
-      }
-
-      function safeRemoveStorage(key) {
-        try {
-          window.localStorage.removeItem(key);
-        } catch (error) {
-          console.warn("storage_remove_failed", key, error);
-        }
-      }
-
-      function formatUnknownValue(value, fallback = "尚未取得資料") {
-        if (value === null || value === undefined) return fallback;
-        const text = String(value).trim();
-        if (!text || text === "--" || text.toLowerCase() === "unknown") {
-          return fallback;
-        }
-        return text;
-      }
-
-      function shortenId(value, front = 6, back = 4) {
-        const text = String(value || "");
-        if (!text) return "尚未有 Run";
-        if (text.length <= front + back + 1) return text;
-        return `${text.slice(0, front)}…${text.slice(-back)}`;
-      }
-
-      function applyPillClass(element, level = "neutral") {
-        if (!element) return;
-        element.classList.remove("pill--success", "pill--warning", "pill--danger", "pill--neutral");
-        element.classList.add(`pill--${level}`);
-      }
-
-      function setStatusText(element, text, level = "neutral", tooltip = "") {
-        if (!element) return;
-        element.textContent = text;
-        if (tooltip) {
-          element.title = tooltip;
-        }
-        applyPillClass(element, level);
-      }
-
-      function mapRunStatusLevel(status = "idle") {
-        const key = String(status || "").toLowerCase();
-        if (["ok", "success", "succeeded", "completed"].includes(key)) return "success";
-        if (["error", "failed", "unavailable"].includes(key)) return "danger";
-        if (["confirm_required", "warning", "degraded"].includes(key)) return "warning";
-        return "neutral";
-      }
-
-      function mapDaemonStatusLevel(status = "idle") {
-        const key = String(status || "").toLowerCase();
-        if (["connected", "healthy"].includes(key)) return "success";
-        if (["reconnecting"].includes(key)) return "warning";
-        if (["error", "unavailable", "disconnected"].includes(key)) return "danger";
-        return "neutral";
-      }
-
-      function getContextDraftStorageKey(projectId = state.projectId) {
-        const scope = projectId || "no-project";
-        return `${STORAGE_KEYS.contextDraftPrefix}${scope}`;
-      }
-
-      function syncContextPanelToggle() {
-        if (!elements.uiShell || !elements.toggleContextPanel) {
-          return;
-        }
-        const collapsed = elements.uiShell.classList.contains("is-context-collapsed");
-        elements.toggleContextPanel.textContent = collapsed ? "展開右側面板" : "收合右側面板";
-        elements.toggleContextPanel.setAttribute("aria-expanded", String(!collapsed));
-        writeStorage(STORAGE_KEYS.contextCollapsed, collapsed ? "1" : "0");
-      }
-
-      function applyContextPanelWidth(width) {
-        const clamped = Math.max(280, Math.min(520, Number(width) || 320));
-        state.contextPanelWidth = clamped;
-        elements.chatLayout?.style.setProperty("--context-panel-width", `${clamped}px`);
-        writeStorage(STORAGE_KEYS.contextWidth, String(clamped));
-      }
-
-      function restoreContextPanelState() {
-        const collapsed = readStorage(STORAGE_KEYS.contextCollapsed) === "1";
-        elements.uiShell?.classList.toggle("is-context-collapsed", collapsed);
-        const storedWidth = Number(readStorage(STORAGE_KEYS.contextWidth));
-        if (Number.isFinite(storedWidth) && storedWidth > 0) {
-          applyContextPanelWidth(storedWidth);
-        } else {
-          applyContextPanelWidth(320);
-        }
-        syncContextPanelToggle();
-      }
-
-      function setupContextResizer() {
-        if (!elements.contextResizer || !elements.chatLayout || !elements.contextPanel) {
-          return;
-        }
-        let dragging = false;
-        const onMove = (event) => {
-          if (!dragging) return;
-          const layoutRect = elements.chatLayout.getBoundingClientRect();
-          const width = layoutRect.right - event.clientX;
-          applyContextPanelWidth(width);
-        };
-        const onUp = () => {
-          dragging = false;
-          document.body.classList.remove("is-resizing-context-panel");
-        };
-        elements.contextResizer.addEventListener("mousedown", (event) => {
-          event.preventDefault();
-          dragging = true;
-          document.body.classList.add("is-resizing-context-panel");
-        });
-        window.addEventListener("mousemove", onMove);
-        window.addEventListener("mouseup", onUp);
-      }
-
-      elements.toggleContextPanel?.addEventListener("click", () => {
-        if (window.innerWidth <= 1200) {
-          elements.uiShell?.classList.toggle("is-context-drawer-open");
-        } else {
-          elements.uiShell?.classList.toggle("is-context-collapsed");
-        }
-        syncContextPanelToggle();
+      const shellLayoutController = createShellLayoutController({
+        elements,
+        state,
+        storage: { readStorage, writeStorage },
+        storageKeys: STORAGE_KEYS,
       });
 
-      elements.toggleSidebar?.addEventListener("click", () => {
-        elements.uiShell?.classList.toggle("is-sidebar-collapsed");
-      });
+      const {
+        syncContextPanelToggle,
+        applyContextPanelWidth,
+        restoreContextPanelState,
+        setupContextResizer,
+        bindToggles,
+      } = shellLayoutController;
 
+      bindToggles();
       restoreContextPanelState();
       setupContextResizer();
       setStatusText(elements.shellDaemonStatus, "Daemon：尚未連線", "neutral", "尚未建立串流連線");
       setStatusText(elements.shellRunStatus, "Run：尚未有 Run", "neutral", "目前尚未執行任何 Run");
-
-      const routeToShellView = {
-        chat: "chat",
-        context: "context",
-        graph: "graph",
-        tools: "tools-skills",
-        config: "config",
-        logs: "logs-events",
-        docs: "docs",
-        billing: "bill",
-      };
 
       const router = createHashRouter({
         routes: routeToShellView,
@@ -372,52 +74,38 @@ const appStore = createStore({ locale: "zh-TW" });
         return router.parse(hashValue);
       }
 
-      function setActiveShellNav(routeKey) {
-        elements.shellNavItems.forEach((item) => {
-          const isActive = item.dataset.route === routeKey;
-          item.classList.toggle("is-active", isActive);
-          item.setAttribute("aria-current", isActive ? "page" : "false");
-        });
-      }
-
-      function switchShellView(view) {
-        if (view !== "bill") {
-          closeBillingStream();
-        }
-        state.shellView = view;
-        elements.chatLayout.hidden = view !== "chat";
-        elements.contextPage.hidden = view !== "context";
-        elements.graphPage.hidden = view !== "graph";
-        elements.toolsSkillsPage.hidden = view !== "tools-skills";
-        elements.billPage.hidden = view !== "bill";
-        elements.configPage.hidden = view !== "config";
-        elements.logsEventsPage.hidden = view !== "logs-events";
-        elements.docsPage.hidden = view !== "docs";
-        if (view !== "chat") elements.uiShell?.classList.remove("is-context-drawer-open");
-      }
+      const SHELL_VIEW_HANDLERS = [
+        CHAT_VIEW,
+        CONTEXT_VIEW,
+        GRAPH_VIEW,
+        DOCS_VIEW,
+        BILLING_VIEW,
+        LOGS_VIEW,
+        CONFIG_VIEW,
+        TOOLS_VIEW,
+      ].reduce((acc, viewDef) => {
+        acc[viewDef.key] = viewDef;
+        return acc;
+      }, {});
 
       async function loadShellViewDependencies(view) {
-        if (view === "tools-skills") {
-          await loadToolsSkillsPage();
+        const viewDef = SHELL_VIEW_HANDLERS[view];
+        if (!viewDef || typeof viewDef.onEnter !== "function") {
+          return;
         }
-        if (view === "config") {
-          await loadConfigPage();
-        }
-        if (view === "logs-events") {
-          await loadLogsEventsPage();
-        }
-        if (view === "docs") {
-          await loadDocsPage();
-        }
-        if (view === "bill") {
-          await loadBillPage();
-        }
+        await viewDef.onEnter({
+          loadDocsPage,
+          loadBillPage,
+          loadLogsEventsPage,
+          loadConfigPage,
+          loadToolsSkillsPage,
+        });
       }
 
       async function applyRoute(routeKey) {
         const view = routeToShellView[routeKey] || "chat";
-        switchShellView(view);
-        setActiveShellNav(routeKey);
+        switchShellView({ view, state, elements, closeBillingStream });
+        setActiveShellNav(elements, routeKey);
         await loadShellViewDependencies(view);
       }
 
@@ -1234,7 +922,7 @@ const appStore = createStore({ locale: "zh-TW" });
           return;
         }
         const key = getContextDraftStorageKey(scope === "project" ? state.projectId : null);
-        safeRemoveStorage(key);
+        removeStorage(key);
         if (scope === "project") {
           refreshContextDraftUi();
         } else {
@@ -2324,10 +2012,4 @@ ${JSON.stringify(data, null, 2)}
         }
       })();
 
-window.addEventListener("error", (event) => {
-  console.error("ui_global_error", event.error || event.message);
-});
-
-window.addEventListener("unhandledrejection", (event) => {
-  console.error("ui_unhandled_rejection", event.reason);
-});
+registerGlobalErrorHandlers();

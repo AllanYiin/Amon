@@ -1,3 +1,4 @@
-export function initContextView() {
-  return { mount() {}, unmount() {} };
-}
+export const CONTEXT_VIEW = {
+  key: "context",
+  onEnter: async () => {},
+};

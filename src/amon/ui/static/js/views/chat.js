@@ -1,3 +1,4 @@
-export function initChatView() {
-  return { mount() {}, unmount() {} };
-}
+export const CHAT_VIEW = {
+  key: "chat",
+  onEnter: async () => {},
+};

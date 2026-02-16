@@ -99,6 +99,32 @@ class UIShellSmokeTests(unittest.TestCase):
         self.assertIn('setStatusText(elements.shellDaemonStatus, "Daemon：尚未連線"', app_js)
         self.assertIn('.context-resizer', css)
 
+    def test_app_is_composition_root_with_domain_store_modules(self) -> None:
+        app_js = Path("src/amon/ui/static/js/app.js").read_text(encoding="utf-8")
+
+        for token in [
+            'createInitialUiState',
+            'collectElements',
+            'createShellLayoutController',
+            'routeToShellView',
+            'SHELL_VIEW_HANDLERS',
+            'registerGlobalErrorHandlers',
+        ]:
+            self.assertIn(token, app_js)
+
+        for module_path in [
+            "src/amon/ui/static/js/store/app_state.js",
+            "src/amon/ui/static/js/store/elements.js",
+            "src/amon/ui/static/js/domain/storage.js",
+            "src/amon/ui/static/js/domain/status.js",
+            "src/amon/ui/static/js/domain/shell_layout.js",
+            "src/amon/ui/static/js/views/shell.js",
+            "src/amon/ui/static/js/views/config.js",
+            "src/amon/ui/static/js/views/tools.js",
+        ]:
+            self.assertTrue(Path(module_path).exists(), module_path)
+
+
 
 if __name__ == "__main__":
     unittest.main()
