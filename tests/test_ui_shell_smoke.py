@@ -20,7 +20,7 @@ class UIShellSmokeTests(unittest.TestCase):
             "id=\"card-run-progress\"",
             "id=\"card-billing\"",
             "id=\"card-pending-confirmations\"",
-            "Daemon：Healthy",
+            "Daemon：尚未連線",
         ]:
             self.assertIn(token, html)
 
@@ -66,6 +66,30 @@ class UIShellSmokeTests(unittest.TestCase):
         css = Path("src/amon/ui/styles.css").read_text(encoding="utf-8")
         self.assertIn("[hidden]", css)
         self.assertIn("display: none !important", css)
+
+    def test_context_page_has_actionable_cta_and_safe_clear_controls(self) -> None:
+        html = Path("src/amon/ui/index.html").read_text(encoding="utf-8")
+
+        for token in [
+            'id="context-draft-input"',
+            'id="context-save-draft"',
+            'id="context-import-file"',
+            'id="context-extract-chat"',
+            'id="context-clear-chat"',
+            'id="context-clear-project"',
+            'clearContextDraft("project")',
+            'confirmModal.open({',
+        ]:
+            self.assertIn(token, html)
+
+    def test_status_semantics_and_run_copy_controls_exist(self) -> None:
+        html = Path("src/amon/ui/index.html").read_text(encoding="utf-8")
+        css = Path("src/amon/ui/styles.css").read_text(encoding="utf-8")
+
+        self.assertIn('id="copy-run-id"', html)
+        self.assertIn('mapDaemonStatusLevel', html)
+        self.assertIn('setStatusText(elements.shellDaemonStatus, "Daemon：Unavailable"', html)
+        self.assertIn('.context-resizer', css)
 
 
 if __name__ == "__main__":

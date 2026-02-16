@@ -35,8 +35,8 @@
                 Project
                 <select id="project-select"></select>
               </label>
-              <span class="shell-status shell-status--run" id="shell-run-status">Run：Idle</span>
-              <span class="shell-status shell-status--daemon" id="shell-daemon-status">Daemon：Healthy</span>
+              <span class="shell-status shell-status--run pill--neutral" id="shell-run-status" title="尚未有 Run">Run：尚未有 Run</span>
+              <span class="shell-status shell-status--daemon pill--neutral" id="shell-daemon-status" title="尚未連線 daemon">Daemon：尚未連線</span>
               <span class="shell-status shell-status--budget" id="shell-budget-status">Budget：NT$ 0 / NT$ 5,000</span>
             </div>
             <button type="button" class="secondary-btn shell-context-toggle" id="toggle-context-panel" aria-expanded="true">收合右側面板</button>
@@ -125,25 +125,26 @@
             <button type="submit" class="primary-btn">送出</button>
           </form>
         </section>
+            <div class="context-resizer" id="context-resizer" role="separator" aria-label="調整右側面板寬度" aria-orientation="vertical"></div>
 
             <aside class="context-panel" id="context-panel">
           <h2>右側資訊</h2>
           <div class="context-shell-placeholders" aria-label="右側狀態摘要">
             <div class="context-shell-card">
               <p class="context-shell-card__label">Memory Used</p>
-              <strong id="card-memory-used">--</strong>
+              <strong id="card-memory-used" title="尚未取得記憶體用量">尚未取得資料</strong>
             </div>
             <div class="context-shell-card">
               <p class="context-shell-card__label">Run Progress</p>
-              <strong id="card-run-progress">--</strong>
+              <strong id="card-run-progress" title="尚未有 Run 可顯示進度">尚未有 Run</strong>
             </div>
             <div class="context-shell-card">
               <p class="context-shell-card__label">Billing</p>
-              <strong id="card-billing">--</strong>
+              <strong id="card-billing" title="尚未取得費用統計">尚未取得資料</strong>
             </div>
             <div class="context-shell-card">
               <p class="context-shell-card__label">Pending Confirmations</p>
-              <strong id="card-pending-confirmations">--</strong>
+              <strong id="card-pending-confirmations" title="尚未有待確認任務">0 項</strong>
             </div>
           </div>
           <div class="context-project" id="context-project">目前專案：未選擇</div>
@@ -161,7 +162,10 @@
           <section class="context-section" data-context-panel="graph" hidden>
             <h3>Graph Preview</h3>
             <div class="graph-toolbar">
-              <span id="graph-run-meta" class="graph-run-meta">尚未偵測到 run</span>
+              <div class="graph-run-meta-wrap">
+                <span id="graph-run-meta" class="graph-run-meta">尚未偵測到 Run</span>
+                <button type="button" class="secondary-btn small" id="copy-run-id" disabled>複製 Run ID</button>
+              </div>
               <div class="graph-toolbar__actions">
                 <button type="button" class="secondary-btn" id="graph-create-template">Create template</button>
               </div>
@@ -350,11 +354,31 @@
           </section>
 
           <section class="main-card context-page" id="context-page" hidden>
-            <header>
-              <h2>Context</h2>
-              <p class="subtitle">此分頁預留為中心畫面 Context 視圖。</p>
+            <header class="context-page__header">
+              <div>
+                <h2>Context</h2>
+                <p class="subtitle">這裡會顯示系統提示、資料來源與可注入變數。若尚未接到後端儲存 API，將先以「本機草稿」方式保存。</p>
+              </div>
             </header>
-            <p class="empty-context">目前尚無可顯示內容。</p>
+            <section class="context-draft" id="context-draft-box">
+              <label class="field-label" for="context-draft-input">Context 草稿（僅本機）</label>
+              <textarea id="context-draft-input" rows="8" placeholder="例如：專案目標、語氣偏好、重要限制條件..."></textarea>
+              <p id="context-draft-meta" class="context-draft__meta">尚未儲存草稿。</p>
+              <div class="context-draft__actions">
+                <button type="button" class="primary-btn" id="context-save-draft">儲存草稿（本機）</button>
+                <label class="secondary-btn file-btn-inline" for="context-import-file">從檔案匯入</label>
+                <input id="context-import-file" type="file" accept=".txt,.md,.json" hidden />
+                <button type="button" class="secondary-btn" id="context-extract-chat">從最近對話擷取</button>
+              </div>
+            </section>
+            <section class="context-danger-zone">
+              <h3>清理動作</h3>
+              <p class="empty-context">高風險操作將需要二次確認。若為本機草稿清理，無法復原。</p>
+              <div class="context-danger-zone__actions">
+                <button type="button" class="secondary-btn" id="context-clear-chat">清空本次對話 Context（本機草稿）</button>
+                <button type="button" class="secondary-btn" id="context-clear-project">清空專案 Context 草稿（本機）</button>
+              </div>
+            </section>
           </section>
 
           <section class="main-card graph-page" id="graph-page" hidden>
@@ -496,6 +520,7 @@
         logsPage: { logsPage: 1, eventsPage: 1, logsHasNext: false, eventsHasNext: false },
         billingSummary: null,
         billingStreamSource: null,
+        contextPanelWidth: 320,
       };
 
       const elements = {
@@ -519,6 +544,7 @@
         graphCode: document.getElementById("graph-code"),
         graphNodeList: document.getElementById("graph-node-list"),
         graphRunMeta: document.getElementById("graph-run-meta"),
+        copyRunId: document.getElementById("copy-run-id"),
         graphCreateTemplate: document.getElementById("graph-create-template"),
         graphNodeDrawer: document.getElementById("graph-node-drawer"),
         graphNodeClose: document.getElementById("graph-node-close"),
@@ -539,6 +565,8 @@
         graphPage: document.getElementById("graph-page"),
         uiShell: document.getElementById("ui-shell"),
         toggleContextPanel: document.getElementById("toggle-context-panel"),
+        contextPanel: document.getElementById("context-panel"),
+        contextResizer: document.getElementById("context-resizer"),
         shellRunStatus: document.getElementById("shell-run-status"),
         shellDaemonStatus: document.getElementById("shell-daemon-status"),
         shellBudgetStatus: document.getElementById("shell-budget-status"),
@@ -615,10 +643,99 @@
         configProject: document.getElementById("config-project"),
         configEffectiveSummary: document.getElementById("config-effective-summary"),
         configTableBody: document.getElementById("config-table-body"),
+        contextDraftInput: document.getElementById("context-draft-input"),
+        contextDraftMeta: document.getElementById("context-draft-meta"),
+        contextSaveDraft: document.getElementById("context-save-draft"),
+        contextImportFile: document.getElementById("context-import-file"),
+        contextExtractChat: document.getElementById("context-extract-chat"),
+        contextClearChat: document.getElementById("context-clear-chat"),
+        contextClearProject: document.getElementById("context-clear-project"),
       };
 
       const toastManager = createToastManager(elements.toast);
       const confirmModal = createConfirmModal(elements.confirmModal);
+
+      const STORAGE_KEYS = {
+        contextCollapsed: "amon.ui.contextPanelCollapsed",
+        contextWidth: "amon.ui.contextPanelWidth",
+        contextDraftPrefix: "amon.ui.contextDraft:",
+      };
+
+      function readStorage(key) {
+        try {
+          return window.localStorage.getItem(key);
+        } catch (error) {
+          return null;
+        }
+      }
+
+      function writeStorage(key, value) {
+        try {
+          window.localStorage.setItem(key, value);
+        } catch (error) {
+          console.warn("storage_write_failed", key, error);
+        }
+      }
+
+      function safeRemoveStorage(key) {
+        try {
+          window.localStorage.removeItem(key);
+        } catch (error) {
+          console.warn("storage_remove_failed", key, error);
+        }
+      }
+
+      function formatUnknownValue(value, fallback = "尚未取得資料") {
+        if (value === null || value === undefined) return fallback;
+        const text = String(value).trim();
+        if (!text || text === "--" || text.toLowerCase() === "unknown") {
+          return fallback;
+        }
+        return text;
+      }
+
+      function shortenId(value, front = 6, back = 4) {
+        const text = String(value || "");
+        if (!text) return "尚未有 Run";
+        if (text.length <= front + back + 1) return text;
+        return `${text.slice(0, front)}…${text.slice(-back)}`;
+      }
+
+      function applyPillClass(element, level = "neutral") {
+        if (!element) return;
+        element.classList.remove("pill--success", "pill--warning", "pill--danger", "pill--neutral");
+        element.classList.add(`pill--${level}`);
+      }
+
+      function setStatusText(element, text, level = "neutral", tooltip = "") {
+        if (!element) return;
+        element.textContent = text;
+        if (tooltip) {
+          element.title = tooltip;
+        }
+        applyPillClass(element, level);
+      }
+
+      function mapRunStatusLevel(status = "idle") {
+        const key = String(status || "").toLowerCase();
+        if (["ok", "success", "succeeded", "completed"].includes(key)) return "success";
+        if (["error", "failed", "unavailable"].includes(key)) return "danger";
+        if (["confirm_required", "warning", "degraded"].includes(key)) return "warning";
+        return "neutral";
+      }
+
+      function mapDaemonStatusLevel(status = "idle") {
+        const key = String(status || "").toLowerCase();
+        if (["connected", "healthy"].includes(key)) return "success";
+        if (["reconnecting"].includes(key)) return "warning";
+        if (["error", "unavailable", "disconnected"].includes(key)) return "danger";
+        return "neutral";
+      }
+
+      function getContextDraftStorageKey(projectId = state.projectId) {
+        const scope = projectId || "no-project";
+        return `${STORAGE_KEYS.contextDraftPrefix}${scope}`;
+      }
 
       function syncContextPanelToggle() {
         if (!elements.uiShell || !elements.toggleContextPanel) {
@@ -627,6 +744,50 @@
         const collapsed = elements.uiShell.classList.contains("is-context-collapsed");
         elements.toggleContextPanel.textContent = collapsed ? "展開右側面板" : "收合右側面板";
         elements.toggleContextPanel.setAttribute("aria-expanded", String(!collapsed));
+        writeStorage(STORAGE_KEYS.contextCollapsed, collapsed ? "1" : "0");
+      }
+
+      function applyContextPanelWidth(width) {
+        const clamped = Math.max(280, Math.min(520, Number(width) || 320));
+        state.contextPanelWidth = clamped;
+        elements.chatLayout?.style.setProperty("--context-panel-width", `${clamped}px`);
+        writeStorage(STORAGE_KEYS.contextWidth, String(clamped));
+      }
+
+      function restoreContextPanelState() {
+        const collapsed = readStorage(STORAGE_KEYS.contextCollapsed) === "1";
+        elements.uiShell?.classList.toggle("is-context-collapsed", collapsed);
+        const storedWidth = Number(readStorage(STORAGE_KEYS.contextWidth));
+        if (Number.isFinite(storedWidth) && storedWidth > 0) {
+          applyContextPanelWidth(storedWidth);
+        } else {
+          applyContextPanelWidth(320);
+        }
+        syncContextPanelToggle();
+      }
+
+      function setupContextResizer() {
+        if (!elements.contextResizer || !elements.chatLayout || !elements.contextPanel) {
+          return;
+        }
+        let dragging = false;
+        const onMove = (event) => {
+          if (!dragging) return;
+          const layoutRect = elements.chatLayout.getBoundingClientRect();
+          const width = layoutRect.right - event.clientX;
+          applyContextPanelWidth(width);
+        };
+        const onUp = () => {
+          dragging = false;
+          document.body.classList.remove("is-resizing-context-panel");
+        };
+        elements.contextResizer.addEventListener("mousedown", (event) => {
+          event.preventDefault();
+          dragging = true;
+          document.body.classList.add("is-resizing-context-panel");
+        });
+        window.addEventListener("mousemove", onMove);
+        window.addEventListener("mouseup", onUp);
       }
 
       elements.toggleContextPanel?.addEventListener("click", () => {
@@ -634,7 +795,35 @@
         syncContextPanelToggle();
       });
 
-      syncContextPanelToggle();
+      restoreContextPanelState();
+      setupContextResizer();
+      setStatusText(elements.shellDaemonStatus, "Daemon：尚未連線", "neutral", "尚未建立串流連線");
+      setStatusText(elements.shellRunStatus, "Run：尚未有 Run", "neutral", "目前尚未執行任何 Run");
+
+      const routeToShellView = {
+        chat: "chat",
+        context: "context",
+        graph: "graph",
+        tools: "tools-skills",
+        config: "config",
+        logs: "logs-events",
+        docs: "docs",
+        billing: "bill",
+      };
+
+      function resolveRouteFromHash(hashValue = window.location.hash) {
+        const raw = (hashValue || "").replace(/^#\/?/, "").trim().toLowerCase();
+        const routeKey = raw.split("/")[0];
+        return routeToShellView[routeKey] ? routeKey : "chat";
+      }
+
+      function setActiveShellNav(routeKey) {
+        elements.shellNavItems.forEach((item) => {
+          const isActive = item.dataset.route === routeKey;
+          item.classList.toggle("is-active", isActive);
+          item.setAttribute("aria-current", isActive ? "page" : "false");
+        });
+      }
 
       const routeToShellView = {
         chat: "chat",
@@ -1126,17 +1315,20 @@
       };
 
       function renderStoreSummary(storeState) {
-        const runStatus = storeState.run?.status || (state.streaming ? "streaming" : "idle");
+        const runStatus = formatUnknownValue(storeState.run?.status || (state.streaming ? "running" : "idle"), "尚未有 Run");
         const runProgress = storeState.run?.progress;
         if (!elements.shellRunStatus || !elements.cardRunProgress || !elements.cardBilling || !elements.shellBudgetStatus || !elements.cardPendingConfirmations) {
           return;
         }
-        elements.shellRunStatus.textContent = `Run：${runStatus}`;
-        elements.cardRunProgress.textContent = Number.isFinite(runProgress) ? `${runProgress}%` : "--";
-        elements.cardBilling.textContent = `NT$ ${storeState.billing.total_cost.toFixed(2)}`;
-        elements.shellBudgetStatus.textContent = `Budget：NT$ ${storeState.billing.total_cost.toFixed(2)} / NT$ 5,000`;
+        setStatusText(elements.shellRunStatus, `Run：${runStatus}`, mapRunStatusLevel(runStatus), `目前執行狀態：${runStatus}`);
+        elements.cardRunProgress.textContent = Number.isFinite(runProgress) ? `${runProgress}%` : "尚未有 Run";
+        elements.cardRunProgress.title = Number.isFinite(runProgress) ? "目前 Run 進度" : "尚未有 Run 可顯示進度";
+        elements.cardBilling.textContent = `NT$ ${Number(storeState.billing.total_cost || 0).toFixed(2)}`;
+        elements.cardBilling.title = "目前已累計費用";
+        elements.shellBudgetStatus.textContent = `Budget：NT$ ${Number(storeState.billing.total_cost || 0).toFixed(2)} / NT$ 5,000`;
         const pendingJobs = Object.values(storeState.jobs).filter((job) => job.status && job.status !== "completed").length;
-        elements.cardPendingConfirmations.textContent = pendingJobs > 0 ? `${pendingJobs} 項任務進行中` : "0";
+        elements.cardPendingConfirmations.textContent = pendingJobs > 0 ? `${pendingJobs} 項任務進行中` : "0 項";
+        elements.cardPendingConfirmations.title = pendingJobs > 0 ? "仍有任務等待確認或完成" : "目前沒有待確認任務";
       }
 
       state.uiStore.subscribe((snapshot) => {
@@ -1252,13 +1444,13 @@
           }
           entries.forEach((item) => {
             if (typeof item === "string") {
-              artifacts.push({ type: "artifact", run_id: state.graphRunId || "unknown", node_id: nodeId, path: item, preview: "" });
+              artifacts.push({ type: "artifact", run_id: state.graphRunId || "尚未取得 Run ID", node_id: nodeId, path: item, preview: "" });
               return;
             }
             if (item && typeof item === "object" && item.path) {
               artifacts.push({
                 type: item.type || "artifact",
-                run_id: item.run_id || state.graphRunId || "unknown",
+                run_id: item.run_id || state.graphRunId || "尚未取得 Run ID",
                 node_id: item.node_id || nodeId,
                 path: item.path,
                 preview: item.preview || "",
@@ -1396,6 +1588,7 @@
         }
         elements.projectSelect.value = projectId || "";
         syncContextHeader();
+        refreshContextDraftUi();
         if (!state.projectId) {
           state.chatId = null;
           elements.timeline.innerHTML = "";
@@ -1403,6 +1596,8 @@
           elements.graphPreview.innerHTML = "<p class=\"empty-context\">請先在上方選擇專案。</p>";
           elements.graphCode.textContent = "";
           elements.contextOverview.textContent = "請先在上方選擇專案，右側內容會自動同步。";
+          elements.graphRunMeta.textContent = "尚未偵測到 Run";
+          elements.copyRunId.disabled = true;
         }
       }
 
@@ -1421,6 +1616,96 @@
         elements.contextPanels.forEach((panel) => {
           panel.hidden = panel.dataset.contextPanel !== tabName;
         });
+      }
+
+      function refreshContextDraftUi() {
+        const draftKey = getContextDraftStorageKey();
+        const draftText = readStorage(draftKey) || "";
+        elements.contextDraftInput.value = draftText;
+        if (draftText.trim()) {
+          elements.contextDraftMeta.textContent = state.projectId
+            ? `已載入專案 ${state.projectId} 的本機草稿。`
+            : "已載入未綁定專案的本機草稿。";
+        } else {
+          elements.contextDraftMeta.textContent = "尚未儲存草稿。";
+        }
+      }
+
+      function saveContextDraft() {
+        const text = (elements.contextDraftInput.value || "").trim();
+        const draftKey = getContextDraftStorageKey();
+        writeStorage(draftKey, text);
+        elements.contextDraftMeta.textContent = text
+          ? `已儲存本機草稿（${new Date().toLocaleString("zh-TW")})。`
+          : "草稿為空，已清空本機草稿。";
+        showToast(text ? "Context 草稿已儲存（僅本機）。" : "已清空本機草稿。", 9000, "success");
+      }
+
+      async function clearContextDraft(scope = "chat") {
+        const title = scope === "project" ? "清空專案 Context 草稿" : "清空本次對話 Context 草稿";
+        const description = scope === "project"
+          ? "將刪除目前專案在此瀏覽器的 Context 草稿。此動作只影響本機，不會刪除伺服器資料，且不可復原。"
+          : "將刪除目前對話在此瀏覽器的 Context 草稿。此動作只影響本機，不會刪除伺服器資料，且不可復原。";
+        const confirmed = await confirmModal.open({
+          title,
+          description,
+          confirmText: "確認清空",
+          cancelText: "取消",
+        });
+        if (!confirmed) {
+          showToast("已取消清空 Context。", 5000, "neutral");
+          return;
+        }
+        const key = getContextDraftStorageKey(scope === "project" ? state.projectId : null);
+        safeRemoveStorage(key);
+        if (scope === "project") {
+          refreshContextDraftUi();
+        } else {
+          elements.contextDraftInput.value = "";
+          elements.contextDraftMeta.textContent = "已清空本次對話 Context 草稿。";
+        }
+        showToast("已清空 Context 草稿（僅本機）。", 9000, "success");
+      }
+
+      function importContextDraftFromFile(file) {
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          elements.contextDraftInput.value = String(reader.result || "");
+          elements.contextDraftMeta.textContent = `已匯入檔案：${file.name}`;
+          showToast(`已匯入 ${file.name}，請記得儲存草稿。`, 9000, "success");
+        };
+        reader.onerror = () => {
+          showToast("檔案匯入失敗，請確認檔案格式是否正確。", 9000, "danger");
+        };
+        reader.readAsText(file);
+      }
+
+      function extractContextFromChat() {
+        const latestUser = [...elements.timeline.querySelectorAll(".chat-bubble.user")].pop();
+        if (!latestUser) {
+          showToast("目前沒有可擷取的對話內容。", 9000, "warning");
+          return;
+        }
+        const text = latestUser.textContent.replace(/^你：/, "").trim();
+        elements.contextDraftInput.value = text;
+        elements.contextDraftMeta.textContent = "已帶入最近一則使用者對話，請檢查後儲存。";
+        showToast("已從最近對話擷取 Context 草稿。", 9000, "success");
+      }
+
+      function renderRunMeta(runId, runStatus) {
+        if (!runId) {
+          elements.graphRunMeta.textContent = "尚未偵測到 Run";
+          elements.graphRunMeta.title = "尚未有可用 Run。";
+          elements.copyRunId.disabled = true;
+          return;
+        }
+        const shortRunId = shortenId(runId);
+        const safeStatus = formatUnknownValue(runStatus, "尚未取得狀態");
+        elements.graphRunMeta.textContent = `Run：${shortRunId}（${safeStatus}）`;
+        elements.graphRunMeta.title = `完整 Run ID：${runId}`;
+        elements.copyRunId.disabled = false;
+        elements.copyRunId.dataset.runId = runId;
       }
 
       async function loadProjects() {
@@ -1476,13 +1761,13 @@
         elements.graphCode.textContent = payload.graph_mermaid || "";
         renderGraph(payload.graph_mermaid || "");
         renderNodeList();
-        elements.graphRunMeta.textContent = state.graphRunId
-          ? `Run：${state.graphRunId}（${payload.run_status || "unknown"}）`
-          : "尚未偵測到 run";
+        renderRunMeta(state.graphRunId, payload.run_status);
         renderDocs(payload.docs || []);
         const docCount = (payload.docs || []).length;
         const hasGraph = payload.graph_mermaid ? "有" : "無";
-        elements.contextOverview.textContent = `已同步專案內容：Graph ${hasGraph}、文件 ${docCount} 筆。`;
+        const runHint = state.graphRunId ? `已連結 Run ${shortenId(state.graphRunId)}` : "尚未有 Run";
+        elements.contextOverview.textContent = `已同步專案內容：Graph ${hasGraph}、文件 ${docCount} 筆；${runHint}。`;
+        elements.contextOverview.title = state.graphRunId ? `完整 Run ID：${state.graphRunId}` : "尚未取得任何 Run。";
         renderArtifacts(collectArtifactsFromNodeStates(state.graphNodeStates));
       }
 
@@ -1491,9 +1776,9 @@
           return {
             path: doc,
             name: doc.split("/").pop() || doc,
-            run_id: "unknown",
-            node_id: "unknown",
-            task_id: "ungrouped",
+            run_id: "尚未取得 Run ID",
+            node_id: "尚未取得 Node ID",
+            task_id: "未分組 Task",
             open_url: null,
             download_url: null,
           };
@@ -1501,9 +1786,9 @@
         return {
           path: doc.path || "",
           name: doc.name || (doc.path || "").split("/").pop() || "(未命名)",
-          run_id: doc.run_id || "unknown",
-          node_id: doc.node_id || "unknown",
-          task_id: doc.task_id || "ungrouped",
+          run_id: doc.run_id || "尚未取得 Run ID",
+          node_id: doc.node_id || "尚未取得 Node ID",
+          task_id: doc.task_id || "未分組 Task",
           open_url: doc.open_url || null,
           download_url: doc.download_url || null,
         };
@@ -1527,13 +1812,13 @@
       function buildDocsTree(items = []) {
         const grouped = new Map();
         items.forEach((doc) => {
-          const runKey = `run:${doc.run_id || "unknown"}`;
+          const runKey = `run:${doc.run_id || "尚未取得 Run ID"}`;
           if (!grouped.has(runKey)) {
-            grouped.set(runKey, { type: "group", key: runKey, label: `Run ${doc.run_id || "unknown"}` });
+            grouped.set(runKey, { type: "group", key: runKey, label: `Run ${doc.run_id || "尚未取得 Run ID"}` });
           }
           const taskKey = `${runKey}/task:${doc.task_id || "ungrouped"}`;
           if (!grouped.has(taskKey)) {
-            grouped.set(taskKey, { type: "group", key: taskKey, label: `Task ${doc.task_id || "ungrouped"}`, depth: 1 });
+            grouped.set(taskKey, { type: "group", key: taskKey, label: `Task ${doc.task_id || "未分組 Task"}`, depth: 1 });
           }
         });
 
@@ -1546,7 +1831,7 @@
               .forEach((task) => {
                 flat.push(task);
                 items
-                  .filter((doc) => task.key === `run:${doc.run_id || "unknown"}/task:${doc.task_id || "ungrouped"}`)
+                  .filter((doc) => task.key === `run:${doc.run_id || "尚未取得 Run ID"}/task:${doc.task_id || "未分組 Task"}`)
                   .forEach((doc) => {
                     flat.push({ type: "doc", depth: 2, key: doc.path, doc });
                   });
@@ -1928,14 +2213,14 @@
           },
           onStatusChange: ({ status, transport }) => {
             if (status === "connected") {
-              elements.shellDaemonStatus.textContent = "Daemon：Healthy";
+              setStatusText(elements.shellDaemonStatus, "Daemon：Healthy", mapDaemonStatusLevel("connected"), "daemon 已連線");
             }
             if (status === "reconnecting") {
-              elements.shellDaemonStatus.textContent = "Daemon：Reconnecting";
-              showToast(`串流中斷，正在重新連線（${transport || "unknown"}）`);
+              setStatusText(elements.shellDaemonStatus, "Daemon：重新連線中", mapDaemonStatusLevel("reconnecting"), "daemon 連線中斷，正在重試");
+              showToast(`串流中斷，正在重新連線（${formatUnknownValue(transport, "未知傳輸") }）`, 9000, "warning");
             }
             if (status === "error") {
-              elements.shellDaemonStatus.textContent = "Daemon：Unavailable";
+              setStatusText(elements.shellDaemonStatus, "Daemon：Unavailable", mapDaemonStatusLevel("error"), "daemon 未連線或不可用");
             }
           },
           onEvent: async (eventType, data) => {
@@ -1967,7 +2252,7 @@ ${JSON.stringify(data, null, 2)}
                 return;
               }
               if (eventType === "error") {
-                showToast(data.message || "串流失敗");
+                showToast(data.message || "串流失敗", 9000, "danger");
                 return;
               }
               if (eventType === "done") {
@@ -2174,6 +2459,30 @@ ${JSON.stringify(data, null, 2)}
       elements.contextTabs.forEach((tab) => {
         tab.addEventListener("click", () => switchContextTab(tab.dataset.contextTab));
       });
+
+      elements.copyRunId?.addEventListener("click", async () => {
+        const runId = elements.copyRunId.dataset.runId;
+        if (!runId) {
+          showToast("目前沒有可複製的 Run ID。", 7000, "warning");
+          return;
+        }
+        try {
+          await navigator.clipboard.writeText(runId);
+          showToast("已複製完整 Run ID。", 7000, "success");
+        } catch (error) {
+          showToast(`複製失敗：${error.message || error}`, 9000, "danger");
+        }
+      });
+
+      elements.contextSaveDraft?.addEventListener("click", saveContextDraft);
+      elements.contextImportFile?.addEventListener("change", (event) => {
+        const file = event.target.files?.[0];
+        importContextDraftFromFile(file);
+        event.target.value = "";
+      });
+      elements.contextExtractChat?.addEventListener("click", extractContextFromChat);
+      elements.contextClearChat?.addEventListener("click", () => void clearContextDraft("chat"));
+      elements.contextClearProject?.addEventListener("click", () => void clearContextDraft("project"));
 
       elements.thinkingMode.addEventListener("change", (event) => {
         state.thinkingMode = event.target.value;
