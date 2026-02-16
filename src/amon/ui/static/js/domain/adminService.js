@@ -37,5 +37,26 @@ export function createAdminService({ api }) {
       const projectParam = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
       return api.request(`/skills/catalog${projectParam}`);
     },
+    /** @param {{toolName: string, action: string, requireConfirm: boolean}} payload */
+    planToolPolicy({ toolName, action, requireConfirm }) {
+      return api.request("/tools/policy/plan", {
+        method: "POST",
+        body: JSON.stringify({ tool_name: toolName, action, require_confirm: requireConfirm }),
+      });
+    },
+    /** @param {string} path @param {Record<string, unknown>} body */
+    confirmPlan(path, body) {
+      return api.request(path, {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+    },
+    /** @param {string} skillName @param {string} projectId */
+    getSkillTriggerPreview(skillName, projectId) {
+      return api.request("/skills/trigger-preview", {
+        method: "POST",
+        body: JSON.stringify({ skill_name: skillName, project_id: projectId || "" }),
+      });
+    },
   };
 }
