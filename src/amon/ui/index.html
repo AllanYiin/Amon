@@ -825,6 +825,31 @@
         });
       }
 
+      const routeToShellView = {
+        chat: "chat",
+        context: "context",
+        graph: "graph",
+        tools: "tools-skills",
+        config: "config",
+        logs: "logs-events",
+        docs: "docs",
+        billing: "bill",
+      };
+
+      function resolveRouteFromHash(hashValue = window.location.hash) {
+        const raw = (hashValue || "").replace(/^#\/?/, "").trim().toLowerCase();
+        const routeKey = raw.split("/")[0];
+        return routeToShellView[routeKey] ? routeKey : "chat";
+      }
+
+      function setActiveShellNav(routeKey) {
+        elements.shellNavItems.forEach((item) => {
+          const isActive = item.dataset.route === routeKey;
+          item.classList.toggle("is-active", isActive);
+          item.setAttribute("aria-current", isActive ? "page" : "false");
+        });
+      }
+
       function switchShellView(view) {
         if (view !== "bill") {
           closeBillingStream();
