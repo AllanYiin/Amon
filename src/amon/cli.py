@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import platform
+import shutil
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -46,7 +50,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command")
 
-    subparsers.add_parser("init", help="初始化 Amon 資料夾")
+    init_parser = subparsers.add_parser("init", help="初始化 Amon 資料夾")
+    init_parser.add_argument(
+        "--start-sandbox",
+        action="store_true",
+        help="初始化完成後另開 command 視窗並啟動 sandbox runner",
+    )
 
     project_parser = subparsers.add_parser("project", help="專案管理")
     project_sub = project_parser.add_subparsers(dest="project_command")
@@ -297,6 +306,15 @@ def main() -> None:
         if args.command == "init":
             core.initialize()
             print("已完成初始化")
+            if getattr(args, "start_sandbox", False):
+                launched, detail = _launch_sandbox_terminal()
+                if launched:
+                    print(f"已嘗試另開 command 視窗啟動 sandbox runner（{detail}）")
+                else:
+                    print(
+                        "無法自動開啟 command 視窗，請手動執行 amon-sandbox-runner"
+                        f"（原因：{detail}）"
+                    )
             return
         if args.command == "project":
             _handle_project(core, args)
@@ -344,6 +362,42 @@ def main() -> None:
         core.logger.error("執行失敗：%s", exc, exc_info=True)
         print("發生錯誤，請查看 logs/amon.log 取得詳細資訊。", file=sys.stderr)
         sys.exit(1)
+
+
+def _launch_sandbox_terminal() -> tuple[bool, str]:
+    sandbox_cmd = os.environ.get("AMON_SANDBOX_RUNNER_CMD", "amon-sandbox-runner")
+    custom_terminal_cmd = os.environ.get("AMON_SANDBOX_TERMINAL_CMD")
+    if custom_terminal_cmd:
+        launch_cmd = custom_terminal_cmd.format(command=sandbox_cmd)
+        subprocess.Popen(launch_cmd, shell=True)
+        return True, "custom"
+
+    system = platform.system().lower()
+    if system == "windows":
+        create_new_console = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+        subprocess.Popen(
+            ["cmd", "/c", "start", "Amon Sandbox", "cmd", "/k", sandbox_cmd],
+            creationflags=create_new_console,
+        )
+        return True, "windows-cmd"
+
+    if system == "darwin":
+        escaped_cmd = sandbox_cmd.replace('"', '\\"')
+        subprocess.Popen(["osascript", "-e", f'tell application "Terminal" to do script "{escaped_cmd}"'])
+        return True, "mac-terminal"
+
+    terminals: list[tuple[str, list[str]]] = [
+        ("x-terminal-emulator", ["x-terminal-emulator", "-e", sandbox_cmd]),
+        ("gnome-terminal", ["gnome-terminal", "--", "bash", "-lc", sandbox_cmd]),
+        ("konsole", ["konsole", "-e", "bash", "-lc", sandbox_cmd]),
+        ("xfce4-terminal", ["xfce4-terminal", "--command", f"bash -lc '{sandbox_cmd}'"]),
+        ("xterm", ["xterm", "-e", sandbox_cmd]),
+    ]
+    for terminal, cmd in terminals:
+        if shutil.which(terminal):
+            subprocess.Popen(cmd)
+            return True, terminal
+    return False, "no_supported_terminal"
 
 
 def _handle_project(core: AmonCore, args: argparse.Namespace) -> None:
