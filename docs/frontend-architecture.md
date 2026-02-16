@@ -114,3 +114,7 @@ src/amon/ui/
 3. **入口 fallback**：可暫時把 `app.js` 指回既有穩定 bootstrap 檔（例如 `bootstrap.legacy.js`）；僅作 emergency 用，修復後再回主線。
 
 > 注意：fallback 檔案若含舊實作，需明確標註淘汰期限，避免形成雙實作長期共存。
+
+## 附錄：Phase 5.2 第二段拆分
+
+- 詳細執行步驟請見：`docs/phase5-second-split-instructions.md`。
