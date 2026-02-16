@@ -1,4 +1,8 @@
+/** @type {import('./contracts.js').ViewContract} */
 export const GRAPH_VIEW = {
-  key: "graph",
-  onEnter: async () => {},
+  id: "graph",
+  route: "/graph",
+  mount: () => {},
+  unmount: () => {},
+  onRoute: async (_params = {}, _ctx) => {},
 };

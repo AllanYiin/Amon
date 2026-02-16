@@ -1,6 +1,10 @@
+/** @type {import('./contracts.js').ViewContract} */
 export const DOCS_VIEW = {
-  key: "docs",
-  onEnter: async ({ loadDocsPage }) => {
-    await loadDocsPage();
+  id: "docs",
+  route: "/docs",
+  mount: () => {},
+  unmount: () => {},
+  onRoute: async (_params = {}, ctx) => {
+    await ctx.services?.admin?.loadDocsPage?.();
   },
 };
