@@ -356,6 +356,48 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
 
     def _handle_api_get(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/api/docs" or parsed.path.startswith("/api/docs/"):
+            params = parse_qs(parsed.query)
+            project_id = params.get("project_id", [""])[0].strip()
+            if not project_id:
+                self._send_json(400, {"message": "請提供 project_id"})
+                return
+            try:
+                project_path = self.core.get_project_path(project_id)
+                docs = self._build_docs_catalog(project_id=project_id, project_path=project_path)
+                if parsed.path == "/api/docs":
+                    self._send_json(200, {"docs": docs})
+                    return
+                raw_doc_path = unquote(parsed.path.replace("/api/docs/", "", 1)).strip()
+                if not raw_doc_path:
+                    self._send_json(400, {"message": "請提供 doc_id_or_path"})
+                    return
+                selected = next((item for item in docs if item.get("path") == raw_doc_path or item.get("name") == raw_doc_path), None)
+                if not selected:
+                    self._send_json(404, {"message": "找不到文件"})
+                    return
+                resolved_path = self._resolve_doc_path(project_path, str(selected["path"]))
+                content = resolved_path.read_text(encoding="utf-8")
+            except FileNotFoundError as exc:
+                self._handle_error(exc, status=404)
+                return
+            except ValueError as exc:
+                self._send_json(400, {"message": str(exc)})
+                return
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(
+                200,
+                {
+                    "path": selected["path"],
+                    "name": selected["name"],
+                    "content": content,
+                    "download_url": selected.get("download_url"),
+                    "updated_at": selected.get("updated_at"),
+                },
+            )
+            return
         if parsed.path == "/v1/queue/depth":
             self._send_json(200, {"depth": get_queue_depth()})
             return
@@ -1904,6 +1946,8 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 "automation_usage": 0.0,
             },
             "exceeded_events": [],
+            "current_run": {"run_id": None, "cost": 0.0, "usage": 0.0, "records": 0},
+            "run_trend": [],
         }
 
         config = self.core.load_config(self.core.get_project_path(project_id)) if project_id else self.core.load_config(None)
@@ -1913,6 +1957,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         summary["budgets"]["per_project_budget"] = self._safe_budget_value(billing_cfg.get("per_project_budget"))
         summary["budgets"]["automation_budget"] = self._safe_budget_value(billing_cfg.get("automation_budget"))
 
+        run_buckets: dict[str, dict[str, Any]] = {}
         for record in records:
             record_project_id = str(record.get("project_id") or "").strip() or None
             if project_id and record_project_id != project_id:
@@ -1920,6 +1965,13 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             amount = self._billing_amount(record)
             record_date = self._extract_date(str(record.get("ts") or ""))
             mode_bucket = self._billing_bucket(record)
+            run_id = str(record.get("run_id") or "unknown")
+
+            bucket = run_buckets.setdefault(run_id, {"run_id": run_id, "cost": 0.0, "usage": 0.0, "records": 0, "last_ts": ""})
+            bucket["cost"] += amount
+            bucket["usage"] += amount
+            bucket["records"] += 1
+            bucket["last_ts"] = max(str(bucket.get("last_ts") or ""), str(record.get("ts") or ""))
 
             summary["project_total"]["cost"] += amount
             summary["project_total"]["usage"] += amount
@@ -1961,6 +2013,15 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             summary["exceeded_events"].append(event)
         summary["exceeded_events"].sort(key=lambda item: str(item.get("ts") or ""), reverse=True)
         summary["exceeded_events"] = summary["exceeded_events"][:50]
+        summary["run_trend"] = sorted(run_buckets.values(), key=lambda item: str(item.get("last_ts") or ""))[-20:]
+        if summary["run_trend"]:
+            latest = summary["run_trend"][-1]
+            summary["current_run"] = {
+                "run_id": latest.get("run_id"),
+                "cost": float(latest.get("cost") or 0.0),
+                "usage": float(latest.get("usage") or 0.0),
+                "records": int(latest.get("records") or 0),
+            }
         return summary
 
     def _handle_billing_stream(self, *, project_id: str | None) -> None:
@@ -2103,6 +2164,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     "run_id": run_id or "unknown",
                     "node_id": node_id,
                     "task_id": task_id or "ungrouped",
+                    "updated_at": datetime.fromtimestamp(path.stat().st_mtime).isoformat(),
                     "download_url": f"/v1/projects/{encoded_project_id}/docs/download?path={encoded_path}",
                     "raw_url": f"/v1/projects/{encoded_project_id}/docs/raw?path={encoded_path}",
                     "open_url": f"/v1/projects/{encoded_project_id}/docs/content?path={encoded_path}",

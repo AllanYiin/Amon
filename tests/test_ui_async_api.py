@@ -547,6 +547,11 @@ class UIAsyncAPITests(unittest.TestCase):
                 docs_payload = json.loads(docs_resp.read().decode("utf-8"))
                 self.assertEqual(docs_resp.status, 200)
                 self.assertEqual(len(docs_payload["docs"]), 2)
+                conn.request("GET", f"/api/docs?project_id={encoded_project}")
+                api_docs_resp = conn.getresponse()
+                api_docs_payload = json.loads(api_docs_resp.read().decode("utf-8"))
+                self.assertEqual(api_docs_resp.status, 200)
+                self.assertEqual(len(api_docs_payload["docs"]), 2)
 
                 markdown_doc = next(doc for doc in docs_payload["docs"] if doc["path"].endswith("result_run_001.md"))
                 binary_doc = next(doc for doc in docs_payload["docs"] if doc["path"].endswith("artifact.bin"))
@@ -563,6 +568,12 @@ class UIAsyncAPITests(unittest.TestCase):
                 preview_payload = json.loads(preview_resp.read().decode("utf-8"))
                 self.assertEqual(preview_resp.status, 200)
                 self.assertIn("# 任務結果", preview_payload["content"])
+                conn.request("GET", f"/api/docs/tasks/task-a/result_run_001.md?project_id={encoded_project}")
+                api_doc_resp = conn.getresponse()
+                api_doc_payload = json.loads(api_doc_resp.read().decode("utf-8"))
+                self.assertEqual(api_doc_resp.status, 200)
+                self.assertEqual(api_doc_payload["name"], "result_run_001.md")
+                self.assertIn("任務結果", api_doc_payload["content"])
 
                 conn.request("GET", f"/v1/projects/{encoded_project}/docs/download?path={encoded_markdown_path}")
                 download_resp = conn.getresponse()
@@ -631,6 +642,8 @@ class UIAsyncAPITests(unittest.TestCase):
                 self.assertAlmostEqual(payload["mode_breakdown"]["automation"]["cost"], 0.8)
                 self.assertEqual(payload["budgets"]["automation_budget"], 2.0)
                 self.assertEqual(len(payload["exceeded_events"]), 1)
+                self.assertIn("run_trend", payload)
+                self.assertIn("current_run", payload)
             finally:
                 if server:
                     server.shutdown()
@@ -685,6 +698,8 @@ class UIAsyncAPITests(unittest.TestCase):
                 self.assertAlmostEqual(payload["mode_breakdown"]["automation"]["cost"], 0.8)
                 self.assertEqual(payload["budgets"]["automation_budget"], 2.0)
                 self.assertEqual(len(payload["exceeded_events"]), 1)
+                self.assertIn("run_trend", payload)
+                self.assertIn("current_run", payload)
             finally:
                 if server:
                     server.shutdown()

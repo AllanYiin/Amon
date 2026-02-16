@@ -5,7 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Amon｜Chat UI</title>
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/styles/github.min.css" />
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/lib/highlight.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
     <script type="module">
       import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
       mermaid.initialize({ startOnLoad: false, theme: "neutral" });
@@ -57,6 +62,14 @@
           </header>
 
           <section id="timeline" class="chat-timeline"></section>
+
+          <section class="execution-timeline" id="execution-timeline" aria-label="Execution Timeline">
+            <header class="execution-timeline__header">
+              <h3>Execution Timeline</h3>
+              <p>顯示 Thinking / Planning / Tool / Node 目前進度（部分可能由事件推測）。</p>
+            </header>
+            <div id="execution-accordion" class="execution-accordion"></div>
+          </section>
 
           <section class="thinking-panel" id="thinking-panel">
             <div class="thinking-panel__header">
@@ -217,7 +230,16 @@
                 <p class="context-shell-card__label">automation / interactive</p>
                 <strong id="bill-mode-summary">--</strong>
               </article>
+              <article class="context-shell-card">
+                <p class="context-shell-card__label">目前 Run 費用</p>
+                <strong id="bill-current-run">--</strong>
+              </article>
             </div>
+
+            <article class="config-card">
+              <h3>每 Run 花費趨勢</h3>
+              <canvas id="bill-run-chart" height="140" aria-label="每 run 花費長條圖"></canvas>
+            </article>
 
             <section class="bill-grid">
               <article class="config-card">
@@ -409,6 +431,7 @@
             <div class="docs-layout">
               <aside class="docs-tree" id="docs-tree-wrap">
                 <div class="docs-tree__meta" id="docs-tree-meta">尚未載入。</div>
+                <input type="search" id="docs-filter" class="docs-filter" placeholder="搜尋檔名或路徑（client-side）" />
                 <div class="docs-tree__viewport" id="docs-tree-viewport" role="list"></div>
               </aside>
               <article class="docs-preview">
@@ -546,11 +569,22 @@
         contextPanelWidth: 320,
         runArtifacts: [],
         artifactPreviewItem: null,
+        docsItems: [],
+        docsFlatItems: [],
+        docsFilteredItems: [],
+        docsSelectedPath: null,
+        docsFilterQuery: "",
+        docsVirtual: { rowHeight: 40, buffer: 8 },
+        thinkingMode: "brief",
+        executionTimeline: new Map(),
+        graphPanZoom: null,
+        billRunChart: null,
       };
 
       const elements = {
         projectSelect: document.getElementById("project-select"),
         timeline: document.getElementById("timeline"),
+        executionAccordion: document.getElementById("execution-accordion"),
         chatForm: document.getElementById("chat-form"),
         chatInput: document.getElementById("chat-input"),
         chatAttachments: document.getElementById("chat-attachments"),
@@ -620,6 +654,8 @@
         billToday: document.getElementById("bill-today"),
         billProjectTotal: document.getElementById("bill-project-total"),
         billModeSummary: document.getElementById("bill-mode-summary"),
+        billCurrentRun: document.getElementById("bill-current-run"),
+        billRunChart: document.getElementById("bill-run-chart"),
         billBudgets: document.getElementById("bill-budgets"),
         billExceeded: document.getElementById("bill-exceeded"),
         billBreakdownProvider: document.getElementById("bill-breakdown-provider"),
@@ -638,6 +674,7 @@
         docsPage: document.getElementById("docs-page"),
         docsRefresh: document.getElementById("docs-refresh"),
         docsTreeMeta: document.getElementById("docs-tree-meta"),
+        docsFilter: document.getElementById("docs-filter"),
         docsTreeViewport: document.getElementById("docs-tree-viewport"),
         docsPreviewTitle: document.getElementById("docs-preview-title"),
         docsPreviewMeta: document.getElementById("docs-preview-meta"),
@@ -1019,23 +1056,27 @@
           elements.billToday.textContent = "--";
           elements.billProjectTotal.textContent = "--";
           elements.billModeSummary.textContent = "--";
+          elements.billCurrentRun.textContent = "--";
           elements.billBudgets.textContent = "尚未載入。";
           elements.billExceeded.innerHTML = "";
           elements.billBreakdownProvider.textContent = "尚未載入。";
           elements.billBreakdownModel.textContent = "尚未載入。";
           elements.billBreakdownAgent.textContent = "尚未載入。";
           elements.billBreakdownNode.textContent = "尚未載入。";
+          renderBillRunChart([]);
           return;
         }
         const currency = payload.currency || "USD";
         elements.billToday.textContent = formatBillMetric(payload.today?.cost, payload.today?.usage, currency);
         elements.billProjectTotal.textContent = formatBillMetric(payload.project_total?.cost, payload.project_total?.usage, currency);
         elements.billModeSummary.textContent = `automation ${formatBillMetric(payload.mode_breakdown?.automation?.cost, payload.mode_breakdown?.automation?.usage, currency)}｜interactive ${formatBillMetric(payload.mode_breakdown?.interactive?.cost, payload.mode_breakdown?.interactive?.usage, currency)}`;
+        elements.billCurrentRun.textContent = formatBillMetric(payload.current_run?.cost, payload.current_run?.usage, currency);
         elements.billBudgets.textContent = JSON.stringify(payload.budgets || {}, null, 2);
         elements.billBreakdownProvider.textContent = formatBreakdown(payload.breakdown?.provider);
         elements.billBreakdownModel.textContent = formatBreakdown(payload.breakdown?.model);
         elements.billBreakdownAgent.textContent = formatBreakdown(payload.breakdown?.agent);
         elements.billBreakdownNode.textContent = formatBreakdown(payload.breakdown?.node);
+        renderBillRunChart(payload.run_trend || [], currency);
 
         elements.billExceeded.innerHTML = "";
         (payload.exceeded_events || []).forEach((event) => {
@@ -1047,6 +1088,34 @@
         if (!payload.exceeded_events || !payload.exceeded_events.length) {
           elements.billExceeded.textContent = "目前沒有超限事件。";
         }
+      }
+
+      function renderBillRunChart(series = [], currency = "USD") {
+        if (!elements.billRunChart || !window.Chart) return;
+        const labels = series.map((item) => item.run_id || "(unknown)");
+        const values = series.map((item) => Number(item.cost || 0));
+        if (state.billRunChart) {
+          state.billRunChart.destroy();
+          state.billRunChart = null;
+        }
+        state.billRunChart = new Chart(elements.billRunChart, {
+          type: "bar",
+          data: {
+            labels,
+            datasets: [{
+              label: `每 Run 花費（${currency}）`,
+              data: values,
+              backgroundColor: "rgba(37, 99, 235, 0.5)",
+              borderColor: "rgba(37, 99, 235, 1)",
+              borderWidth: 1,
+            }],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: { y: { beginAtZero: true } },
+          },
+        });
       }
 
       function closeBillingStream() {
@@ -1421,6 +1490,73 @@
         elements.timeline.scrollTop = elements.timeline.scrollHeight;
       }
 
+      function executionStatusMeta(status = "pending") {
+        if (status === "succeeded") return { icon: "✅", label: "已完成" };
+        if (status === "running") return { icon: "🔄", label: "執行中" };
+        if (status === "failed") return { icon: "❌", label: "失敗" };
+        return { icon: "⚪", label: "等待中" };
+      }
+
+      function updateExecutionStep(stepId, next = {}) {
+        const current = state.executionTimeline.get(stepId) || {};
+        state.executionTimeline.set(stepId, {
+          id: stepId,
+          title: next.title || current.title || stepId,
+          status: next.status || current.status || "pending",
+          details: next.details || current.details || "",
+          inferred: next.inferred !== undefined ? next.inferred : current.inferred || false,
+          updatedAt: new Date().toISOString(),
+        });
+        renderExecutionTimeline();
+      }
+
+      function renderExecutionTimeline() {
+        if (!elements.executionAccordion) return;
+        const items = Array.from(state.executionTimeline.values());
+        if (!items.length) {
+          elements.executionAccordion.innerHTML = '<p class="empty-context">尚無執行步驟。</p>';
+          return;
+        }
+        elements.executionAccordion.innerHTML = "";
+        items.forEach((item) => {
+          const statusMeta = executionStatusMeta(item.status);
+          const details = document.createElement("details");
+          details.className = `execution-step execution-step--${item.status}`;
+          details.open = item.status === "running";
+          details.innerHTML = `
+            <summary>${statusMeta.icon} ${escapeHtml(item.title)} <span>${statusMeta.label}</span></summary>
+            <div class="execution-step__body">
+              <p>${escapeHtml(item.details || "尚無詳細資訊")}</p>
+              <small>${item.inferred ? "推測來源（非結構化）" : "結構化事件"} · ${new Date(item.updatedAt).toLocaleTimeString("zh-TW", { hour12: false })}</small>
+            </div>
+          `;
+          elements.executionAccordion.appendChild(details);
+        });
+      }
+
+      function applyExecutionEvent(eventType, data = {}) {
+        if (eventType === "token") {
+          updateExecutionStep("thinking", { title: "Thinking", status: "running", details: "模型正在輸出 token", inferred: false });
+          return;
+        }
+        if (eventType === "plan") {
+          updateExecutionStep("planning", { title: "Planning", status: "running", details: "已產生 Plan Card，等待確認", inferred: false });
+          return;
+        }
+        if (eventType === "result") {
+          updateExecutionStep("tool_execution", { title: "Tool execution", status: "succeeded", details: "工具呼叫已回傳結果", inferred: false });
+          return;
+        }
+        if (eventType === "done") {
+          updateExecutionStep("thinking", { title: "Thinking", status: "succeeded", details: `流程完成（${data.status || "ok"}）`, inferred: false });
+          updateExecutionStep("planning", { title: "Planning", status: data.status === "confirm_required" ? "running" : "succeeded", details: data.status === "confirm_required" ? "等待使用者確認" : "規劃流程已完成", inferred: false });
+          updateExecutionStep("node_status", { title: "Node 狀態", status: data.status === "ok" ? "succeeded" : "running", details: state.graphRunId ? `Run ${shortenId(state.graphRunId)} 已更新` : "等待下一次 context refresh", inferred: true });
+          return;
+        }
+        if (eventType === "error") {
+          updateExecutionStep("tool_execution", { title: "Tool execution", status: "failed", details: data.message || "執行時發生錯誤", inferred: false });
+        }
+      }
 
       function appendRestoredMessage(role, text, ts = "") {
         const row = document.createElement("article");
@@ -1516,88 +1652,34 @@
       }
 
       function renderMarkdown(text) {
-        const lines = String(text || "").split("\n");
-        const html = [];
-        let inList = false;
-        let inCodeBlock = false;
-        let codeLines = [];
-        let paragraph = [];
+        const source = String(text || "");
+        if (window.marked?.parse) {
+          marked.setOptions({
+            breaks: true,
+            gfm: true,
+            highlight(code, lang) {
+              if (window.hljs) {
+                if (lang && hljs.getLanguage(lang)) {
+                  return hljs.highlight(code, { language: lang }).value;
+                }
+                return hljs.highlightAuto(code).value;
+              }
+              return escapeHtml(code);
+            },
+          });
+          const rendered = marked.parse(source);
+          return window.DOMPurify ? window.DOMPurify.sanitize(rendered) : rendered;
+        }
+        return `<p>${renderInlineMarkdown(source).replaceAll("\n", "<br />")}</p>`;
+      }
 
-        const flushParagraph = () => {
-          if (!paragraph.length) return;
-          html.push(`<p>${renderInlineMarkdown(paragraph.join("\n")).replaceAll("\n", "<br />")}</p>`);
-          paragraph = [];
-        };
-
-        const flushCodeBlock = () => {
-          if (!inCodeBlock) return;
-          html.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
-          inCodeBlock = false;
-          codeLines = [];
-        };
-
-        const closeList = () => {
-          if (!inList) return;
-          html.push("</ul>");
-          inList = false;
-        };
-
-        lines.forEach((rawLine) => {
-          const line = rawLine.trimEnd();
-          if (line.trim().startsWith("```")) {
-            flushParagraph();
-            closeList();
-            if (inCodeBlock) {
-              flushCodeBlock();
-            } else {
-              inCodeBlock = true;
-              codeLines = [];
-            }
-            return;
-          }
-
-          if (inCodeBlock) {
-            codeLines.push(rawLine);
-            return;
-          }
-
-          if (!line.trim()) {
-            flushParagraph();
-            closeList();
-            return;
-          }
-
-          const headingMatch = line.match(/^(#{1,3})\s+(.+)$/);
-          if (headingMatch) {
-            flushParagraph();
-            closeList();
-            const level = headingMatch[1].length;
-            html.push(`<h${level}>${renderInlineMarkdown(headingMatch[2])}</h${level}>`);
-            return;
-          }
-
-          const listMatch = line.match(/^[-*]\s+(.+)$/);
-          if (listMatch) {
-            flushParagraph();
-            if (!inList) {
-              html.push("<ul>");
-              inList = true;
-            }
-            html.push(`<li>${renderInlineMarkdown(listMatch[1])}</li>`);
-            return;
-          }
-
-          closeList();
-          paragraph.push(line);
-        });
-
-        flushParagraph();
-        closeList();
-        flushCodeBlock();
-        return html.join("");
+      function highlightPreviewBlocks(root = elements.docsPreviewContent) {
+        if (!window.hljs || !root) return;
+        root.querySelectorAll("pre code").forEach((block) => hljs.highlightElement(block));
       }
 
       function setStreaming(active) {
+
         state.streaming = active;
         elements.streamProgress.hidden = !active;
         elements.chatInput.disabled = active;
@@ -1806,6 +1888,15 @@
         elements.contextOverview.textContent = `已同步專案內容：Graph ${hasGraph}、文件 ${docCount} 筆；${runHint}。`;
         elements.contextOverview.title = state.graphRunId ? `完整 Run ID：${state.graphRunId}` : "尚未取得任何 Run。";
         renderArtifacts(collectArtifactsFromNodeStates(state.graphNodeStates));
+        const nodeStatuses = Object.values(state.graphNodeStates || {}).map((node) => normalizeNodeStatus(node?.status));
+        const hasFailedNode = nodeStatuses.includes("failed");
+        const hasRunningNode = nodeStatuses.includes("running");
+        updateExecutionStep("node_status", {
+          title: "Node 狀態",
+          status: hasFailedNode ? "failed" : hasRunningNode ? "running" : nodeStatuses.length ? "succeeded" : "pending",
+          details: nodeStatuses.length ? `共 ${nodeStatuses.length} 個節點狀態已同步` : "尚無節點事件",
+          inferred: false,
+        });
         await loadRunArtifacts();
       }
 
@@ -1835,16 +1926,22 @@
       function renderDocs(docs) {
         const normalized = (docs || []).map(normalizeDocItem);
         state.docsItems = normalized;
-        if (!normalized.length) {
+        state.docsFilteredItems = normalized.filter((doc) => {
+          const query = state.docsFilterQuery.trim().toLowerCase();
+          if (!query) return true;
+          return doc.path.toLowerCase().includes(query) || doc.name.toLowerCase().includes(query);
+        });
+        if (!state.docsFilteredItems.length) {
           state.docsSelectedPath = null;
           elements.docsOpen.disabled = true;
           elements.docsDownload.disabled = true;
           elements.docsInsert.disabled = true;
-          elements.docsPreviewTitle.textContent = "請從左側選擇文件";
-          elements.docsPreviewMeta.textContent = "來源 run / node 將顯示於此。";
-          elements.docsPreviewContent.innerHTML = '<p class="empty-context">尚未選擇文件。</p>';
+          elements.docsPreviewTitle.textContent = "尚無文件";
+          elements.docsPreviewMeta.textContent = "可將檔案放入專案 docs/ 目錄（支援 .md/.txt/.json/.py/.js 等）";
+          elements.docsPreviewContent.innerHTML = '<p class="empty-context">目前沒有可預覽文件。請把文件放到 <code>docs/</code> 後重新整理。</p>';
           return;
         }
+        state.docsFlatItems = buildDocsTree(state.docsFilteredItems);
       }
 
       function buildDocsTree(items = []) {
@@ -1883,7 +1980,7 @@
         const viewport = elements.docsTreeViewport;
         const total = state.docsFlatItems.length;
         if (!total) {
-          viewport.innerHTML = '<p class="empty-context">尚無文件可顯示。</p>';
+          viewport.innerHTML = '<p class="empty-context">尚無文件可顯示。請將文件放到專案 <code>docs/</code> 目錄後重新整理。</p>';
           return;
         }
         const rowHeight = state.docsVirtual.rowHeight;
@@ -1944,7 +2041,13 @@
         elements.docsInsert.disabled = false;
         try {
           const payload = await apiFetch(`/projects/${encodeURIComponent(state.projectId)}/docs/content?path=${encodeURIComponent(selected.path)}`);
-          elements.docsPreviewContent.innerHTML = renderMarkdown(payload.content || "");
+          const lowerPath = selected.path.toLowerCase();
+          if (/\.(md|markdown)$/i.test(lowerPath)) {
+            elements.docsPreviewContent.innerHTML = renderMarkdown(payload.content || "");
+          } else {
+            elements.docsPreviewContent.innerHTML = `<pre><code>${escapeHtml(payload.content || "")}</code></pre>`;
+          }
+          highlightPreviewBlocks(elements.docsPreviewContent);
         } catch (error) {
           elements.docsPreviewContent.innerHTML = `<p class="empty-context">預覽失敗：${escapeHtml(error.message)}</p>`;
         }
@@ -1966,11 +2069,10 @@
         }
         const payload = await apiFetch(`/projects/${encodeURIComponent(state.projectId)}/docs`);
         const docs = (payload.docs || []).map(normalizeDocItem);
-        state.docsItems = docs;
-        state.docsFlatItems = buildDocsTree(docs);
-        elements.docsTreeMeta.textContent = `共 ${docs.length} 份文件（虛擬列表模式）`;
-        if (!docs.find((doc) => doc.path === state.docsSelectedPath)) {
-          state.docsSelectedPath = docs[0]?.path || null;
+        renderDocs(docs);
+        elements.docsTreeMeta.textContent = `共 ${state.docsFilteredItems.length} / ${docs.length} 份文件（虛擬列表）`;
+        if (!state.docsFilteredItems.find((doc) => doc.path === state.docsSelectedPath)) {
+          state.docsSelectedPath = state.docsFilteredItems[0]?.path || null;
         }
         renderDocsVirtualList();
         if (state.docsSelectedPath) {
@@ -1980,10 +2082,25 @@
 
       async function renderGraph(code) {
         elements.graphPreview.innerHTML = "";
+        if (state.graphPanZoom) {
+          state.graphPanZoom.destroy();
+          state.graphPanZoom = null;
+        }
         if (!code) return;
         try {
           const { svg } = await window.__mermaid.render(`graphPreview-${Date.now()}`, code);
           elements.graphPreview.innerHTML = svg;
+          const svgEl = elements.graphPreview.querySelector("svg");
+          if (svgEl && window.svgPanZoom) {
+            state.graphPanZoom = svgPanZoom(svgEl, {
+              controlIconsEnabled: true,
+              fit: true,
+              center: true,
+              zoomScaleSensitivity: 0.35,
+              minZoom: 0.5,
+              maxZoom: 6,
+            });
+          }
           decorateMermaidNodes();
         } catch (error) {
           elements.graphPreview.innerHTML = "<p>Mermaid 渲染失敗，請檢查 graph。</p>";
@@ -2400,6 +2517,10 @@
         appendMessage("user", `你：${finalMessage}`);
         appendTimelineStatus("訊息已送出，等待事件回傳中...");
         updateThinking({ status: "queued", brief: "已送出，等待伺服器事件" });
+        updateExecutionStep("thinking", { title: "Thinking", status: "running", details: "訊息已送出，等待模型分析" });
+        updateExecutionStep("planning", { title: "Planning", status: "pending", details: "尚未開始規劃" });
+        updateExecutionStep("tool_execution", { title: "Tool execution", status: "pending", details: "等待工具呼叫" });
+        updateExecutionStep("node_status", { title: "Node 狀態", status: "pending", details: "等待 run/node 事件", inferred: true });
         setStreaming(true);
 
         state.streamClient = new EventStreamClient({
@@ -2438,6 +2559,7 @@
               if (state.projectId && ["result", "done", "notice"].includes(eventType)) {
                 await loadContext();
               }
+              applyExecutionEvent(eventType, data);
               if (eventType === "token") {
                 applyTokenChunk(data.text || "");
                 return;
@@ -2564,6 +2686,18 @@ ${JSON.stringify(data, null, 2)}
       elements.toolsSkillsRefresh.addEventListener("click", loadToolsSkillsPage);
       elements.docsRefresh.addEventListener("click", loadDocsPage);
       elements.docsTreeViewport.addEventListener("scroll", renderDocsVirtualList);
+      elements.docsFilter?.addEventListener("input", async (event) => {
+        state.docsFilterQuery = event.target.value || "";
+        renderDocs(state.docsItems || []);
+        elements.docsTreeMeta.textContent = `共 ${state.docsFilteredItems.length} / ${state.docsItems.length} 份文件（虛擬列表）`;
+        if (!state.docsFilteredItems.find((doc) => doc.path === state.docsSelectedPath)) {
+          state.docsSelectedPath = state.docsFilteredItems[0]?.path || null;
+        }
+        renderDocsVirtualList();
+        if (state.docsSelectedPath) {
+          await selectDoc(state.docsSelectedPath);
+        }
+      });
       elements.docsOpen.addEventListener("click", () => {
         const selected = getSelectedDoc();
         if (!selected || !state.projectId) return;
