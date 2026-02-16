@@ -27,7 +27,7 @@ class UIShellSmokeTests(unittest.TestCase):
 
     def test_shell_navigation_uses_hash_routes(self) -> None:
         html = Path("src/amon/ui/index.html").read_text(encoding="utf-8")
-        app_js = Path("src/amon/ui/static/js/app.js").read_text(encoding="utf-8")
+        bootstrap_js = Path("src/amon/ui/static/js/bootstrap.js").read_text(encoding="utf-8")
 
         for token in [
             'href="#/chat"',
@@ -47,7 +47,7 @@ class UIShellSmokeTests(unittest.TestCase):
             'function navigateToRoute(routeKey)',
             'createHashRouter',
         ]:
-            self.assertIn(token, app_js)
+            self.assertIn(token, bootstrap_js)
 
     def test_project_and_single_pages_redirect_to_index_hash_routes(self) -> None:
         project_html = Path("src/amon/ui/project.html").read_text(encoding="utf-8")
@@ -81,7 +81,7 @@ class UIShellSmokeTests(unittest.TestCase):
 
     def test_context_page_has_actionable_cta_and_safe_clear_controls(self) -> None:
         html = Path("src/amon/ui/index.html").read_text(encoding="utf-8")
-        app_js = Path("src/amon/ui/static/js/app.js").read_text(encoding="utf-8")
+        bootstrap_js = Path("src/amon/ui/static/js/bootstrap.js").read_text(encoding="utf-8")
 
         for token in [
             'id="context-draft-input"',
@@ -94,21 +94,29 @@ class UIShellSmokeTests(unittest.TestCase):
             self.assertIn(token, html)
 
         for token in ['clearContextDraft("project")', 'confirmModal.open({']:
-            self.assertIn(token, app_js)
+            self.assertIn(token, bootstrap_js)
 
     def test_status_semantics_and_run_copy_controls_exist(self) -> None:
         html = Path("src/amon/ui/index.html").read_text(encoding="utf-8")
         css = Path("src/amon/ui/styles.css").read_text(encoding="utf-8")
-        app_js = Path("src/amon/ui/static/js/app.js").read_text(encoding="utf-8")
+        bootstrap_js = Path("src/amon/ui/static/js/bootstrap.js").read_text(encoding="utf-8")
 
         self.assertIn('id="copy-run-id"', html)
-        self.assertIn('mapDaemonStatusLevel', app_js)
-        self.assertIn('createHeaderLayout', app_js)
-        self.assertIn('daemonPill: { text: "Daemon：尚未連線"', app_js)
+        self.assertIn('mapDaemonStatusLevel', bootstrap_js)
+        self.assertIn('createHeaderLayout', bootstrap_js)
+        self.assertIn('daemonPill: { text: "Daemon：尚未連線"', bootstrap_js)
         self.assertIn('.context-resizer', css)
 
-    def test_app_is_composition_root_with_domain_store_modules(self) -> None:
+    def test_app_entry_only_bootstraps_composition_root(self) -> None:
         app_js = Path("src/amon/ui/static/js/app.js").read_text(encoding="utf-8")
+        bootstrap_js = Path("src/amon/ui/static/js/bootstrap.js").read_text(encoding="utf-8")
+
+        self.assertIn('import { bootstrapApp } from "./bootstrap.js";', app_js)
+        self.assertIn("bootstrapApp();", app_js)
+
+        # entry 檔不應含 view/render 細節
+        self.assertNotIn("createHashRouter", app_js)
+        self.assertNotIn("createHeaderLayout", app_js)
 
         for token in [
             'createInitialUiState',
@@ -120,7 +128,7 @@ class UIShellSmokeTests(unittest.TestCase):
             'SHELL_VIEW_HANDLERS',
             'registerGlobalErrorHandlers',
         ]:
-            self.assertIn(token, app_js)
+            self.assertIn(token, bootstrap_js)
 
         for module_path in [
             "src/amon/ui/static/js/store/app_state.js",

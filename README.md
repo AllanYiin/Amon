@@ -83,6 +83,7 @@ amon toolforge verify
 amon ui --port 8000
 
 > UI 唯一入口為 `src/amon/ui/index.html`（以 hash route 切換），`project.html` / `single.html` 僅保留導向用途。
+> 前端模組分層、維護方式、手動回歸清單與回滾策略請參考 `docs/frontend-architecture.md`。
 
 # 互動式 Chat
 amon chat --project <project_id>
