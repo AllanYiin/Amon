@@ -58,14 +58,21 @@ class UIShellSmokeTests(unittest.TestCase):
         self.assertIn('url=./index.html#/chat', single_html)
         self.assertIn('href="./index.html#/chat"', single_html)
 
-    def test_chat_stream_uses_defined_render_paths(self) -> None:
-        app_js = Path("src/amon/ui/static/js/app.js").read_text(encoding="utf-8")
+    def test_chat_stream_uses_view_renderers_and_orchestrator(self) -> None:
+        chat_js = Path("src/amon/ui/static/js/views/chat.js").read_text(encoding="utf-8")
+        message_renderer_js = Path("src/amon/ui/static/js/views/chat/renderers/messageRenderer.js").read_text(encoding="utf-8")
+        timeline_renderer_js = Path("src/amon/ui/static/js/views/chat/renderers/timelineRenderer.js").read_text(encoding="utf-8")
+        input_bar_js = Path("src/amon/ui/static/js/views/chat/renderers/inputBar.js").read_text(encoding="utf-8")
 
-        self.assertIn("state.streamClient.start({", app_js)
-        self.assertIn('applyTokenChunk(data.text || "")', app_js)
-        self.assertIn("applySessionFromEvent(data);", app_js)
-        self.assertNotIn("agentBubble.innerHTML", app_js)
-        self.assertNotIn("buffer += data.text", app_js)
+        self.assertIn("createMessageRenderer", chat_js)
+        self.assertIn("createTimelineRenderer", chat_js)
+        self.assertIn("createInputBar", chat_js)
+        self.assertIn("appState.streamClient.start({", chat_js)
+        self.assertIn('messageRenderer.applyTokenChunk(data.text || "")', chat_js)
+        self.assertIn("applySessionFromEvent(data)", chat_js)
+        self.assertIn("dataset.buffer", message_renderer_js)
+        self.assertIn("applyExecutionEvent", timeline_renderer_js)
+        self.assertIn("renderAttachmentPreview", input_bar_js)
 
     def test_styles_force_hidden_attribute_to_behave_like_tabs(self) -> None:
         css = Path("src/amon/ui/styles.css").read_text(encoding="utf-8")
