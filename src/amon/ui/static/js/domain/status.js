@@ -1,3 +1,6 @@
+import { daemonStatusPillLevelMap, runStatusPillLevelMap, statusI18nKeyMap, statusPillClassMap } from "../constants/status.js";
+import { shortenId as shortenDisplayId } from "../utils/format.js";
+
 export function formatUnknownValue(value, fallback = "尚未取得資料") {
   if (value === null || value === undefined) return fallback;
   const text = String(value).trim();
@@ -8,16 +11,14 @@ export function formatUnknownValue(value, fallback = "尚未取得資料") {
 }
 
 export function shortenId(value, front = 6, back = 4) {
-  const text = String(value || "");
-  if (!text) return "尚未有 Run";
-  if (text.length <= front + back + 1) return text;
-  return `${text.slice(0, front)}…${text.slice(-back)}`;
+  const shortened = shortenDisplayId(value, front, back);
+  return shortened === "--" ? "尚未有 Run" : shortened;
 }
 
 export function applyPillClass(element, level = "neutral") {
   if (!element) return;
   element.classList.remove("pill--success", "pill--warning", "pill--danger", "pill--neutral");
-  element.classList.add(`pill--${level}`);
+  element.classList.add(statusPillClassMap[level] || statusPillClassMap.neutral);
 }
 
 export function setStatusText(element, text, level = "neutral", tooltip = "") {
@@ -29,16 +30,15 @@ export function setStatusText(element, text, level = "neutral", tooltip = "") {
 
 export function mapRunStatusLevel(status = "idle") {
   const key = String(status || "").toLowerCase();
-  if (["ok", "success", "succeeded", "completed"].includes(key)) return "success";
-  if (["error", "failed", "unavailable"].includes(key)) return "danger";
-  if (["confirm_required", "warning", "degraded"].includes(key)) return "warning";
-  return "neutral";
+  return runStatusPillLevelMap[key] || "neutral";
 }
 
 export function mapDaemonStatusLevel(status = "idle") {
   const key = String(status || "").toLowerCase();
-  if (["connected", "healthy"].includes(key)) return "success";
-  if (["reconnecting"].includes(key)) return "warning";
-  if (["error", "unavailable", "disconnected"].includes(key)) return "danger";
-  return "neutral";
+  return daemonStatusPillLevelMap[key] || "neutral";
+}
+
+export function statusToI18nKey(domain, status, fallbackKey) {
+  const namespace = statusI18nKeyMap[domain] || {};
+  return namespace[String(status || "").toLowerCase()] || fallbackKey;
 }
