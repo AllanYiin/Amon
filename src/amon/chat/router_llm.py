@@ -14,6 +14,18 @@ from .router_types import RouterResult
 
 logger = logging.getLogger(__name__)
 
+TEAM_MODE_STRONG_SIGNALS = (
+    "研究報告",
+    "白皮書",
+    "論文",
+    "研究計畫",
+    "實驗設計",
+    "多代理",
+    "多 agent",
+    "multi-agent",
+    "team",
+)
+
 
 class LLMClient(Protocol):
     def generate_stream(self, messages: list[dict[str, str]], model: str | None = None) -> Iterable[str]:
@@ -84,6 +96,8 @@ def choose_execution_mode_with_llm(
         output_text = _collect_stream(llm_client, messages, model)
         mode = _parse_execution_mode(output_text)
         if mode in {"single", "self_critique", "team"}:
+            if mode == "team" and not _allow_team_mode(normalized):
+                return "single"
             return mode
     except (ProviderError, OSError, ValueError) as exc:
         logger.warning("LLM execution mode 判斷失敗，改用預設 single：%s", exc)
@@ -173,6 +187,12 @@ def _parse_execution_mode(raw_text: str) -> str:
         return ""
     mode = str(payload.get("mode") or "").strip().lower()
     return mode
+
+
+def _allow_team_mode(message: str) -> bool:
+    lowered = message.lower()
+    compact = "".join(lowered.split())
+    return any(signal in lowered or signal.replace(" ", "") in compact for signal in TEAM_MODE_STRONG_SIGNALS)
 
 
 def _router_schema() -> dict[str, Any]:

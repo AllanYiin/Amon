@@ -1691,7 +1691,11 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 execution_mode = choose_execution_mode_with_llm(message, project_id=project_id)
                 prompt_with_history = build_prompt_with_history(message, history)
 
+                streamed_token_count = 0
+
                 def stream_handler(token: str) -> None:
+                    nonlocal streamed_token_count
+                    streamed_token_count += 1
                     send_event("token", {"text": token})
                     append_event(
                         chat_id,
@@ -1714,22 +1718,25 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         stream_handler=stream_handler,
                     )
                 else:
-                    send_event("notice", {"text": "Amon：偵測為研究級任務，改用 team 流程。"})
+                    send_event("notice", {"text": "Amon：這題我會改用 team 流程分工處理，完成後用自然語氣一次整理回覆給你。"})
                     response_text = self.core.run_team(
                         prompt_with_history,
                         project_path=self.core.get_project_path(project_id),
-                        stream_handler=stream_handler,
+                        stream_handler=None,
                     )
                 append_event(chat_id, {"type": "assistant", "text": response_text, "project_id": project_id})
+                done_payload: dict[str, Any] = {
+                    "status": "ok",
+                    "chat_id": chat_id,
+                    "project_id": project_id,
+                    "run_id": run_id,
+                    "execution_mode": execution_mode,
+                }
+                if streamed_token_count == 0 and response_text:
+                    done_payload["final_text"] = response_text
                 send_event(
                     "done",
-                    {
-                        "status": "ok",
-                        "chat_id": chat_id,
-                        "project_id": project_id,
-                        "run_id": run_id,
-                        "execution_mode": execution_mode,
-                    },
+                    done_payload,
                 )
                 return
             send_event(

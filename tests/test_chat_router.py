@@ -92,6 +92,16 @@ class ChatRouterTests(unittest.TestCase):
         mode = choose_execution_mode_with_llm("我要把模型改裝為擴散語言模型", llm_client=mock)
         self.assertEqual(mode, "self_critique")
 
+    def test_choose_execution_mode_with_llm_downgrades_team_without_strong_signal(self) -> None:
+        mock = MockLLM('{"mode":"team"}')
+        mode = choose_execution_mode_with_llm("請幫我潤稿這段敘述", llm_client=mock)
+        self.assertEqual(mode, "single")
+
+    def test_choose_execution_mode_with_llm_keeps_team_when_research_signal_exists(self) -> None:
+        mock = MockLLM('{"mode":"team"}')
+        mode = choose_execution_mode_with_llm("請產出多代理協作架構研究報告", llm_client=mock)
+        self.assertEqual(mode, "team")
+
     def test_choose_execution_mode_with_llm_fallbacks_to_single_on_invalid_json(self) -> None:
         mock = MockLLM("not-json")
         mode = choose_execution_mode_with_llm("我要把模型改裝為擴散語言模型", llm_client=mock)

@@ -936,7 +936,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
 
         state.streaming = active;
         elements.streamProgress.hidden = !active;
-        elements.chatInput.disabled = active;
+        elements.chatInput.disabled = false;
       }
 
       function resetPlanCard() {
