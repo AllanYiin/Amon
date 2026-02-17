@@ -946,6 +946,15 @@ appStore.patch({ bootstrappedAt: Date.now() });
             },
           },
         });
+
+        const anchorMap = {
+          thinking: "inspector-thinking",
+          artifacts: "inspector-artifacts",
+          logs: "inspector-execution",
+        };
+        const anchorId = anchorMap[tabName];
+        const anchorElement = anchorId ? document.getElementById(anchorId) : null;
+        anchorElement?.scrollIntoView({ behavior: "smooth", block: "start" });
       }
 
       function focusInspectorSection(which) {
@@ -1698,6 +1707,29 @@ appStore.patch({ bootstrappedAt: Date.now() });
         hint.addEventListener("click", () => focusInspectorSection("artifacts"));
         row.appendChild(hint);
         elements.timeline.appendChild(row);
+      }
+
+      function renderArtifacts(artifacts = []) {
+        if (!elements.artifactList) {
+          return;
+        }
+        elements.artifactList.innerHTML = "";
+        if (!artifacts.length) {
+          elements.artifactList.innerHTML = '<p class="empty-context">目前尚無 artifact</p>';
+          return;
+        }
+        artifacts.forEach((artifact) => {
+          const card = document.createElement("article");
+          card.className = "artifact-card";
+          card.innerHTML = `
+            <header>
+              <strong>${artifact.type}</strong>
+              <span>${artifact.run_id}/${artifact.node_id}</span>
+            </header>
+            <p>${artifact.path}</p>
+            <pre>${escapeHtml(artifact.preview || "(無預覽)")}</pre>`;
+          elements.artifactList.appendChild(card);
+        });
       }
 
       elements.shellNavItems.forEach((link) => {

@@ -17,9 +17,9 @@ class UIShellSmokeTests(unittest.TestCase):
             'id="shell-run-status"',
             'id="shell-daemon-status"',
             'id="shell-budget-status"',
-            'data-context-tab="thinking"',
-            'data-context-tab="artifacts"',
-            'data-context-tab="logs"',
+            'id="inspector-execution"',
+            'id="inspector-thinking"',
+            'id="inspector-artifacts"',
             'script type="module" src="/static/js/app.js"',
         ]:
             self.assertIn(token, html)
@@ -59,7 +59,7 @@ class UIShellSmokeTests(unittest.TestCase):
         self.assertIn('id="graph-page"', html)
         self.assertIn('id="graph-run-select"', html)
         self.assertIn('id="graph-history-refresh"', html)
-        self.assertIn('id="panel-artifacts" data-context-panel="artifacts"', html)
+        self.assertIn('id="inspector-artifacts"', html)
         self.assertIn('graph: "graph"', shell_js)
         self.assertIn('ctx.services.graph.listRuns', graph_view_js)
 
