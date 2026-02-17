@@ -60,7 +60,56 @@ class ProjectBootstrapTests(unittest.TestCase):
             _raise,
         )
 
-        self.assertEqual(name, "Please create a concise execution")
+        self.assertEqual(name, "Please create concise execution plan")
+
+
+    def test_build_project_name_keeps_cjk_meaning_within_limit(self) -> None:
+        def _raise(_: str, __: str) -> tuple[str, dict]:
+            raise ValueError("無法解析")
+
+        name = build_project_name(
+            "請幫我開發一個俄羅斯方塊遊戲並且提供分數排行榜與音效",
+            "command_plan",
+            _raise,
+        )
+
+        self.assertEqual(name, "開發俄羅斯方塊遊戲")
+
+    def test_build_project_name_prefers_llm_summary_for_cjk(self) -> None:
+        class _MockLLM:
+            def generate_stream(self, messages: list[dict[str, str]], model: str | None = None):
+                _ = (messages, model)
+                yield '{"name":"開發俄羅斯方塊"}'
+
+        def _raise(_: str, __: str) -> tuple[str, dict]:
+            raise ValueError("無法解析")
+
+        name = build_project_name(
+            "請幫我開發一個俄羅斯方塊遊戲並且提供分數排行榜與音效",
+            "command_plan",
+            _raise,
+            llm_client=_MockLLM(),
+        )
+
+        self.assertEqual(name, "開發俄羅斯方塊")
+
+    def test_build_project_name_prefers_llm_summary_for_english(self) -> None:
+        class _MockLLM:
+            def generate_stream(self, messages: list[dict[str, str]], model: str | None = None):
+                _ = (messages, model)
+                yield '{"name":"Marketing launch execution plan"}'
+
+        def _raise(_: str, __: str) -> tuple[str, dict]:
+            raise ValueError("無法解析")
+
+        name = build_project_name(
+            "Please create a concise execution plan for the marketing launch",
+            "command_plan",
+            _raise,
+            llm_client=_MockLLM(),
+        )
+
+        self.assertEqual(name, "Marketing launch execution plan")
 
     def test_choose_execution_mode_prefers_self_critique_for_professional_writing(self) -> None:
         mode = choose_execution_mode("協助撰寫比較OpenClaw與Manus在記憶機制以及多agent任務同步機制比較的技術文章")
@@ -69,6 +118,18 @@ class ProjectBootstrapTests(unittest.TestCase):
     def test_choose_execution_mode_prefers_team_for_research_report(self) -> None:
         mode = choose_execution_mode("請撰寫多agent協作架構的研究報告，需含方法論與驗證計畫")
         self.assertEqual(mode, "team")
+
+    def test_created_project_id_uses_neutral_prefix(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("開發一個俄羅斯方塊")
+
+                self.assertRegex(project.project_id, r"^project-[0-9a-f]{6}$")
+            finally:
+                os.environ.pop("AMON_HOME", None)
 
     def test_resolve_project_id_from_message_by_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

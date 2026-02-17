@@ -20,7 +20,8 @@ export function createHeaderLayout({ elements, store }) {
     projects.forEach((project) => {
       const option = document.createElement("option");
       option.value = project.project_id;
-      option.textContent = `${project.name}（${project.project_id}）`;
+      option.textContent = project.name;
+      option.title = `ID: ${project.project_id}`;
       projectSelect.appendChild(option);
     });
 

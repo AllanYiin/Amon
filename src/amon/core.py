@@ -2771,9 +2771,8 @@ if __name__ == "__main__":
         return f"[資料]\n工具：{tool_name}\n```json\n{payload}\n```"
 
     def _generate_project_id(self, name: str) -> str:
-        slug = "".join(char.lower() for char in name if char.isalnum())
         short_id = uuid.uuid4().hex[:6]
-        return f"{slug or 'project'}-{short_id}"
+        return f"project-{short_id}"
 
     def fs_delete(self, target: str | Path) -> str | None:
         self.ensure_base_structure()
