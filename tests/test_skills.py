@@ -91,7 +91,9 @@ class SkillsTests(unittest.TestCase):
                 )
 
                 self.assertNotIn("## Skills (frontmatter)", base_message)
-                self.assertIn("回覆必須先交付可執行內容", base_message)
+                self.assertIn("將使用者需求視為任務委託", base_message)
+                self.assertIn("僅提 1–2 個最必要問題", base_message)
+                self.assertIn("同一輪只提供一次完整版本", base_message)
                 self.assertIn("## First-party tools", base_message)
                 self.assertIn("- filesystem.read", base_message)
                 self.assertIn("## Skills (frontmatter)", skill_message)
