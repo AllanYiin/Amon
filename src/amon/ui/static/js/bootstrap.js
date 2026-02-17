@@ -60,7 +60,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
           daemonPill: { text: "Daemon：尚未連線", level: "neutral", title: t("tooltip.daemonIdle") },
           budgetPill: "Budget：NT$ 0.00 / NT$ 5,000",
           inspector: {
-            activeTab: "run",
+            activeTab: "thinking",
             collapsed: isMobileViewport,
             width: state.contextPanelWidth,
           },
@@ -992,7 +992,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
           return;
         }
         if (routeKey === "chat") {
-          switchContextTab("run");
+          switchContextTab("thinking");
         }
       }
 
@@ -1799,7 +1799,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
       elements.refreshContext.addEventListener("click", loadContext);
       elements.planConfirm.addEventListener("click", () => confirmPlan(true));
       elements.planCancel.addEventListener("click", () => confirmPlan(false));
-      elements.artifactsGoRun?.addEventListener("click", () => switchContextTab("run"));
+      elements.artifactsGoRun?.addEventListener("click", () => switchContextTab("thinking"));
       elements.artifactsGoLogs?.addEventListener("click", () => switchContextTab("logs"));
       elements.artifactPreviewClose?.addEventListener("click", closeArtifactPreview);
       elements.artifactPreviewModal?.addEventListener("click", (event) => {
