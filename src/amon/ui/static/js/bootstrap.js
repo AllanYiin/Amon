@@ -60,7 +60,6 @@ appStore.patch({ bootstrappedAt: Date.now() });
           daemonPill: { text: "Daemon：尚未連線", level: "neutral", title: t("tooltip.daemonIdle") },
           budgetPill: "Budget：NT$ 0.00 / NT$ 5,000",
           inspector: {
-            activeTab: "thinking",
             collapsed: isMobileViewport,
             width: state.contextPanelWidth,
           },
@@ -74,11 +73,6 @@ appStore.patch({ bootstrappedAt: Date.now() });
         store: appStore,
         storage: { readStorage, writeStorage },
         storageKeys: STORAGE_KEYS,
-        onTabChange: (tabName) => {
-          if (tabName === "artifacts") {
-            void loadRunArtifacts();
-          }
-        },
       });
 
       sidebarLayout.mount();
@@ -199,7 +193,6 @@ appStore.patch({ bootstrappedAt: Date.now() });
 
       async function applyRoute(routeKey) {
         const view = routeToShellView[routeKey] || "chat";
-        syncInspectorTabByRoute(routeKey);
         switchShellView({ view, state, elements, closeBillingStream });
         bus.emit("run:changed", { view });
         appStore.patch({
@@ -837,42 +830,6 @@ appStore.patch({ bootstrappedAt: Date.now() });
         elements.timeline.scrollTop = elements.timeline.scrollHeight;
       }
 
-      function collectArtifactsFromNodeStates(nodeStates = {}) {
-        const artifacts = [];
-        Object.entries(nodeStates || {}).forEach(([nodeId, nodeState]) => {
-          const output = nodeState && typeof nodeState === "object" ? nodeState.output : null;
-          if (!output || typeof output !== "object") {
-            return;
-          }
-          const entries = [];
-          if (Array.isArray(output.artifacts)) {
-            entries.push(...output.artifacts);
-          }
-          if (Array.isArray(output.docs)) {
-            entries.push(...output.docs);
-          }
-          if (typeof output.path === "string") {
-            entries.push({ path: output.path });
-          }
-          entries.forEach((item) => {
-            if (typeof item === "string") {
-              artifacts.push({ type: "artifact", run_id: state.graphRunId || "尚未取得 Run ID", node_id: nodeId, path: item, preview: "" });
-              return;
-            }
-            if (item && typeof item === "object" && item.path) {
-              artifacts.push({
-                type: item.type || "artifact",
-                run_id: item.run_id || state.graphRunId || "尚未取得 Run ID",
-                node_id: item.node_id || nodeId,
-                path: item.path,
-                preview: item.preview || "",
-              });
-            }
-          });
-        });
-        return artifacts;
-      }
-
       function escapeHtml(text) {
         return text
           .replaceAll("&", "&amp;")
@@ -957,7 +914,6 @@ appStore.patch({ bootstrappedAt: Date.now() });
         if (!state.projectId) {
           state.chatId = null;
           elements.timeline.innerHTML = "";
-          renderArtifacts([]);
           renderArtifactsInspector([]);
           elements.graphPreview.innerHTML = "<p class=\"empty-context\">請先在上方選擇專案。</p>";
           elements.graphCode.textContent = "";
@@ -973,14 +929,20 @@ appStore.patch({ bootstrappedAt: Date.now() });
         elements.chatProjectLabel.textContent = `目前專案：${selected}`;
       }
 
-      function switchContextTab(tabName) {
+      function openInspectorPanel() {
+        if (window.innerWidth <= 1200) {
+          elements.uiShell?.classList.add("is-context-drawer-open");
+          return;
+        }
         const layoutState = appStore.getState().layout || {};
+        const inspector = layoutState.inspector || {};
+        if (!inspector.collapsed) return;
         appStore.patch({
           layout: {
             ...layoutState,
             inspector: {
-              ...(layoutState.inspector || {}),
-              activeTab: tabName,
+              ...inspector,
+              collapsed: false,
             },
           },
         });
@@ -995,14 +957,21 @@ appStore.patch({ bootstrappedAt: Date.now() });
         anchorElement?.scrollIntoView({ behavior: "smooth", block: "start" });
       }
 
-      function syncInspectorTabByRoute(routeKey) {
-        if (routeKey === "logs") {
-          switchContextTab("logs");
-          return;
-        }
-        if (routeKey === "chat") {
-          switchContextTab("thinking");
-        }
+      function focusInspectorSection(which) {
+        const sectionMap = {
+          execution: elements.inspectorExecution,
+          thinking: elements.inspectorThinking,
+          artifacts: elements.inspectorArtifacts,
+        };
+        openInspectorPanel();
+        const target = sectionMap[which] || elements.inspectorThinking;
+        if (!target) return;
+        requestAnimationFrame(() => {
+          target.scrollIntoView({ behavior: "smooth", block: "start" });
+          if (typeof target.focus === "function") {
+            target.focus({ preventScroll: true });
+          }
+        });
       }
 
       function refreshContextDraftUi() {
@@ -1158,7 +1127,6 @@ appStore.patch({ bootstrappedAt: Date.now() });
         const runHint = state.graphRunId ? `已連結 Run ${shortenId(state.graphRunId)}` : "尚未有 Run";
         elements.contextOverview.textContent = `已同步專案內容：Graph ${hasGraph}、文件 ${docCount} 筆；${runHint}。`;
         elements.contextOverview.title = state.graphRunId ? `完整 Run ID：${state.graphRunId}` : "尚未取得任何 Run。";
-        renderArtifacts(collectArtifactsFromNodeStates(state.graphNodeStates));
         const nodeStatuses = Object.values(state.graphNodeStates || {}).map((node) => normalizeNodeStatus(node?.status));
         const hasFailedNode = nodeStatuses.includes("failed");
         const hasRunningNode = nodeStatuses.includes("running");
@@ -1736,7 +1704,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
         hint.type = "button";
         hint.className = "secondary-btn small";
         hint.textContent = `Artifacts 產出：${count} 份（點我查看）`;
-        hint.addEventListener("click", () => switchContextTab("artifacts"));
+        hint.addEventListener("click", () => focusInspectorSection("artifacts"));
         row.appendChild(hint);
         elements.timeline.appendChild(row);
       }
@@ -1811,8 +1779,8 @@ appStore.patch({ bootstrappedAt: Date.now() });
       elements.refreshContext.addEventListener("click", loadContext);
       elements.planConfirm.addEventListener("click", () => confirmPlan(true));
       elements.planCancel.addEventListener("click", () => confirmPlan(false));
-      elements.artifactsGoRun?.addEventListener("click", () => switchContextTab("thinking"));
-      elements.artifactsGoLogs?.addEventListener("click", () => switchContextTab("logs"));
+      elements.artifactsGoRun?.addEventListener("click", () => focusInspectorSection("execution"));
+      elements.artifactsGoLogs?.addEventListener("click", () => navigateToRoute("logs"));
       elements.artifactPreviewClose?.addEventListener("click", closeArtifactPreview);
       elements.artifactPreviewModal?.addEventListener("click", (event) => {
         if (event.target === elements.artifactPreviewModal) closeArtifactPreview();
@@ -1841,7 +1809,6 @@ appStore.patch({ bootstrappedAt: Date.now() });
         try {
           await loadProjects();
           setProjectState(state.projectId);
-          renderArtifacts([]);
           updateThinking({ status: "idle", brief: "目前沒有 Thinking 事件" });
           await loadProjectHistory();
           if (state.projectId) {

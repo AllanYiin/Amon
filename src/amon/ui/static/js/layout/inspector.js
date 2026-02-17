@@ -1,7 +1,7 @@
 import { createSplitPane } from "./splitPane.js";
 import { t } from "../i18n.js";
 
-export function createInspectorLayout({ elements, store, storage, storageKeys, onTabChange }) {
+export function createInspectorLayout({ elements, store, storage, storageKeys }) {
   const { readStorage, writeStorage } = storage;
   let splitPane = null;
 
@@ -11,23 +11,10 @@ export function createInspectorLayout({ elements, store, storage, storageKeys, o
     return clamped;
   }
 
-  function renderTabs(activeTab = "thinking") {
-    elements.contextTabs.forEach((tab) => {
-      const isActive = tab.dataset.contextTab === activeTab;
-      tab.classList.toggle("is-active", isActive);
-      tab.setAttribute("aria-selected", String(isActive));
-      tab.setAttribute("tabindex", isActive ? "0" : "-1");
-    });
-    elements.contextPanels.forEach((panel) => {
-      panel.hidden = panel.dataset.contextPanel !== activeTab;
-    });
-  }
-
   function render(snapshot = {}) {
     const layout = snapshot.layout || {};
     const inspector = layout.inspector || {};
     const collapsed = Boolean(inspector.collapsed);
-    const activeTab = inspector.activeTab || "thinking";
     const width = applyPanelWidth(inspector.width);
 
     elements.uiShell?.classList.toggle("is-context-collapsed", collapsed);
@@ -35,8 +22,6 @@ export function createInspectorLayout({ elements, store, storage, storageKeys, o
     if (elements.toggleContextPanel) {
       elements.toggleContextPanel.textContent = collapsed ? t("topbar.toggleContext.expand") : t("topbar.toggleContext.collapse");
     }
-    renderTabs(activeTab);
-
     writeStorage(storageKeys.contextCollapsed, collapsed ? "1" : "0");
     writeStorage(storageKeys.contextWidth, String(width));
   }
@@ -64,37 +49,14 @@ export function createInspectorLayout({ elements, store, storage, storageKeys, o
     elements.toggleContextPanel?.addEventListener("click", () => {
       const inspector = (store.getState().layout || {}).inspector || {};
       if (window.innerWidth <= 1200) {
-        elements.uiShell?.classList.toggle("is-context-drawer-open");
+        const isDrawerOpen = Boolean(elements.uiShell?.classList.toggle("is-context-drawer-open"));
+        if (elements.toggleContextPanel) {
+          elements.toggleContextPanel.setAttribute("aria-expanded", String(isDrawerOpen));
+          elements.toggleContextPanel.textContent = isDrawerOpen ? t("topbar.toggleContext.collapse") : t("topbar.toggleContext.expand");
+        }
       } else {
         updateInspector({ collapsed: !inspector.collapsed });
       }
-    });
-
-    elements.contextTabs.forEach((tab) => {
-      tab.addEventListener("click", () => {
-        const nextTab = tab.dataset.contextTab || "thinking";
-        updateInspector({ activeTab: nextTab });
-        if (typeof onTabChange === "function") onTabChange(nextTab);
-      });
-
-      tab.addEventListener("keydown", (event) => {
-        if (!["ArrowRight", "ArrowLeft", "Home", "End"].includes(event.key)) return;
-        const tabs = Array.from(elements.contextTabs || []);
-        const currentIndex = tabs.indexOf(tab);
-        if (currentIndex < 0) return;
-        event.preventDefault();
-        let nextIndex = currentIndex;
-        if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % tabs.length;
-        if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
-        if (event.key === "Home") nextIndex = 0;
-        if (event.key === "End") nextIndex = tabs.length - 1;
-        const nextTab = tabs[nextIndex];
-        nextTab?.focus();
-        if (nextTab?.dataset.contextTab) {
-          updateInspector({ activeTab: nextTab.dataset.contextTab });
-          if (typeof onTabChange === "function") onTabChange(nextTab.dataset.contextTab);
-        }
-      });
     });
 
     splitPane = createSplitPane({
