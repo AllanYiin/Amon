@@ -1751,29 +1751,41 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         if not session_files:
             return {"project_id": project_id, "chat_id": None, "messages": []}
 
-        latest_session = max(session_files, key=lambda path: path.stat().st_mtime)
-        messages: list[dict[str, Any]] = []
-        for raw_line in latest_session.read_text(encoding="utf-8").splitlines():
-            line = raw_line.strip()
-            if not line:
-                continue
-            try:
-                payload = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            event_type = str(payload.get("type") or "").strip()
-            text = payload.get("text")
-            if event_type not in {"user", "assistant"} or not isinstance(text, str) or not text.strip():
-                continue
-            messages.append(
-                {
-                    "role": "user" if event_type == "user" else "assistant",
-                    "text": text.strip(),
-                    "ts": str(payload.get("ts") or "").strip(),
-                }
-            )
+        def _read_session_messages(path: Path) -> list[dict[str, Any]]:
+            parsed_messages: list[dict[str, Any]] = []
+            for raw_line in path.read_text(encoding="utf-8").splitlines():
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                event_type = str(payload.get("type") or "").strip()
+                text = payload.get("text")
+                if event_type not in {"user", "assistant"} or not isinstance(text, str) or not text.strip():
+                    continue
+                parsed_messages.append(
+                    {
+                        "role": "user" if event_type == "user" else "assistant",
+                        "text": text.strip(),
+                        "ts": str(payload.get("ts") or "").strip(),
+                    }
+                )
+            return parsed_messages
 
-        return {"project_id": project_id, "chat_id": latest_session.stem, "messages": messages[-60:]}
+        selected_session = max(session_files, key=lambda path: path.stat().st_mtime)
+        selected_messages = _read_session_messages(selected_session)
+
+        if not selected_messages:
+            for session_file in sorted(session_files, key=lambda path: path.stat().st_mtime, reverse=True):
+                fallback_messages = _read_session_messages(session_file)
+                if fallback_messages:
+                    selected_session = session_file
+                    selected_messages = fallback_messages
+                    break
+
+        return {"project_id": project_id, "chat_id": selected_session.stem, "messages": selected_messages[-60:]}
 
     def _build_project_context(self, project_id: str) -> dict[str, Any]:
         project_path = self.core.get_project_path(project_id)

@@ -410,6 +410,58 @@ class UIAsyncAPITests(unittest.TestCase):
                 os.environ.pop("AMON_HOME", None)
 
 
+    def test_project_chat_history_prefers_latest_non_empty_session(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("chat-history-test")
+                project_path = Path(project.path)
+                sessions_dir = project_path / "sessions" / "chat"
+                sessions_dir.mkdir(parents=True, exist_ok=True)
+
+                filled_session = sessions_dir / "chat-has-history.jsonl"
+                filled_session.write_text(
+                    "\n".join(
+                        [
+                            json.dumps({"type": "user", "text": "你好", "ts": "2026-01-01T10:00:00Z"}, ensure_ascii=False),
+                            json.dumps({"type": "assistant", "text": "已收到", "ts": "2026-01-01T10:00:01Z"}, ensure_ascii=False),
+                        ]
+                    ),
+                    encoding="utf-8",
+                )
+
+                empty_session = sessions_dir / "chat-empty.jsonl"
+                empty_session.write_text("", encoding="utf-8")
+                os.utime(empty_session, None)
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port)
+                encoded_project = quote(project.project_id)
+                conn.request("GET", f"/v1/projects/{encoded_project}/chat-history")
+                response = conn.getresponse()
+                payload = json.loads(response.read().decode("utf-8"))
+
+                self.assertEqual(response.status, 200)
+                self.assertEqual(payload["chat_id"], "chat-has-history")
+                self.assertEqual(len(payload["messages"]), 2)
+                self.assertEqual(payload["messages"][0]["role"], "user")
+                self.assertEqual(payload["messages"][1]["role"], "assistant")
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
+
     def test_config_view_api_returns_sources_and_chat_override(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"
