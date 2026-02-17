@@ -2513,15 +2513,38 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         if not nodes:
             return "graph TD\n  empty[\"尚無 graph\"]"
         lines = ["graph TD"]
-        id_map = {}
+        id_map: dict[str, str] = {}
+        used_ids: set[str] = set()
+
+        def to_safe_mermaid_id(node_id: str) -> str:
+            base = re.sub(r"[^0-9A-Za-z_]", "_", node_id).strip("_")
+            if not base:
+                base = "node"
+            if re.match(r"^[0-9]", base):
+                base = f"n_{base}"
+            candidate = base
+            suffix = 2
+            while candidate in used_ids:
+                candidate = f"{base}_{suffix}"
+                suffix += 1
+            used_ids.add(candidate)
+            return candidate
+
+        def escape_mermaid_label(label: str) -> str:
+            return (
+                label.replace("\\", "\\\\")
+                .replace('"', r'\"')
+                .replace("\n", "\\n")
+            )
+
         for node in nodes:
             node_id = str(node.get("id", ""))
-            safe_id = node_id.replace("-", "_")
+            safe_id = to_safe_mermaid_id(node_id)
             id_map[node_id] = safe_id
-            lines.append(f"  {safe_id}[\"{node_id}\"]")
+            lines.append(f"  {safe_id}[\"{escape_mermaid_label(node_id)}\"]")
         for edge in edges:
-            source = id_map.get(str(edge.get("from", "")), str(edge.get("from", "")))
-            target = id_map.get(str(edge.get("to", "")), str(edge.get("to", "")))
+            source = id_map.get(str(edge.get("from", "")), "")
+            target = id_map.get(str(edge.get("to", "")), "")
             if source and target:
                 lines.append(f"  {source} --> {target}")
         return "\n".join(lines)
