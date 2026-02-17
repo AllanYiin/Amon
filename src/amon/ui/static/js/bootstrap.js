@@ -199,6 +199,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
 
       async function applyRoute(routeKey) {
         const view = routeToShellView[routeKey] || "chat";
+        syncInspectorTabByRoute(routeKey);
         switchShellView({ view, state, elements, closeBillingStream });
         bus.emit("run:changed", { view });
         appStore.patch({
@@ -983,6 +984,20 @@ appStore.patch({ bootstrappedAt: Date.now() });
             },
           },
         });
+      }
+
+      function syncInspectorTabByRoute(routeKey) {
+        if (routeKey === "graph") {
+          switchContextTab("graph");
+          return;
+        }
+        if (routeKey === "logs") {
+          switchContextTab("logs");
+          return;
+        }
+        if (routeKey === "chat") {
+          switchContextTab("run");
+        }
       }
 
       function refreshContextDraftUi() {

@@ -74,24 +74,6 @@
             <div id="execution-accordion" class="execution-accordion"></div>
           </section>
 
-          <section class="thinking-panel" id="thinking-panel">
-            <div class="thinking-panel__header">
-              <h3>Thinking 狀態</h3>
-              <label class="field-label thinking-mode">
-                顯示模式
-                <select id="thinking-mode">
-                  <option value="off">off</option>
-                  <option value="brief" selected>brief</option>
-                  <option value="verbose">verbose</option>
-                </select>
-              </label>
-            </div>
-            <details open id="thinking-details">
-              <summary id="thinking-summary">目前沒有 Thinking 事件</summary>
-              <div id="thinking-detail" class="thinking-panel__detail"></div>
-            </details>
-          </section>
-
           <div class="progress-bar" id="stream-progress" aria-hidden="true">
             <span></span>
           </div>
@@ -165,18 +147,28 @@
             </div>
           </div>
           <div class="context-project" id="context-project">目前專案：未選擇</div>
-          <div class="context-tabs" role="tablist" aria-label="Inspector 檢視器切換" data-i18n-attr="aria-label:a11y.inspector.tablist">
-            <button type="button" class="context-tab is-active" id="tab-run" data-context-tab="run" role="tab" aria-selected="true" aria-controls="panel-run" tabindex="0" data-i18n="tab.run">Run</button>
-            <button type="button" class="context-tab" id="tab-graph" data-context-tab="graph" role="tab" aria-selected="false" aria-controls="panel-graph" tabindex="-1" data-i18n="tab.graph">Graph</button>
-            <button type="button" class="context-tab" id="tab-artifacts" data-context-tab="artifacts" role="tab" aria-selected="false" aria-controls="panel-artifacts" tabindex="-1" data-i18n="tab.artifacts">Artifacts</button>
-            <button type="button" class="context-tab" id="tab-logs" data-context-tab="logs" role="tab" aria-selected="false" aria-controls="panel-logs" tabindex="-1" data-i18n="tab.logs">Logs</button>
-          </div>
-
-          <section class="context-section" id="panel-run" data-context-panel="run" role="tabpanel" aria-labelledby="tab-run">
+          <section class="context-section" id="panel-run" data-context-panel="run" role="tabpanel">
             <h3>Run Inspector</h3>
             <p id="context-overview" class="context-overview">請先在上方選擇專案，右側內容會自動同步。</p>
+            <section class="thinking-panel" id="thinking-panel">
+              <div class="thinking-panel__header">
+                <h3>Thinking 狀態</h3>
+                <label class="field-label thinking-mode">
+                  顯示模式
+                  <select id="thinking-mode">
+                    <option value="off">off</option>
+                    <option value="brief" selected>brief</option>
+                    <option value="verbose">verbose</option>
+                  </select>
+                </label>
+              </div>
+              <details open id="thinking-details">
+                <summary id="thinking-summary">目前沒有 Thinking 事件</summary>
+                <div id="thinking-detail" class="thinking-panel__detail"></div>
+              </details>
+            </section>
           </section>
-          <section class="context-section" id="panel-graph" data-context-panel="graph" role="tabpanel" aria-labelledby="tab-graph" hidden>
+          <section class="context-section" id="panel-graph" data-context-panel="graph" role="tabpanel" hidden>
             <h3>Graph Preview</h3>
             <div class="graph-toolbar">
               <div class="graph-run-meta-wrap">
@@ -191,7 +183,7 @@
             <ul id="graph-node-list" class="graph-node-list"></ul>
             <pre id="graph-code" class="graph-code"></pre>
           </section>
-          <section class="context-section" id="panel-artifacts" data-context-panel="artifacts" role="tabpanel" aria-labelledby="tab-artifacts" hidden>
+          <section class="context-section" id="panel-artifacts" data-context-panel="artifacts" role="tabpanel" hidden>
             <h3>Artifacts Inspector</h3>
             <p class="context-overview" id="artifacts-overview">請先執行 run，完成後會顯示可預覽與下載的產出物。</p>
             <div id="artifacts-inspector-list" class="artifacts-inspector-list"></div>
@@ -203,7 +195,7 @@
               </div>
             </div>
           </section>
-          <section class="context-section" id="panel-logs" data-context-panel="logs" role="tabpanel" aria-labelledby="tab-logs" hidden>
+          <section class="context-section" id="panel-logs" data-context-panel="logs" role="tabpanel" hidden>
             <h3>Logs Inspector</h3>
             <p class="empty-context">顯示同一個 run 的 logs 摘要（Phase 1 先提供框架）。</p>
           </section>
