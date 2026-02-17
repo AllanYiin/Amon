@@ -85,7 +85,15 @@ export const GRAPH_VIEW = {
         runSelectEl.appendChild(option);
       });
 
-      local.runId = ctx.appState?.graphRunId || runs[0]?.id || runs[0]?.run_id || "";
+      const preferredRunId = ctx.appState?.graphRunId || "";
+      if (preferredRunId && !runs.some((run) => (run.id || run.run_id || "") === preferredRunId)) {
+        const fallback = document.createElement("option");
+        fallback.value = preferredRunId;
+        fallback.textContent = `${preferredRunId}｜current`;
+        runSelectEl.prepend(fallback);
+      }
+
+      local.runId = preferredRunId || runs[0]?.id || runs[0]?.run_id || "";
       runSelectEl.value = local.runId;
     }
 

@@ -59,6 +59,39 @@ def route_with_llm(
     return RouterResult(type="chat_response", confidence=0.0, reason="路由失敗，已切換安全模式")
 
 
+def choose_execution_mode_with_llm(
+    message: str,
+    *,
+    project_id: str | None = None,
+    llm_client: LLMClient | None = None,
+    model: str | None = None,
+) -> str:
+    if message is None:
+        message = ""
+    normalized = " ".join(message.split())
+    if not normalized:
+        return "single"
+    try:
+        if llm_client is None:
+            llm_client, model = _build_default_client(project_id, model)
+        messages = [
+            {"role": "system", "content": _execution_mode_system_prompt()},
+            {
+                "role": "user",
+                "content": json.dumps({"message": normalized, "allowed_modes": ["single", "self_critique", "team"]}, ensure_ascii=False),
+            },
+        ]
+        output_text = _collect_stream(llm_client, messages, model)
+        mode = _parse_execution_mode(output_text)
+        if mode in {"single", "self_critique", "team"}:
+            return mode
+    except (ProviderError, OSError, ValueError) as exc:
+        logger.warning("LLM execution mode 判斷失敗，改用預設 single：%s", exc)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("LLM execution mode 未預期錯誤：%s", exc, exc_info=True)
+    return "single"
+
+
 def _build_default_client(project_id: str | None, model: str | None) -> tuple[LLMClient, str | None]:
     config = ConfigLoader().resolve(project_id=project_id).effective
     provider_name = config.get("amon", {}).get("provider", "openai")
@@ -120,6 +153,26 @@ def _system_prompt() -> str:
         "如果不確定，請以 chat_response 回覆。"
         f"JSON schema 如下：{schema}"
     )
+
+
+def _execution_mode_system_prompt() -> str:
+    return (
+        "你是執行模式路由器。"
+        "請根據使用者訊息判斷最適合的 execution mode。"
+        "只允許輸出 JSON，格式為 {\"mode\":\"single|self_critique|team\"}。"
+        "不得輸出額外文字。"
+    )
+
+
+def _parse_execution_mode(raw_text: str) -> str:
+    cleaned = _strip_code_fences(raw_text)
+    if not cleaned:
+        return ""
+    payload = json.loads(cleaned)
+    if not isinstance(payload, dict):
+        return ""
+    mode = str(payload.get("mode") or "").strip().lower()
+    return mode
 
 
 def _router_schema() -> dict[str, Any]:

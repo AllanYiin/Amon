@@ -62,6 +62,7 @@ export function collectElements(doc = document) {
     artifactsEmpty: doc.getElementById("artifacts-empty"),
     artifactsGoRun: doc.getElementById("artifacts-go-run"),
     artifactsGoLogs: doc.getElementById("artifacts-go-logs"),
+    artifactsDownloadChat: doc.getElementById("artifacts-download-chat"),
     artifactPreviewModal: doc.getElementById("artifact-preview-modal"),
     artifactPreviewTitle: doc.getElementById("artifact-preview-title"),
     artifactPreviewBody: doc.getElementById("artifact-preview-body"),

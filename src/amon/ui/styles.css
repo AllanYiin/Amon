@@ -1031,7 +1031,7 @@ body.is-resizing-context-panel {
   padding: 12px;
   display: grid;
   gap: 10px;
-  min-height: 220px;
+  min-height: 140px;
 }
 
 .thinking-panel__header {
@@ -1054,7 +1054,7 @@ body.is-resizing-context-panel {
   font-size: 13px;
   color: var(--text);
   white-space: pre-wrap;
-  max-height: 320px;
+  max-height: 200px;
   overflow: auto;
 }
 
@@ -2011,7 +2011,7 @@ body.is-resizing-context-panel {
 
 .bill-page .config-card canvas {
   width: 100% !important;
-  min-height: 220px;
+  min-height: 140px;
 }
 
 :root {
