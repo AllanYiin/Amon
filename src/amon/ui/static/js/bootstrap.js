@@ -40,7 +40,31 @@ appStore.patch({ bootstrappedAt: Date.now() });
 
       const elements = collectElements(document);
 
-      const toastManager = createToastManager(elements.toast);
+      async function logToastEvent(entry = {}) {
+        const payload = {
+          level: entry.type === "danger" ? "ERROR" : entry.type === "warning" ? "WARNING" : "INFO",
+          type: entry.type || "info",
+          message: String(entry.message || "").slice(0, 600),
+          message_length: String(entry.message || "").length,
+          duration_ms: Number(entry.duration) || 12000,
+          source: entry.source || "ui",
+          route: window.location.hash || "#/chat",
+          project_id: String(state.projectId || "").trim() || null,
+          chat_id: String(state.chatId || "").trim() || null,
+          metadata: entry.metadata || {},
+        };
+        try {
+          await requestJson("/v1/ui/toasts", {
+            method: "POST",
+            body: JSON.stringify(payload),
+            timeoutMs: 5000,
+          });
+        } catch (error) {
+          console.warn("toast_log_failed", error);
+        }
+      }
+
+      const toastManager = createToastManager(elements.toast, { onShow: logToastEvent });
       const confirmModal = createConfirmModal(elements.confirmModal);
 
       const STORAGE_KEYS = {

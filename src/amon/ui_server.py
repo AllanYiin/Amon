@@ -879,6 +879,45 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
 
     def _handle_api_post(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/v1/ui/toasts":
+            payload = self._read_json()
+            if payload is None:
+                return
+            if not isinstance(payload, dict):
+                self._send_json(400, {"message": "payload 需為物件"})
+                return
+            message = str(payload.get("message", "")).strip()
+            if not message:
+                self._send_json(400, {"message": "請提供 toast 訊息"})
+                return
+            toast_type = str(payload.get("type", "info")).strip() or "info"
+            severity = str(payload.get("level", "INFO")).strip().upper() or "INFO"
+            if severity not in {"INFO", "WARNING", "ERROR"}:
+                severity = "INFO"
+            duration_ms = payload.get("duration_ms", 12000)
+            if not isinstance(duration_ms, (int, float)):
+                duration_ms = 12000
+            duration_ms = max(0, min(int(duration_ms), 120000))
+            metadata = payload.get("metadata")
+            if not isinstance(metadata, dict):
+                metadata = {}
+            log_event(
+                {
+                    "level": severity,
+                    "event": "ui_toast_displayed",
+                    "type": toast_type,
+                    "message": message[:600],
+                    "message_length": len(message),
+                    "duration_ms": duration_ms,
+                    "project_id": str(payload.get("project_id", "")).strip() or None,
+                    "chat_id": str(payload.get("chat_id", "")).strip() or None,
+                    "route": str(payload.get("route", "")).strip() or None,
+                    "source": str(payload.get("source", "ui")).strip() or "ui",
+                    "metadata": metadata,
+                }
+            )
+            self._send_json(202, {"status": "ok"})
+            return
         if parsed.path == "/v1/runs":
             payload = self._read_json()
             if payload is None:

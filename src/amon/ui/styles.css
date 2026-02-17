@@ -857,6 +857,8 @@ body {
   transition: all 0.2s ease;
   user-select: text;
   pointer-events: none;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .toast--success {
@@ -887,6 +889,7 @@ body {
 .toast.visible {
   opacity: 1;
   transform: translateY(0);
+  pointer-events: auto;
 }
 
 .confirm-modal {
