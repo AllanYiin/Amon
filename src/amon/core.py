@@ -506,6 +506,9 @@ class AmonCore:
             {"role": "system", "content": system_message},
             {"role": "user", "content": user_prompt or prompt},
         ]
+        web_context = self._auto_web_search_context(user_prompt or prompt, project_path=project_path, config=config)
+        if web_context:
+            messages.insert(1, {"role": "system", "content": web_context})
         response_text = ""
         session_id = uuid.uuid4().hex
         session_path = self._prepare_session_path(project_path, session_id)
@@ -579,6 +582,72 @@ class AmonCore:
             project_id=project_id,
         )
         return response_text
+
+    def _auto_web_search_context(
+        self,
+        prompt: str,
+        *,
+        project_path: Path | None,
+        config: dict[str, Any],
+    ) -> str:
+        enabled = bool(config.get("amon", {}).get("auto_web_search", True))
+        if not enabled:
+            return ""
+        if not self._prompt_requires_web_search(prompt):
+            return ""
+        try:
+            from .tooling.builtin import build_registry
+            from .tooling.policy import ToolPolicy
+            from .tooling.types import ToolCall
+
+            workspace_root = project_path or Path.cwd()
+            registry = build_registry(workspace_root)
+            policy = registry.policy
+            allow = tuple(dict.fromkeys((*policy.allow, "web.search", "web.fetch")))
+            ask = tuple(rule for rule in policy.ask if rule not in {"web.search", "web.fetch"})
+            registry.policy = ToolPolicy(allow=allow, ask=ask, deny=policy.deny)
+            result = registry.call(
+                ToolCall(
+                    tool="web.search",
+                    args={"query": prompt, "max_results": 5},
+                    caller="agent",
+                    project_id=project_path.name if project_path else None,
+                )
+            )
+            if result.is_error:
+                self.logger.info("自動 web.search 未提供結果：%s", result.meta.get("status"))
+                return ""
+            payload = result.as_text().strip()
+            if not payload:
+                return ""
+            return (
+                "以下是剛剛使用 web.search 取得的參考資料，請先引用這些結果再回答，"
+                "若內容不足再明確說明限制。\n"
+                f"```json\n{payload}\n```"
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning("自動 web.search 失敗：%s", exc, exc_info=True)
+            return ""
+
+    def _prompt_requires_web_search(self, prompt: str) -> bool:
+        normalized = unicodedata.normalize("NFKC", prompt).strip().lower()
+        if not normalized:
+            return False
+        keywords = (
+            "搜尋",
+            "查詢",
+            "最新",
+            "新聞",
+            "資料來源",
+            "網路",
+            "上網",
+            "search",
+            "google",
+            "wikipedia",
+            "duckduckgo",
+            "cite",
+        )
+        return any(keyword in normalized for keyword in keywords)
 
     def run_single(
         self,
