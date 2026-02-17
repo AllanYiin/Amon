@@ -49,6 +49,21 @@ appStore.patch({ bootstrappedAt: Date.now() });
         contextDraftPrefix: "amon.ui.contextDraft:",
       };
 
+      function getContextDraftStorageKey(projectIdOverride = undefined) {
+        const resolvedProjectId = projectIdOverride === undefined ? state.projectId : projectIdOverride;
+        const normalizedProjectId = String(resolvedProjectId || "").trim();
+        if (normalizedProjectId) {
+          return `${STORAGE_KEYS.contextDraftPrefix}project:${normalizedProjectId}`;
+        }
+
+        const normalizedChatId = String(state.chatId || "").trim();
+        if (normalizedChatId) {
+          return `${STORAGE_KEYS.contextDraftPrefix}chat:${normalizedChatId}`;
+        }
+
+        return `${STORAGE_KEYS.contextDraftPrefix}default`;
+      }
+
       const isMobileViewport = window.innerWidth < 768;
       appStore.patch({
         layout: {

@@ -52,6 +52,7 @@ from .tooling import (
     write_tool_spec,
 )
 from .tooling.native import compute_tool_sha256, parse_native_manifest, scan_native_tools
+from .tooling.builtin import build_registry
 from .skills import build_system_prefix_injection
 
 
@@ -92,6 +93,8 @@ class AmonCore:
         self.node_env_dir = self.data_dir / "node_env"
         self.billing_log = self.logs_dir / "billing.log"
         self.logger = setup_logger("amon", self.logs_dir)
+        # Backward-compatible registry handle for UI/legacy callers.
+        self.tool_registry = build_registry(Path.cwd())
 
     def ensure_base_structure(self) -> None:
         for path in [
