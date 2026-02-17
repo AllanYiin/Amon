@@ -22,10 +22,10 @@ from urllib.parse import parse_qs, quote, unquote, urlparse
 from amon.chat.cli import _build_plan_from_message
 from amon.chat.project_bootstrap import (
     bootstrap_project_if_needed,
-    choose_execution_mode,
     resolve_project_id_from_message,
 )
 from amon.chat.router import route_intent
+from amon.chat.router_llm import choose_execution_mode_with_llm
 from amon.chat.router_types import RouterResult
 from amon.chat.session_store import (
     append_event,
@@ -1648,8 +1648,8 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 send_event("done", {"status": "ok", "chat_id": chat_id, "project_id": project_id})
                 return
             if router_result.type == "chat_response":
-                send_event("notice", {"text": "Amon：已判斷為對話回覆，開始產生內容。"})
-                execution_mode = choose_execution_mode(message)
+                send_event("notice", {"text": "Amon：正在分析需求並進入執行流程。"})
+                execution_mode = choose_execution_mode_with_llm(message, project_id=project_id)
                 prompt_with_history = build_prompt_with_history(message, history)
 
                 def stream_handler(token: str) -> None:

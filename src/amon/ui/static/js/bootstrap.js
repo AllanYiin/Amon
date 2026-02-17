@@ -825,6 +825,24 @@ appStore.patch({ bootstrappedAt: Date.now() });
         elements.timeline.appendChild(row);
       }
 
+      async function downloadProjectHistory() {
+        if (!state.projectId) {
+          showToast("請先選擇專案後再下載對話紀錄。", 9000, "warning");
+          return;
+        }
+        const payload = await services.runs.getProjectHistory(state.projectId);
+        const fileName = `chat-history-${state.projectId}.json`;
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = fileName;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(url);
+      }
+
       async function loadProjectHistory() {
         elements.timeline.innerHTML = "";
         if (!state.projectId) {
@@ -1570,6 +1588,14 @@ appStore.patch({ bootstrappedAt: Date.now() });
         return /\.(md|markdown)$/i.test(name);
       }
 
+      function isConversationArtifact(artifact = {}) {
+        const path = String(artifact.path || "").toLowerCase();
+        const name = String(artifact.name || "").toLowerCase();
+        const runId = String(state.graphRunId || "").toLowerCase();
+        if (!runId) return false;
+        return path.startsWith(`docs/single_${runId}`) || name.startsWith(`single_${runId}`);
+      }
+
       async function loadRunArtifacts() {
         if (!state.projectId || !state.graphRunId) {
           state.runArtifacts = [];
@@ -1577,7 +1603,8 @@ appStore.patch({ bootstrappedAt: Date.now() });
           return;
         }
         try {
-          state.runArtifacts = await services.artifacts.listArtifacts(state.graphRunId, state.projectId);
+          const artifacts = await services.artifacts.listArtifacts(state.graphRunId, state.projectId);
+          state.runArtifacts = artifacts.filter((artifact) => !isConversationArtifact(artifact));
           renderArtifactsInspector(state.runArtifacts);
         } catch (error) {
           state.runArtifacts = [];
@@ -1796,6 +1823,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
       elements.planCancel.addEventListener("click", () => confirmPlan(false));
       elements.artifactsGoRun?.addEventListener("click", () => focusInspectorSection("execution"));
       elements.artifactsGoLogs?.addEventListener("click", () => navigateToRoute("logs"));
+      elements.artifactsDownloadChat?.addEventListener("click", () => void downloadProjectHistory());
       elements.artifactPreviewClose?.addEventListener("click", closeArtifactPreview);
       elements.artifactPreviewModal?.addEventListener("click", (event) => {
         if (event.target === elements.artifactPreviewModal) closeArtifactPreview();

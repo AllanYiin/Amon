@@ -6,6 +6,7 @@ from typing import Iterable
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from amon.chat.router import route_intent
+from amon.chat.router_llm import choose_execution_mode_with_llm
 from amon.commands.registry import clear_commands, get_command, register_command
 
 
@@ -85,6 +86,16 @@ class ChatRouterTests(unittest.TestCase):
         )
 
         self.assertIsNotNone(get_command("projects.list"))
+
+    def test_choose_execution_mode_with_llm_uses_model_decision(self) -> None:
+        mock = MockLLM('{"mode":"self_critique"}')
+        mode = choose_execution_mode_with_llm("我要把模型改裝為擴散語言模型", llm_client=mock)
+        self.assertEqual(mode, "self_critique")
+
+    def test_choose_execution_mode_with_llm_fallbacks_to_single_on_invalid_json(self) -> None:
+        mock = MockLLM("not-json")
+        mode = choose_execution_mode_with_llm("我要把模型改裝為擴散語言模型", llm_client=mock)
+        self.assertEqual(mode, "single")
 
 
 if __name__ == "__main__":

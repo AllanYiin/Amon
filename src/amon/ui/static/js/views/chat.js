@@ -106,7 +106,7 @@ export const CHAT_VIEW = {
       const finalMessage = `${message}${buildAttachmentSummary(attachments)}`;
       messageRenderer.appendMessage("user", `你：${finalMessage}`);
       messageRenderer.appendTimelineStatus("訊息已送出，等待事件回傳中...");
-      ctx.chatDeps.updateThinking({ status: "queued", brief: "已送出，等待伺服器事件" });
+      ctx.chatDeps.updateThinking({ status: "processing", brief: "需求已送出，正在分析任務" });
       timelineRenderer.updateExecutionStep("thinking", { title: "Thinking", status: "running", details: "訊息已送出，等待模型分析" });
       timelineRenderer.updateExecutionStep("planning", { title: "Planning", status: "pending", details: "尚未開始規劃" });
       timelineRenderer.updateExecutionStep("tool_execution", { title: "Tool execution", status: "pending", details: "等待工具呼叫" });
@@ -141,11 +141,15 @@ export const CHAT_VIEW = {
             }
             timelineRenderer.applyExecutionEvent(eventType, data);
             if (eventType === "token") {
+              ctx.chatDeps.updateThinking({ status: "thinking", brief: "模型思考中", verbose: data.text || "" });
               messageRenderer.applyTokenChunk(data.text || "");
               return;
             }
             if (eventType === "notice") {
-              if (data.text) messageRenderer.appendMessage("agent", data.text);
+              if (data.text) {
+                ctx.chatDeps.updateThinking({ status: "progress", brief: data.text });
+                messageRenderer.appendMessage("agent", data.text);
+              }
               return;
             }
             if (eventType === "plan") {
@@ -154,10 +158,12 @@ export const CHAT_VIEW = {
               return;
             }
             if (eventType === "result") {
+              ctx.chatDeps.updateThinking({ status: "tool_result", brief: "已收到工具結果" });
               messageRenderer.appendMessage("agent", `Amon：\n\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``);
               return;
             }
             if (eventType === "error") {
+              ctx.chatDeps.updateThinking({ status: "error", brief: data.message || "流程失敗" });
               ui.toast?.show(data.message || "串流失敗", { type: "danger", duration: 9000 });
               return;
             }
@@ -168,6 +174,7 @@ export const CHAT_VIEW = {
                 messageRenderer.appendMessage("agent", `Amon：流程結束（${doneStatus}）。我已收到你的訊息，請調整描述後再送出，我會持續回應。`);
                 messageRenderer.appendTimelineStatus(`流程狀態：${doneStatus}`);
               }
+              ctx.chatDeps.updateThinking({ status: doneStatus === "ok" ? "done" : doneStatus, brief: doneStatus === "ok" ? "流程已完成" : `流程結束：${doneStatus}` });
               stopStream();
               await ctx.chatDeps.loadProjects();
               if (appState.projectId) {

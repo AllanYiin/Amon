@@ -132,15 +132,6 @@
           </div>
           <div class="context-project" id="context-project">目前專案：未選擇</div>
           <p id="context-overview" class="context-overview">請先在上方選擇專案，右側內容會自動同步。</p>
-          <section class="context-section" id="inspector-execution">
-            <section class="execution-timeline" id="execution-timeline" aria-label="Execution Timeline">
-              <header class="execution-timeline__header">
-                <h3>Execution Timeline</h3>
-                <p>顯示 Thinking / Planning / Tool / Node 目前進度（部分可能由事件推測）。</p>
-              </header>
-              <div id="execution-accordion" class="execution-accordion"></div>
-            </section>
-          </section>
           <section class="context-section" id="inspector-thinking">
             <h3>Thinking Inspector</h3>
             <section class="thinking-panel" id="thinking-panel">
@@ -161,9 +152,21 @@
               </details>
             </section>
           </section>
+          <section class="context-section" id="inspector-execution">
+            <section class="execution-timeline" id="execution-timeline" aria-label="Execution Timeline">
+              <header class="execution-timeline__header">
+                <h3>Execution Timeline</h3>
+                <p>顯示 Thinking / Planning / Tool / Node 目前進度（部分可能由事件推測）。</p>
+              </header>
+              <div id="execution-accordion" class="execution-accordion"></div>
+            </section>
+          </section>
           <section class="context-section" id="inspector-artifacts">
             <h3>Artifacts Inspector</h3>
-            <p class="context-overview" id="artifacts-overview">請先執行 run，完成後會顯示可預覽與下載的產出物。</p>
+            <p class="context-overview" id="artifacts-overview">這裡僅顯示流程產生的檔案；對話紀錄請使用下方「下載對話紀錄」。</p>
+            <div class="artifacts-empty__actions">
+              <button type="button" class="secondary-btn small" id="artifacts-download-chat">下載對話紀錄</button>
+            </div>
             <div id="artifacts-inspector-list" class="artifacts-inspector-list"></div>
             <div id="artifacts-empty" class="artifacts-empty" hidden>
               <p>尚無 artifacts（可能是 run 尚未完成或此流程未產出檔案）。</p>
