@@ -1807,14 +1807,32 @@ appStore.patch({ bootstrappedAt: Date.now() });
         }
       });
 
+      async function hydrateSelectedProject() {
+        try {
+          await loadProjectHistory();
+        } catch (error) {
+          showToast(`載入歷史對話失敗：${error.message}`, 9000, "warning");
+        }
+
+        if (!state.projectId) return;
+
+        try {
+          await ensureChatSession();
+        } catch (error) {
+          showToast(`建立對話工作階段失敗：${error.message}`, 9000, "warning");
+        }
+
+        try {
+          await loadContext();
+        } catch (error) {
+          showToast(`載入專案 Context 失敗：${error.message}`, 9000, "warning");
+        }
+      }
+
       elements.projectSelect.addEventListener("change", async (event) => {
         const selectedProject = event.target.value;
         setProjectState(selectedProject);
-        await loadProjectHistory();
-        if (state.projectId) {
-          await ensureChatSession();
-          await loadContext();
-        }
+        await hydrateSelectedProject();
         await loadShellViewDependencies(state.shellView);
       });
 
@@ -1845,19 +1863,15 @@ appStore.patch({ bootstrappedAt: Date.now() });
 
       elements.thinkingMode.addEventListener("change", (event) => {
         state.thinkingMode = event.target.value;
-        updateThinking({ status: "idle", brief: "已切換 Thinking 顯示模式" });
+        updateThinking({ status: "idle", brief: "待命中；送出訊息後會顯示 Thinking 流程" });
       });
 
       (async () => {
         try {
           await loadProjects();
           setProjectState(state.projectId);
-          updateThinking({ status: "idle", brief: "目前沒有 Thinking 事件" });
-          await loadProjectHistory();
-          if (state.projectId) {
-            await ensureChatSession();
-            await loadContext();
-          }
+          updateThinking({ status: "idle", brief: "待命中；送出訊息後會顯示 Thinking、Plan 與工具事件" });
+          await hydrateSelectedProject();
           const routeKey = resolveRouteFromHash();
           if (!window.location.hash) {
             navigateToRoute(routeKey);
