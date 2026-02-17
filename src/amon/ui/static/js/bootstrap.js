@@ -961,7 +961,8 @@ appStore.patch({ bootstrappedAt: Date.now() });
         if (state.projectId && !elements.projectSelect.querySelector(`option[value="${CSS.escape(state.projectId)}"]`)) {
           const dynamicOption = document.createElement("option");
           dynamicOption.value = state.projectId;
-          dynamicOption.textContent = `新專案（${state.projectId}）`;
+          dynamicOption.textContent = "新專案";
+          dynamicOption.title = `ID: ${state.projectId}`;
           dynamicOption.dataset.dynamic = "true";
           elements.projectSelect.appendChild(dynamicOption);
         }
@@ -1037,7 +1038,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
         elements.contextDraftInput.value = draftText;
         if (draftText.trim()) {
           elements.contextDraftMeta.textContent = state.projectId
-            ? `已載入專案 ${state.projectId} 的本機草稿。`
+            ? "已載入目前專案的本機草稿。"
             : "已載入未綁定專案的本機草稿。";
         } else {
           elements.contextDraftMeta.textContent = "尚未儲存草稿。";

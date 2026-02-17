@@ -1619,7 +1619,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     send_event(
                         "notice",
                         {
-                            "text": f"Amon：目前已在專案「{active_project.name}」（{active_project.project_id}），略過重複建立專案。",
+                            "text": f"Amon：目前已在專案「{active_project.name}」，略過重複建立專案。",
                             "project_id": active_project.project_id,
                         },
                     )

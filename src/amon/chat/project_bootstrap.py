@@ -2,12 +2,24 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import re
-from typing import Any, Callable
+from typing import Any, Callable, Iterable, Protocol
 
+from amon.config import ConfigLoader
 from amon.core import AmonCore, ProjectRecord
+from amon.models import ProviderError, build_provider
 
 PlanBuilder = Callable[[str, str], tuple[str, dict]]
+
+
+class LLMClient(Protocol):
+    def generate_stream(self, messages: list[dict[str, str]], model: str | None = None) -> Iterable[str]:
+        ...
+
+
+logger = logging.getLogger(__name__)
 
 
 TASK_INTENT_KEYWORDS = (
@@ -62,7 +74,15 @@ def should_bootstrap_project(
     return is_slash_command
 
 
-def build_project_name(message: str, plan_type: str, build_plan_from_message: PlanBuilder) -> str:
+def build_project_name(
+    message: str,
+    plan_type: str,
+    build_plan_from_message: PlanBuilder,
+    *,
+    project_id: str | None = None,
+    llm_client: LLMClient | None = None,
+    model: str | None = None,
+) -> str:
     command_name = ""
     args: dict[str, Any] = {}
     try:
@@ -84,7 +104,13 @@ def build_project_name(message: str, plan_type: str, build_plan_from_message: Pl
     if not name:
         name = command_name or "未命名任務"
     normalized = " ".join(name.split())
-    return _normalize_project_name(normalized)
+    llm_summary = _summarize_project_name_with_llm(
+        normalized,
+        project_id=project_id,
+        llm_client=llm_client,
+        model=model,
+    )
+    return _normalize_project_name(llm_summary or normalized)
 
 
 def summarize_task_message(message: str) -> str:
@@ -122,8 +148,39 @@ def bootstrap_project_if_needed(
     if not should_bootstrap_project(project_id, router_type, message, is_slash_command=is_slash_command):
         return None
     plan_type = router_type if router_type in {"command_plan", "graph_patch_plan"} else "command_plan"
-    name = build_project_name(message, plan_type, build_plan_from_message)
+    name = build_project_name(message, plan_type, build_plan_from_message, project_id=project_id)
     return core.create_project(name)
+
+
+def _summarize_project_name_with_llm(
+    source_text: str,
+    *,
+    project_id: str | None,
+    llm_client: LLMClient | None,
+    model: str | None,
+) -> str:
+    text = " ".join(source_text.split()).strip()
+    if not text:
+        return ""
+    try:
+        selected_model = model
+        client = llm_client
+        if client is None:
+            client, selected_model = _build_default_client(project_id=project_id, model=model)
+        messages = [
+            {"role": "system", "content": _project_name_system_prompt()},
+            {
+                "role": "user",
+                "content": json.dumps({"text": text, "output_schema": {"name": "string"}}, ensure_ascii=False),
+            },
+        ]
+        raw = _collect_stream(client, messages, selected_model)
+        return _parse_llm_project_name(raw)
+    except (ProviderError, OSError, ValueError, json.JSONDecodeError) as exc:
+        logger.warning("LLM 專案名稱摘要失敗，改用本地規則：%s", exc)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("LLM 專案名稱摘要未預期錯誤：%s", exc, exc_info=True)
+    return ""
 
 
 def is_task_intent_message(message: str) -> bool:
@@ -210,26 +267,113 @@ def _normalize_project_name(name: str) -> str:
         return "未命名任務"
     has_cjk = any(_is_cjk(char) for char in cleaned)
     if has_cjk:
-        compact = re.sub(r"\s+", "", cleaned)
-        result_chars: list[str] = []
-        cjk_count = 0
-        for char in compact:
-            if _is_cjk(char):
-                if cjk_count >= 10:
-                    break
-                cjk_count += 1
-                result_chars.append(char)
-                continue
-            if char.isalnum() and cjk_count < 10:
-                result_chars.append(char)
-        result = "".join(result_chars).strip("-_ ")
+        result = _compress_cjk_name(cleaned)
         while result.endswith(("的", "了", "與", "和")):
             result = result[:-1]
         return result or "新任務"
 
-    words = cleaned.split()
-    result = " ".join(words[:5]).strip()
+    result = _compress_english_name(cleaned)
     return result or "new task"
+
+
+def _compress_cjk_name(text: str) -> str:
+    compact = re.sub(r"\s+", "", text)
+    compact = re.sub(r"^(請幫我|請協助|幫我|協助|請|麻煩|可以幫我)", "", compact)
+    compact = re.sub(r"(嗎|呢|吧)$", "", compact)
+    action_match = re.match(r"(開發|建立|製作|撰寫|整理|規劃|設計|分析|修正|產生|完成)(.+)", compact)
+    if action_match:
+        action, subject = action_match.groups()
+        subject = re.sub(r"^(一個|一份|一套|一篇)", "", subject)
+        subject = re.sub(r"(並|而且|以及|且).*$", "", subject)
+        candidate = f"{action}{subject}"
+        if _cjk_length(candidate) <= 10:
+            return candidate.strip("-_ ")
+
+    result_chars: list[str] = []
+    cjk_count = 0
+    for char in compact:
+        if _is_cjk(char):
+            if cjk_count >= 10:
+                break
+            cjk_count += 1
+            result_chars.append(char)
+            continue
+        if char.isalnum() and cjk_count < 10:
+            result_chars.append(char)
+    return "".join(result_chars).strip("-_ ")
+
+
+def _compress_english_name(text: str) -> str:
+    words = text.split()
+    if len(words) <= 5:
+        return " ".join(words).strip()
+
+    stop_words = {"please", "kindly", "the", "a", "an", "to", "for", "of", "and", "with", "on", "in"}
+    meaningful: list[str] = []
+    for word in words:
+        plain = re.sub(r"[^A-Za-z0-9_-]", "", word)
+        if not plain:
+            continue
+        if plain.lower() in stop_words and meaningful:
+            continue
+        meaningful.append(plain)
+        if len(meaningful) == 5:
+            break
+    if meaningful:
+        return " ".join(meaningful).strip()
+    return " ".join(words[:5]).strip()
+
+
+def _cjk_length(text: str) -> int:
+    return sum(1 for char in text if _is_cjk(char))
+
+
+def _build_default_client(project_id: str | None, model: str | None) -> tuple[LLMClient, str | None]:
+    config = ConfigLoader().resolve(project_id=project_id).effective
+    provider_name = config.get("amon", {}).get("provider", "openai")
+    provider_cfg = config.get("providers", {}).get(provider_name, {})
+    selected_model = model or provider_cfg.get("default_model") or provider_cfg.get("model")
+    provider = build_provider(provider_cfg, model=selected_model)
+    return provider, selected_model
+
+
+def _collect_stream(llm_client: LLMClient, messages: list[dict[str, str]], model: str | None) -> str:
+    chunks: list[str] = []
+    for token in llm_client.generate_stream(messages, model=model):
+        chunks.append(token)
+    return "".join(chunks).strip()
+
+
+def _parse_llm_project_name(raw_text: str) -> str:
+    cleaned = _strip_code_fences(raw_text)
+    if not cleaned:
+        return ""
+    payload = json.loads(cleaned)
+    if not isinstance(payload, dict):
+        return ""
+    return " ".join(str(payload.get("name") or "").split()).strip()
+
+
+def _strip_code_fences(text: str) -> str:
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        stripped = "\n".join(lines)
+    return stripped.strip()
+
+
+def _project_name_system_prompt() -> str:
+    return (
+        "你是專案命名助手。"
+        "請根據輸入文字抽取最完整且自然的短語意名稱。"
+        "若主要為中文，名稱上限 10 個漢字；若主要為英文，名稱上限 5 個單字。"
+        "不要使用截斷符號（例如 ...），不要附加編號或 ID。"
+        "只能輸出 JSON：{\"name\":\"...\"}，不得輸出其他文字。"
+    )
 
 
 def _is_cjk(char: str) -> bool:
