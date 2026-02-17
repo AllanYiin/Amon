@@ -101,7 +101,7 @@
             </div>
           </section>
 
-          <section class="artifact-section">
+          <section class="artifact-section" hidden>
             <div class="artifact-section__header">
               <h3>Artifacts</h3>
               <p>顯示來自 run/node 的產出。</p>
@@ -168,22 +168,7 @@
               </details>
             </section>
           </section>
-          <section class="context-section" id="panel-graph" data-context-panel="graph" role="tabpanel" hidden>
-            <h3>Graph Preview</h3>
-            <div class="graph-toolbar">
-              <div class="graph-run-meta-wrap">
-                <span id="graph-run-meta" class="graph-run-meta">尚未偵測到 Run</span>
-                <button type="button" class="secondary-btn small" id="copy-run-id" disabled data-i18n="button.copyRunId" data-i18n-attr="aria-label:button.copyRunIdAria">複製 Run ID</button>
-              </div>
-              <div class="graph-toolbar__actions">
-                <button type="button" class="secondary-btn" id="graph-create-template">Create template</button>
-              </div>
-            </div>
-            <div id="graph-preview" class="graph-preview"></div>
-            <ul id="graph-node-list" class="graph-node-list"></ul>
-            <pre id="graph-code" class="graph-code"></pre>
-          </section>
-          <section class="context-section" id="panel-artifacts" data-context-panel="artifacts" role="tabpanel" hidden>
+          <section class="context-section" id="panel-artifacts" data-context-panel="run" role="tabpanel">
             <h3>Artifacts Inspector</h3>
             <p class="context-overview" id="artifacts-overview">請先執行 run，完成後會顯示可預覽與下載的產出物。</p>
             <div id="artifacts-inspector-list" class="artifacts-inspector-list"></div>
@@ -408,11 +393,31 @@
           </section>
 
           <section class="main-card graph-page" id="graph-page" hidden>
-            <header>
-              <h2>Graph</h2>
-              <p class="subtitle">此分頁預留為中心畫面 Graph 視圖。</p>
+            <header class="graph-page__header">
+              <div>
+                <h2>Graph</h2>
+                <p class="subtitle">流程圖主視圖（支援切換歷史 Run）。</p>
+              </div>
+              <div class="graph-page__controls">
+                <label class="field-label">
+                  歷史 Run
+                  <select id="graph-run-select"></select>
+                </label>
+                <button type="button" class="secondary-btn" id="graph-history-refresh">重新整理</button>
+                <button type="button" class="secondary-btn" id="copy-run-id" disabled data-i18n="button.copyRunId" data-i18n-attr="aria-label:button.copyRunIdAria">複製 Run ID</button>
+              </div>
             </header>
-            <p class="empty-context">目前尚無可顯示內容。</p>
+            <div class="graph-toolbar">
+              <div class="graph-run-meta-wrap">
+                <span id="graph-run-meta" class="graph-run-meta">尚未偵測到 Run</span>
+              </div>
+              <div class="graph-toolbar__actions">
+                <button type="button" class="secondary-btn" id="graph-create-template">Create template</button>
+              </div>
+            </div>
+            <div id="graph-preview" class="graph-preview"></div>
+            <ul id="graph-node-list" class="graph-node-list"></ul>
+            <pre id="graph-code" class="graph-code"></pre>
           </section>
 
           <section class="main-card docs-page" id="docs-page" hidden>

@@ -21,6 +21,8 @@ export function collectElements(doc = document) {
     graphCode: doc.getElementById("graph-code"),
     graphNodeList: doc.getElementById("graph-node-list"),
     graphRunMeta: doc.getElementById("graph-run-meta"),
+    graphRunSelect: doc.getElementById("graph-run-select"),
+    graphHistoryRefresh: doc.getElementById("graph-history-refresh"),
     copyRunId: doc.getElementById("copy-run-id"),
     graphCreateTemplate: doc.getElementById("graph-create-template"),
     graphNodeDrawer: doc.getElementById("graph-node-drawer"),

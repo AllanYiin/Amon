@@ -1,7 +1,7 @@
 export const routeToShellView = {
   chat: "chat",
   context: "context",
-  graph: "chat",
+  graph: "graph",
   tools: "tools-skills",
   config: "config",
   logs: "logs-events",

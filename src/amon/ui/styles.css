@@ -1031,6 +1031,7 @@ body.is-resizing-context-panel {
   padding: 12px;
   display: grid;
   gap: 10px;
+  min-height: 220px;
 }
 
 .thinking-panel__header {
@@ -1050,9 +1051,25 @@ body.is-resizing-context-panel {
 
 .thinking-panel__detail {
   margin-top: 8px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text);
   white-space: pre-wrap;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.graph-page__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.graph-page__controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .plan-card {
