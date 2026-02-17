@@ -1198,6 +1198,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         mcp_registry = self.core.get_mcp_registry(refresh=refresh_mcp)
         recent_usage = self._read_recent_tool_usage()
         server_map = {server.name: server for server in self.core._load_mcp_servers(config)}
+        tool_registry = self._resolve_tool_registry(project_path)
 
         tools: list[dict[str, Any]] = []
         for server_name, server_info in (mcp_registry.get("servers") or {}).items():
@@ -1230,9 +1231,9 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     }
                 )
 
-        for spec in self.core.tool_registry.list_specs():
+        for spec in tool_registry.list_specs():
             source = "forged" if spec.name.startswith("native:") else "built-in"
-            decision, reason = self.core.tool_registry.policy.explain(
+            decision, reason = tool_registry.policy.explain(
                 ToolCall(tool=spec.name, args={}, caller="ui")
             )
             tools.append(
@@ -1254,6 +1255,15 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
 
         tools.sort(key=lambda item: (item.get("type", ""), item.get("name", "")))
         return {"tools": tools, "updated_at": self.core._now(), "policy_editable": True}
+
+    def _resolve_tool_registry(self, project_path: Path | None) -> Any:
+        registry = getattr(self.core, "tool_registry", None)
+        if registry is not None:
+            return registry
+        from amon.tooling.builtin import build_registry
+
+        workspace_root = project_path or Path.cwd()
+        return build_registry(workspace_root)
 
     def _build_skills_catalog(self, project_id: str | None) -> dict[str, Any]:
         project_path = self.core.get_project_path(project_id) if project_id else None
