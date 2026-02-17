@@ -987,10 +987,6 @@ appStore.patch({ bootstrappedAt: Date.now() });
       }
 
       function syncInspectorTabByRoute(routeKey) {
-        if (routeKey === "graph") {
-          switchContextTab("graph");
-          return;
-        }
         if (routeKey === "logs") {
           switchContextTab("logs");
           return;

@@ -52,16 +52,17 @@ class UIShellSmokeTests(unittest.TestCase):
         ]:
             self.assertIn(token, bootstrap_js)
 
-    def test_graph_route_reuses_chat_layout_and_right_panel_has_no_tab_menu(self) -> None:
+    def test_graph_route_uses_dedicated_graph_page_and_supports_history_runs(self) -> None:
         html = Path("src/amon/ui/index.html").read_text(encoding="utf-8")
         shell_js = Path("src/amon/ui/static/js/views/shell.js").read_text(encoding="utf-8")
-        bootstrap_js = Path("src/amon/ui/static/js/bootstrap.js").read_text(encoding="utf-8")
+        graph_view_js = Path("src/amon/ui/static/js/views/graph.js").read_text(encoding="utf-8")
 
-        self.assertNotIn('class="context-tabs"', html)
-        self.assertIn('id="thinking-panel"', html)
-        self.assertIn('graph: "chat"', shell_js)
-        self.assertIn('function syncInspectorTabByRoute(routeKey)', bootstrap_js)
-        self.assertIn('switchContextTab("graph")', bootstrap_js)
+        self.assertIn('id="graph-page"', html)
+        self.assertIn('id="graph-run-select"', html)
+        self.assertIn('id="graph-history-refresh"', html)
+        self.assertIn('id="panel-artifacts" data-context-panel="run"', html)
+        self.assertIn('graph: "graph"', shell_js)
+        self.assertIn('ctx.services.graph.listRuns', graph_view_js)
 
     def test_project_and_single_pages_redirect_to_index_hash_routes(self) -> None:
         project_html = Path("src/amon/ui/project.html").read_text(encoding="utf-8")
@@ -158,6 +159,14 @@ class UIShellSmokeTests(unittest.TestCase):
             "src/amon/ui/static/js/views/tools.js",
         ]:
             self.assertTrue(Path(module_path).exists(), module_path)
+
+    def test_ui_server_exposes_graph_history_and_billing_series_endpoints(self) -> None:
+        server_py = Path("src/amon/ui_server.py").read_text(encoding="utf-8")
+        self.assertIn('if parsed.path == "/v1/billing/series"', server_py)
+        self.assertIn('if parsed.path == "/v1/runs"', server_py)
+        self.assertIn('if parsed.path.startswith("/v1/runs/") and parsed.path.endswith("/graph")', server_py)
+        self.assertIn("def _list_runs_for_ui", server_py)
+        self.assertIn("def _load_run_bundle", server_py)
 
 
 

@@ -11,7 +11,7 @@ import time
 import traceback
 import uuid
 from collections import deque
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 import yaml
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -563,6 +563,16 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 return
             self._send_json(200, payload)
             return
+        if parsed.path == "/v1/billing/series":
+            params = parse_qs(parsed.query)
+            project_id = params.get("project_id", [""])[0].strip() or None
+            try:
+                payload = self._build_billing_summary(project_id=project_id)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, {"series": payload.get("run_trend", [])})
+            return
         if parsed.path == "/v1/billing/stream":
             params = parse_qs(parsed.query)
             project_id = params.get("project_id", [""])[0].strip() or None
@@ -573,6 +583,71 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             include_deleted = params.get("include_deleted", ["false"])[0].lower() == "true"
             records = self._list_projects_for_ui(include_deleted=include_deleted)
             self._send_json(200, {"projects": records})
+            return
+        if parsed.path == "/v1/runs":
+            params = parse_qs(parsed.query)
+            project_id = params.get("project_id", [""])[0].strip() or None
+            try:
+                runs = self._list_runs_for_ui(project_id)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, {"runs": runs})
+            return
+        if parsed.path.startswith("/v1/runs/") and parsed.path.endswith("/graph"):
+            run_id = self._get_path_segment(parsed.path, 2)
+            if not run_id:
+                self._send_json(400, {"message": "無效的 run_id"})
+                return
+            params = parse_qs(parsed.query)
+            project_id = params.get("project_id", [""])[0].strip() or None
+            try:
+                payload = self._load_run_bundle(run_id=run_id, project_id=project_id)
+            except FileNotFoundError as exc:
+                self._handle_error(exc, status=404)
+                return
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(
+                200,
+                {
+                    "run_id": payload["run_id"],
+                    "run_status": payload["run_status"],
+                    "graph": payload["graph"],
+                    "graph_mermaid": self._graph_to_mermaid(payload["graph"]),
+                    "node_states": payload["node_states"],
+                    "recent_events": payload["recent_events"],
+                },
+            )
+            return
+        if parsed.path.startswith("/v1/runs/") and "/nodes/" in parsed.path:
+            run_id = self._get_path_segment(parsed.path, 2)
+            node_id = self._get_path_segment(parsed.path, 4)
+            if not run_id or not node_id:
+                self._send_json(400, {"message": "缺少 run_id 或 node_id"})
+                return
+            params = parse_qs(parsed.query)
+            project_id = params.get("project_id", [""])[0].strip() or None
+            try:
+                payload = self._load_run_bundle(run_id=run_id, project_id=project_id)
+            except FileNotFoundError as exc:
+                self._handle_error(exc, status=404)
+                return
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            selected_node = next((node for node in payload["graph"].get("nodes", []) if str(node.get("id")) == node_id), None)
+            self._send_json(
+                200,
+                {
+                    "run_id": run_id,
+                    "node_id": node_id,
+                    "node": selected_node or {"id": node_id},
+                    "state": payload["node_states"].get(node_id, {}),
+                    "events": [event for event in payload["recent_events"] if str(event.get("node_id") or "") == node_id],
+                },
+            )
             return
         if parsed.path.endswith("/chat-history") and parsed.path.startswith("/v1/projects/"):
             project_id = self._get_path_segment(parsed.path, 2)
@@ -1770,6 +1845,91 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             "node_states": state_payload.get("nodes", {}),
             "recent_events": events[-100:],
         }
+
+    def _load_run_bundle(self, run_id: str, project_id: str | None = None) -> dict[str, Any]:
+        project_path = self.core.get_project_path(project_id) if project_id else self._resolve_project_path_from_run_id(run_id)
+        run_dir = project_path / ".amon" / "runs" / run_id
+        if not run_dir.exists():
+            raise FileNotFoundError("找不到 run")
+
+        fallback_graph = self._load_latest_graph(project_path)
+        graph = fallback_graph
+        resolved_path = run_dir / "graph.resolved.json"
+        if resolved_path.exists():
+            try:
+                graph = json.loads(resolved_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                graph = fallback_graph
+
+        state_payload: dict[str, Any] = {}
+        state_path = run_dir / "state.json"
+        if state_path.exists():
+            try:
+                state_payload = json.loads(state_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                state_payload = {}
+
+        events: list[dict[str, Any]] = []
+        events_path = run_dir / "events.jsonl"
+        if events_path.exists():
+            try:
+                for raw in events_path.read_text(encoding="utf-8").splitlines():
+                    line = raw.strip()
+                    if not line:
+                        continue
+                    try:
+                        payload = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(payload, dict):
+                        events.append(payload)
+            except OSError:
+                events = []
+
+        return {
+            "run_id": run_id,
+            "run_status": state_payload.get("status", "unknown"),
+            "graph": graph,
+            "node_states": state_payload.get("nodes", {}),
+            "recent_events": events[-100:],
+        }
+
+    def _list_runs_for_ui(self, project_id: str | None = None) -> list[dict[str, Any]]:
+        if project_id:
+            project_ids = [project_id]
+        else:
+            project_ids = [record.project_id for record in self.core.list_projects()]
+
+        runs: list[dict[str, Any]] = []
+        for pid in project_ids:
+            project_path = self.core.get_project_path(pid)
+            runs_dir = project_path / ".amon" / "runs"
+            if not runs_dir.exists():
+                continue
+            for run_dir in runs_dir.iterdir():
+                if not run_dir.is_dir():
+                    continue
+                run_id = run_dir.name
+                state_payload: dict[str, Any] = {}
+                state_path = run_dir / "state.json"
+                if state_path.exists():
+                    try:
+                        state_payload = json.loads(state_path.read_text(encoding="utf-8"))
+                    except (OSError, json.JSONDecodeError):
+                        state_payload = {}
+                runs.append(
+                    {
+                        "id": run_id,
+                        "run_id": run_id,
+                        "project_id": pid,
+                        "status": state_payload.get("status", "unknown"),
+                        "created_at": datetime.fromtimestamp(run_dir.stat().st_mtime, tz=timezone.utc).isoformat(),
+                        "updated_at": datetime.fromtimestamp(run_dir.stat().st_mtime, tz=timezone.utc).isoformat(),
+                    }
+                )
+
+        runs.sort(key=lambda item: item.get("updated_at", ""), reverse=True)
+        return runs
 
     def _query_logs(self, params: dict[str, list[str]], *, include_paging: bool = True) -> dict[str, Any]:
         source = params.get("source", ["amon"])[0].strip().lower()
