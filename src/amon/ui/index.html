@@ -111,8 +111,8 @@
             <div class="context-resizer" id="context-resizer" role="separator" aria-label="調整右側面板寬度" aria-orientation="vertical"></div>
 
             <aside class="context-panel" id="context-panel">
-          <h2>右側資訊</h2>
-          <div class="context-shell" id="context-shell">
+          <h2>Thinking / Artifacts</h2>
+          <div class="context-shell" id="context-shell" hidden>
             <article class="context-shell-card">
               <p class="context-shell-card__label">Memory</p>
               <strong id="card-memory">尚未同步</strong>
@@ -130,8 +130,8 @@
               <strong id="card-pending-confirmations">0</strong>
             </article>
           </div>
-          <div class="context-project" id="context-project">目前專案：未選擇</div>
-          <p id="context-overview" class="context-overview">請先在上方選擇專案，右側內容會自動同步。</p>
+          <div class="context-project" id="context-project" hidden>目前專案：未選擇</div>
+          <p id="context-overview" class="context-overview" hidden>請先在上方選擇專案，右側內容會自動同步。</p>
           <section class="context-section" id="inspector-thinking">
             <h3>Thinking Inspector</h3>
             <section class="thinking-panel" id="thinking-panel">
@@ -152,7 +152,7 @@
               </details>
             </section>
           </section>
-          <section class="context-section" id="inspector-execution">
+          <section class="context-section" id="inspector-execution" hidden>
             <section class="execution-timeline" id="execution-timeline" aria-label="Execution Timeline">
               <header class="execution-timeline__header">
                 <h3>Execution Timeline</h3>
