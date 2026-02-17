@@ -47,7 +47,7 @@ export const CHAT_VIEW = {
     const setStreaming = (active) => {
       appState.streaming = active;
       elements.streamProgress.hidden = !active;
-      inputBar.setDisabled(active);
+      inputBar.setDisabled(false);
     };
 
     const updateDaemonStatus = (status, transport) => {
@@ -74,7 +74,11 @@ export const CHAT_VIEW = {
             },
           },
         });
-        ui.toast?.show(`串流中斷，正在重新連線（${ctx.chatDeps.formatUnknownValue(transport, "未知傳輸")}）`, { type: "warning", duration: 9000 });
+        ui.toast?.show(`串流中斷（${ctx.chatDeps.formatUnknownValue(transport, "未知傳輸")}），請重新送出訊息以續接。`, {
+          type: "warning",
+          duration: 9000,
+        });
+        stopStream();
       } else if (status === "error") {
         store.patch({
           layout: {
@@ -86,6 +90,8 @@ export const CHAT_VIEW = {
             },
           },
         });
+        ui.toast?.show("串流連線失敗，輸入框已恢復可編輯，請重新送出。", { type: "danger", duration: 9000 });
+        stopStream();
       }
     };
 
@@ -115,6 +121,7 @@ export const CHAT_VIEW = {
 
       appState.streamClient = new EventStreamClient({
         preferSSE: true,
+        maxReconnectAttempts: 0,
         sseUrlBuilder: (params, lastEventId) => {
           const query = new URLSearchParams({ message: params.message });
           if (params.project_id) query.set("project_id", params.project_id);
