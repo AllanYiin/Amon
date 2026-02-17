@@ -107,7 +107,12 @@ class UIShellSmokeTests(unittest.TestCase):
         ]:
             self.assertIn(token, html)
 
-        for token in ['clearContextDraft("project")', 'confirmModal.open({']:
+        for token in [
+            'clearContextDraft("project")',
+            'confirmModal.open({',
+            'function getContextDraftStorageKey(projectIdOverride = undefined)',
+            'return `${STORAGE_KEYS.contextDraftPrefix}project:${normalizedProjectId}`;',
+        ]:
             self.assertIn(token, bootstrap_js)
 
     def test_status_semantics_and_run_copy_controls_exist(self) -> None:
