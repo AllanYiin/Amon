@@ -66,14 +66,6 @@
 
           <section id="timeline" class="chat-timeline"></section>
 
-          <section class="execution-timeline" id="execution-timeline" aria-label="Execution Timeline">
-            <header class="execution-timeline__header">
-              <h3>Execution Timeline</h3>
-              <p>顯示 Thinking / Planning / Tool / Node 目前進度（部分可能由事件推測）。</p>
-            </header>
-            <div id="execution-accordion" class="execution-accordion"></div>
-          </section>
-
           <div class="progress-bar" id="stream-progress" aria-hidden="true">
             <span></span>
           </div>
@@ -101,14 +93,6 @@
             </div>
           </section>
 
-          <section class="artifact-section" hidden>
-            <div class="artifact-section__header">
-              <h3>Artifacts</h3>
-              <p>顯示來自 run/node 的產出。</p>
-            </div>
-            <div id="artifact-list" class="artifact-list"></div>
-          </section>
-
           <form id="chat-form" class="chat-input">
             <div class="chat-input__main">
               <textarea id="chat-input" rows="4" placeholder="輸入你的需求，例如：建立專案 Amon Demo" data-i18n-attr="placeholder:placeholder.chatInput"></textarea>
@@ -128,15 +112,37 @@
 
             <aside class="context-panel" id="context-panel">
           <h2>右側資訊</h2>
-          <div class="context-tabs" role="tablist" aria-label="右側資訊分頁">
-            <button type="button" class="context-tab is-active" data-context-tab="thinking" role="tab" aria-selected="true" tabindex="0">Thinking</button>
-            <button type="button" class="context-tab" data-context-tab="artifacts" role="tab" aria-selected="false" tabindex="-1">Artifacts</button>
-            <button type="button" class="context-tab" data-context-tab="logs" role="tab" aria-selected="false" tabindex="-1">Logs</button>
+          <div class="context-shell" id="context-shell">
+            <article class="context-shell-card">
+              <p class="context-shell-card__label">Memory</p>
+              <strong id="card-memory">尚未同步</strong>
+            </article>
+            <article class="context-shell-card">
+              <p class="context-shell-card__label">Run</p>
+              <strong id="card-run-progress">尚未開始</strong>
+            </article>
+            <article class="context-shell-card">
+              <p class="context-shell-card__label">Billing</p>
+              <strong id="card-billing">NT$ 0</strong>
+            </article>
+            <article class="context-shell-card">
+              <p class="context-shell-card__label">Pending</p>
+              <strong id="card-pending-confirmations">0</strong>
+            </article>
           </div>
           <div class="context-project" id="context-project">目前專案：未選擇</div>
-          <section class="context-section" id="panel-thinking" data-context-panel="thinking" role="tabpanel">
+          <p id="context-overview" class="context-overview">請先在上方選擇專案，右側內容會自動同步。</p>
+          <section class="context-section" id="inspector-execution">
+            <section class="execution-timeline" id="execution-timeline" aria-label="Execution Timeline">
+              <header class="execution-timeline__header">
+                <h3>Execution Timeline</h3>
+                <p>顯示 Thinking / Planning / Tool / Node 目前進度（部分可能由事件推測）。</p>
+              </header>
+              <div id="execution-accordion" class="execution-accordion"></div>
+            </section>
+          </section>
+          <section class="context-section" id="inspector-thinking">
             <h3>Thinking Inspector</h3>
-            <p id="context-overview" class="context-overview">請先在上方選擇專案，右側內容會自動同步。</p>
             <section class="thinking-panel" id="thinking-panel">
               <div class="thinking-panel__header">
                 <h3>Thinking 狀態</h3>
@@ -155,7 +161,7 @@
               </details>
             </section>
           </section>
-          <section class="context-section" id="panel-artifacts" data-context-panel="artifacts" role="tabpanel" hidden>
+          <section class="context-section" id="inspector-artifacts">
             <h3>Artifacts Inspector</h3>
             <p class="context-overview" id="artifacts-overview">請先執行 run，完成後會顯示可預覽與下載的產出物。</p>
             <div id="artifacts-inspector-list" class="artifacts-inspector-list"></div>
@@ -163,13 +169,8 @@
               <p>尚無 artifacts（可能是 run 尚未完成或此流程未產出檔案）。</p>
               <div class="artifacts-empty__actions">
                 <button type="button" class="secondary-btn small" id="artifacts-go-run">前往 Thinking</button>
-                <button type="button" class="secondary-btn small" id="artifacts-go-logs">前往 Logs</button>
               </div>
             </div>
-          </section>
-          <section class="context-section" id="panel-logs" data-context-panel="logs" role="tabpanel" hidden>
-            <h3>Logs Inspector</h3>
-            <p class="empty-context">顯示同一個 run 的 logs 摘要（Phase 1 先提供框架）。</p>
           </section>
             </aside>
           </div>

@@ -984,6 +984,15 @@ appStore.patch({ bootstrappedAt: Date.now() });
             },
           },
         });
+
+        const anchorMap = {
+          thinking: "inspector-thinking",
+          artifacts: "inspector-artifacts",
+          logs: "inspector-execution",
+        };
+        const anchorId = anchorMap[tabName];
+        const anchorElement = anchorId ? document.getElementById(anchorId) : null;
+        anchorElement?.scrollIntoView({ behavior: "smooth", block: "start" });
       }
 
       function syncInspectorTabByRoute(routeKey) {
@@ -1733,6 +1742,9 @@ appStore.patch({ bootstrappedAt: Date.now() });
       }
 
       function renderArtifacts(artifacts = []) {
+        if (!elements.artifactList) {
+          return;
+        }
         elements.artifactList.innerHTML = "";
         if (!artifacts.length) {
           elements.artifactList.innerHTML = '<p class="empty-context">目前尚無 artifact</p>';
