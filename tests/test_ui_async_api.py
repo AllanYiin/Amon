@@ -876,6 +876,62 @@ class UIAsyncAPITests(unittest.TestCase):
                     server.server_close()
                 os.environ.pop("AMON_HOME", None)
 
+    def test_ui_toast_logging_endpoint_writes_detailed_log(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("toast-log")
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                body = {
+                    "type": "warning",
+                    "level": "WARNING",
+                    "message": "UI 測試 toast 訊息",
+                    "duration_ms": 18000,
+                    "project_id": project.project_id,
+                    "chat_id": "chat_test_1",
+                    "route": "#/logs",
+                    "source": "ui",
+                    "metadata": {"view": "logs-events", "error_code": "E_TOAST"},
+                }
+
+                conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                conn.request(
+                    "POST",
+                    "/v1/ui/toasts",
+                    body=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+                    headers={"Content-Type": "application/json; charset=utf-8"},
+                )
+                response = conn.getresponse()
+                payload = json.loads(response.read().decode("utf-8"))
+
+                self.assertEqual(response.status, 202)
+                self.assertEqual(payload["status"], "ok")
+
+                log_path = data_dir / "logs" / "amon.log"
+                self.assertTrue(log_path.exists())
+                records = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+                self.assertTrue(any(item.get("event") == "ui_toast_displayed" for item in records))
+                toast_record = next(item for item in records if item.get("event") == "ui_toast_displayed")
+                self.assertEqual(toast_record["project_id"], project.project_id)
+                self.assertEqual(toast_record["chat_id"], "chat_test_1")
+                self.assertEqual(toast_record["level"], "WARNING")
+                self.assertEqual(toast_record["metadata"]["error_code"], "E_TOAST")
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
 
 if __name__ == "__main__":
     unittest.main()
