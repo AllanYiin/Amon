@@ -11,7 +11,7 @@ export function createInspectorLayout({ elements, store, storage, storageKeys, o
     return clamped;
   }
 
-  function renderTabs(activeTab = "run") {
+  function renderTabs(activeTab = "thinking") {
     elements.contextTabs.forEach((tab) => {
       const isActive = tab.dataset.contextTab === activeTab;
       tab.classList.toggle("is-active", isActive);
@@ -27,7 +27,7 @@ export function createInspectorLayout({ elements, store, storage, storageKeys, o
     const layout = snapshot.layout || {};
     const inspector = layout.inspector || {};
     const collapsed = Boolean(inspector.collapsed);
-    const activeTab = inspector.activeTab || "run";
+    const activeTab = inspector.activeTab || "thinking";
     const width = applyPanelWidth(inspector.width);
 
     elements.uiShell?.classList.toggle("is-context-collapsed", collapsed);
@@ -72,7 +72,7 @@ export function createInspectorLayout({ elements, store, storage, storageKeys, o
 
     elements.contextTabs.forEach((tab) => {
       tab.addEventListener("click", () => {
-        const nextTab = tab.dataset.contextTab || "run";
+        const nextTab = tab.dataset.contextTab || "thinking";
         updateInspector({ activeTab: nextTab });
         if (typeof onTabChange === "function") onTabChange(nextTab);
       });

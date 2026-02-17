@@ -10,7 +10,6 @@ class UIShellSmokeTests(unittest.TestCase):
             "shell-sidebar",
             "toggle-context-panel",
             "toggle-sidebar",
-            "Memory Used",
             'data-i18n="nav.tools"',
             'data-shell-view="bill"',
             'id="bill-page"',
@@ -18,9 +17,9 @@ class UIShellSmokeTests(unittest.TestCase):
             'id="shell-run-status"',
             'id="shell-daemon-status"',
             'id="shell-budget-status"',
-            'id="card-run-progress"',
-            'id="card-billing"',
-            'id="card-pending-confirmations"',
+            'data-context-tab="thinking"',
+            'data-context-tab="artifacts"',
+            'data-context-tab="logs"',
             'script type="module" src="/static/js/app.js"',
         ]:
             self.assertIn(token, html)
@@ -60,7 +59,7 @@ class UIShellSmokeTests(unittest.TestCase):
         self.assertIn('id="graph-page"', html)
         self.assertIn('id="graph-run-select"', html)
         self.assertIn('id="graph-history-refresh"', html)
-        self.assertIn('id="panel-artifacts" data-context-panel="run"', html)
+        self.assertIn('id="panel-artifacts" data-context-panel="artifacts"', html)
         self.assertIn('graph: "graph"', shell_js)
         self.assertIn('ctx.services.graph.listRuns', graph_view_js)
 

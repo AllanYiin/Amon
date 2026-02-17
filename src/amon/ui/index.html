@@ -128,27 +128,14 @@
 
             <aside class="context-panel" id="context-panel">
           <h2>右側資訊</h2>
-          <div class="context-shell-placeholders" aria-label="右側狀態摘要">
-            <div class="context-shell-card">
-              <p class="context-shell-card__label">Memory Used</p>
-              <strong id="card-memory-used" title="尚未取得記憶體用量">尚未取得資料</strong>
-            </div>
-            <div class="context-shell-card">
-              <p class="context-shell-card__label">Run Progress</p>
-              <strong id="card-run-progress" title="尚未有 Run 可顯示進度">尚未有 Run</strong>
-            </div>
-            <div class="context-shell-card">
-              <p class="context-shell-card__label">Billing</p>
-              <strong id="card-billing" title="尚未取得費用統計">尚未取得資料</strong>
-            </div>
-            <div class="context-shell-card">
-              <p class="context-shell-card__label">Pending Confirmations</p>
-              <strong id="card-pending-confirmations" title="尚未有待確認任務">0 項</strong>
-            </div>
+          <div class="context-tabs" role="tablist" aria-label="右側資訊分頁">
+            <button type="button" class="context-tab is-active" data-context-tab="thinking" role="tab" aria-selected="true" tabindex="0">Thinking</button>
+            <button type="button" class="context-tab" data-context-tab="artifacts" role="tab" aria-selected="false" tabindex="-1">Artifacts</button>
+            <button type="button" class="context-tab" data-context-tab="logs" role="tab" aria-selected="false" tabindex="-1">Logs</button>
           </div>
           <div class="context-project" id="context-project">目前專案：未選擇</div>
-          <section class="context-section" id="panel-run" data-context-panel="run" role="tabpanel">
-            <h3>Run Inspector</h3>
+          <section class="context-section" id="panel-thinking" data-context-panel="thinking" role="tabpanel">
+            <h3>Thinking Inspector</h3>
             <p id="context-overview" class="context-overview">請先在上方選擇專案，右側內容會自動同步。</p>
             <section class="thinking-panel" id="thinking-panel">
               <div class="thinking-panel__header">
@@ -168,14 +155,14 @@
               </details>
             </section>
           </section>
-          <section class="context-section" id="panel-artifacts" data-context-panel="run" role="tabpanel">
+          <section class="context-section" id="panel-artifacts" data-context-panel="artifacts" role="tabpanel" hidden>
             <h3>Artifacts Inspector</h3>
             <p class="context-overview" id="artifacts-overview">請先執行 run，完成後會顯示可預覽與下載的產出物。</p>
             <div id="artifacts-inspector-list" class="artifacts-inspector-list"></div>
             <div id="artifacts-empty" class="artifacts-empty" hidden>
               <p>尚無 artifacts（可能是 run 尚未完成或此流程未產出檔案）。</p>
               <div class="artifacts-empty__actions">
-                <button type="button" class="secondary-btn small" id="artifacts-go-run">前往 Run</button>
+                <button type="button" class="secondary-btn small" id="artifacts-go-run">前往 Thinking</button>
                 <button type="button" class="secondary-btn small" id="artifacts-go-logs">前往 Logs</button>
               </div>
             </div>
