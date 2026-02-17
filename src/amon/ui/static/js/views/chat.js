@@ -181,6 +181,9 @@ export const CHAT_VIEW = {
                 messageRenderer.appendMessage("agent", `Amon：流程結束（${doneStatus}）。我已收到你的訊息，請調整描述後再送出，我會持續回應。`);
                 messageRenderer.appendTimelineStatus(`流程狀態：${doneStatus}`);
               }
+              if (data.final_text) {
+                messageRenderer.appendMessage("agent", `Amon：${data.final_text}`);
+              }
               ctx.chatDeps.updateThinking({ status: doneStatus === "ok" ? "done" : doneStatus, brief: doneStatus === "ok" ? "流程已完成" : `流程結束：${doneStatus}` });
               stopStream();
               await ctx.chatDeps.loadProjects();
