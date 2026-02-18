@@ -784,6 +784,7 @@ class AmonCore:
             docs_dir.mkdir(parents=True, exist_ok=True)
             provider_name = config.get("amon", {}).get("provider", "openai")
             provider_cfg = config.get("providers", {}).get(provider_name, {})
+            continuation_context = self._collect_mnt_data_handover_context(project_id)
             graph = self._build_team_graph()
             graph_path = self._write_graph_resolved(
                 project_path,
@@ -795,6 +796,7 @@ class AmonCore:
                     "audit_force_approve": False,
                     "model": model or "",
                     "skill_names": skill_names or [],
+                    "continuation_context": continuation_context,
                 },
                 mode="team",
             )
@@ -811,6 +813,53 @@ class AmonCore:
                 }
             )
             return final_text
+
+    def _collect_mnt_data_handover_context(self, project_id: str) -> str:
+        base = Path("/mnt/data")
+        if not base.exists():
+            return "未找到 /mnt/data，視為首次執行。"
+        summary_lines: list[str] = []
+        direct_match = base / project_id
+        candidates: list[Path] = []
+        if direct_match.exists():
+            candidates.append(direct_match)
+        if not candidates:
+            try:
+                for entry in base.iterdir():
+                    name_lower = entry.name.lower()
+                    if project_id.lower() in name_lower:
+                        candidates.append(entry)
+            except OSError as exc:
+                self.logger.warning("掃描 /mnt/data 失敗：%s", exc)
+                return "掃描 /mnt/data 失敗，請在回覆中聲明無法接續既有專案。"
+        if not candidates:
+            return "未在 /mnt/data 找到可接續專案資料夾。"
+
+        for candidate in candidates[:3]:
+            if candidate.is_file():
+                summary_lines.append(f"- {candidate.name}（檔案，無法判斷專案結構）")
+                continue
+            summary_lines.append(f"- {candidate.name}")
+            key_files = [
+                candidate / "TODO.md",
+                candidate / "ProjectManager.md",
+                candidate / "docs" / "final.md",
+            ]
+            try:
+                child_names = sorted(path.name for path in candidate.iterdir())[:12]
+            except OSError:
+                child_names = []
+            if child_names:
+                summary_lines.append(f"  - 目錄內容預覽：{', '.join(child_names)}")
+            for key_file in key_files:
+                if not key_file.exists() or not key_file.is_file():
+                    continue
+                try:
+                    preview = key_file.read_text(encoding="utf-8")[:300].replace("\n", " ")
+                except OSError:
+                    preview = "（讀取失敗）"
+                summary_lines.append(f"  - {key_file.relative_to(candidate)}: {preview}")
+        return "\n".join(summary_lines)
 
     def export_project(self, project_id: str, output_path: Path) -> Path:
         record = self.get_project(project_id)
@@ -911,12 +960,38 @@ class AmonCore:
         return {
             "nodes": [
                 {
+                    "id": "pm_todo",
+                    "type": "agent_task",
+                    "prompt": (
+                        "你是專案經理。請先輸出 TODO.md，拆解任務並標記初始狀態都為 [ ]。"
+                        "必須包含 Step0：檢查 /mnt/data 與遺留文件是否可接續。"
+                        "請使用繁體中文 markdown。"
+                        "\n\n任務：${prompt}\n"
+                        "\n可接續資料摘要：\n${continuation_context}\n"
+                    ),
+                    "output_path": "docs/TODO.md",
+                    "store_output": "todo_markdown",
+                },
+                {
+                    "id": "pm_log_bootstrap",
+                    "type": "agent_task",
+                    "prompt": (
+                        "你是專案經理，請建立 ProjectManager.md 的啟動紀錄，"
+                        "內容要包含決策理由、任務分派策略與風險控管。"
+                        "\n\n目前 TODO：\n${todo_markdown}\n"
+                        "\n任務：${prompt}\n"
+                    ),
+                    "output_path": "docs/ProjectManager.md",
+                },
+                {
                     "id": "pm_plan",
                     "type": "agent_task",
                     "prompt": (
                         "你是 PM，請根據任務拆解為 tasks.json。"
                         "輸出必須是 JSON，格式："
                         "{\"tasks\":[{\"task_id\":\"T1\",\"title\":\"...\",\"role\":\"...\",\"description\":\"...\"}]}。"
+                        "\n請依角色工廠規則決定任務類型：單一專業型、自我批評型（10位）、能力小組型（3位）。"
+                        "\n每個 task 請加上 role_assignment_reason 欄位。"
                         "\n\n任務：${prompt}\n"
                     ),
                     "output_path": "docs/team_plan_${run_id}.md",
@@ -952,6 +1027,7 @@ class AmonCore:
                                 "type": "agent_task",
                                 "prompt": (
                                     "你是 ${task_role}，請針對任務提出執行方案。"
+                                    "請依 Teamworks 流程，於輸出中明確區分：觀察、判斷理由、資料來源引述、成果與評估指標。"
                                     "\n\n任務：${task_title}\n${task_description}\n"
                                 ),
                                 "output_path": "docs/tasks/${task_task_id}/plan.md",
@@ -962,6 +1038,8 @@ class AmonCore:
                                 "type": "agent_task",
                                 "prompt": (
                                     "請依照以下方案完成任務並輸出結果：\n${member_plan}\n\n"
+                                    "輸出檔案需符合：{任務名稱}_{專案成員角色}.md 的記錄精神，"
+                                    "且需包含可驗證成果。"
                                     "任務：${task_title}\n${task_description}\n"
                                 ),
                                 "output_path": "docs/tasks/${task_task_id}/result.md",
@@ -1030,12 +1108,17 @@ class AmonCore:
                     "type": "agent_task",
                     "prompt": (
                         "你是 PM，請彙整所有任務結果與審核，產出最終總結。"
+                        "輸出開頭必須是 '# TeamworksGPT'，第二行要有"
+                        "'## 我務必依照以下的【角色定義】 以及【工作流程】來完成任務'。"
+                        "同時說明已如何遵守 Step0~Step6。"
                         "\n\n任務：${prompt}\n\n彙整：\n${team_results_block}\n"
                     ),
                     "output_path": "docs/final.md",
                 },
             ],
             "edges": [
+                {"from": "pm_todo", "to": "pm_log_bootstrap"},
+                {"from": "pm_log_bootstrap", "to": "pm_plan"},
                 {"from": "pm_plan", "to": "tasks_file"},
                 {"from": "tasks_file", "to": "tasks_map"},
                 {"from": "tasks_map", "to": "synthesis"},
