@@ -966,6 +966,8 @@ class AmonCore:
                         "你是專案經理。請先輸出 TODO.md，拆解任務並標記初始狀態都為 [ ]。"
                         "必須包含 Step0：檢查 /mnt/data 與遺留文件是否可接續。"
                         "請使用繁體中文 markdown。"
+                        "輸出格式第一行必須是『專案經理：』，第二行起列出 todo list。"
+                        "若需要等待角色工廠，請加上『(向角色工廠申請人設中)』。"
                         "\n\n任務：${prompt}\n"
                         "\n可接續資料摘要：\n${continuation_context}\n"
                     ),
@@ -978,6 +980,7 @@ class AmonCore:
                     "prompt": (
                         "你是專案經理，請建立 ProjectManager.md 的啟動紀錄，"
                         "內容要包含決策理由、任務分派策略與風險控管。"
+                        "輸出每段前請標註『專案經理：』。"
                         "\n\n目前 TODO：\n${todo_markdown}\n"
                         "\n任務：${prompt}\n"
                     ),
@@ -1016,6 +1019,7 @@ class AmonCore:
                                 "prompt": (
                                     "你是角色工廠，請為下列子任務產生可執行的人設 JSON。"
                                     "請至少輸出欄位：name、role、focus、instructions、success_metrics。"
+                                    "並在最前面加上一行『角色工廠：人設為...』再接 JSON。"
                                     "\n\n子任務：${task_title}\n${task_description}\n"
                                     "候選角色：${task_role}\n"
                                     "若需要反方觀點，請在 instructions 中加入。"
@@ -1034,6 +1038,7 @@ class AmonCore:
                                 "type": "agent_task",
                                 "prompt": (
                                     "你是 ${task_role}，請依照角色工廠提供的人設提出執行方案。"
+                                    "輸出第一行請標註『專案成員（${task_role}）：』。"
                                     "人設如下：\n${role_factory_payload}\n"
                                     "請依 Teamworks 流程，於輸出中明確區分：觀察、判斷理由、資料來源引述、成果與評估指標。"
                                     "\n\n任務：${task_title}\n${task_description}\n"
@@ -1118,6 +1123,7 @@ class AmonCore:
                     "type": "agent_task",
                     "prompt": (
                         "你是角色工廠，請為最終稽核會建立 3 位稽核員人設，輸出 JSON。"
+                        "輸出開頭請標示『角色工廠：人設為...』。"
                         "格式：{\"committee\":[{\"name\":\"...\",\"role\":\"...\",\"focus\":\"...\",\"instructions\":\"...\"}]}。"
                         "請涵蓋品質、風險、可驗證性三種視角。\n\n任務：${prompt}\n"
                     ),
@@ -1129,6 +1135,7 @@ class AmonCore:
                     "type": "agent_task",
                     "prompt": (
                         "你是稽核會，請審查全部任務是否皆可通過。"
+                        "輸出第一行請標註『稽核會：』。"
                         "請只輸出 JSON：{\"status\":\"APPROVED_ALL|REJECTED\",\"reason\":\"...\",\"actions\":[\"...\"]}。"
                         "\n\n稽核會人設：\n${committee_roles}\n"
                         "\n任務摘要：\n${team_results_block}\n"
@@ -1147,6 +1154,7 @@ class AmonCore:
                     "type": "agent_task",
                     "prompt": (
                         "你是 PM，稽核會尚未全數通過。請輸出退回補強通知，"
+                        "輸出第一行請標註『專案經理：任務分派為補強』。"
                         "需列出未通過理由與下一輪補強步驟。"
                         "\n\n稽核會決議：\n${committee_decision}\n"
                         "\n任務摘要：\n${team_results_block}\n"
@@ -1158,6 +1166,7 @@ class AmonCore:
                     "type": "agent_task",
                     "prompt": (
                         "你是 PM，請彙整所有任務結果與審核，產出最終總結。"
+                        "輸出中需使用具名段落（專案經理/角色工廠/專案成員/稽核會）。"
                         "輸出開頭必須是 '# TeamworksGPT'，第二行要有"
                         "'## 我務必依照以下的【角色定義】 以及【工作流程】來完成任務'。"
                         "同時說明已如何遵守 Step0~Step6，並註明稽核會全員通過。"
