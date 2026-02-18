@@ -2296,10 +2296,163 @@ body.is-resizing-context-panel {
 .bill-kpis,
 .bill-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
 }
 
+.bill-kpi-card,
+.bill-surface-card,
+.bill-raw-json {
+  border: 1px solid color-mix(in srgb, var(--c-border) 70%, #2b5ea8 30%);
+  border-radius: 16px;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--c-surface-2) 86%, #123460 14%), color-mix(in srgb, var(--c-surface-1) 92%, #0b1f39 8%));
+}
+
+.bill-kpi-card {
+  padding: 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.bill-kpi-card__label {
+  color: var(--muted);
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.bill-kpi-card strong {
+  font-size: 1.25rem;
+}
+
+.bill-kpi-card small {
+  color: var(--muted);
+}
+
+.bill-surface-card {
+  padding: 14px;
+}
+
+.bill-section__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.bill-section__header h3 {
+  margin: 0;
+}
+
+.bill-range {
+  gap: 2px;
+}
+
+.bill-range .segmented__item {
+  min-width: 54px;
+  padding: 6px 10px;
+}
+
+.bill-chart-wrap {
+  min-height: 220px;
+}
+
+.bill-model-scroller {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.bill-model-card {
+  min-width: 220px;
+  border: 1px solid var(--c-border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--c-surface-2) 88%, #123b69 12%);
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.bill-model-card__title {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  font-weight: 700;
+}
+
+.bill-model-card__meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.bill-model-card__meta strong {
+  color: var(--text);
+  display: block;
+  font-size: 1.15rem;
+}
+
+.bill-list-rows,
+#bill-recent-sessions {
+  display: grid;
+  gap: 8px;
+}
+
+.bill-row {
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  background: color-mix(in srgb, var(--c-surface-2) 80%, transparent);
+}
+
+.bill-row__meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.bill-row__value {
+  text-align: right;
+}
+
+.bill-row__value strong {
+  display: block;
+}
+
+.bill-empty {
+  color: var(--muted);
+  border: 1px dashed var(--c-border);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.bill-cta-card {
+  display: flex;
+  justify-content: center;
+}
+
+.bill-cta-card .btn {
+  width: 100%;
+}
+
+.bill-raw-json {
+  padding: 10px 14px;
+}
+
+.bill-raw-json pre {
+  margin: 10px 0 0;
+  max-height: 280px;
+  overflow: auto;
+}
 
 .graph-run-meta-wrap {
   display: inline-flex;
@@ -2741,7 +2894,7 @@ body.is-resizing-context-panel {
   height: 100%;
 }
 
-.bill-page .config-card canvas {
+.bill-page .bill-chart-wrap canvas {
   width: 100% !important;
   min-height: 140px;
 }
