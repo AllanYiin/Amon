@@ -31,6 +31,7 @@ from amon.chat.session_store import (
     append_event,
     build_prompt_with_history,
     create_chat_session,
+    load_latest_run_context,
     load_recent_dialogue,
 )
 from amon.commands.executor import CommandPlan, execute
@@ -291,6 +292,15 @@ def _resolve_command_plan_from_router(message: str, router_result: RouterResult)
     if router_result.api and isinstance(router_result.args, dict):
         return router_result.api, dict(router_result.args)
     return _build_plan_from_message(message, router_result.type)
+
+
+def _should_continue_chat_run(last_assistant_text: str | None) -> bool:
+    if not last_assistant_text:
+        return False
+    normalized = str(last_assistant_text).strip()
+    if not normalized:
+        return False
+    return "？" in normalized or "?" in normalized
 
 
 def _is_duplicate_project_create(
@@ -1549,7 +1559,13 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 history = load_recent_dialogue(project_id, chat_id)
                 if history:
                     initial_context = {"conversation_history": history}
-            router_result = route_intent(message, project_id=project_id, context=initial_context)
+            initial_run_context = load_latest_run_context(project_id, chat_id) if project_id and chat_id else {"run_id": None, "last_assistant_text": None}
+            router_result = route_intent(
+                message,
+                project_id=project_id,
+                run_id=str(initial_run_context.get("run_id") or "") or None,
+                context=initial_context,
+            )
             created_project: ProjectRecord | None = None
             if project_id is None:
                 created_project = bootstrap_project_if_needed(
@@ -1594,8 +1610,14 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             if not chat_id:
                 chat_id = create_chat_session(project_id)
             history = load_recent_dialogue(project_id, chat_id)
+            run_context = load_latest_run_context(project_id, chat_id)
             router_context = {"conversation_history": history} if history else None
-            router_result = route_intent(message, project_id=project_id, context=router_context)
+            router_result = route_intent(
+                message,
+                project_id=project_id,
+                run_id=str(run_context.get("run_id") or "") or None,
+                context=router_context,
+            )
             append_event(chat_id, {"type": "user", "text": message, "project_id": project_id})
             append_event(
                 chat_id,
@@ -1713,10 +1735,14 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
 
                 run_id = ""
                 if execution_mode == "single":
+                    continued_run_id = None
+                    if _should_continue_chat_run(run_context.get("last_assistant_text")):
+                        continued_run_id = str(run_context.get("run_id") or "").strip() or None
                     result, response_text = self.core.run_single_stream(
                         prompt_with_history,
                         project_path=self.core.get_project_path(project_id),
                         stream_handler=stream_handler,
+                        run_id=continued_run_id,
                     )
                     run_id = result.run_id
                 elif execution_mode == "self_critique":
@@ -1733,7 +1759,10 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         project_path=self.core.get_project_path(project_id),
                         stream_handler=None,
                     )
-                append_event(chat_id, {"type": "assistant", "text": response_text, "project_id": project_id})
+                assistant_payload: dict[str, Any] = {"type": "assistant", "text": response_text, "project_id": project_id}
+                if run_id:
+                    assistant_payload["run_id"] = run_id
+                append_event(chat_id, assistant_payload)
                 done_payload: dict[str, Any] = {
                     "status": "ok",
                     "chat_id": chat_id,

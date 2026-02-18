@@ -14,6 +14,7 @@ from amon.chat.session_store import (
     append_event,
     build_prompt_with_history,
     create_chat_session,
+    load_latest_run_context,
     load_recent_dialogue,
 )
 
@@ -170,6 +171,29 @@ class ChatSessionStoreTests(unittest.TestCase):
         self.assertIn("俄羅斯方塊單頁網頁應用程式", prompt)
         self.assertIn("Amon: " + ("A" * 200), prompt)
         self.assertNotIn("A" * 1000, prompt)
+
+    def test_load_latest_run_context_tracks_run_and_last_assistant(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                project_id = "proj-run-ctx"
+                chat_id = create_chat_session(project_id)
+                append_event(chat_id, {"type": "user", "text": "先幫我規劃", "project_id": project_id})
+                append_event(
+                    chat_id,
+                    {
+                        "type": "assistant",
+                        "text": "好的，請問你想先做 UI 還是 API？",
+                        "project_id": project_id,
+                        "run_id": "run-123",
+                    },
+                )
+                context = load_latest_run_context(project_id, chat_id)
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+        self.assertEqual(context["run_id"], "run-123")
+        self.assertEqual(context["last_assistant_text"], "好的，請問你想先做 UI 還是 API？")
 
 
 if __name__ == "__main__":

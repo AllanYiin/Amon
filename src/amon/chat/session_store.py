@@ -136,6 +136,49 @@ def load_recent_dialogue(project_id: str, chat_id: str, limit: int = 12) -> list
     return dialogue[-limit:]
 
 
+def load_latest_run_context(project_id: str, chat_id: str) -> dict[str, str | None]:
+    """Load the latest run_id and assistant reply text from a chat session."""
+    if not chat_id:
+        return {"run_id": None, "last_assistant_text": None}
+    validate_project_id(project_id)
+
+    session_path = _chat_session_path(project_id, chat_id)
+    if not session_path.exists():
+        return {"run_id": None, "last_assistant_text": None}
+
+    latest_run_id: str | None = None
+    last_assistant_text: str | None = None
+    try:
+        for raw_line in session_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            run_id = payload.get("run_id")
+            if isinstance(run_id, str) and run_id.strip():
+                latest_run_id = run_id.strip()
+            if payload.get("type") == "assistant":
+                text = payload.get("text")
+                if isinstance(text, str) and text.strip():
+                    last_assistant_text = text.strip()
+    except OSError as exc:
+        log_event(
+            {
+                "event": "chat_session_read_failed",
+                "level": "WARNING",
+                "project_id": project_id,
+                "session_id": chat_id,
+                "error": str(exc),
+            }
+        )
+        return {"run_id": None, "last_assistant_text": None}
+
+    return {"run_id": latest_run_id, "last_assistant_text": last_assistant_text}
+
+
 def build_prompt_with_history(message: str, dialogue: list[dict[str, str]] | None = None) -> str:
     """Compose prompt with conversation history when available."""
     cleaned_message = (message or "").strip()

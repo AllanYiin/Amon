@@ -699,6 +699,7 @@ class AmonCore:
         model: str | None = None,
         stream_handler=None,
         skill_names: list[str] | None = None,
+        run_id: str | None = None,
     ) -> tuple[GraphRunResult, str]:
         if not project_path:
             raise ValueError("執行 stream 需要指定專案")
@@ -715,6 +716,7 @@ class AmonCore:
                 project_path=project_path,
                 graph_path=graph_path,
                 stream_handler=stream_handler,
+                run_id=run_id,
             )
             response = self._load_graph_primary_output(result.run_dir)
             return result, response
