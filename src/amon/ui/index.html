@@ -563,8 +563,16 @@
                 <button type="button" class="btn btn--secondary secondary-btn" id="graph-create-template">Create template</button>
               </div>
             </div>
-            <div id="graph-preview" class="graph-preview"></div>
-            <ul id="graph-node-list" class="graph-node-list list-row-group"></ul>
+            <section class="graph-stage">
+              <div id="graph-preview" class="graph-preview"></div>
+            </section>
+            <section class="graph-node-panel card">
+              <header class="graph-node-panel__header">
+                <h3>Nodes</h3>
+                <p class="subtitle">點選節點可開啟詳細資訊。</p>
+              </header>
+              <ul id="graph-node-list" class="graph-node-list list-row-group"></ul>
+            </section>
             <pre id="graph-code" class="graph-code codeblock"></pre>
           </section>
 
@@ -685,22 +693,22 @@
         <button type="button" class="btn btn--secondary secondary-btn" id="graph-node-close" data-i18n-attr="aria-label:button.collapseGraphNode">關閉</button>
       </header>
       <div class="graph-node-drawer__meta" id="graph-node-meta"></div>
-      <section>
+      <section class="graph-node-drawer__section">
         <h4>inputs</h4>
-        <details open>
+        <details class="graph-node-drawer__details" open>
           <summary>展開內容</summary>
           <pre id="graph-node-inputs" class="graph-node-json"></pre>
         </details>
       </section>
-      <section>
+      <section class="graph-node-drawer__section">
         <h4>outputs（docs/artifacts）</h4>
         <pre id="graph-node-outputs" class="graph-node-json"></pre>
       </section>
-      <section>
+      <section class="graph-node-drawer__section">
         <h4>最近 events/logs</h4>
         <ul id="graph-node-events" class="graph-node-events"></ul>
       </section>
-      <section>
+      <section class="graph-node-drawer__section">
         <h4>Template 化</h4>
         <div class="graph-node-drawer__actions">
           <button type="button" class="btn btn--secondary secondary-btn" id="graph-parametrize">Parametrize（改成 {{var}}）</button>
