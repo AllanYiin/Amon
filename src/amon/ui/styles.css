@@ -41,6 +41,14 @@
   --focus-ring-width: 3px;
   --scrollbar-size: 10px;
   --mobile-nav-height: 74px;
+  --mobile-safe-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px));
+
+  --mix-ink: #000;
+  --mix-night-950: #050b16;
+  --mix-brand-500: #2b5ea8;
+  --mix-brand-800: #123460;
+  --mix-brand-900: #0b1f39;
+  --mix-brand-700: #123b69;
 }
 
 /* B. Dark theme tokens (default) */
@@ -247,8 +255,8 @@ body {
 }
 
 .shell-sidebar {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--c-surface-2) 88%, #000 12%), color-mix(in srgb, var(--c-surface-1) 92%, #000 8%));
-  border: 1px solid color-mix(in srgb, var(--c-border-strong) 78%, #000 22%);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--c-surface-2) 88%, var(--mix-ink) 12%), color-mix(in srgb, var(--c-surface-1) 92%, var(--mix-ink) 8%));
+  border: 1px solid color-mix(in srgb, var(--c-border-strong) 78%, var(--mix-ink) 22%);
   border-radius: 18px;
   padding: 16px;
   position: sticky;
@@ -416,7 +424,7 @@ body {
 
 .nav-group {
   margin-top: 20px;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   color: var(--muted);
   font-weight: 700;
 }
@@ -486,7 +494,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   color: var(--muted);
 }
 
@@ -523,7 +531,7 @@ body {
 
 .project-info p {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   color: var(--muted);
 }
 
@@ -901,7 +909,7 @@ body {
 
 .panel-hint {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   color: var(--muted);
   line-height: 1.6;
 }
@@ -1115,7 +1123,7 @@ body {
 
 .chat-artifact-card__open {
   border: 1px solid var(--c-border-strong);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--c-surface-2);
   color: var(--title);
   font-size: 11px;
@@ -1225,7 +1233,7 @@ body {
 }
 
 .attachment-info {
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   color: var(--muted);
 }
 
@@ -1267,7 +1275,7 @@ body {
 }
 
 .notice {
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   color: var(--muted);
   line-height: 1.6;
 }
@@ -1300,7 +1308,7 @@ body {
 }
 
 .field-label {
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   color: var(--muted);
   font-weight: 700;
 }
@@ -1477,7 +1485,7 @@ body {
   width: 8px;
   min-height: 100%;
   cursor: col-resize;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: linear-gradient(to right, transparent 0, var(--c-border-strong) 50%, transparent 100%);
 }
 
@@ -1607,7 +1615,7 @@ body.is-resizing-context-panel {
 .graph-page__controls {
   display: flex;
   align-items: flex-end;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 
@@ -1815,7 +1823,7 @@ body.is-resizing-context-panel {
 
 .empty-context {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   color: var(--muted);
 }
 
@@ -1941,7 +1949,7 @@ body.is-resizing-context-panel {
 }
 
 .graph-run-meta {
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   color: var(--muted);
 }
 
@@ -2122,7 +2130,7 @@ body.is-resizing-context-panel {
   right: 0;
   width: min(460px, 96vw);
   height: 100vh;
-  background: color-mix(in srgb, var(--c-surface-1) 90%, #050b16);
+  background: color-mix(in srgb, var(--c-surface-1) 90%, var(--mix-night-950));
   border-left: 1px solid color-mix(in srgb, var(--c-border-strong) 70%, var(--c-border));
   box-shadow: var(--shadow-sm);
   z-index: 40;
@@ -2186,7 +2194,7 @@ body.is-resizing-context-panel {
 
 .graph-node-events li {
   border: 1px solid var(--c-border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 8px;
   font-size: 12px;
   background: var(--c-bg);
@@ -2600,8 +2608,8 @@ body.is-resizing-context-panel {
 .pager {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 10px;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
 }
 
 @media (max-width: 880px) {
@@ -2639,9 +2647,9 @@ body.is-resizing-context-panel {
 .bill-kpi-card,
 .bill-surface-card,
 .bill-raw-json {
-  border: 1px solid color-mix(in srgb, var(--c-border) 70%, #2b5ea8 30%);
+  border: 1px solid color-mix(in srgb, var(--c-border) 70%, var(--mix-brand-500) 30%);
   border-radius: 16px;
-  background: linear-gradient(160deg, color-mix(in srgb, var(--c-surface-2) 86%, #123460 14%), color-mix(in srgb, var(--c-surface-1) 92%, #0b1f39 8%));
+  background: linear-gradient(160deg, color-mix(in srgb, var(--c-surface-2) 86%, var(--mix-brand-800) 14%), color-mix(in srgb, var(--c-surface-1) 92%, var(--mix-brand-900) 8%));
 }
 
 .bill-kpi-card {
@@ -2706,7 +2714,7 @@ body.is-resizing-context-panel {
   min-width: 220px;
   border: 1px solid var(--c-border);
   border-radius: 14px;
-  background: color-mix(in srgb, var(--c-surface-2) 88%, #123b69 12%);
+  background: color-mix(in srgb, var(--c-surface-2) 88%, var(--mix-brand-700) 12%);
   padding: 12px;
   display: grid;
   gap: 10px;
@@ -2793,7 +2801,7 @@ body.is-resizing-context-panel {
 .graph-run-meta-wrap {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 
@@ -2846,7 +2854,7 @@ body.is-resizing-context-panel {
 .context-status-pill {
   border-radius: 999px;
   padding: 4px 10px;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   color: var(--muted);
   background: color-mix(in srgb, var(--c-surface-3) 82%, transparent);
   border: 1px solid var(--c-border);
@@ -2886,7 +2894,7 @@ body.is-resizing-context-panel {
 }
 
 .context-gauge__center span {
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   color: var(--muted);
 }
 
@@ -3014,7 +3022,7 @@ body.is-resizing-context-panel {
 .context-draft__actions,
 .context-danger-zone__actions {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 
@@ -3055,29 +3063,26 @@ body.is-resizing-context-panel {
 
 .artifacts-inspector-list {
   display: grid;
-  gap: 10px;
-  margin-top: 10px;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
 }
 
 .artifact-inspector-card {
-  border: 1px solid var(--c-border);
-  border-radius: 12px;
-  padding: 10px;
-  background: var(--c-surface-1);
   display: grid;
-  gap: 8px;
+  gap: var(--space-2);
+  padding: var(--space-3);
 }
 
 .artifact-inspector-card header {
   display: flex;
   justify-content: space-between;
-  gap: 8px;
-  font-size: 12px;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
 }
 
 .artifact-inspector-card__path {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   color: var(--muted);
   word-break: break-all;
 }
@@ -3087,23 +3092,23 @@ body.is-resizing-context-panel {
   max-height: 160px;
   object-fit: contain;
   border: 1px solid var(--c-border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--c-bg);
 }
 
 .artifact-inspector-card__actions,
 .artifacts-empty__actions {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 
 .artifacts-empty {
   border: 1px dashed var(--c-border-strong);
-  border-radius: 12px;
-  padding: 12px;
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
   background: var(--c-surface-1);
-  margin-top: 10px;
+  margin-top: var(--space-3);
 }
 
 .artifact-preview-modal {
@@ -3209,7 +3214,7 @@ body.is-resizing-context-panel {
   width: 100%;
   margin: 8px 0 10px;
   border: 1px solid var(--c-border-strong);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 8px 10px;
 }
 
@@ -3335,6 +3340,12 @@ body.is-resizing-context-panel {
   height: 100%;
 }
 
+
+.graph-preview g.node[role="button"]:focus-visible {
+  outline: none;
+  filter: drop-shadow(var(--focus-ring));
+}
+
 .bill-page .bill-chart-wrap canvas {
   width: 100% !important;
   min-height: 140px;
@@ -3378,7 +3389,7 @@ body.is-resizing-context-panel {
     position: fixed;
     right: 0;
     top: 0;
-    bottom: 0;
+    bottom: calc(var(--mobile-safe-bottom) + var(--space-2));
     width: min(92vw, var(--context-width-max));
     z-index: 40;
     box-shadow: var(--shadow-sm);
@@ -3409,7 +3420,7 @@ body.is-resizing-context-panel {
 @media (max-width: 767px) {
   .page {
     padding: 12px;
-    padding-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px) + 12px);
+    padding-bottom: calc(var(--mobile-safe-bottom) + var(--space-4));
   }
 
   .ui-shell {
@@ -3431,7 +3442,7 @@ body.is-resizing-context-panel {
     border-radius: 18px;
     overflow: visible;
     box-shadow: var(--shadow-sm);
-    background: color-mix(in srgb, var(--c-surface-2) 90%, #000 10%);
+    background: color-mix(in srgb, var(--c-surface-2) 90%, var(--mix-ink) 10%);
   }
 
   .shell-sidebar h2 {
@@ -3471,19 +3482,19 @@ body.is-resizing-context-panel {
 
   .chat-input {
     position: sticky;
-    bottom: 0;
+    bottom: calc(var(--mobile-safe-bottom) + var(--space-2));
     background: var(--card);
     border-top: 1px solid var(--stroke);
-    padding-top: 10px;
+    padding-top: var(--space-3);
     z-index: 5;
   }
 
   .chat-timeline {
-    padding-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px) + 12px);
+    padding-bottom: calc(var(--mobile-safe-bottom) + var(--space-4));
   }
 
   .chat-panel {
-    padding-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px) + 92px);
+    padding-bottom: calc(var(--mobile-safe-bottom) + 92px);
   }
 
   .shell-topbar {
@@ -3492,6 +3503,9 @@ body.is-resizing-context-panel {
 
   .context-panel {
     width: min(96vw, var(--context-width-max));
+    top: var(--space-3);
+    bottom: calc(var(--mobile-safe-bottom) + var(--space-2));
+    border-radius: var(--radius-2xl);
   }
 }
 
