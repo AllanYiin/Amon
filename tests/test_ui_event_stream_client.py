@@ -165,6 +165,61 @@ class UIEventStreamClientTests(unittest.TestCase):
         )
         self._run_node(script)
 
+    def test_done_event_ignores_followup_onerror_without_reconnect(self) -> None:
+        script = textwrap.dedent(
+            """
+            const { EventStreamClient } = require('./src/amon/ui/event_stream_client.js');
+
+            let instances = 0;
+            const statuses = [];
+            class FakeEventSource {
+              constructor(_url) {
+                instances += 1;
+                this.listeners = new Map();
+                setTimeout(() => {
+                  const done = this.listeners.get('done');
+                  if (done) {
+                    done({ data: JSON.stringify({ status: 'ok' }), lastEventId: 'evt-done' });
+                  }
+                  if (typeof this.onerror === 'function') {
+                    this.onerror(new Error('connection closed'));
+                  }
+                }, 0);
+              }
+
+              addEventListener(eventType, callback) {
+                this.listeners.set(eventType, callback);
+              }
+
+              close() {}
+            }
+
+            global.EventSource = FakeEventSource;
+
+            const client = new EventStreamClient({
+              preferSSE: true,
+              maxReconnectAttempts: 5,
+              reconnectBaseMs: 1,
+              reconnectMaxMs: 1,
+              sseUrlBuilder: () => '/v1/chat/stream?message=demo',
+              onStatusChange: ({ status }) => statuses.push(status),
+            });
+
+            client.start({ message: 'demo' });
+
+            setTimeout(() => {
+              if (instances !== 1) {
+                throw new Error(`done event should stop reconnect, got ${instances} connections`);
+              }
+              if (statuses.includes('error') || statuses.includes('reconnecting')) {
+                throw new Error(`unexpected status transitions: ${statuses.join(',')}`);
+              }
+              process.exit(0);
+            }, 30);
+            """
+        )
+        self._run_node(script)
+
 
     def test_reasoning_event_is_dispatched(self) -> None:
         script = textwrap.dedent(

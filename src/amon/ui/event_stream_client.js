@@ -152,12 +152,17 @@
       this.currentTransport = "sse";
       this._setStatus("connecting", "sse");
       const source = new EventSource(url);
+      let closedByTerminalEvent = false;
       this.connection = source;
       source.onopen = () => {
         this.reconnectAttempts = 0;
         this._setStatus("connected", "sse");
       };
       source.onerror = () => {
+        if (closedByTerminalEvent || !this.shouldRun) {
+          source.close();
+          return;
+        }
         source.close();
         this._scheduleReconnect();
       };
@@ -167,6 +172,7 @@
           const eventId = event.lastEventId || null;
           this._dispatch(eventType, payload, eventId);
           if (eventType === "done" || eventType === "error") {
+            closedByTerminalEvent = true;
             this.shouldRun = false;
             source.close();
             this.connection = null;
