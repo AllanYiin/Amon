@@ -7,7 +7,7 @@ export function createMessageRenderer({ timelineEl, renderMarkdown }) {
 
   function appendMessage(role, text, meta = {}) {
     const row = document.createElement("article");
-    row.className = `timeline-row timeline-row--${role}`;
+    row.className = "timeline-row";
 
     const bubble = document.createElement("div");
     bubble.className = `chat-bubble ${role}`;
@@ -28,7 +28,7 @@ export function createMessageRenderer({ timelineEl, renderMarkdown }) {
 
   function appendTimelineStatus(message) {
     const item = document.createElement("div");
-    item.className = "timeline-status timeline-status--event";
+    item.className = "timeline-status";
     item.textContent = message;
     timelineEl.appendChild(item);
     timelineEl.scrollTop = timelineEl.scrollHeight;
