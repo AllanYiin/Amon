@@ -19,6 +19,31 @@ class Provider(Protocol):
         ...
 
 
+_REASONING_CHUNK_PREFIX = "__AMON_REASONING__::"
+
+
+def encode_reasoning_chunk(text: str) -> str:
+    return f"{_REASONING_CHUNK_PREFIX}{text}"
+
+
+def decode_reasoning_chunk(token: str) -> tuple[bool, str]:
+    if isinstance(token, str) and token.startswith(_REASONING_CHUNK_PREFIX):
+        return True, token[len(_REASONING_CHUNK_PREFIX) :]
+    return False, token
+
+
+def _extract_reasoning_text(delta: dict[str, object]) -> str:
+    reasoning_fields = [delta.get("reasoning"), delta.get("reasoning_content"), delta.get("summary")]
+    for raw in reasoning_fields:
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+        if isinstance(raw, dict):
+            summary = raw.get("summary")
+            if isinstance(summary, str) and summary.strip():
+                return summary.strip()
+    return ""
+
+
 @dataclass
 class OpenAIProviderConfig:
     base_url: str
@@ -69,8 +94,13 @@ class OpenAICompatibleProvider:
                     except json.JSONDecodeError as exc:
                         raise ProviderError("解析模型串流資料失敗") from exc
                     delta = chunk.get("choices", [{}])[0].get("delta", {})
+                    if not isinstance(delta, dict):
+                        continue
+                    reasoning_text = _extract_reasoning_text(delta)
+                    if reasoning_text:
+                        yield encode_reasoning_chunk(reasoning_text)
                     content = delta.get("content")
-                    if content:
+                    if isinstance(content, str) and content:
                         yield content
         except urllib.error.HTTPError as exc:
             raise ProviderError(f"模型請求失敗：{exc}") from exc

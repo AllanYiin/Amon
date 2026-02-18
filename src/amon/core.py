@@ -37,7 +37,7 @@ from .events import emit_event
 from .logging import log_billing, log_event
 from .logging_utils import setup_logger
 from .mcp_client import MCPClientError, MCPServerConfig, MCPStdioClient
-from .models import ProviderError, build_provider
+from .models import ProviderError, build_provider, decode_reasoning_chunk
 from .graph_runtime import GraphRuntime, GraphRunResult
 from .sandbox.service import run_sandbox_step
 from .tooling import (
@@ -537,6 +537,22 @@ class AmonCore:
         )
         try:
             for index, token in enumerate(provider.generate_stream(messages, model=provider_model)):
+                is_reasoning, reasoning_text = decode_reasoning_chunk(token)
+                if is_reasoning:
+                    if stream_handler:
+                        stream_handler(token)
+                    self._append_session_event(
+                        session_path,
+                        {
+                            "event": "reasoning_chunk",
+                            "index": index,
+                            "content": reasoning_text,
+                            "provider": provider_name,
+                            "model": provider_model,
+                        },
+                        session_id=session_id,
+                    )
+                    continue
                 print(token, end="", flush=True)
                 response_text += token
                 if stream_handler:
@@ -4755,6 +4771,21 @@ if __name__ == "__main__":
             )
             with output_path.open("w", encoding="utf-8") as handle:
                 for index, token in enumerate(provider.generate_stream(messages, model=provider_model)):
+                    is_reasoning, reasoning_text = decode_reasoning_chunk(token)
+                    if is_reasoning:
+                        self._append_session_event(
+                            session_path,
+                            {
+                                "event": "reasoning_chunk",
+                                "index": index,
+                                "content": reasoning_text,
+                                "stage": stage,
+                                "provider": provider_name,
+                                "model": provider_model,
+                            },
+                            session_id=session_id,
+                        )
+                        continue
                     print(token, end="", flush=True)
                     handle.write(token)
                     response_text += token
@@ -4826,6 +4857,21 @@ if __name__ == "__main__":
                 session_id=session_id,
             )
             for index, token in enumerate(provider.generate_stream(messages, model=provider_model)):
+                is_reasoning, reasoning_text = decode_reasoning_chunk(token)
+                if is_reasoning:
+                    self._append_session_event(
+                        session_path,
+                        {
+                            "event": "reasoning_chunk",
+                            "index": index,
+                            "content": reasoning_text,
+                            "stage": stage,
+                            "provider": provider_name,
+                            "model": provider_model,
+                        },
+                        session_id=session_id,
+                    )
+                    continue
                 print(token, end="", flush=True)
                 response_text += token
                 self._append_session_event(

@@ -43,6 +43,7 @@ from amon.tooling.audit import default_audit_log_path
 from amon.tooling.types import ToolCall
 from .core import AmonCore, ProjectRecord
 from .logging import log_event
+from .models import decode_reasoning_chunk
 from .skills import build_skill_injection_preview
 
 
@@ -1695,6 +1696,14 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
 
                 def stream_handler(token: str) -> None:
                     nonlocal streamed_token_count
+                    is_reasoning, reasoning_text = decode_reasoning_chunk(token)
+                    if is_reasoning:
+                        send_event("reasoning", {"text": reasoning_text})
+                        append_event(
+                            chat_id,
+                            {"type": "assistant_reasoning", "text": reasoning_text, "project_id": project_id},
+                        )
+                        return
                     streamed_token_count += 1
                     send_event("token", {"text": token})
                     append_event(
