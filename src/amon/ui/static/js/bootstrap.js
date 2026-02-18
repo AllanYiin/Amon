@@ -457,6 +457,87 @@ appStore.patch({ bootstrappedAt: Date.now() });
         return date.toISOString();
       }
 
+      function getLevelKey(value) {
+        return String(value || "info").trim().toLowerCase();
+      }
+
+      function formatLogTime(value) {
+        if (!value) return "-";
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return String(value);
+        return date.toLocaleString("zh-TW", { hour12: false });
+      }
+
+      function getLogMessage(item = {}) {
+        const candidates = [item.message, item.msg, item.summary, item.detail, item.event, item.type];
+        const found = candidates.find((text) => String(text || "").trim());
+        return found ? String(found) : "(無訊息內容)";
+      }
+
+      function formatMetaLine(item = {}) {
+        const pairs = [
+          ["project", item.project_id],
+          ["run", item.run_id],
+          ["node", item.node_id],
+          ["component", item.component],
+        ].filter(([, value]) => value);
+        return pairs.map(([key, value]) => `${key}:${value}`).join(" · ") || "-";
+      }
+
+      function matchesSearch(item = {}, keyword = "") {
+        const normalized = String(keyword || "").trim().toLowerCase();
+        if (!normalized) return true;
+        return JSON.stringify(item).toLowerCase().includes(normalized);
+      }
+
+      function setLogsEventsPanel(panelName = "logs") {
+        const showLogs = panelName !== "events";
+        elements.logsPanel.hidden = !showLogs;
+        elements.eventsPanel.hidden = showLogs;
+        elements.logsTabLogs.classList.toggle("is-active", showLogs);
+        elements.logsTabEvents.classList.toggle("is-active", !showLogs);
+        elements.logsTabLogs.setAttribute("aria-pressed", showLogs ? "true" : "false");
+        elements.logsTabEvents.setAttribute("aria-pressed", showLogs ? "false" : "true");
+      }
+
+      function setSeverityChipActive(severityValue = "") {
+        const targetValue = String(severityValue || "").toUpperCase();
+        elements.logsSeverityChips?.querySelectorAll(".chip[data-severity]").forEach((chip) => {
+          const chipValue = String(chip.dataset.severity || "").toUpperCase();
+          chip.classList.toggle("is-active", chipValue === targetValue || (!chipValue && !targetValue));
+        });
+      }
+
+      function createTimelineItem(item = {}, options = {}) {
+        const { isEvent = false } = options;
+        const article = document.createElement("article");
+        const levelRaw = isEvent ? "EVENT" : item.level || item.severity || "INFO";
+        const levelKey = getLevelKey(levelRaw);
+        article.className = "logs-timeline-item";
+        article.dataset.level = levelKey;
+
+        const eventType = item.event || item.type || "event";
+        const title = isEvent ? eventType : levelRaw;
+
+        article.innerHTML = `
+          <div class="logs-timeline-item__time">${escapeHtml(formatLogTime(item.ts || item.time || item.timestamp))}</div>
+          <div class="logs-timeline-item__content">
+            <span class="logs-timeline-item__dot" aria-hidden="true"></span>
+            <div class="logs-timeline-item__head">
+              <span class="pill ${isEvent ? "pill--info" : `pill--${levelKey === "warning" || levelKey === "warn" ? "warn" : levelKey === "error" || levelKey === "critical" || levelKey === "fatal" ? "error" : levelKey === "debug" ? "neutral" : "info"}`}">${escapeHtml(String(title).toUpperCase())}</span>
+              ${isEvent ? "" : `<code>${escapeHtml(item.id || item.log_id || "")}</code>`}
+            </div>
+            <p class="logs-timeline-item__message">${escapeHtml(getLogMessage(item))}</p>
+            <div class="logs-timeline-item__meta">${escapeHtml(formatMetaLine(item))}</div>
+            <details>
+              <summary>Raw JSON</summary>
+              <pre class="logs-timeline-item__json">${escapeHtml(JSON.stringify(item, null, 2))}</pre>
+            </details>
+          </div>
+        `;
+        return article;
+      }
+
       function buildLogsQuery(page) {
         const params = new URLSearchParams({ source: elements.logsSource.value, page: String(page), page_size: "50" });
         [
@@ -489,41 +570,29 @@ appStore.patch({ bootstrappedAt: Date.now() });
       }
 
       function renderLogsPage(payload) {
+        const items = (payload.items || []).filter((item) => matchesSearch(item, elements.logsSearch?.value || ""));
         elements.logsList.innerHTML = "";
-        elements.logsSummary.textContent = `共 ${payload.total} 筆，顯示第 ${payload.page} 頁。`;
+        elements.logsSummary.textContent = `共 ${payload.total} 筆，篩選後 ${items.length} 筆，顯示第 ${payload.page} 頁。`;
         elements.logsPageLabel.textContent = `第 ${payload.page} 頁`;
         elements.logsPrev.disabled = payload.page <= 1;
         elements.logsNext.disabled = !payload.has_next;
-        payload.items.forEach((item) => {
-          const card = document.createElement("article");
-          card.className = "log-item";
-          card.innerHTML = `
-            <header><strong>${escapeHtml(item.level || item.severity || "INFO")}</strong> · <code>${escapeHtml(item.ts || "-")}</code></header>
-            <div class="log-item__meta">${escapeHtml(item.project_id || "-")} / ${escapeHtml(item.run_id || "-")} / ${escapeHtml(item.node_id || "-")}</div>
-            <pre>${escapeHtml(JSON.stringify(item, null, 2))}</pre>
-          `;
-          elements.logsList.appendChild(card);
+        items.forEach((item) => {
+          elements.logsList.appendChild(createTimelineItem(item));
         });
-        if (!payload.items.length) {
-          elements.logsList.textContent = "查無資料";
+        if (!items.length) {
+          elements.logsList.innerHTML = '<p class="empty-context">目前條件查無 log。</p>';
         }
       }
 
       function renderEventsPage(payload) {
+        const items = (payload.items || []).filter((item) => matchesSearch(item, elements.eventsSearch?.value || ""));
         elements.eventsList.innerHTML = "";
-        elements.eventsSummary.textContent = `共 ${payload.total} 筆，顯示第 ${payload.page} 頁。`;
+        elements.eventsSummary.textContent = `共 ${payload.total} 筆，篩選後 ${items.length} 筆，顯示第 ${payload.page} 頁。`;
         elements.eventsPageLabel.textContent = `第 ${payload.page} 頁`;
         elements.eventsPrev.disabled = payload.page <= 1;
         elements.eventsNext.disabled = !payload.has_next;
-        payload.items.forEach((item) => {
-          const card = document.createElement("article");
-          card.className = "log-item";
-          const eventType = item.event || item.type || "unknown";
-          card.innerHTML = `
-            <header><strong>${escapeHtml(eventType)}</strong> · <code>${escapeHtml(item.ts || "-")}</code></header>
-            <div class="log-item__meta">${escapeHtml(item.project_id || "-")} / ${escapeHtml(item.run_id || "-")} / ${escapeHtml(item.node_id || "-")}</div>
-            <pre>${escapeHtml(JSON.stringify(item, null, 2))}</pre>
-          `;
+        items.forEach((item) => {
+          const card = createTimelineItem(item, { isEvent: true });
           const drilldown = document.createElement("div");
           drilldown.className = "log-item__actions";
           ["run_id", "node_id", "hook_id", "schedule_id", "job_id"].forEach((key) => {
@@ -543,11 +612,11 @@ appStore.patch({ bootstrappedAt: Date.now() });
             });
             drilldown.appendChild(button);
           });
-          card.appendChild(drilldown);
+          card.querySelector(".logs-timeline-item__content")?.appendChild(drilldown);
           elements.eventsList.appendChild(card);
         });
-        if (!payload.items.length) {
-          elements.eventsList.textContent = "查無資料";
+        if (!items.length) {
+          elements.eventsList.innerHTML = '<p class="empty-context">目前條件查無 event。</p>';
         }
       }
 
@@ -555,6 +624,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
         const payload = await services.admin.getLogs(buildLogsQuery(page));
         state.logsPage.logsPage = payload.page;
         state.logsPage.logsHasNext = payload.has_next;
+        state.logsPage.latestLogsPayload = payload;
         renderLogsPage(payload);
       }
 
@@ -562,7 +632,25 @@ appStore.patch({ bootstrappedAt: Date.now() });
         const payload = await services.admin.getEvents(buildEventsQuery(page));
         state.logsPage.eventsPage = payload.page;
         state.logsPage.eventsHasNext = payload.has_next;
+        state.logsPage.latestEventsPayload = payload;
         renderEventsPage(payload);
+      }
+
+      function downloadLogsPayload() {
+        const payload = state.logsPage.latestLogsPayload;
+        if (!payload) {
+          showToast("目前沒有可下載的 Logs 結果。", 8000, "warning");
+          return;
+        }
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = `amon-logs-page-${payload.page || 1}.json`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(url);
       }
 
       async function loadLogsEventsPage() {
@@ -572,9 +660,10 @@ appStore.patch({ bootstrappedAt: Date.now() });
         if (!elements.eventsFilterProject.value && state.projectId) {
           elements.eventsFilterProject.value = state.projectId;
         }
+        setLogsEventsPanel("logs");
+        setSeverityChipActive(elements.logsFilterSeverity.value || "");
         await Promise.all([loadLogsPage(1), loadEventsPage(1)]);
       }
-
       async function loadToolsSkillsPage() {
         const toolsPayload = await services.admin.getToolsCatalog(state.projectId);
         const skillsPayload = await services.admin.getSkillsCatalog(state.projectId);
@@ -1834,6 +1923,31 @@ appStore.patch({ bootstrappedAt: Date.now() });
         } catch (error) {
           showToast(`技能預覽失敗：${error.message}`);
         }
+      });
+
+      elements.logsTabLogs?.addEventListener("click", () => setLogsEventsPanel("logs"));
+      elements.logsTabEvents?.addEventListener("click", () => setLogsEventsPanel("events"));
+
+      elements.logsSeverityChips?.addEventListener("click", (event) => {
+        const chip = event.target.closest(".chip[data-severity]");
+        if (!chip) return;
+        const severity = String(chip.dataset.severity || "");
+        elements.logsFilterSeverity.value = severity;
+        setSeverityChipActive(severity);
+        void loadLogsPage(1);
+      });
+
+      elements.logsRefresh?.addEventListener("click", () => void loadLogsPage(1));
+      elements.eventsRefresh?.addEventListener("click", () => void loadEventsPage(1));
+      elements.logsPrev?.addEventListener("click", () => void loadLogsPage(Math.max(1, state.logsPage.logsPage - 1)));
+      elements.logsNext?.addEventListener("click", () => void loadLogsPage(state.logsPage.logsPage + 1));
+      elements.eventsPrev?.addEventListener("click", () => void loadEventsPage(Math.max(1, state.logsPage.eventsPage - 1)));
+      elements.eventsNext?.addEventListener("click", () => void loadEventsPage(state.logsPage.eventsPage + 1));
+      elements.logsDownload?.addEventListener("click", downloadLogsPayload);
+      elements.logsSearch?.addEventListener("input", () => renderLogsPage(state.logsPage.latestLogsPayload || { items: [], total: 0, page: 1, has_next: false }));
+      elements.eventsSearch?.addEventListener("input", () => renderEventsPage(state.logsPage.latestEventsPayload || { items: [], total: 0, page: 1, has_next: false }));
+      elements.logsFilterSeverity?.addEventListener("change", () => {
+        setSeverityChipActive(elements.logsFilterSeverity.value || "");
       });
 
       async function hydrateSelectedProject() {
