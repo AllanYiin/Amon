@@ -148,11 +148,28 @@ class ChatSessionStoreTests(unittest.TestCase):
                 {"role": "assistant", "content": "好的，請提供主題。"},
             ],
         )
+        self.assertIn("[核心任務]", prompt)
+        self.assertIn("幫我整理簡報", prompt)
         self.assertIn("[歷史對話]", prompt)
         self.assertIn("使用者: 幫我整理簡報", prompt)
         self.assertIn("Amon: 好的，請提供主題。", prompt)
         self.assertIn("[目前訊息]", prompt)
         self.assertIn("使用者: 請繼續", prompt)
+
+    def test_build_prompt_with_history_trims_long_assistant_turn(self) -> None:
+        long_assistant = "A" * 1200
+        prompt = build_prompt_with_history(
+            "不用，桌面版即可",
+            [
+                {"role": "user", "content": "請協助我開發一個俄羅斯方塊單頁網頁應用程式"},
+                {"role": "assistant", "content": long_assistant},
+            ],
+        )
+
+        self.assertIn("[核心任務]", prompt)
+        self.assertIn("俄羅斯方塊單頁網頁應用程式", prompt)
+        self.assertIn("Amon: " + ("A" * 200), prompt)
+        self.assertNotIn("A" * 1000, prompt)
 
 
 if __name__ == "__main__":
