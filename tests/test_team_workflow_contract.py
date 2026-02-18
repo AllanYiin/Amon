@@ -20,6 +20,11 @@ class TeamWorkflowContractTests(unittest.TestCase):
         self.assertIn("pm_log_bootstrap", nodes)
         self.assertEqual(nodes["pm_log_bootstrap"]["output_path"], "docs/ProjectManager.md")
 
+        task_map = nodes["tasks_map"]
+        sub_nodes = {node["id"]: node for node in task_map["subgraph"]["nodes"]}
+        self.assertIn("role_factory_request", sub_nodes)
+        self.assertEqual(sub_nodes["role_factory_request"]["output_path"], "docs/tasks/${task_task_id}/role_factory.md")
+
         synthesis_prompt = nodes["synthesis"]["prompt"]
         self.assertIn("# TeamworksGPT", synthesis_prompt)
         self.assertIn("Step0~Step6", synthesis_prompt)

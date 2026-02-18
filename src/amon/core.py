@@ -1011,22 +1011,30 @@ class AmonCore:
                     "subgraph": {
                         "nodes": [
                             {
+                                "id": "role_factory_request",
+                                "type": "agent_task",
+                                "prompt": (
+                                    "你是角色工廠，請為下列子任務產生可執行的人設 JSON。"
+                                    "請至少輸出欄位：name、role、focus、instructions、success_metrics。"
+                                    "\n\n子任務：${task_title}\n${task_description}\n"
+                                    "候選角色：${task_role}\n"
+                                    "若需要反方觀點，請在 instructions 中加入。"
+                                ),
+                                "output_path": "docs/tasks/${task_task_id}/role_factory.md",
+                                "store_output": "role_factory_payload",
+                            },
+                            {
                                 "id": "persona_file",
                                 "type": "write_file",
                                 "path": "docs/tasks/${task_task_id}/persona.json",
-                                "content": (
-                                    "{\n"
-                                    "  \"task_id\": \"${task_task_id}\",\n"
-                                    "  \"title\": \"${task_title}\",\n"
-                                    "  \"role\": \"${task_role}\"\n"
-                                    "}\n"
-                                ),
+                                "content": "${role_factory_payload}",
                             },
                             {
                                 "id": "member_plan",
                                 "type": "agent_task",
                                 "prompt": (
-                                    "你是 ${task_role}，請針對任務提出執行方案。"
+                                    "你是 ${task_role}，請依照角色工廠提供的人設提出執行方案。"
+                                    "人設如下：\n${role_factory_payload}\n"
                                     "請依 Teamworks 流程，於輸出中明確區分：觀察、判斷理由、資料來源引述、成果與評估指標。"
                                     "\n\n任務：${task_title}\n${task_description}\n"
                                 ),
@@ -1087,6 +1095,7 @@ class AmonCore:
                             },
                         ],
                         "edges": [
+                            {"from": "role_factory_request", "to": "persona_file"},
                             {"from": "persona_file", "to": "member_plan"},
                             {"from": "member_plan", "to": "member_execute"},
                             {"from": "member_execute", "to": "audit"},
