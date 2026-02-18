@@ -216,65 +216,97 @@
           <section class="main-card card bill-page" id="bill-page" hidden>
             <header class="bill-page__header">
               <div>
-                <h2>Bill</h2>
-                <p class="subtitle">顯示今日、專案累計、breakdown、automation/interactive 與 budgets。</p>
+                <h2>Billing &amp; Usage</h2>
+                <p class="subtitle">費用與用量概覽（依既有 Billing API 即時更新）。</p>
               </div>
               <button type="button" class="btn btn--secondary secondary-btn" id="bill-refresh">重新整理</button>
             </header>
 
             <div class="bill-kpis">
-              <article class="context-shell-card card card--kpi">
-                <p class="context-shell-card__label">今日費用 / 用量</p>
+              <article class="bill-kpi-card card">
+                <p class="bill-kpi-card__label">今日費用 / 用量</p>
                 <strong id="bill-today">--</strong>
+                <small>Today</small>
               </article>
-              <article class="context-shell-card card card--kpi">
-                <p class="context-shell-card__label">專案累計費用 / 用量</p>
+              <article class="bill-kpi-card card">
+                <p class="bill-kpi-card__label">專案累計費用 / 用量</p>
                 <strong id="bill-project-total">--</strong>
+                <small>Current cycle</small>
               </article>
-              <article class="context-shell-card card card--kpi">
-                <p class="context-shell-card__label">automation / interactive</p>
+              <article class="bill-kpi-card card">
+                <p class="bill-kpi-card__label">automation / interactive</p>
                 <strong id="bill-mode-summary">--</strong>
+                <small>Mode split</small>
               </article>
-              <article class="context-shell-card card card--kpi">
-                <p class="context-shell-card__label">目前 Run 費用</p>
+              <article class="bill-kpi-card card">
+                <p class="bill-kpi-card__label">目前 Run 費用</p>
                 <strong id="bill-current-run">--</strong>
+                <small>Current run</small>
               </article>
             </div>
 
-            <article class="config-card card">
-              <h3>每 Run 花費趨勢</h3>
-              <canvas id="bill-run-chart" height="140" aria-label="每 run 花費長條圖"></canvas>
+            <article class="bill-surface-card card bill-chart-card">
+              <header class="bill-section__header">
+                <h3>Usage History</h3>
+                <div class="segmented bill-range" role="tablist" aria-label="歷史區間">
+                  <button type="button" class="segmented__item is-active" id="bill-range-7d" aria-pressed="true">7D</button>
+                  <button type="button" class="segmented__item" id="bill-range-30d" aria-pressed="false">30D</button>
+                  <button type="button" class="segmented__item" id="bill-range-all" aria-pressed="false">All</button>
+                </div>
+              </header>
+              <div class="bill-chart-wrap">
+                <canvas id="bill-run-chart" height="180" aria-label="每 run 花費長條圖"></canvas>
+              </div>
             </article>
 
+            <section class="bill-surface-card card">
+              <header class="bill-section__header">
+                <h3>Cost by Model</h3>
+              </header>
+              <div id="bill-breakdown-model" class="bill-model-scroller" role="list"></div>
+            </section>
+
+            <section class="bill-surface-card card">
+              <header class="bill-section__header">
+                <h3>Recent Sessions</h3>
+              </header>
+              <div id="bill-recent-sessions" class="list-row-group"></div>
+            </section>
+
+            <section class="bill-surface-card card bill-cta-card">
+              <button type="button" class="btn btn--secondary secondary-btn" id="bill-download" disabled title="目前尚未提供下載 endpoint">下載帳單 CSV</button>
+            </section>
+
             <section class="bill-grid">
-              <article class="config-card card">
+              <article class="bill-surface-card card">
                 <h3>Budgets</h3>
-                <pre id="bill-budgets">尚未載入。</pre>
+                <div id="bill-budgets" class="bill-list-rows"></div>
               </article>
-              <article class="config-card card">
+              <article class="bill-surface-card card">
                 <h3>超限事件（budget_exceeded）</h3>
                 <ul id="bill-exceeded" class="logs-list list-row-group"></ul>
               </article>
             </section>
 
             <section class="bill-grid">
-              <article class="config-card card">
+              <article class="bill-surface-card card">
                 <h3>Breakdown：provider</h3>
-                <pre id="bill-breakdown-provider">尚未載入。</pre>
+                <div id="bill-breakdown-provider" class="bill-list-rows"></div>
               </article>
-              <article class="config-card card">
-                <h3>Breakdown：model</h3>
-                <pre id="bill-breakdown-model">尚未載入。</pre>
-              </article>
-              <article class="config-card card">
+              <article class="bill-surface-card card">
                 <h3>Breakdown：agent</h3>
-                <pre id="bill-breakdown-agent">尚未載入。</pre>
+                <div id="bill-breakdown-agent" class="bill-list-rows"></div>
               </article>
-              <article class="config-card card">
+              <article class="bill-surface-card card">
                 <h3>Breakdown：node</h3>
-                <pre id="bill-breakdown-node">尚未載入。</pre>
+                <div id="bill-breakdown-node" class="bill-list-rows"></div>
               </article>
             </section>
+
+            <details class="bill-raw-json card">
+              <summary>Raw JSON（進階）</summary>
+              <pre id="bill-raw-json">尚未載入。</pre>
+            </details>
           </section>
 
 
