@@ -784,6 +784,7 @@ class AmonCore:
             docs_dir.mkdir(parents=True, exist_ok=True)
             provider_name = config.get("amon", {}).get("provider", "openai")
             provider_cfg = config.get("providers", {}).get(provider_name, {})
+            continuation_context = self._collect_mnt_data_handover_context(project_path)
             graph = self._build_team_graph()
             graph_path = self._write_graph_resolved(
                 project_path,
@@ -795,6 +796,7 @@ class AmonCore:
                     "audit_force_approve": False,
                     "model": model or "",
                     "skill_names": skill_names or [],
+                    "continuation_context": continuation_context,
                 },
                 mode="team",
             )
@@ -811,6 +813,38 @@ class AmonCore:
                 }
             )
             return final_text
+
+    def _collect_mnt_data_handover_context(self, project_path: Path) -> str:
+        docs_dir = project_path / "docs"
+        if not docs_dir.exists():
+            return "未找到專案 docs 資料夾，視為首次執行。"
+
+        summary_lines: list[str] = [f"- docs（project: {project_path.name}）"]
+        key_files = [
+            docs_dir / "TODO.md",
+            docs_dir / "ProjectManager.md",
+            docs_dir / "final.md",
+        ]
+        try:
+            child_names = sorted(path.name for path in docs_dir.iterdir())[:12]
+        except OSError as exc:
+            self.logger.warning("掃描專案 docs 失敗：%s", exc)
+            return "掃描專案 docs 失敗，請在回覆中聲明無法接續既有文件。"
+        if child_names:
+            summary_lines.append(f"  - 目錄內容預覽：{', '.join(child_names)}")
+
+        for key_file in key_files:
+            if not key_file.exists() or not key_file.is_file():
+                continue
+            try:
+                preview = key_file.read_text(encoding="utf-8")[:300].replace("\n", " ")
+            except OSError:
+                preview = "（讀取失敗）"
+            summary_lines.append(f"  - {key_file.relative_to(project_path)}: {preview}")
+
+        if len(summary_lines) == 1:
+            summary_lines.append("  - 尚未找到 TODO.md / ProjectManager.md / final.md")
+        return "\n".join(summary_lines)
 
     def export_project(self, project_id: str, output_path: Path) -> Path:
         record = self.get_project(project_id)
@@ -911,12 +945,41 @@ class AmonCore:
         return {
             "nodes": [
                 {
+                    "id": "pm_todo",
+                    "type": "agent_task",
+                    "prompt": (
+                        "你是專案經理。請先輸出 TODO.md，拆解任務並標記初始狀態都為 [ ]。"
+                        "必須包含 Step0：檢查專案 docs 資料夾中的遺留文件是否可接續。"
+                        "請使用繁體中文 markdown。"
+                        "輸出格式第一行必須是『專案經理：』，第二行起列出 todo list。"
+                        "若需要等待角色工廠，請加上『(向角色工廠申請人設中)』。"
+                        "\n\n任務：${prompt}\n"
+                        "\n可接續資料摘要：\n${continuation_context}\n"
+                    ),
+                    "output_path": "docs/TODO.md",
+                    "store_output": "todo_markdown",
+                },
+                {
+                    "id": "pm_log_bootstrap",
+                    "type": "agent_task",
+                    "prompt": (
+                        "你是專案經理，請建立 ProjectManager.md 的啟動紀錄，"
+                        "內容要包含決策理由、任務分派策略與風險控管。"
+                        "輸出每段前請標註『專案經理：』。"
+                        "\n\n目前 TODO：\n${todo_markdown}\n"
+                        "\n任務：${prompt}\n"
+                    ),
+                    "output_path": "docs/ProjectManager.md",
+                },
+                {
                     "id": "pm_plan",
                     "type": "agent_task",
                     "prompt": (
                         "你是 PM，請根據任務拆解為 tasks.json。"
                         "輸出必須是 JSON，格式："
                         "{\"tasks\":[{\"task_id\":\"T1\",\"title\":\"...\",\"role\":\"...\",\"description\":\"...\"}]}。"
+                        "\n請依角色工廠規則決定任務類型：單一專業型、自我批評型（10位）、能力小組型（3位）。"
+                        "\n每個 task 請加上 role_assignment_reason 欄位。"
                         "\n\n任務：${prompt}\n"
                     ),
                     "output_path": "docs/team_plan_${run_id}.md",
@@ -936,22 +999,33 @@ class AmonCore:
                     "subgraph": {
                         "nodes": [
                             {
+                                "id": "role_factory_request",
+                                "type": "agent_task",
+                                "prompt": (
+                                    "你是角色工廠，請為下列子任務產生可執行的人設 JSON。"
+                                    "請至少輸出欄位：name、role、focus、instructions、success_metrics。"
+                                    "並在最前面加上一行『角色工廠：人設為...』再接 JSON。"
+                                    "\n\n子任務：${task_title}\n${task_description}\n"
+                                    "候選角色：${task_role}\n"
+                                    "若需要反方觀點，請在 instructions 中加入。"
+                                ),
+                                "output_path": "docs/tasks/${task_task_id}/role_factory.md",
+                                "store_output": "role_factory_payload",
+                            },
+                            {
                                 "id": "persona_file",
                                 "type": "write_file",
                                 "path": "docs/tasks/${task_task_id}/persona.json",
-                                "content": (
-                                    "{\n"
-                                    "  \"task_id\": \"${task_task_id}\",\n"
-                                    "  \"title\": \"${task_title}\",\n"
-                                    "  \"role\": \"${task_role}\"\n"
-                                    "}\n"
-                                ),
+                                "content": "${role_factory_payload}",
                             },
                             {
                                 "id": "member_plan",
                                 "type": "agent_task",
                                 "prompt": (
-                                    "你是 ${task_role}，請針對任務提出執行方案。"
+                                    "你是 ${task_role}，請依照角色工廠提供的人設提出執行方案。"
+                                    "輸出第一行請標註『專案成員（${task_role}）：』。"
+                                    "人設如下：\n${role_factory_payload}\n"
+                                    "請依 Teamworks 流程，於輸出中明確區分：觀察、判斷理由、資料來源引述、成果與評估指標。"
                                     "\n\n任務：${task_title}\n${task_description}\n"
                                 ),
                                 "output_path": "docs/tasks/${task_task_id}/plan.md",
@@ -962,6 +1036,8 @@ class AmonCore:
                                 "type": "agent_task",
                                 "prompt": (
                                     "請依照以下方案完成任務並輸出結果：\n${member_plan}\n\n"
+                                    "輸出檔案需符合：{任務名稱}_{專案成員角色}.md 的記錄精神，"
+                                    "且需包含可驗證成果。"
                                     "任務：${task_title}\n${task_description}\n"
                                 ),
                                 "output_path": "docs/tasks/${task_task_id}/result.md",
@@ -971,7 +1047,8 @@ class AmonCore:
                                 "id": "audit",
                                 "type": "agent_task",
                                 "prompt": (
-                                    "請審核以下結果，回覆是否 APPROVED，並給出原因與建議。"
+                                    "請審核以下結果，必須回覆是否 APPROVED。若為 REJECTED，"
+                                    "請提供具體未通過理由與補強建議。"
                                     "\n\n結果：\n${task_result}\n"
                                 ),
                                 "output_path": "docs/audits/${task_task_id}.md",
@@ -1009,6 +1086,7 @@ class AmonCore:
                             },
                         ],
                         "edges": [
+                            {"from": "role_factory_request", "to": "persona_file"},
                             {"from": "persona_file", "to": "member_plan"},
                             {"from": "member_plan", "to": "member_execute"},
                             {"from": "member_execute", "to": "audit"},
@@ -1026,19 +1104,72 @@ class AmonCore:
                     ),
                 },
                 {
+                    "id": "audit_committee_role_factory",
+                    "type": "agent_task",
+                    "prompt": (
+                        "你是角色工廠，請為最終稽核會建立 3 位稽核員人設，輸出 JSON。"
+                        "輸出開頭請標示『角色工廠：人設為...』。"
+                        "格式：{\"committee\":[{\"name\":\"...\",\"role\":\"...\",\"focus\":\"...\",\"instructions\":\"...\"}]}。"
+                        "請涵蓋品質、風險、可驗證性三種視角。\n\n任務：${prompt}\n"
+                    ),
+                    "output_path": "docs/audits/committee_roles.md",
+                    "store_output": "committee_roles",
+                },
+                {
+                    "id": "audit_committee_gate",
+                    "type": "agent_task",
+                    "prompt": (
+                        "你是稽核會，請審查全部任務是否皆可通過。"
+                        "輸出第一行請標註『稽核會：』。"
+                        "請只輸出 JSON：{\"status\":\"APPROVED_ALL|REJECTED\",\"reason\":\"...\",\"actions\":[\"...\"]}。"
+                        "\n\n稽核會人設：\n${committee_roles}\n"
+                        "\n任務摘要：\n${team_results_block}\n"
+                    ),
+                    "output_path": "docs/audits/committee_decision.md",
+                    "store_output": "committee_decision",
+                },
+                {
+                    "id": "audit_committee_condition",
+                    "type": "condition",
+                    "variable": "committee_decision",
+                    "contains": "APPROVED_ALL",
+                },
+                {
+                    "id": "final_rework_notice",
+                    "type": "agent_task",
+                    "prompt": (
+                        "你是 PM，稽核會尚未全數通過。請輸出退回補強通知，"
+                        "輸出第一行請標註『專案經理：任務分派為補強』。"
+                        "需列出未通過理由與下一輪補強步驟。"
+                        "\n\n稽核會決議：\n${committee_decision}\n"
+                        "\n任務摘要：\n${team_results_block}\n"
+                    ),
+                    "output_path": "docs/final.md",
+                },
+                {
                     "id": "synthesis",
                     "type": "agent_task",
                     "prompt": (
                         "你是 PM，請彙整所有任務結果與審核，產出最終總結。"
+                        "輸出中需使用具名段落（專案經理/角色工廠/專案成員/稽核會）。"
+                        "輸出開頭必須是 '# TeamworksGPT'，第二行要有"
+                        "'## 我務必依照以下的【角色定義】 以及【工作流程】來完成任務'。"
+                        "同時說明已如何遵守 Step0~Step6，並註明稽核會全員通過。"
                         "\n\n任務：${prompt}\n\n彙整：\n${team_results_block}\n"
                     ),
                     "output_path": "docs/final.md",
                 },
             ],
             "edges": [
+                {"from": "pm_todo", "to": "pm_log_bootstrap"},
+                {"from": "pm_log_bootstrap", "to": "pm_plan"},
                 {"from": "pm_plan", "to": "tasks_file"},
                 {"from": "tasks_file", "to": "tasks_map"},
-                {"from": "tasks_map", "to": "synthesis"},
+                {"from": "tasks_map", "to": "audit_committee_role_factory"},
+                {"from": "audit_committee_role_factory", "to": "audit_committee_gate"},
+                {"from": "audit_committee_gate", "to": "audit_committee_condition"},
+                {"from": "audit_committee_condition", "to": "synthesis", "when": True},
+                {"from": "audit_committee_condition", "to": "final_rework_notice", "when": False},
             ],
         }
 
