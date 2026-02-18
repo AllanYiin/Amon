@@ -1541,7 +1541,15 @@ appStore.patch({ bootstrappedAt: Date.now() });
           const status = normalizeNodeStatus(getNodeState(label).status);
           group.classList.add(`node-status--${status}`);
           group.style.cursor = "pointer";
+          group.setAttribute("role", "button");
+          group.setAttribute("tabindex", "0");
+          group.setAttribute("aria-label", `開啟 ${label} 節點詳細資訊`);
           group.addEventListener("click", () => openNodeDrawer(label));
+          group.addEventListener("keydown", (event) => {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            openNodeDrawer(label);
+          });
         });
       }
 
