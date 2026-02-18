@@ -2060,6 +2060,39 @@ body.is-resizing-context-panel {
   gap: 16px;
 }
 
+.tools-skills-surface {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-1);
+}
+
+.tools-skills-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: end;
+}
+
+.tools-skills-toolbar__search {
+  min-width: min(440px, 100%);
+}
+
+.tools-skills-toolbar__search input {
+  width: 100%;
+}
+
+.tools-skills-segment {
+  width: fit-content;
+}
+
+.tools-skills-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .tools-skills-page__header {
   display: flex;
   justify-content: space-between;
@@ -2075,25 +2108,46 @@ body.is-resizing-context-panel {
 
 .tool-card,
 .skill-card {
-  border: 1px solid var(--stroke);
-  border-radius: 12px;
-  padding: 12px;
+  border: 1px solid var(--c-border);
+  border-radius: 14px;
+  padding: 14px;
   background: var(--c-surface-1);
+  display: grid;
+  gap: 8px;
 }
 
 .tool-card header,
 .skill-card header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
+}
+
+.tool-card header::before,
+.skill-card header::before {
+  content: "build";
+  font-family: "Material Symbols Rounded", sans-serif;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--c-primary);
+  margin-top: 2px;
+}
+
+.skill-card header::before {
+  content: "school";
 }
 
 .tool-card header p,
 .skill-card p {
   margin: 4px 0 0;
   font-size: 12px;
-  color: var(--muted);
+  color: var(--c-text-muted);
+}
+
+.tool-card strong,
+.skill-card strong {
+  font-size: 14px;
 }
 
 .tool-card details {
@@ -2117,7 +2171,7 @@ body.is-resizing-context-panel {
 .tool-card__actions {
   display: flex;
   gap: 8px;
-  margin-top: 10px;
+  margin-top: 6px;
   flex-wrap: wrap;
 }
 
@@ -2175,19 +2229,23 @@ body.is-resizing-context-panel {
 }
 
 .config-card {
-  border: 1px solid var(--stroke);
-  border-radius: 12px;
-  padding: 12px;
+  border: 1px solid var(--c-border);
+  border-radius: 14px;
+  padding: 14px;
   background: var(--c-surface-1);
+  display: grid;
+  gap: 8px;
 }
 
 .config-card pre {
   margin: 8px 0 0;
   background: var(--c-code-bg);
-  color: var(--c-border);
+  color: var(--c-code-text);
   border-radius: 10px;
   padding: 10px;
-  font-size: 11px;
+  font-size: 12px;
+  font-family: var(--font-family-mono);
+  line-height: 1.55;
   max-height: 280px;
   overflow: auto;
 }
@@ -2211,6 +2269,13 @@ body.is-resizing-context-panel {
   text-align: left;
   vertical-align: top;
   font-size: 13px;
+}
+
+.config-table td code,
+.config-table th code {
+  font-family: var(--font-family-mono);
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .config-effective-summary {
@@ -3004,18 +3069,123 @@ body.is-resizing-context-panel {
 
 .docs-filter {
   width: 100%;
-  margin: 8px 0;
+  margin: 8px 0 10px;
   border: 1px solid var(--c-border-strong);
   border-radius: 8px;
   padding: 8px 10px;
 }
 
+.docs-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.docs-tree,
+.docs-preview {
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-xl);
+  background: var(--c-surface-1);
+  padding: 12px;
+}
+
+.docs-tree {
+  display: flex;
+  flex-direction: column;
+  min-height: 420px;
+}
+
+.docs-tree__meta {
+  color: var(--c-text-muted);
+  font-size: 12px;
+}
+
+.docs-tree__viewport,
+.docs-preview__content {
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-lg);
+  background: var(--c-surface-2);
+  overflow: auto;
+  scrollbar-width: thin;
+}
+
+.docs-tree__viewport {
+  flex: 1;
+  min-height: 280px;
+  padding: 8px;
+}
+
+.docs-preview {
+  display: grid;
+  grid-template-rows: auto minmax(300px, 1fr);
+  gap: 10px;
+}
+
+.docs-preview__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.docs-preview__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.docs-preview__meta {
+  margin-top: 4px;
+  color: var(--c-text-muted);
+  font-size: 12px;
+}
+
+.docs-row {
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--c-text);
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+}
+
+.docs-row--doc::before,
+.docs-row--run::before,
+.docs-row--task::before,
+.docs-row--node::before {
+  font-family: "Material Symbols Rounded", sans-serif;
+  margin-right: 8px;
+  font-size: 18px;
+  color: var(--c-text-muted);
+}
+
+.docs-row--doc::before { content: "description"; }
+.docs-row--run::before { content: "play_circle"; }
+.docs-row--task::before { content: "checklist"; }
+.docs-row--node::before { content: "account_tree"; }
+
+.docs-row--doc:hover,
+.docs-row.is-active {
+  border-color: var(--c-border-strong);
+  background: color-mix(in srgb, var(--c-primary) 10%, var(--c-surface-1));
+}
+
 .docs-preview__content pre {
   background: var(--c-code-bg);
-  color: var(--c-border);
+  color: var(--c-code-text);
   padding: 12px;
-  border-radius: 8px;
+  border-radius: 10px;
+  border: 1px solid var(--c-border);
   overflow-x: auto;
+  font-family: var(--font-family-mono);
+}
+
+.docs-preview__content pre code,
+.artifact-preview-modal__body pre code {
+  font-family: var(--font-family-mono);
 }
 
 .graph-preview {
@@ -3082,6 +3252,10 @@ body.is-resizing-context-panel {
 
   .ui-shell.is-context-drawer-open .context-panel {
     transform: translateX(0);
+  }
+
+  .docs-layout {
+    grid-template-columns: 1fr;
   }
 }
 

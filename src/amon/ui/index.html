@@ -610,6 +610,26 @@
               <button type="button" class="btn btn--secondary secondary-btn" id="tools-skills-refresh">重新整理</button>
             </header>
 
+            <section class="tools-skills-surface card" aria-label="工具與技能篩選">
+              <div class="tools-skills-toolbar">
+                <label class="field-label tools-skills-toolbar__search">
+                  搜尋
+                  <input type="search" placeholder="搜尋工具名稱、技能說明（僅 UI）" />
+                </label>
+                <div class="segmented tools-skills-segment" role="tablist" aria-label="顯示模式">
+                  <button type="button" class="segmented__item is-active" aria-pressed="true">In-use</button>
+                  <button type="button" class="segmented__item" aria-pressed="false">Library</button>
+                </div>
+              </div>
+              <div class="tools-skills-chips" aria-label="分類">
+                <button type="button" class="chip is-active">All</button>
+                <button type="button" class="chip">MCP</button>
+                <button type="button" class="chip">System</button>
+                <button type="button" class="chip">Automation</button>
+                <button type="button" class="chip">Custom</button>
+              </div>
+            </section>
+
             <section class="tools-section">
               <h3>Tools</h3>
               <div id="tools-list" class="tools-list list-row-group"></div>
