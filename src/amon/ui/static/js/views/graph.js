@@ -25,10 +25,29 @@ export const GRAPH_VIEW = {
       local.graph = graph;
       codeEl.textContent = payload?.graph_mermaid || "";
       listEl.innerHTML = "";
-      (graph?.nodes || []).forEach((node) => {
+      const nodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
+      if (!nodes.length) {
+        listEl.innerHTML = '<li><p class="graph-empty-state">目前沒有可顯示的節點資料。</p></li>';
+      }
+      nodes.forEach((node) => {
+        const rawStatus = String(node?.status || node?.state || "pending").toLowerCase();
+        const normalizedStatus = ["running", "succeeded", "failed"].includes(rawStatus) ? rawStatus : "pending";
+        const progressValue = Number.isFinite(Number(node?.progress)) ? Math.max(0, Math.min(100, Number(node.progress))) : null;
+        const progressMeta = progressValue === null ? "" : `<span>${Math.round(progressValue)}%</span>`;
+        const progressBlock = progressValue === null
+          ? ""
+          : `<div class="graph-node-item__progress" aria-label="Node progress"><span style="--graph-progress:${progressValue}%;"></span></div>`;
         const li = document.createElement("li");
         li.className = "graph-node-item";
-        li.innerHTML = `<button type="button" class="graph-node-item__button" data-node-id="${node.id}">${node.id}</button>`;
+        li.innerHTML = `
+          <button type="button" class="graph-node-item__button list-row" data-node-id="${node.id}">
+            <span class="graph-node-item__content">
+              <strong class="graph-node-item__title">${node.id || "(unknown node)"}</strong>
+              <span class="graph-node-item__meta">${progressMeta}${progressBlock}</span>
+            </span>
+            <span class="node-status node-status--${normalizedStatus}">${normalizedStatus}</span>
+          </button>
+        `;
         listEl.appendChild(li);
       });
 
@@ -44,7 +63,7 @@ export const GRAPH_VIEW = {
           local.panZoom = window.svgPanZoom(svgEl, { controlIconsEnabled: true, fit: true, center: true });
         }
       } else {
-        previewEl.innerHTML = '<p class="empty-context">此 Run 尚無流程圖資料。</p>';
+        previewEl.innerHTML = '<p class="graph-empty-state">此 Run 尚無流程圖資料。</p>';
       }
     }
 
