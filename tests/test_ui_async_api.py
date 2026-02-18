@@ -232,12 +232,22 @@ class UIAsyncAPITests(unittest.TestCase):
                 project = core.create_project("追問延續測試")
 
                 observed_run_ids: list[str | None] = []
+                observed_histories: list[list[dict[str, str]] | None] = []
                 call_count = 0
 
-                def fake_run_single_stream(prompt, project_path, model=None, stream_handler=None, skill_names=None, run_id=None):
+                def fake_run_single_stream(
+                    prompt,
+                    project_path,
+                    model=None,
+                    stream_handler=None,
+                    skill_names=None,
+                    run_id=None,
+                    conversation_history=None,
+                ):
                     nonlocal call_count
                     call_count += 1
                     observed_run_ids.append(run_id)
+                    observed_histories.append(conversation_history)
                     if stream_handler:
                         stream_handler("token")
                     response = "好的，請問你要先做前端還是後端？" if call_count == 1 else "了解，我會接續上一段任務繼續完成。"
@@ -307,6 +317,14 @@ class UIAsyncAPITests(unittest.TestCase):
                     self.assertEqual(done_payload_2["run_id"], "run-followup-001")
 
                 self.assertEqual(observed_run_ids, [None, "run-followup-001"])
+                self.assertEqual(observed_histories[0], [])
+                self.assertEqual(
+                    observed_histories[1],
+                    [
+                        {"role": "user", "content": "請幫我建立完整功能"},
+                        {"role": "assistant", "content": "好的，請問你要先做前端還是後端？"},
+                    ],
+                )
             finally:
                 if server:
                     server.shutdown()

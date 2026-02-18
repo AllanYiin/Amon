@@ -199,7 +199,11 @@ def build_prompt_with_history(message: str, dialogue: list[dict[str, str]] | Non
     if not history_lines and not anchor_task:
         return cleaned_message
 
-    blocks: list[str] = ["請根據以下歷史對話延續回覆，保持脈絡一致，不要改題。"]
+    blocks: list[str] = [
+        "請根據以下歷史對話延續回覆，保持脈絡一致，不要改題。"
+        "若目前訊息是對上一輪提問的簡短回答（例如選項、片語或關鍵字），"
+        "請直接沿用既有任務往下執行，不要改成其他主題，也不要再次要求使用者重複確認。"
+    ]
     if anchor_task:
         blocks.append("[核心任務]\n" + anchor_task)
     if history_lines:

@@ -156,6 +156,7 @@ class ChatSessionStoreTests(unittest.TestCase):
         self.assertIn("Amon: 好的，請提供主題。", prompt)
         self.assertIn("[目前訊息]", prompt)
         self.assertIn("使用者: 請繼續", prompt)
+        self.assertIn("請直接沿用既有任務往下執行", prompt)
 
     def test_build_prompt_with_history_trims_long_assistant_turn(self) -> None:
         long_assistant = "A" * 1200

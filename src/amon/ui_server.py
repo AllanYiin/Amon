@@ -1743,6 +1743,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         project_path=self.core.get_project_path(project_id),
                         stream_handler=stream_handler,
                         run_id=continued_run_id,
+                        conversation_history=history,
                     )
                     run_id = result.run_id
                 elif execution_mode == "self_critique":
