@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from typing import Any, Callable, Iterable, Protocol
 
 from amon.config import ConfigLoader
@@ -22,54 +21,20 @@ class LLMClient(Protocol):
 logger = logging.getLogger(__name__)
 
 
-TASK_INTENT_KEYWORDS = (
-    "請",
-    "幫我",
-    "協助",
-    "處理",
-    "完成",
-    "製作",
-    "整理",
-    "規劃",
-    "建立",
-    "產生",
-    "撰寫",
-    "設計",
-    "分析",
-    "修正",
-)
-
-PROFESSIONAL_WRITING_KEYWORDS = (
-    "技術文章",
-    "專業文件",
-    "白皮書",
-    "研究",
-    "報告",
-    "分析文",
-    "比較",
-)
-
-TEAM_WRITING_KEYWORDS = (
-    "研究報告",
-    "白皮書",
-    "論文",
-    "研究計畫",
-    "實驗設計",
-)
-
-
 def should_bootstrap_project(
     project_id: str | None,
     router_type: str,
     message: str = "",
     *,
     is_slash_command: bool = False,
+    llm_client: LLMClient | None = None,
+    model: str | None = None,
 ) -> bool:
     if project_id:
         return False
     if router_type in {"command_plan", "graph_patch_plan"}:
         return True
-    if is_task_intent_message(message):
+    if is_task_intent_message(message, project_id=project_id, llm_client=llm_client, model=model):
         return True
     return is_slash_command
 
@@ -117,23 +82,7 @@ def summarize_task_message(message: str) -> str:
     normalized = " ".join(message.strip().split())
     if not normalized:
         return ""
-
-    stripped = normalized
-    for prefix in ("請幫我", "請協助", "協助", "幫我", "請", "麻煩", "可以幫我"):
-        if stripped.startswith(prefix):
-            stripped = stripped[len(prefix) :].strip()
-            break
-
-    compact = re.sub(r"\s+", "", stripped)
-    compare_match = re.search(r"比較([A-Za-z0-9_-]+)與([A-Za-z0-9_-]+)", compact, flags=re.IGNORECASE)
-    if compare_match:
-        left = compare_match.group(1)
-        right = compare_match.group(2)
-        action = "撰寫" if ("撰寫" in compact or "文章" in compact) else "比較"
-        suffix = "技術文章" if ("技術文章" in compact or "文章" in compact) else "比較"
-        return f"{action}{left}與{right}{suffix}"
-
-    return stripped
+    return normalized
 
 
 def bootstrap_project_if_needed(
@@ -144,11 +93,27 @@ def bootstrap_project_if_needed(
     router_type: str,
     build_plan_from_message: PlanBuilder,
     is_slash_command: bool = False,
+    llm_client: LLMClient | None = None,
+    model: str | None = None,
 ) -> ProjectRecord | None:
-    if not should_bootstrap_project(project_id, router_type, message, is_slash_command=is_slash_command):
+    if not should_bootstrap_project(
+        project_id,
+        router_type,
+        message,
+        is_slash_command=is_slash_command,
+        llm_client=llm_client,
+        model=model,
+    ):
         return None
     plan_type = router_type if router_type in {"command_plan", "graph_patch_plan"} else "command_plan"
-    name = build_project_name(message, plan_type, build_plan_from_message, project_id=project_id)
+    name = build_project_name(
+        message,
+        plan_type,
+        build_plan_from_message,
+        project_id=project_id,
+        llm_client=llm_client,
+        model=model,
+    )
     return core.create_project(name)
 
 
@@ -183,17 +148,44 @@ def _summarize_project_name_with_llm(
     return ""
 
 
-def is_task_intent_message(message: str) -> bool:
+def is_task_intent_message(
+    message: str,
+    *,
+    project_id: str | None = None,
+    llm_client: LLMClient | None = None,
+    model: str | None = None,
+) -> bool:
     normalized = " ".join(message.split())
     if not normalized:
         return False
-    lowered = normalized.lower()
-    if lowered in {"hi", "hello", "哈囉", "你好", "早安", "晚安"}:
-        return False
-    return any(keyword in normalized for keyword in TASK_INTENT_KEYWORDS)
+    try:
+        selected_model = model
+        client = llm_client
+        if client is None:
+            client, selected_model = _build_default_client(project_id=project_id, model=model)
+        messages = [
+            {"role": "system", "content": _task_intent_system_prompt()},
+            {
+                "role": "user",
+                "content": json.dumps({"message": normalized, "output_schema": {"is_task_intent": "boolean"}}, ensure_ascii=False),
+            },
+        ]
+        raw = _collect_stream(client, messages, selected_model)
+        return _parse_task_intent(raw)
+    except (ProviderError, OSError, ValueError, json.JSONDecodeError) as exc:
+        logger.warning("LLM 任務意圖判斷失敗，改用預設 False：%s", exc)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("LLM 任務意圖判斷未預期錯誤：%s", exc, exc_info=True)
+    return False
 
 
-def choose_execution_mode(message: str) -> str:
+def choose_execution_mode(
+    message: str,
+    *,
+    project_id: str | None = None,
+    llm_client: LLMClient | None = None,
+    model: str | None = None,
+) -> str:
     """Return suggested execution mode for chat tasks.
 
     Professional writing tasks should be at least self_critique; research-scale
@@ -203,11 +195,26 @@ def choose_execution_mode(message: str) -> str:
     normalized = " ".join(message.split())
     if not normalized:
         return "single"
-    compact_lower = "".join(normalized.lower().split())
-    if any(keyword in compact_lower for keyword in TEAM_WRITING_KEYWORDS):
-        return "team"
-    if any(keyword in normalized for keyword in PROFESSIONAL_WRITING_KEYWORDS):
-        return "self_critique"
+    try:
+        selected_model = model
+        client = llm_client
+        if client is None:
+            client, selected_model = _build_default_client(project_id=project_id, model=model)
+        messages = [
+            {"role": "system", "content": _execution_mode_system_prompt()},
+            {
+                "role": "user",
+                "content": json.dumps({"message": normalized, "allowed_modes": ["single", "self_critique", "team"]}, ensure_ascii=False),
+            },
+        ]
+        raw = _collect_stream(client, messages, selected_model)
+        mode = _parse_execution_mode(raw)
+        if mode in {"single", "self_critique", "team"}:
+            return mode
+    except (ProviderError, OSError, ValueError, json.JSONDecodeError) as exc:
+        logger.warning("LLM execution mode 判斷失敗，改用預設 single：%s", exc)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("LLM execution mode 未預期錯誤：%s", exc, exc_info=True)
     return "single"
 
 
@@ -265,67 +272,7 @@ def _normalize_project_name(name: str) -> str:
     cleaned = " ".join(name.split()).strip()
     if not cleaned:
         return "未命名任務"
-    has_cjk = any(_is_cjk(char) for char in cleaned)
-    if has_cjk:
-        result = _compress_cjk_name(cleaned)
-        while result.endswith(("的", "了", "與", "和")):
-            result = result[:-1]
-        return result or "新任務"
-
-    result = _compress_english_name(cleaned)
-    return result or "new task"
-
-
-def _compress_cjk_name(text: str) -> str:
-    compact = re.sub(r"\s+", "", text)
-    compact = re.sub(r"^(請幫我|請協助|幫我|協助|請|麻煩|可以幫我)", "", compact)
-    compact = re.sub(r"(嗎|呢|吧)$", "", compact)
-    action_match = re.match(r"(開發|建立|製作|撰寫|整理|規劃|設計|分析|修正|產生|完成)(.+)", compact)
-    if action_match:
-        action, subject = action_match.groups()
-        subject = re.sub(r"^(一個|一份|一套|一篇)", "", subject)
-        subject = re.sub(r"(並|而且|以及|且).*$", "", subject)
-        candidate = f"{action}{subject}"
-        if _cjk_length(candidate) <= 10:
-            return candidate.strip("-_ ")
-
-    result_chars: list[str] = []
-    cjk_count = 0
-    for char in compact:
-        if _is_cjk(char):
-            if cjk_count >= 10:
-                break
-            cjk_count += 1
-            result_chars.append(char)
-            continue
-        if char.isalnum() and cjk_count < 10:
-            result_chars.append(char)
-    return "".join(result_chars).strip("-_ ")
-
-
-def _compress_english_name(text: str) -> str:
-    words = text.split()
-    if len(words) <= 5:
-        return " ".join(words).strip()
-
-    stop_words = {"please", "kindly", "the", "a", "an", "to", "for", "of", "and", "with", "on", "in"}
-    meaningful: list[str] = []
-    for word in words:
-        plain = re.sub(r"[^A-Za-z0-9_-]", "", word)
-        if not plain:
-            continue
-        if plain.lower() in stop_words and meaningful:
-            continue
-        meaningful.append(plain)
-        if len(meaningful) == 5:
-            break
-    if meaningful:
-        return " ".join(meaningful).strip()
-    return " ".join(words[:5]).strip()
-
-
-def _cjk_length(text: str) -> int:
-    return sum(1 for char in text if _is_cjk(char))
+    return cleaned
 
 
 def _build_default_client(project_id: str | None, model: str | None) -> tuple[LLMClient, str | None]:
@@ -376,10 +323,38 @@ def _project_name_system_prompt() -> str:
     )
 
 
-def _is_cjk(char: str) -> bool:
-    code = ord(char)
+def _task_intent_system_prompt() -> str:
     return (
-        0x4E00 <= code <= 0x9FFF
-        or 0x3400 <= code <= 0x4DBF
-        or 0xF900 <= code <= 0xFAFF
+        "你是任務意圖分類器。"
+        "請判斷使用者訊息是否明確要求系統執行任務，而非單純寒暄或閒聊。"
+        "只能輸出 JSON：{\"is_task_intent\": true|false}，不得輸出其他文字。"
     )
+
+
+def _execution_mode_system_prompt() -> str:
+    return (
+        "你是執行模式路由器。"
+        "請根據使用者訊息判斷最適合的 execution mode。"
+        "只允許輸出 JSON，格式為 {\"mode\":\"single|self_critique|team\"}。"
+        "不得輸出額外文字。"
+    )
+
+
+def _parse_task_intent(raw_text: str) -> bool:
+    cleaned = _strip_code_fences(raw_text)
+    if not cleaned:
+        return False
+    payload = json.loads(cleaned)
+    if not isinstance(payload, dict):
+        return False
+    return bool(payload.get("is_task_intent"))
+
+
+def _parse_execution_mode(raw_text: str) -> str:
+    cleaned = _strip_code_fences(raw_text)
+    if not cleaned:
+        return ""
+    payload = json.loads(cleaned)
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("mode") or "").strip().lower()

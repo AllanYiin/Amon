@@ -18,16 +18,25 @@ from amon.chat.project_bootstrap import (
 
 
 class ProjectBootstrapTests(unittest.TestCase):
+    class _MockLLM:
+        def __init__(self, payload: str):
+            self.payload = payload
+
+        def generate_stream(self, messages: list[dict[str, str]], model: str | None = None):
+            _ = (messages, model)
+            yield self.payload
+
     def test_should_bootstrap_when_task_intent_without_project(self) -> None:
         should_bootstrap = should_bootstrap_project(
             None,
             "chat_response",
             "請幫我整理這份影片企劃並輸出重點",
+            llm_client=self._MockLLM('{"is_task_intent":true}'),
         )
         self.assertTrue(should_bootstrap)
 
     def test_should_not_bootstrap_for_greeting(self) -> None:
-        self.assertFalse(is_task_intent_message("你好"))
+        self.assertFalse(is_task_intent_message("你好", llm_client=self._MockLLM('{"is_task_intent":false}')))
 
     def test_build_project_name_falls_back_to_message_snippet_when_parse_failed(self) -> None:
         def _raise(_: str, __: str) -> tuple[str, dict]:
@@ -35,9 +44,9 @@ class ProjectBootstrapTests(unittest.TestCase):
 
         name = build_project_name("請幫我整理出 20 頁以上的投影片", "command_plan", _raise)
 
-        self.assertEqual(name, "整理出20頁以上的投影片")
+        self.assertEqual(name, "請幫我整理出 20 頁以上的投影片")
 
-    def test_build_project_name_summarizes_comparison_article_prompt(self) -> None:
+    def test_build_project_name_prefers_llm_summary_for_comparison_article_prompt(self) -> None:
         def _raise(_: str, __: str) -> tuple[str, dict]:
             raise ValueError("無法解析")
 
@@ -45,12 +54,13 @@ class ProjectBootstrapTests(unittest.TestCase):
             "協助撰寫比較OpenClaw與Manus在記憶機制以及多agent任務同步機制比較的技術文章",
             "command_plan",
             _raise,
+            llm_client=self._MockLLM('{"name":"撰寫OpenClaw與Manus技術文章"}'),
         )
 
         self.assertEqual(name, "撰寫OpenClaw與Manus技術文章")
 
 
-    def test_build_project_name_limits_english_to_five_words(self) -> None:
+    def test_build_project_name_falls_back_to_original_english_without_llm(self) -> None:
         def _raise(_: str, __: str) -> tuple[str, dict]:
             raise ValueError("無法解析")
 
@@ -60,10 +70,10 @@ class ProjectBootstrapTests(unittest.TestCase):
             _raise,
         )
 
-        self.assertEqual(name, "Please create concise execution plan")
+        self.assertEqual(name, "Please create a concise execution plan for the marketing launch")
 
 
-    def test_build_project_name_keeps_cjk_meaning_within_limit(self) -> None:
+    def test_build_project_name_falls_back_to_original_cjk_without_llm(self) -> None:
         def _raise(_: str, __: str) -> tuple[str, dict]:
             raise ValueError("無法解析")
 
@@ -73,14 +83,9 @@ class ProjectBootstrapTests(unittest.TestCase):
             _raise,
         )
 
-        self.assertEqual(name, "開發俄羅斯方塊遊戲")
+        self.assertEqual(name, "請幫我開發一個俄羅斯方塊遊戲並且提供分數排行榜與音效")
 
     def test_build_project_name_prefers_llm_summary_for_cjk(self) -> None:
-        class _MockLLM:
-            def generate_stream(self, messages: list[dict[str, str]], model: str | None = None):
-                _ = (messages, model)
-                yield '{"name":"開發俄羅斯方塊"}'
-
         def _raise(_: str, __: str) -> tuple[str, dict]:
             raise ValueError("無法解析")
 
@@ -88,17 +93,12 @@ class ProjectBootstrapTests(unittest.TestCase):
             "請幫我開發一個俄羅斯方塊遊戲並且提供分數排行榜與音效",
             "command_plan",
             _raise,
-            llm_client=_MockLLM(),
+            llm_client=self._MockLLM('{"name":"開發俄羅斯方塊"}'),
         )
 
         self.assertEqual(name, "開發俄羅斯方塊")
 
     def test_build_project_name_prefers_llm_summary_for_english(self) -> None:
-        class _MockLLM:
-            def generate_stream(self, messages: list[dict[str, str]], model: str | None = None):
-                _ = (messages, model)
-                yield '{"name":"Marketing launch execution plan"}'
-
         def _raise(_: str, __: str) -> tuple[str, dict]:
             raise ValueError("無法解析")
 
@@ -106,17 +106,23 @@ class ProjectBootstrapTests(unittest.TestCase):
             "Please create a concise execution plan for the marketing launch",
             "command_plan",
             _raise,
-            llm_client=_MockLLM(),
+            llm_client=self._MockLLM('{"name":"Marketing launch execution plan"}'),
         )
 
         self.assertEqual(name, "Marketing launch execution plan")
 
     def test_choose_execution_mode_prefers_self_critique_for_professional_writing(self) -> None:
-        mode = choose_execution_mode("協助撰寫比較OpenClaw與Manus在記憶機制以及多agent任務同步機制比較的技術文章")
+        mode = choose_execution_mode(
+            "協助撰寫比較OpenClaw與Manus在記憶機制以及多agent任務同步機制比較的技術文章",
+            llm_client=self._MockLLM('{"mode":"self_critique"}'),
+        )
         self.assertEqual(mode, "self_critique")
 
     def test_choose_execution_mode_prefers_team_for_research_report(self) -> None:
-        mode = choose_execution_mode("請撰寫多agent協作架構的研究報告，需含方法論與驗證計畫")
+        mode = choose_execution_mode(
+            "請撰寫多agent協作架構的研究報告，需含方法論與驗證計畫",
+            llm_client=self._MockLLM('{"mode":"team"}'),
+        )
         self.assertEqual(mode, "team")
 
     def test_created_project_id_uses_neutral_prefix(self) -> None:
