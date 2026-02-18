@@ -1057,7 +1057,8 @@ class AmonCore:
                                 "id": "audit",
                                 "type": "agent_task",
                                 "prompt": (
-                                    "請審核以下結果，回覆是否 APPROVED，並給出原因與建議。"
+                                    "請審核以下結果，必須回覆是否 APPROVED。若為 REJECTED，"
+                                    "請提供具體未通過理由與補強建議。"
                                     "\n\n結果：\n${task_result}\n"
                                 ),
                                 "output_path": "docs/audits/${task_task_id}.md",
@@ -1113,13 +1114,53 @@ class AmonCore:
                     ),
                 },
                 {
+                    "id": "audit_committee_role_factory",
+                    "type": "agent_task",
+                    "prompt": (
+                        "你是角色工廠，請為最終稽核會建立 3 位稽核員人設，輸出 JSON。"
+                        "格式：{\"committee\":[{\"name\":\"...\",\"role\":\"...\",\"focus\":\"...\",\"instructions\":\"...\"}]}。"
+                        "請涵蓋品質、風險、可驗證性三種視角。\n\n任務：${prompt}\n"
+                    ),
+                    "output_path": "docs/audits/committee_roles.md",
+                    "store_output": "committee_roles",
+                },
+                {
+                    "id": "audit_committee_gate",
+                    "type": "agent_task",
+                    "prompt": (
+                        "你是稽核會，請審查全部任務是否皆可通過。"
+                        "請只輸出 JSON：{\"status\":\"APPROVED_ALL|REJECTED\",\"reason\":\"...\",\"actions\":[\"...\"]}。"
+                        "\n\n稽核會人設：\n${committee_roles}\n"
+                        "\n任務摘要：\n${team_results_block}\n"
+                    ),
+                    "output_path": "docs/audits/committee_decision.md",
+                    "store_output": "committee_decision",
+                },
+                {
+                    "id": "audit_committee_condition",
+                    "type": "condition",
+                    "variable": "committee_decision",
+                    "contains": "APPROVED_ALL",
+                },
+                {
+                    "id": "final_rework_notice",
+                    "type": "agent_task",
+                    "prompt": (
+                        "你是 PM，稽核會尚未全數通過。請輸出退回補強通知，"
+                        "需列出未通過理由與下一輪補強步驟。"
+                        "\n\n稽核會決議：\n${committee_decision}\n"
+                        "\n任務摘要：\n${team_results_block}\n"
+                    ),
+                    "output_path": "docs/final.md",
+                },
+                {
                     "id": "synthesis",
                     "type": "agent_task",
                     "prompt": (
                         "你是 PM，請彙整所有任務結果與審核，產出最終總結。"
                         "輸出開頭必須是 '# TeamworksGPT'，第二行要有"
                         "'## 我務必依照以下的【角色定義】 以及【工作流程】來完成任務'。"
-                        "同時說明已如何遵守 Step0~Step6。"
+                        "同時說明已如何遵守 Step0~Step6，並註明稽核會全員通過。"
                         "\n\n任務：${prompt}\n\n彙整：\n${team_results_block}\n"
                     ),
                     "output_path": "docs/final.md",
@@ -1130,7 +1171,11 @@ class AmonCore:
                 {"from": "pm_log_bootstrap", "to": "pm_plan"},
                 {"from": "pm_plan", "to": "tasks_file"},
                 {"from": "tasks_file", "to": "tasks_map"},
-                {"from": "tasks_map", "to": "synthesis"},
+                {"from": "tasks_map", "to": "audit_committee_role_factory"},
+                {"from": "audit_committee_role_factory", "to": "audit_committee_gate"},
+                {"from": "audit_committee_gate", "to": "audit_committee_condition"},
+                {"from": "audit_committee_condition", "to": "synthesis", "when": True},
+                {"from": "audit_committee_condition", "to": "final_rework_notice", "when": False},
             ],
         }
 

@@ -25,9 +25,16 @@ class TeamWorkflowContractTests(unittest.TestCase):
         self.assertIn("role_factory_request", sub_nodes)
         self.assertEqual(sub_nodes["role_factory_request"]["output_path"], "docs/tasks/${task_task_id}/role_factory.md")
 
+        self.assertIn("audit_committee_role_factory", nodes)
+        self.assertEqual(nodes["audit_committee_role_factory"]["output_path"], "docs/audits/committee_roles.md")
+        self.assertIn("audit_committee_gate", nodes)
+        self.assertEqual(nodes["audit_committee_gate"]["output_path"], "docs/audits/committee_decision.md")
+        self.assertIn("final_rework_notice", nodes)
+
         synthesis_prompt = nodes["synthesis"]["prompt"]
         self.assertIn("# TeamworksGPT", synthesis_prompt)
         self.assertIn("Step0~Step6", synthesis_prompt)
+        self.assertIn("稽核會全員通過", synthesis_prompt)
 
     def test_collect_mnt_data_handover_context_reads_existing_files(self) -> None:
         core = AmonCore()
