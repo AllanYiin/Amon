@@ -113,6 +113,38 @@
 
             <aside class="context-panel" id="context-panel">
           <h2>Thinking / Artifacts</h2>
+          <div class="inspector-tabs segmented" role="tablist" aria-label="Inspector 切換" data-i18n-attr="aria-label:a11y.inspector.tablist">
+            <button
+              type="button"
+              class="segmented__item inspector-tabs__button"
+              id="inspector-tab-thinking"
+              role="tab"
+              aria-controls="inspector-thinking"
+              aria-selected="true"
+              tabindex="0"
+              data-inspector-tab="thinking"
+            >Thinking</button>
+            <button
+              type="button"
+              class="segmented__item inspector-tabs__button"
+              id="inspector-tab-artifacts"
+              role="tab"
+              aria-controls="inspector-artifacts"
+              aria-selected="false"
+              tabindex="-1"
+              data-inspector-tab="artifacts"
+            >Artifacts</button>
+            <button
+              type="button"
+              class="segmented__item inspector-tabs__button"
+              id="inspector-tab-execution"
+              role="tab"
+              aria-controls="inspector-execution"
+              aria-selected="false"
+              tabindex="-1"
+              data-inspector-tab="execution"
+            >Execution</button>
+          </div>
           <div class="context-shell" id="context-shell" hidden>
             <article class="context-shell-card card card--kpi">
               <p class="context-shell-card__label">Memory</p>
@@ -163,7 +195,7 @@
               <div id="execution-accordion" class="execution-accordion"></div>
             </section>
           </section>
-          <section class="context-section" id="inspector-artifacts">
+          <section class="context-section" id="inspector-artifacts" hidden>
             <h3>Artifacts Inspector</h3>
             <p class="context-overview" id="artifacts-overview">這裡僅顯示流程產生的檔案；對話紀錄請使用下方「下載對話紀錄」。</p>
             <div class="artifacts-empty__actions">
