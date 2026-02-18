@@ -784,7 +784,7 @@ class AmonCore:
             docs_dir.mkdir(parents=True, exist_ok=True)
             provider_name = config.get("amon", {}).get("provider", "openai")
             provider_cfg = config.get("providers", {}).get(provider_name, {})
-            continuation_context = self._collect_mnt_data_handover_context(project_id)
+            continuation_context = self._collect_mnt_data_handover_context(project_path)
             graph = self._build_team_graph()
             graph_path = self._write_graph_resolved(
                 project_path,
@@ -814,51 +814,36 @@ class AmonCore:
             )
             return final_text
 
-    def _collect_mnt_data_handover_context(self, project_id: str) -> str:
-        base = Path("/mnt/data")
-        if not base.exists():
-            return "未找到 /mnt/data，視為首次執行。"
-        summary_lines: list[str] = []
-        direct_match = base / project_id
-        candidates: list[Path] = []
-        if direct_match.exists():
-            candidates.append(direct_match)
-        if not candidates:
-            try:
-                for entry in base.iterdir():
-                    name_lower = entry.name.lower()
-                    if project_id.lower() in name_lower:
-                        candidates.append(entry)
-            except OSError as exc:
-                self.logger.warning("掃描 /mnt/data 失敗：%s", exc)
-                return "掃描 /mnt/data 失敗，請在回覆中聲明無法接續既有專案。"
-        if not candidates:
-            return "未在 /mnt/data 找到可接續專案資料夾。"
+    def _collect_mnt_data_handover_context(self, project_path: Path) -> str:
+        docs_dir = project_path / "docs"
+        if not docs_dir.exists():
+            return "未找到專案 docs 資料夾，視為首次執行。"
 
-        for candidate in candidates[:3]:
-            if candidate.is_file():
-                summary_lines.append(f"- {candidate.name}（檔案，無法判斷專案結構）")
+        summary_lines: list[str] = [f"- docs（project: {project_path.name}）"]
+        key_files = [
+            docs_dir / "TODO.md",
+            docs_dir / "ProjectManager.md",
+            docs_dir / "final.md",
+        ]
+        try:
+            child_names = sorted(path.name for path in docs_dir.iterdir())[:12]
+        except OSError as exc:
+            self.logger.warning("掃描專案 docs 失敗：%s", exc)
+            return "掃描專案 docs 失敗，請在回覆中聲明無法接續既有文件。"
+        if child_names:
+            summary_lines.append(f"  - 目錄內容預覽：{', '.join(child_names)}")
+
+        for key_file in key_files:
+            if not key_file.exists() or not key_file.is_file():
                 continue
-            summary_lines.append(f"- {candidate.name}")
-            key_files = [
-                candidate / "TODO.md",
-                candidate / "ProjectManager.md",
-                candidate / "docs" / "final.md",
-            ]
             try:
-                child_names = sorted(path.name for path in candidate.iterdir())[:12]
+                preview = key_file.read_text(encoding="utf-8")[:300].replace("\n", " ")
             except OSError:
-                child_names = []
-            if child_names:
-                summary_lines.append(f"  - 目錄內容預覽：{', '.join(child_names)}")
-            for key_file in key_files:
-                if not key_file.exists() or not key_file.is_file():
-                    continue
-                try:
-                    preview = key_file.read_text(encoding="utf-8")[:300].replace("\n", " ")
-                except OSError:
-                    preview = "（讀取失敗）"
-                summary_lines.append(f"  - {key_file.relative_to(candidate)}: {preview}")
+                preview = "（讀取失敗）"
+            summary_lines.append(f"  - {key_file.relative_to(project_path)}: {preview}")
+
+        if len(summary_lines) == 1:
+            summary_lines.append("  - 尚未找到 TODO.md / ProjectManager.md / final.md")
         return "\n".join(summary_lines)
 
     def export_project(self, project_id: str, output_path: Path) -> Path:
@@ -964,7 +949,7 @@ class AmonCore:
                     "type": "agent_task",
                     "prompt": (
                         "你是專案經理。請先輸出 TODO.md，拆解任務並標記初始狀態都為 [ ]。"
-                        "必須包含 Step0：檢查 /mnt/data 與遺留文件是否可接續。"
+                        "必須包含 Step0：檢查專案 docs 資料夾中的遺留文件是否可接續。"
                         "請使用繁體中文 markdown。"
                         "輸出格式第一行必須是『專案經理：』，第二行起列出 todo list。"
                         "若需要等待角色工廠，請加上『(向角色工廠申請人設中)』。"

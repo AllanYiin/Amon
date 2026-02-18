@@ -1,4 +1,5 @@
 import shutil
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -41,24 +42,21 @@ class TeamWorkflowContractTests(unittest.TestCase):
         self.assertIn("Step0~Step6", synthesis_prompt)
         self.assertIn("稽核會全員通過", synthesis_prompt)
 
-    def test_collect_mnt_data_handover_context_reads_existing_files(self) -> None:
+    def test_collect_mnt_data_handover_context_reads_project_docs_files(self) -> None:
         core = AmonCore()
-        project_id = "amon-teamwork-contract-test"
-        base = Path("/mnt/data")
-        base.mkdir(parents=True, exist_ok=True)
-        project_dir = base / project_id
+        project_dir = Path(tempfile.mkdtemp(prefix="amon-teamwork-contract-test-"))
         docs_dir = project_dir / "docs"
         docs_dir.mkdir(parents=True, exist_ok=True)
-        (project_dir / "TODO.md").write_text("- [ ] 任務A", encoding="utf-8")
-        (project_dir / "ProjectManager.md").write_text("決策：先做驗證", encoding="utf-8")
+        (docs_dir / "TODO.md").write_text("- [ ] 任務A", encoding="utf-8")
+        (docs_dir / "ProjectManager.md").write_text("決策：先做驗證", encoding="utf-8")
         (docs_dir / "final.md").write_text("最終總結", encoding="utf-8")
 
         try:
-            context = core._collect_mnt_data_handover_context(project_id)
+            context = core._collect_mnt_data_handover_context(project_dir)
         finally:
             shutil.rmtree(project_dir, ignore_errors=True)
 
-        self.assertIn(project_id, context)
+        self.assertIn(project_dir.name, context)
         self.assertIn("TODO.md", context)
         self.assertIn("ProjectManager.md", context)
 
