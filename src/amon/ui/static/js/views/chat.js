@@ -110,7 +110,7 @@ export const CHAT_VIEW = {
       ctx.chatDeps.resetPlanCard();
 
       const finalMessage = `${message}${buildAttachmentSummary(attachments)}`;
-      messageRenderer.appendMessage("user", `你：${finalMessage}`);
+      messageRenderer.appendMessage("user", finalMessage);
       messageRenderer.appendTimelineStatus("訊息已送出，等待事件回傳中...");
       ctx.chatDeps.updateThinking({ status: "processing", brief: "需求已送出，正在分析任務" });
       timelineRenderer.updateExecutionStep("thinking", { title: "Thinking", status: "running", details: "訊息已送出，等待模型分析" });
@@ -161,12 +161,12 @@ export const CHAT_VIEW = {
             }
             if (eventType === "plan") {
               ctx.chatDeps.showPlanCard(data);
-              messageRenderer.appendMessage("agent", "Amon：已產生 Plan Card，請確認。");
+              messageRenderer.appendMessage("agent", "已產生 Plan Card，請確認。");
               return;
             }
             if (eventType === "result") {
               ctx.chatDeps.updateThinking({ status: "tool_result", brief: "已收到工具結果" });
-              messageRenderer.appendMessage("agent", `Amon：\n\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``);
+              messageRenderer.appendMessage("agent", `\n\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``);
               return;
             }
             if (eventType === "error") {
@@ -178,11 +178,11 @@ export const CHAT_VIEW = {
               await ctx.chatDeps.applySessionFromEvent(data);
               const doneStatus = data.status || "ok";
               if (doneStatus !== "ok" && doneStatus !== "confirm_required") {
-                messageRenderer.appendMessage("agent", `Amon：流程結束（${doneStatus}）。我已收到你的訊息，請調整描述後再送出，我會持續回應。`);
+                messageRenderer.appendMessage("agent", `流程結束（${doneStatus}）。我已收到你的訊息，請調整描述後再送出，我會持續回應。`);
                 messageRenderer.appendTimelineStatus(`流程狀態：${doneStatus}`);
               }
               if (data.final_text) {
-                messageRenderer.appendMessage("agent", `Amon：${data.final_text}`);
+                messageRenderer.appendMessage("agent", data.final_text);
               }
               ctx.chatDeps.updateThinking({ status: doneStatus === "ok" ? "done" : doneStatus, brief: doneStatus === "ok" ? "流程已完成" : `流程結束：${doneStatus}` });
               stopStream();
