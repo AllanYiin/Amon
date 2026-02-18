@@ -362,9 +362,13 @@
                 <h2>Logs &amp; Events</h2>
                 <p class="subtitle">依來源與條件檢視 log/event，並支援下載與 drilldown。</p>
               </div>
+              <div class="segmented logs-events-tabs" id="logs-events-tabs" role="tablist" aria-label="Logs 與 Events 分頁">
+                <button type="button" class="segmented__item is-active" id="logs-tab-logs" data-panel="logs" aria-pressed="true">Logs</button>
+                <button type="button" class="segmented__item" id="logs-tab-events" data-panel="events" aria-pressed="false">Events</button>
+              </div>
             </header>
 
-            <section class="logs-panel">
+            <section class="logs-panel" id="logs-panel" data-panel="logs">
               <h3>Logs</h3>
               <div class="logs-toolbar">
                 <label class="field-label">來源
@@ -376,6 +380,7 @@
                 </label>
                 <label class="field-label">起始時間<input type="datetime-local" id="logs-time-from" /></label>
                 <label class="field-label">結束時間<input type="datetime-local" id="logs-time-to" /></label>
+                <label class="field-label">搜尋<input type="search" id="logs-search" placeholder="關鍵字或 ID" /></label>
                 <label class="field-label">project<input type="text" id="logs-filter-project" placeholder="project_id" /></label>
                 <label class="field-label">run<input type="text" id="logs-filter-run" placeholder="run_id" /></label>
                 <label class="field-label">node<input type="text" id="logs-filter-node" placeholder="node_id" /></label>
@@ -391,8 +396,15 @@
                 <button type="button" class="btn btn--secondary secondary-btn" id="logs-refresh">查詢</button>
                 <button type="button" class="btn btn--secondary secondary-btn" id="logs-download">下載</button>
               </div>
+              <div class="logs-severity-chips" id="logs-severity-chips" role="group" aria-label="Severity 篩選">
+                <button type="button" class="chip is-active" data-severity="">All</button>
+                <button type="button" class="chip" data-severity="INFO">Info</button>
+                <button type="button" class="chip" data-severity="WARNING">Warn</button>
+                <button type="button" class="chip" data-severity="ERROR">Error</button>
+                <button type="button" class="chip" data-severity="DEBUG">Debug</button>
+              </div>
               <div id="logs-summary" class="logs-summary">尚未載入。</div>
-              <div id="logs-list" class="logs-list list-row-group"></div>
+              <div id="logs-list" class="logs-list logs-timeline list-row-group"></div>
               <div class="pager" id="logs-pager">
                 <button type="button" class="btn btn--secondary secondary-btn" id="logs-prev">上一頁</button>
                 <span id="logs-page-label">第 1 頁</span>
@@ -400,9 +412,10 @@
               </div>
             </section>
 
-            <section class="events-panel">
+            <section class="events-panel" id="events-panel" data-panel="events" hidden>
               <h3>Events</h3>
               <div class="logs-toolbar">
+                <label class="field-label">搜尋<input type="search" id="events-search" placeholder="關鍵字或 ID" /></label>
                 <label class="field-label">type<input type="text" id="events-filter-type" placeholder="event type" /></label>
                 <label class="field-label">起始時間<input type="datetime-local" id="events-time-from" /></label>
                 <label class="field-label">結束時間<input type="datetime-local" id="events-time-to" /></label>
@@ -412,7 +425,7 @@
                 <button type="button" class="btn btn--secondary secondary-btn" id="events-refresh">查詢</button>
               </div>
               <div id="events-summary" class="logs-summary">尚未載入。</div>
-              <div id="events-list" class="logs-list list-row-group"></div>
+              <div id="events-list" class="logs-list logs-timeline list-row-group"></div>
               <div class="pager" id="events-pager">
                 <button type="button" class="btn btn--secondary secondary-btn" id="events-prev">上一頁</button>
                 <span id="events-page-label">第 1 頁</span>
