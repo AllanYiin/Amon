@@ -14,6 +14,9 @@ from amon.fs.safety import validate_project_id
 
 
 NOISY_EVENT_TYPES = {"assistant_chunk"}
+MAX_HISTORY_CHARS = 3200
+MAX_USER_TURN_CHARS = 420
+MAX_ASSISTANT_TURN_CHARS = 240
 
 
 def create_chat_session(project_id: str) -> str:
@@ -139,24 +142,75 @@ def build_prompt_with_history(message: str, dialogue: list[dict[str, str]] | Non
     if not dialogue:
         return cleaned_message
 
+    anchor_task = _extract_anchor_task(dialogue)
+    condensed_dialogue = _condense_dialogue(dialogue)
+
     history_lines: list[str] = []
-    for item in dialogue:
+    for item in condensed_dialogue:
         role = item.get("role")
         content = (item.get("content") or "").strip()
         if role not in {"user", "assistant"} or not content:
             continue
         speaker = "使用者" if role == "user" else "Amon"
         history_lines.append(f"{speaker}: {content}")
-    if not history_lines:
+    if not history_lines and not anchor_task:
         return cleaned_message
-    history = "\n".join(history_lines)
-    return (
-        "請根據以下歷史對話延續回覆，保持脈絡一致。\n"
-        "[歷史對話]\n"
-        f"{history}\n"
-        "[目前訊息]\n"
-        f"使用者: {cleaned_message}"
-    )
+
+    blocks: list[str] = ["請根據以下歷史對話延續回覆，保持脈絡一致，不要改題。"]
+    if anchor_task:
+        blocks.append("[核心任務]\n" + anchor_task)
+    if history_lines:
+        blocks.append("[歷史對話]\n" + "\n".join(history_lines))
+    blocks.append("[目前訊息]\n" + f"使用者: {cleaned_message}")
+    return "\n".join(blocks)
+
+
+def _extract_anchor_task(dialogue: list[dict[str, str]]) -> str:
+    for item in dialogue:
+        if item.get("role") != "user":
+            continue
+        content = _normalize_content(item.get("content") or "")
+        if content:
+            return _trim_content(content, MAX_USER_TURN_CHARS)
+    return ""
+
+
+def _condense_dialogue(dialogue: list[dict[str, str]]) -> list[dict[str, str]]:
+    kept: list[dict[str, str]] = []
+    total_chars = 0
+    for item in reversed(dialogue):
+        role = item.get("role")
+        if role not in {"user", "assistant"}:
+            continue
+        content = _normalize_content(item.get("content") or "")
+        if not content:
+            continue
+        limit = MAX_USER_TURN_CHARS if role == "user" else MAX_ASSISTANT_TURN_CHARS
+        clipped = _trim_content(content, limit)
+        needed = len(clipped) + 16
+        if kept and total_chars + needed > MAX_HISTORY_CHARS:
+            continue
+        if not kept and total_chars + needed > MAX_HISTORY_CHARS:
+            clipped = _trim_content(clipped, max(32, MAX_HISTORY_CHARS - total_chars - 16))
+            if not clipped:
+                continue
+            needed = len(clipped) + 16
+        kept.append({"role": role, "content": clipped})
+        total_chars += needed
+    kept.reverse()
+    return kept
+
+
+def _normalize_content(content: str) -> str:
+    return " ".join(content.split())
+
+
+def _trim_content(content: str, limit: int) -> str:
+    if limit <= 0:
+        return ""
+    if len(content) <= limit:
+        return content
+    return content[: max(0, limit - 1)].rstrip() + "…"
 
 
 def _chat_session_path(project_id: str, chat_id: str) -> Path:
