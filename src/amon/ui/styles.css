@@ -40,6 +40,7 @@
 
   --focus-ring-width: 3px;
   --scrollbar-size: 10px;
+  --mobile-nav-height: 74px;
 }
 
 /* B. Dark theme tokens (default) */
@@ -233,9 +234,9 @@ body {
 }
 
 .shell-sidebar {
-  background: var(--card);
-  border: 1px solid var(--stroke);
-  border-radius: 16px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--c-surface-2) 88%, #000 12%), color-mix(in srgb, var(--c-surface-1) 92%, #000 8%));
+  border: 1px solid color-mix(in srgb, var(--c-border-strong) 78%, #000 22%);
+  border-radius: 18px;
   padding: 16px;
   position: sticky;
   top: 24px;
@@ -248,7 +249,9 @@ body {
 .shell-sidebar h2 {
   margin: 0 0 12px;
   font-size: 16px;
-  color: var(--title);
+  color: var(--c-text-muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .shell-nav {
@@ -258,27 +261,59 @@ body {
 }
 
 .shell-nav__item {
+  --nav-icon: "radio_button_checked";
   width: 100%;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: var(--radius-pill);
   background: transparent;
-  padding: 9px 10px;
+  padding: 10px 14px;
   text-align: left;
   font-size: 13px;
-  color: var(--title);
+  font-weight: 600;
+  color: var(--c-text);
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }
 
+.shell-nav__item::before {
+  content: var(--nav-icon);
+  font-family: "Material Symbols Rounded", sans-serif;
+  font-size: 20px;
+  line-height: 1;
+  font-weight: 400;
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+  color: var(--c-text-muted);
+}
+
+.shell-nav__item[data-icon="chat"] { --nav-icon: "chat"; }
+.shell-nav__item[data-icon="dashboard"] { --nav-icon: "dashboard"; }
+.shell-nav__item[data-icon="hub"] { --nav-icon: "hub"; }
+.shell-nav__item[data-icon="build"] { --nav-icon: "build"; }
+.shell-nav__item[data-icon="tune"] { --nav-icon: "tune"; }
+.shell-nav__item[data-icon="receipt_long"] { --nav-icon: "receipt_long"; }
+.shell-nav__item[data-icon="description"] { --nav-icon: "description"; }
+.shell-nav__item[data-icon="payments"] { --nav-icon: "payments"; }
+
 .shell-nav__item:hover {
-  background: var(--card-muted);
-  border-color: var(--stroke);
+  background: color-mix(in srgb, var(--c-primary) 15%, transparent);
+  border-color: color-mix(in srgb, var(--c-primary) 30%, var(--stroke));
+  color: var(--c-text-strong);
 }
 
 .shell-nav__item.is-active {
-  background: var(--highlight);
-  border-color: var(--stroke);
-  color: var(--primary);
+  background: color-mix(in srgb, var(--c-primary) 24%, var(--c-surface-2));
+  border-color: color-mix(in srgb, var(--c-primary) 42%, var(--c-border-strong));
+  color: var(--c-text-strong);
   font-weight: 700;
+}
+
+.shell-nav__item:hover::before,
+.shell-nav__item.is-active::before,
+.shell-nav__item:focus-visible::before {
+  color: var(--c-primary);
 }
 
 .shell-nav__link {
@@ -297,14 +332,19 @@ body {
 }
 
 .shell-topbar {
-  background: var(--card);
-  border: 1px solid var(--stroke);
+  background: color-mix(in srgb, var(--c-surface-1) 76%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c-border) 72%, transparent);
   border-radius: 16px;
   padding: 12px 16px;
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+  position: sticky;
+  top: 24px;
+  z-index: 30;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
 }
 
 .shell-topbar__group {
@@ -326,7 +366,7 @@ body {
   padding: 6px 10px;
   font-size: 12px;
   color: var(--text);
-  background: var(--c-surface-1);
+  background: color-mix(in srgb, var(--c-surface-1) 74%, transparent);
 }
 
 .shell-status--run,
@@ -1503,7 +1543,7 @@ body.is-resizing-context-panel {
 
   .shell-nav__item {
     font-size: 12px;
-    padding: 8px;
+    padding: 9px 10px;
   }
 
   .chat-layout {
@@ -1534,14 +1574,10 @@ body.is-resizing-context-panel {
     position: static;
   }
 
-  .shell-nav {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .shell-topbar {
     flex-direction: column;
     align-items: stretch;
+    top: 16px;
   }
 
   .shell-context-toggle {
@@ -2215,6 +2251,12 @@ body.is-resizing-context-panel {
 .ui-shell.is-sidebar-collapsed .shell-nav__item {
   font-size: 0;
   min-height: 36px;
+  justify-content: center;
+  padding-inline: 8px;
+}
+
+.ui-shell.is-sidebar-collapsed .shell-nav__item::before {
+  margin: 0;
 }
 
 .logs-list,
@@ -2257,16 +2299,66 @@ body.is-resizing-context-panel {
 }
 
 @media (max-width: 767px) {
+  .page {
+    padding: 12px;
+    padding-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px) + 12px);
+  }
+
   .ui-shell {
     grid-template-columns: 1fr;
+    gap: 12px;
   }
 
   .shell-sidebar {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+    top: auto;
+    margin: 0;
+    max-height: none;
+    height: auto;
+    z-index: 45;
+    padding: 8px 10px;
+    border-radius: 18px;
+    overflow: visible;
+    box-shadow: var(--shadow-sm);
+    background: color-mix(in srgb, var(--c-surface-2) 90%, #000 10%);
+  }
+
+  .shell-sidebar h2 {
     display: none;
   }
 
+  .shell-nav {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .shell-nav__item {
+    min-width: 0;
+    border-radius: 12px;
+    padding: 6px 4px 7px;
+    justify-content: center;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 11px;
+    line-height: 1.2;
+    text-align: center;
+  }
+
+  .shell-nav__item::before {
+    font-size: 18px;
+  }
+
   .ui-shell.is-sidebar-collapsed .shell-sidebar {
-    display: none;
+    display: block;
+  }
+
+  .ui-shell.is-sidebar-collapsed .shell-nav__item {
+    font-size: 11px;
+    min-height: 0;
   }
 
   .chat-input {
@@ -2279,7 +2371,15 @@ body.is-resizing-context-panel {
   }
 
   .chat-timeline {
-    padding-bottom: 72px;
+    padding-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px) + 12px);
+  }
+
+  .chat-panel {
+    padding-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px) + 92px);
+  }
+
+  .shell-topbar {
+    top: 12px;
   }
 
   .context-panel {
