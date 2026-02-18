@@ -13,6 +13,41 @@ from amon.core import AmonCore
 
 
 class CoreStreamHandlerTests(unittest.TestCase):
+    def test_run_single_stream_forwards_conversation_history_to_graph_variables(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("單輪對話測試")
+                project_path = Path(project.path)
+                run_dir = project_path / ".amon" / "runs" / "run-test"
+                output_path = run_dir / "docs" / "single_run-test.md"
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_text("ok", encoding="utf-8")
+                history = [
+                    {"role": "user", "content": "前一輪需求"},
+                    {"role": "assistant", "content": "好的，請補充細節"},
+                ]
+
+                with patch.object(
+                    core,
+                    "run_graph",
+                    return_value=SimpleNamespace(run_dir=run_dir, run_id="run-test"),
+                ) as mock_run_graph:
+                    core.run_single_stream(
+                        "請直接開始",
+                        project_path=project_path,
+                        conversation_history=history,
+                    )
+
+                self.assertEqual(
+                    mock_run_graph.call_args.kwargs.get("variables"),
+                    {"conversation_history": history},
+                )
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
     def test_run_self_critique_forwards_stream_handler_to_run_graph(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir

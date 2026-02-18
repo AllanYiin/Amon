@@ -480,6 +480,7 @@ class AmonCore:
         mode: str = "single",
         stream_handler=None,
         skill_names: list[str] | None = None,
+        conversation_history: list[dict[str, str]] | None = None,
     ) -> str:
         config = self.load_config(project_path)
         project_id = project_path.name if project_path else None
@@ -505,10 +506,9 @@ class AmonCore:
         user_prompt = prompt
         if prompt.startswith("/"):
             user_prompt = " ".join(prompt.split()[1:]).strip()
-        messages = [
-            {"role": "system", "content": system_message},
-            {"role": "user", "content": user_prompt or prompt},
-        ]
+        messages = [{"role": "system", "content": system_message}]
+        messages.extend(self._normalize_chat_history(conversation_history))
+        messages.append({"role": "user", "content": user_prompt or prompt})
         web_context = self._auto_web_search_context(user_prompt or prompt, project_path=project_path, config=config)
         if web_context:
             messages.insert(1, {"role": "system", "content": web_context})
@@ -601,6 +601,26 @@ class AmonCore:
             project_id=project_id,
         )
         return response_text
+
+
+    def _normalize_chat_history(self, history: list[dict[str, str]] | None) -> list[dict[str, str]]:
+        if not history:
+            return []
+        normalized: list[dict[str, str]] = []
+        for item in history:
+            if not isinstance(item, dict):
+                continue
+            role = item.get("role")
+            content = item.get("content")
+            if role not in {"user", "assistant"}:
+                continue
+            if not isinstance(content, str):
+                continue
+            cleaned = content.strip()
+            if not cleaned:
+                continue
+            normalized.append({"role": role, "content": cleaned})
+        return normalized
 
     def _auto_web_search_context(
         self,
@@ -700,6 +720,7 @@ class AmonCore:
         stream_handler=None,
         skill_names: list[str] | None = None,
         run_id: str | None = None,
+        conversation_history: list[dict[str, str]] | None = None,
     ) -> tuple[GraphRunResult, str]:
         if not project_path:
             raise ValueError("執行 stream 需要指定專案")
@@ -715,6 +736,7 @@ class AmonCore:
             result = self.run_graph(
                 project_path=project_path,
                 graph_path=graph_path,
+                variables={"conversation_history": conversation_history or []},
                 stream_handler=stream_handler,
                 run_id=run_id,
             )
