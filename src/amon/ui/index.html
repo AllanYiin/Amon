@@ -23,15 +23,15 @@
       <div class="ui-shell" id="ui-shell">
         <aside class="shell-sidebar" aria-label="主要導覽" data-i18n-attr="aria-label:a11y.sidebar">
           <h2>Amon UI</h2>
-          <nav class="shell-nav" id="shell-nav">
-            <a class="shell-nav__item shell-nav__link" data-shell-view="chat" data-route="chat" data-icon="chat" href="#/chat" data-i18n="nav.chat">對話</a>
-            <a class="shell-nav__item shell-nav__link" data-shell-view="context" data-route="context" data-icon="dashboard" href="#/context" data-i18n="nav.context">情境</a>
-            <a class="shell-nav__item shell-nav__link" data-shell-view="graph" data-route="graph" data-icon="hub" href="#/graph" data-i18n="nav.graph">流程圖</a>
-            <a class="shell-nav__item shell-nav__link" data-shell-view="tools-skills" data-route="tools" data-icon="build" href="#/tools" data-i18n="nav.tools">工具與技能</a>
-            <a class="shell-nav__item shell-nav__link" data-shell-view="config" data-route="config" data-icon="tune" href="#/config" data-i18n="nav.config">設定</a>
-            <a class="shell-nav__item shell-nav__link" data-shell-view="logs-events" data-route="logs" data-icon="receipt_long" href="#/logs" data-i18n="nav.logs">日誌與事件</a>
-            <a class="shell-nav__item shell-nav__link" data-shell-view="docs" data-route="docs" data-icon="description" href="#/docs" data-i18n="nav.docs">文件</a>
-            <a class="shell-nav__item shell-nav__link" data-shell-view="bill" data-route="billing" data-icon="payments" href="#/billing" data-i18n="nav.billing">計費</a>
+          <nav class="shell-nav segmented" id="shell-nav">
+            <a class="shell-nav__item shell-nav__link segmented__item" data-shell-view="chat" data-route="chat" data-icon="chat" href="#/chat" data-i18n="nav.chat">對話</a>
+            <a class="shell-nav__item shell-nav__link segmented__item" data-shell-view="context" data-route="context" data-icon="dashboard" href="#/context" data-i18n="nav.context">情境</a>
+            <a class="shell-nav__item shell-nav__link segmented__item" data-shell-view="graph" data-route="graph" data-icon="hub" href="#/graph" data-i18n="nav.graph">流程圖</a>
+            <a class="shell-nav__item shell-nav__link segmented__item" data-shell-view="tools-skills" data-route="tools" data-icon="build" href="#/tools" data-i18n="nav.tools">工具與技能</a>
+            <a class="shell-nav__item shell-nav__link segmented__item" data-shell-view="config" data-route="config" data-icon="tune" href="#/config" data-i18n="nav.config">設定</a>
+            <a class="shell-nav__item shell-nav__link segmented__item" data-shell-view="logs-events" data-route="logs" data-icon="receipt_long" href="#/logs" data-i18n="nav.logs">日誌與事件</a>
+            <a class="shell-nav__item shell-nav__link segmented__item" data-shell-view="docs" data-route="docs" data-icon="description" href="#/docs" data-i18n="nav.docs">文件</a>
+            <a class="shell-nav__item shell-nav__link segmented__item" data-shell-view="bill" data-route="billing" data-icon="payments" href="#/billing" data-i18n="nav.billing">計費</a>
           </nav>
         </aside>
 
@@ -42,18 +42,18 @@
                 <span data-i18n="topbar.project">專案</span>
                 <select id="project-select"></select>
               </label>
-              <span class="shell-status shell-status--run pill--neutral" id="shell-run-status" title="尚未有 Run" data-i18n="status.run.idle" data-i18n-attr="title:tooltip.runIdle">尚未有 Run</span>
-              <span class="shell-status shell-status--daemon pill--neutral" id="shell-daemon-status" title="尚未連線 daemon" data-i18n="status.daemon.idle" data-i18n-attr="title:tooltip.daemonIdle">尚未連線</span>
-              <span class="shell-status shell-status--budget" id="shell-budget-status">Budget：NT$ 0 / NT$ 5,000</span>
+              <span class="shell-status shell-status--run pill pill--neutral" id="shell-run-status" title="尚未有 Run" data-i18n="status.run.idle" data-i18n-attr="title:tooltip.runIdle">尚未有 Run</span>
+              <span class="shell-status shell-status--daemon pill pill--neutral" id="shell-daemon-status" title="尚未連線 daemon" data-i18n="status.daemon.idle" data-i18n-attr="title:tooltip.daemonIdle">尚未連線</span>
+              <span class="shell-status shell-status--budget pill pill--neutral" id="shell-budget-status">Budget：NT$ 0 / NT$ 5,000</span>
             </div>
             <div class="shell-topbar__actions">
-              <button type="button" class="secondary-btn shell-sidebar-toggle" id="toggle-sidebar" aria-label="收合側欄" data-i18n-attr="aria-label:topbar.toggleSidebar">☰</button>
-              <button type="button" class="secondary-btn shell-context-toggle" id="toggle-context-panel" aria-expanded="true" data-i18n="topbar.toggleContext">收合右側面板</button>
+              <button type="button" class="btn btn--secondary secondary-btn shell-sidebar-toggle" id="toggle-sidebar" aria-label="收合側欄" data-i18n-attr="aria-label:topbar.toggleSidebar">☰</button>
+              <button type="button" class="btn btn--secondary secondary-btn shell-context-toggle" id="toggle-context-panel" aria-expanded="true" data-i18n="topbar.toggleContext">收合右側面板</button>
             </div>
           </header>
 
           <div class="layout chat-layout" id="chat-layout">
-            <section class="main-card chat-panel">
+            <section class="main-card card chat-panel">
           <header class="chat-header">
             <div>
               <h1>Amon Chat</h1>
@@ -61,7 +61,7 @@
             </div>
             <div class="chat-controls">
               <span class="chat-project-label" id="chat-project-label">目前專案：未指定專案</span>
-              <button class="secondary-btn" id="refresh-context">刷新 Context</button>
+              <button class="btn btn--secondary secondary-btn" id="refresh-context">刷新 Context</button>
             </div>
           </header>
 
@@ -89,8 +89,8 @@
             <div class="plan-risk" id="plan-risk"></div>
             <pre id="plan-content"></pre>
             <div class="plan-card__actions">
-              <button class="secondary-btn" id="plan-cancel">取消</button>
-              <button class="primary-btn" id="plan-confirm">確認執行</button>
+              <button class="btn btn--secondary secondary-btn" id="plan-cancel">取消</button>
+              <button class="btn btn--primary primary-btn" id="plan-confirm">確認執行</button>
             </div>
           </section>
 
@@ -98,7 +98,7 @@
             <div class="chat-input__main">
               <textarea id="chat-input" rows="4" placeholder="輸入你的需求，例如：建立專案 Amon Demo" data-i18n-attr="placeholder:placeholder.chatInput"></textarea>
               <div class="chat-input__toolbar">
-                <label class="file-btn">
+                <label class="file-btn chip">
                   加入附件
                   <input id="chat-attachments" type="file" multiple accept="image/*,video/*,.pdf" />
                 </label>
@@ -106,7 +106,7 @@
               </div>
               <div id="attachment-preview" class="attachment-preview"></div>
             </div>
-            <button type="submit" class="primary-btn">送出</button>
+            <button type="submit" class="btn btn--primary primary-btn">送出</button>
           </form>
         </section>
             <div class="context-resizer" id="context-resizer" role="separator" aria-label="調整右側面板寬度" aria-orientation="vertical"></div>
@@ -114,19 +114,19 @@
             <aside class="context-panel" id="context-panel">
           <h2>Thinking / Artifacts</h2>
           <div class="context-shell" id="context-shell" hidden>
-            <article class="context-shell-card">
+            <article class="context-shell-card card card--kpi">
               <p class="context-shell-card__label">Memory</p>
               <strong id="card-memory">尚未同步</strong>
             </article>
-            <article class="context-shell-card">
+            <article class="context-shell-card card card--kpi">
               <p class="context-shell-card__label">Run</p>
               <strong id="card-run-progress">尚未開始</strong>
             </article>
-            <article class="context-shell-card">
+            <article class="context-shell-card card card--kpi">
               <p class="context-shell-card__label">Billing</p>
               <strong id="card-billing">NT$ 0</strong>
             </article>
-            <article class="context-shell-card">
+            <article class="context-shell-card card card--kpi">
               <p class="context-shell-card__label">Pending</p>
               <strong id="card-pending-confirmations">0</strong>
             </article>
@@ -167,13 +167,13 @@
             <h3>Artifacts Inspector</h3>
             <p class="context-overview" id="artifacts-overview">這裡僅顯示流程產生的檔案；對話紀錄請使用下方「下載對話紀錄」。</p>
             <div class="artifacts-empty__actions">
-              <button type="button" class="secondary-btn small" id="artifacts-download-chat">下載對話紀錄</button>
+              <button type="button" class="btn btn--secondary secondary-btn small" id="artifacts-download-chat">下載對話紀錄</button>
             </div>
-            <div id="artifacts-inspector-list" class="artifacts-inspector-list"></div>
+            <div id="artifacts-inspector-list" class="artifacts-inspector-list list-row-group"></div>
             <div id="artifacts-empty" class="artifacts-empty" hidden>
               <p>尚無 artifacts（可能是 run 尚未完成或此流程未產出檔案）。</p>
               <div class="artifacts-empty__actions">
-                <button type="button" class="secondary-btn small" id="artifacts-go-run">前往 Thinking</button>
+                <button type="button" class="btn btn--secondary secondary-btn small" id="artifacts-go-run">前往 Thinking</button>
               </div>
             </div>
           </section>
@@ -181,64 +181,64 @@
           </div>
 
 
-          <section class="main-card bill-page" id="bill-page" hidden>
+          <section class="main-card card bill-page" id="bill-page" hidden>
             <header class="bill-page__header">
               <div>
                 <h2>Bill</h2>
                 <p class="subtitle">顯示今日、專案累計、breakdown、automation/interactive 與 budgets。</p>
               </div>
-              <button type="button" class="secondary-btn" id="bill-refresh">重新整理</button>
+              <button type="button" class="btn btn--secondary secondary-btn" id="bill-refresh">重新整理</button>
             </header>
 
             <div class="bill-kpis">
-              <article class="context-shell-card">
+              <article class="context-shell-card card card--kpi">
                 <p class="context-shell-card__label">今日費用 / 用量</p>
                 <strong id="bill-today">--</strong>
               </article>
-              <article class="context-shell-card">
+              <article class="context-shell-card card card--kpi">
                 <p class="context-shell-card__label">專案累計費用 / 用量</p>
                 <strong id="bill-project-total">--</strong>
               </article>
-              <article class="context-shell-card">
+              <article class="context-shell-card card card--kpi">
                 <p class="context-shell-card__label">automation / interactive</p>
                 <strong id="bill-mode-summary">--</strong>
               </article>
-              <article class="context-shell-card">
+              <article class="context-shell-card card card--kpi">
                 <p class="context-shell-card__label">目前 Run 費用</p>
                 <strong id="bill-current-run">--</strong>
               </article>
             </div>
 
-            <article class="config-card">
+            <article class="config-card card">
               <h3>每 Run 花費趨勢</h3>
               <canvas id="bill-run-chart" height="140" aria-label="每 run 花費長條圖"></canvas>
             </article>
 
             <section class="bill-grid">
-              <article class="config-card">
+              <article class="config-card card">
                 <h3>Budgets</h3>
                 <pre id="bill-budgets">尚未載入。</pre>
               </article>
-              <article class="config-card">
+              <article class="config-card card">
                 <h3>超限事件（budget_exceeded）</h3>
-                <ul id="bill-exceeded" class="logs-list"></ul>
+                <ul id="bill-exceeded" class="logs-list list-row-group"></ul>
               </article>
             </section>
 
             <section class="bill-grid">
-              <article class="config-card">
+              <article class="config-card card">
                 <h3>Breakdown：provider</h3>
                 <pre id="bill-breakdown-provider">尚未載入。</pre>
               </article>
-              <article class="config-card">
+              <article class="config-card card">
                 <h3>Breakdown：model</h3>
                 <pre id="bill-breakdown-model">尚未載入。</pre>
               </article>
-              <article class="config-card">
+              <article class="config-card card">
                 <h3>Breakdown：agent</h3>
                 <pre id="bill-breakdown-agent">尚未載入。</pre>
               </article>
-              <article class="config-card">
+              <article class="config-card card">
                 <h3>Breakdown：node</h3>
                 <pre id="bill-breakdown-node">尚未載入。</pre>
               </article>
@@ -246,13 +246,13 @@
           </section>
 
 
-          <section class="main-card config-page" id="config-page" hidden>
+          <section class="main-card card config-page" id="config-page" hidden>
             <header class="config-page__header">
               <div>
                 <h2>Config</h2>
                 <p class="subtitle">唯讀檢視 Global / Project / Effective 設定，並顯示 Effective 來源。</p>
               </div>
-              <button type="button" class="secondary-btn" id="config-export">匯出 Effective Config</button>
+              <button type="button" class="btn btn--secondary secondary-btn" id="config-export">匯出 Effective Config</button>
             </header>
 
             <div class="config-toolbar">
@@ -260,21 +260,21 @@
                 搜尋 key path
                 <input type="search" id="config-search" placeholder="例如：amon.ui.theme" />
               </label>
-              <button type="button" class="secondary-btn" id="config-refresh">重新整理</button>
+              <button type="button" class="btn btn--secondary secondary-btn" id="config-refresh">重新整理</button>
             </div>
 
             <div class="config-grid">
-              <article class="config-card">
+              <article class="config-card card">
                 <h3>Global config</h3>
                 <pre id="config-global">尚未載入。</pre>
               </article>
-              <article class="config-card">
+              <article class="config-card card">
                 <h3>Project config</h3>
                 <pre id="config-project">尚未載入。</pre>
               </article>
             </div>
 
-            <article class="config-card">
+            <article class="config-card card">
               <h3>Effective config（含來源）</h3>
               <div id="config-effective-summary" class="config-effective-summary">尚未載入。</div>
               <div class="config-table-wrap">
@@ -292,7 +292,7 @@
             </article>
           </section>
 
-          <section class="main-card logs-events-page" id="logs-events-page" hidden>
+          <section class="main-card card logs-events-page" id="logs-events-page" hidden>
             <header class="logs-events-page__header">
               <div>
                 <h2>Logs &amp; Events</h2>
@@ -324,15 +324,15 @@
                   </select>
                 </label>
                 <label class="field-label">component<input type="text" id="logs-filter-component" placeholder="component / event" /></label>
-                <button type="button" class="secondary-btn" id="logs-refresh">查詢</button>
-                <button type="button" class="secondary-btn" id="logs-download">下載</button>
+                <button type="button" class="btn btn--secondary secondary-btn" id="logs-refresh">查詢</button>
+                <button type="button" class="btn btn--secondary secondary-btn" id="logs-download">下載</button>
               </div>
               <div id="logs-summary" class="logs-summary">尚未載入。</div>
-              <div id="logs-list" class="logs-list"></div>
+              <div id="logs-list" class="logs-list list-row-group"></div>
               <div class="pager" id="logs-pager">
-                <button type="button" class="secondary-btn" id="logs-prev">上一頁</button>
+                <button type="button" class="btn btn--secondary secondary-btn" id="logs-prev">上一頁</button>
                 <span id="logs-page-label">第 1 頁</span>
-                <button type="button" class="secondary-btn" id="logs-next">下一頁</button>
+                <button type="button" class="btn btn--secondary secondary-btn" id="logs-next">下一頁</button>
               </div>
             </section>
 
@@ -345,19 +345,19 @@
                 <label class="field-label">project<input type="text" id="events-filter-project" placeholder="project_id" /></label>
                 <label class="field-label">run<input type="text" id="events-filter-run" placeholder="run_id" /></label>
                 <label class="field-label">node<input type="text" id="events-filter-node" placeholder="node_id" /></label>
-                <button type="button" class="secondary-btn" id="events-refresh">查詢</button>
+                <button type="button" class="btn btn--secondary secondary-btn" id="events-refresh">查詢</button>
               </div>
               <div id="events-summary" class="logs-summary">尚未載入。</div>
-              <div id="events-list" class="logs-list"></div>
+              <div id="events-list" class="logs-list list-row-group"></div>
               <div class="pager" id="events-pager">
-                <button type="button" class="secondary-btn" id="events-prev">上一頁</button>
+                <button type="button" class="btn btn--secondary secondary-btn" id="events-prev">上一頁</button>
                 <span id="events-page-label">第 1 頁</span>
-                <button type="button" class="secondary-btn" id="events-next">下一頁</button>
+                <button type="button" class="btn btn--secondary secondary-btn" id="events-next">下一頁</button>
               </div>
             </section>
           </section>
 
-          <section class="main-card context-page" id="context-page" hidden>
+          <section class="main-card card context-page" id="context-page" hidden>
             <header class="context-page__header">
               <div>
                 <h2>Context</h2>
@@ -369,23 +369,23 @@
               <textarea id="context-draft-input" rows="8" placeholder="例如：專案目標、語氣偏好、重要限制條件..."></textarea>
               <p id="context-draft-meta" class="context-draft__meta">尚未儲存草稿。</p>
               <div class="context-draft__actions">
-                <button type="button" class="primary-btn" id="context-save-draft">儲存草稿（本機）</button>
-                <label class="secondary-btn file-btn-inline" for="context-import-file">從檔案匯入</label>
+                <button type="button" class="btn btn--primary primary-btn" id="context-save-draft">儲存草稿（本機）</button>
+                <label class="btn btn--secondary secondary-btn file-btn-inline" for="context-import-file">從檔案匯入</label>
                 <input id="context-import-file" type="file" accept=".txt,.md,.json" hidden />
-                <button type="button" class="secondary-btn" id="context-extract-chat">從最近對話擷取</button>
+                <button type="button" class="btn btn--secondary secondary-btn" id="context-extract-chat">從最近對話擷取</button>
               </div>
             </section>
             <section class="context-danger-zone">
               <h3>清理動作</h3>
               <p class="empty-context">高風險操作將需要二次確認。若為本機草稿清理，無法復原。</p>
               <div class="context-danger-zone__actions">
-                <button type="button" class="secondary-btn" id="context-clear-chat">清空本次對話 Context（本機草稿）</button>
-                <button type="button" class="secondary-btn" id="context-clear-project">清空專案 Context 草稿（本機）</button>
+                <button type="button" class="btn btn--secondary secondary-btn" id="context-clear-chat">清空本次對話 Context（本機草稿）</button>
+                <button type="button" class="btn btn--secondary secondary-btn" id="context-clear-project">清空專案 Context 草稿（本機）</button>
               </div>
             </section>
           </section>
 
-          <section class="main-card graph-page" id="graph-page" hidden>
+          <section class="main-card card graph-page" id="graph-page" hidden>
             <header class="graph-page__header">
               <div>
                 <h2>Graph</h2>
@@ -396,8 +396,8 @@
                   歷史 Run
                   <select id="graph-run-select"></select>
                 </label>
-                <button type="button" class="secondary-btn" id="graph-history-refresh">重新整理</button>
-                <button type="button" class="secondary-btn" id="copy-run-id" disabled data-i18n="button.copyRunId" data-i18n-attr="aria-label:button.copyRunIdAria">複製 Run ID</button>
+                <button type="button" class="btn btn--secondary secondary-btn" id="graph-history-refresh">重新整理</button>
+                <button type="button" class="btn btn--secondary secondary-btn" id="copy-run-id" disabled data-i18n="button.copyRunId" data-i18n-attr="aria-label:button.copyRunIdAria">複製 Run ID</button>
               </div>
             </header>
             <div class="graph-toolbar">
@@ -405,21 +405,21 @@
                 <span id="graph-run-meta" class="graph-run-meta">尚未偵測到 Run</span>
               </div>
               <div class="graph-toolbar__actions">
-                <button type="button" class="secondary-btn" id="graph-create-template">Create template</button>
+                <button type="button" class="btn btn--secondary secondary-btn" id="graph-create-template">Create template</button>
               </div>
             </div>
             <div id="graph-preview" class="graph-preview"></div>
-            <ul id="graph-node-list" class="graph-node-list"></ul>
-            <pre id="graph-code" class="graph-code"></pre>
+            <ul id="graph-node-list" class="graph-node-list list-row-group"></ul>
+            <pre id="graph-code" class="graph-code codeblock"></pre>
           </section>
 
-          <section class="main-card docs-page" id="docs-page" hidden>
+          <section class="main-card card docs-page" id="docs-page" hidden>
             <header class="docs-page__header">
               <div>
                 <h2>Docs</h2>
                 <p class="subtitle">依 run/task 檢視文件，預覽 markdown，並插入 Chat 引用。</p>
               </div>
-              <button type="button" class="secondary-btn" id="docs-refresh">重新整理</button>
+              <button type="button" class="btn btn--secondary secondary-btn" id="docs-refresh">重新整理</button>
             </header>
             <div class="docs-layout">
               <aside class="docs-tree" id="docs-tree-wrap">
@@ -434,9 +434,9 @@
                     <p id="docs-preview-meta" class="docs-preview__meta">來源 run / node 將顯示於此。</p>
                   </div>
                   <div class="docs-preview__actions">
-                    <button type="button" class="secondary-btn" id="docs-open" disabled>Open</button>
-                    <button type="button" class="secondary-btn" id="docs-download" disabled>Download</button>
-                    <button type="button" class="primary-btn" id="docs-insert" disabled>插入 @doc</button>
+                    <button type="button" class="btn btn--secondary secondary-btn" id="docs-open" disabled>Open</button>
+                    <button type="button" class="btn btn--secondary secondary-btn" id="docs-download" disabled>Download</button>
+                    <button type="button" class="btn btn--primary primary-btn" id="docs-insert" disabled>插入 @doc</button>
                   </div>
                 </header>
                 <div id="docs-preview-content" class="docs-preview__content">
@@ -446,33 +446,33 @@
             </div>
           </section>
 
-          <section class="main-card tools-skills-page" id="tools-skills-page" hidden>
+          <section class="main-card card tools-skills-page" id="tools-skills-page" hidden>
             <header class="tools-skills-page__header">
               <div>
                 <h2>Tools &amp; Skills</h2>
                 <p class="subtitle">管理工具與技能清單；所有權限變更都必須經過 Plan Card 確認。</p>
               </div>
-              <button type="button" class="secondary-btn" id="tools-skills-refresh">重新整理</button>
+              <button type="button" class="btn btn--secondary secondary-btn" id="tools-skills-refresh">重新整理</button>
             </header>
 
             <section class="tools-section">
               <h3>Tools</h3>
-              <div id="tools-list" class="tools-list"></div>
+              <div id="tools-list" class="tools-list list-row-group"></div>
             </section>
 
             <section class="skills-section">
               <h3>Skills</h3>
               <div id="skills-collisions" class="skills-collisions"></div>
-              <div id="skills-list" class="skills-list"></div>
+              <div id="skills-list" class="skills-list list-row-group"></div>
             </section>
 
             <section class="skills-preview-section">
               <h3>注入預覽（不觸發模型）</h3>
               <div class="skills-preview-controls">
                 <select id="skill-trigger-select"></select>
-                <button type="button" class="primary-btn" id="skill-trigger-preview">預覽注入內容</button>
+                <button type="button" class="btn btn--primary primary-btn" id="skill-trigger-preview">預覽注入內容</button>
               </div>
-              <pre id="skill-injection-preview" class="skill-injection-preview">尚未產生預覽。</pre>
+              <pre id="skill-injection-preview" class="skill-injection-preview codeblock">尚未產生預覽。</pre>
             </section>
           </section>
         </section>
@@ -485,8 +485,8 @@
         <h3 class="confirm-modal__title" id="confirm-modal-title" data-confirm-title data-i18n="modal.confirm.title">請再次確認</h3>
         <p class="confirm-modal__description" id="confirm-modal-description" data-confirm-description data-i18n="modal.confirm.description">這個動作無法復原，是否繼續？</p>
         <div class="confirm-modal__actions">
-          <button type="button" class="secondary-btn" data-confirm-cancel data-i18n="modal.confirm.cancel">取消</button>
-          <button type="button" class="primary-btn" data-confirm-ok data-i18n="modal.confirm.ok">確認</button>
+          <button type="button" class="btn btn--secondary secondary-btn" data-confirm-cancel data-i18n="modal.confirm.cancel">取消</button>
+          <button type="button" class="btn btn--primary primary-btn" data-confirm-ok data-i18n="modal.confirm.ok">確認</button>
         </div>
       </div>
     </div>
@@ -495,11 +495,11 @@
       <div class="artifact-preview-modal__panel">
         <header class="artifact-preview-modal__header">
           <h3 id="artifact-preview-title">Artifact 預覽</h3>
-          <button type="button" class="secondary-btn small" id="artifact-preview-close">關閉</button>
+          <button type="button" class="btn btn--secondary secondary-btn small" id="artifact-preview-close">關閉</button>
         </header>
         <div class="artifact-preview-modal__actions">
-          <button type="button" class="secondary-btn small" id="artifact-preview-download">下載檔案</button>
-          <button type="button" class="secondary-btn small" id="artifact-preview-copy" hidden>複製內容</button>
+          <button type="button" class="btn btn--secondary secondary-btn small" id="artifact-preview-download">下載檔案</button>
+          <button type="button" class="btn btn--secondary secondary-btn small" id="artifact-preview-copy" hidden>複製內容</button>
         </div>
         <div id="artifact-preview-body" class="artifact-preview-modal__body"></div>
       </div>
@@ -507,7 +507,7 @@
     <aside id="graph-node-drawer" class="graph-node-drawer" hidden>
       <header class="graph-node-drawer__header">
         <h3 id="graph-node-title">Node 詳細</h3>
-        <button type="button" class="secondary-btn" id="graph-node-close" data-i18n-attr="aria-label:button.collapseGraphNode">關閉</button>
+        <button type="button" class="btn btn--secondary secondary-btn" id="graph-node-close" data-i18n-attr="aria-label:button.collapseGraphNode">關閉</button>
       </header>
       <div class="graph-node-drawer__meta" id="graph-node-meta"></div>
       <section>
@@ -528,7 +528,7 @@
       <section>
         <h4>Template 化</h4>
         <div class="graph-node-drawer__actions">
-          <button type="button" class="secondary-btn" id="graph-parametrize">Parametrize（改成 {{var}}）</button>
+          <button type="button" class="btn btn--secondary secondary-btn" id="graph-parametrize">Parametrize（改成 {{var}}）</button>
         </div>
       </section>
     </aside>
