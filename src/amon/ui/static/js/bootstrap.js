@@ -101,6 +101,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
           inspector: {
             collapsed: isMobileViewport,
             width: state.contextPanelWidth,
+            activeTab: "thinking",
           },
         },
       });
@@ -987,32 +988,35 @@ appStore.patch({ bootstrappedAt: Date.now() });
         elements.chatProjectLabel.textContent = `目前專案：${selected}`;
       }
 
-      function openInspectorPanel() {
+      function openInspectorPanel(tabName = "thinking") {
+        const layoutState = appStore.getState().layout || {};
+        const inspector = layoutState.inspector || {};
+        const nextInspector = {
+          ...inspector,
+          activeTab: tabName,
+        };
+
         if (window.innerWidth <= 1200) {
+          appStore.patch({
+            layout: {
+              ...layoutState,
+              inspector: nextInspector,
+            },
+          });
           elements.uiShell?.classList.add("is-context-drawer-open");
           return;
         }
-        const layoutState = appStore.getState().layout || {};
-        const inspector = layoutState.inspector || {};
-        if (!inspector.collapsed) return;
+
+        if (!inspector.collapsed && inspector.activeTab === tabName) return;
         appStore.patch({
           layout: {
             ...layoutState,
             inspector: {
-              ...inspector,
+              ...nextInspector,
               collapsed: false,
             },
           },
         });
-
-        const anchorMap = {
-          thinking: "inspector-thinking",
-          artifacts: "inspector-artifacts",
-          logs: "inspector-execution",
-        };
-        const anchorId = anchorMap[tabName];
-        const anchorElement = anchorId ? document.getElementById(anchorId) : null;
-        anchorElement?.scrollIntoView({ behavior: "smooth", block: "start" });
       }
 
       function focusInspectorSection(which) {
@@ -1021,7 +1025,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
           thinking: elements.inspectorThinking,
           artifacts: elements.inspectorArtifacts,
         };
-        openInspectorPanel();
+        openInspectorPanel(which);
         const target = sectionMap[which] || elements.inspectorThinking;
         if (!target) return;
         requestAnimationFrame(() => {

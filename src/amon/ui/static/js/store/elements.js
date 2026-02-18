@@ -39,6 +39,8 @@ export function collectElements(doc = document) {
     inspectorExecution: doc.getElementById("inspector-execution"),
     inspectorThinking: doc.getElementById("inspector-thinking"),
     inspectorArtifacts: doc.getElementById("inspector-artifacts"),
+    inspectorTabList: doc.querySelector(".inspector-tabs"),
+    inspectorTabButtons: doc.querySelectorAll("[data-inspector-tab]"),
     streamProgress: doc.getElementById("stream-progress"),
     chatLayout: doc.getElementById("chat-layout"),
     contextPage: doc.getElementById("context-page"),
