@@ -112,7 +112,7 @@ export const CHAT_VIEW = {
       const finalMessage = `${message}${buildAttachmentSummary(attachments)}`;
       messageRenderer.appendMessage("user", finalMessage);
       messageRenderer.appendTimelineStatus("訊息已送出，等待事件回傳中...");
-      ctx.chatDeps.updateThinking({ status: "processing", brief: "需求已送出，正在分析任務" });
+      ctx.chatDeps.updateThinking({ status: "processing", brief: "需求已送出，等待 reasoning 摘要" });
       timelineRenderer.updateExecutionStep("thinking", { title: "Thinking", status: "running", details: "訊息已送出，等待模型分析" });
       timelineRenderer.updateExecutionStep("planning", { title: "Planning", status: "pending", details: "尚未開始規劃" });
       timelineRenderer.updateExecutionStep("tool_execution", { title: "Tool execution", status: "pending", details: "等待工具呼叫" });
@@ -147,14 +147,16 @@ export const CHAT_VIEW = {
               await ctx.chatDeps.loadContext();
             }
             timelineRenderer.applyExecutionEvent(eventType, data);
+            if (eventType === "reasoning") {
+              ctx.chatDeps.updateThinking({ status: "reasoning", brief: "收到 reasoning 摘要", verbose: data.text || "" });
+              return;
+            }
             if (eventType === "token") {
-              ctx.chatDeps.updateThinking({ status: "thinking", brief: "模型思考中", verbose: data.text || "" });
               messageRenderer.applyTokenChunk(data.text || "");
               return;
             }
             if (eventType === "notice") {
               if (data.text) {
-                ctx.chatDeps.updateThinking({ status: "progress", brief: data.text });
                 messageRenderer.appendMessage("agent", data.text);
               }
               return;

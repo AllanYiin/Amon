@@ -165,6 +165,54 @@ class UIEventStreamClientTests(unittest.TestCase):
         )
         self._run_node(script)
 
+
+    def test_reasoning_event_is_dispatched(self) -> None:
+        script = textwrap.dedent(
+            """
+            const { EventStreamClient } = require('./src/amon/ui/event_stream_client.js');
+
+            let seenReasoning = '';
+            class FakeEventSource {
+              constructor(_url) {
+                this.listeners = new Map();
+                setTimeout(() => {
+                  const emit = (eventType, payload) => {
+                    const handler = this.listeners.get(eventType);
+                    if (handler) {
+                      handler({ data: JSON.stringify(payload), lastEventId: null });
+                    }
+                  };
+                  emit('reasoning', { text: '先分解問題再輸出' });
+                  emit('done', { status: 'ok' });
+                }, 0);
+              }
+              addEventListener(eventType, callback) { this.listeners.set(eventType, callback); }
+              close() {}
+            }
+            global.EventSource = FakeEventSource;
+
+            const client = new EventStreamClient({
+              preferSSE: true,
+              sseUrlBuilder: () => '/v1/chat/stream?message=demo',
+              onEvent: (eventType, payload) => {
+                if (eventType === 'reasoning') {
+                  seenReasoning = payload.text || '';
+                }
+              },
+            });
+
+            client.start({ message: 'demo' });
+
+            setTimeout(() => {
+              if (seenReasoning !== '先分解問題再輸出') {
+                throw new Error(`reasoning event missing: ${seenReasoning}`);
+              }
+              process.exit(0);
+            }, 20);
+            """
+        )
+        self._run_node(script)
+
     def test_reconnect_request_reuses_project_and_chat_from_events(self) -> None:
         script = textwrap.dedent(
             """

@@ -115,6 +115,59 @@ src/amon/ui/
 
 > 注意：fallback 檔案若含舊實作，需明確標註淘汰期限，避免形成雙實作長期共存。
 
+## 7. UI 常見問答（Artifacts / Docs / Thinking Inspector）
+
+### Q1. Inspector 裡的 Artifacts 跟左側 Docs 頁面有什麼差別？
+
+- **Artifacts（Inspector）**
+  - 以「**單次 run 的產出**」為主（例如某次執行所生成的檔案）。
+  - 入口是 `/v1/runs/{run_id}/artifacts`，必須先有 run_id。
+  - 適合在聊天流程進行中，快速確認這次執行剛產生了哪些檔案。
+
+- **Docs（Docs 頁）**
+  - 以「**整個專案 docs 目錄的文件總覽**」為主。
+  - 入口是 `/v1/projects/{project_id}/docs`，列出 `docs/` 下所有文件（包含文字與二進位檔），並附帶 run/node 推測來源。
+  - 適合做跨 run 的歷史回看、全文瀏覽、插入 `@doc` 到 chat 等操作。
+
+> 實務上可把 Artifacts 視為「run-centric 快速檢視」，Docs 視為「project-centric 文件索引」。
+
+#### 補充：如果一個 project 幾乎都只跑一次，兩者會不會其實差不多？
+
+會「看起來接近」，但仍有 3 個實際差異：
+
+1. **查詢鍵不同**：Artifacts 依 `run_id` 查；Docs 依 `project_id` 查。
+2. **預期內容不同**：Artifacts 聚焦「本次執行輸出」；Docs 聚焦「專案 docs 目錄內所有可用文件」（含先前手動整理或其他流程產物）。
+3. **操作目的不同**：Artifacts 偏除錯/驗收當次輸出；Docs 偏文件管理、搜尋、預覽與 `@doc` 引用。
+
+> 所以：即使「目前工作習慣」常是 1 project 對 1 run，UI 仍保留兩者分工，避免未來 run 變多時要重做資訊架構。
+
+### Q2. Thinking Inspector 的顯示模式 off / brief / verbose 差異？
+
+- `off`
+  - 關閉內容顯示；summary 固定為「Thinking 顯示已關閉」，detail 為空。
+- `brief`
+  - 顯示狀態摘要與短訊息（`payload.brief`）。
+- `verbose`
+  - 優先顯示詳情（`payload.verbose`），若無則回退 `brief`。
+
+### Q3. 要怎樣 Thinking Inspector 才會出現內容？
+
+1. 進入 Chat 頁後送出一則訊息。
+2. 前端會在流程中依 SSE 事件更新 Thinking：
+   - `token`：寫入「模型思考中」，並把 token 內容當作 verbose。
+   - `notice` / `result` / `error` / `done`：更新各階段摘要。
+3. 若模式是 `off`，即使事件有進來也不會顯示內容；切到 `brief` 或 `verbose` 即可看到。
+
+### Q4. Thinking Inspector 是否等同 OpenAI API 的 `reasoning={"effort":"medium","summary":"auto"}`？
+
+目前邏輯已調整為「**Reasoning 優先**」：
+
+- 後端若從 provider 串流中讀到 reasoning 內容，會發送 `reasoning` SSE 事件。
+- 前端 Thinking Inspector 只用 `reasoning` 事件更新主要內容，不再把 `notice/result` 當作 Thinking 內容。
+- 若 provider 未提供 reasoning 內容，Thinking 區塊會停在等待狀態，但 chat 文字 token 仍正常串流顯示。
+
+因此它仍不是 OpenAI 參數本身的原樣回放，而是「Amon 對 reasoning 串流欄位的 UI 呈現」。
+
 ## 附錄：Phase 5.2 第二段拆分
 
 - 詳細執行步驟請見：`docs/phase5-second-split-instructions.md`。
