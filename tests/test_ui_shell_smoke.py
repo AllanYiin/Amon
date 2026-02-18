@@ -93,6 +93,14 @@ class UIShellSmokeTests(unittest.TestCase):
         self.assertIn("[hidden]", css)
         self.assertIn("display: none !important", css)
 
+    def test_artifact_preview_modal_body_is_scrollable(self) -> None:
+        css = Path("src/amon/ui/styles.css").read_text(encoding="utf-8")
+        self.assertIn(".artifact-preview-modal__panel", css)
+        self.assertIn("grid-template-rows: auto auto minmax(0, 1fr);", css)
+        self.assertIn("overflow: hidden;", css)
+        self.assertIn(".artifact-preview-modal__body", css)
+        self.assertIn("overflow: auto;", css)
+
     def test_context_page_has_actionable_cta_and_safe_clear_controls(self) -> None:
         html = Path("src/amon/ui/index.html").read_text(encoding="utf-8")
         bootstrap_js = Path("src/amon/ui/static/js/bootstrap.js").read_text(encoding="utf-8")
