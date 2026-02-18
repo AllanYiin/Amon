@@ -180,127 +180,280 @@
           </div>
 
 
-          <section class="main-card bill-page" id="bill-page" hidden>
-            <header class="bill-page__header">
-              <div>
-                <h2>Bill</h2>
-                <p class="subtitle">顯示今日、專案累計、breakdown、automation/interactive 與 budgets。</p>
+          <section class="main-card bill-page bill-page--mobile" id="bill-page" hidden>
+            <header class="bill-mobile-topbar">
+              <div class="bill-mobile-topbar__left">
+                <button type="button" class="bill-mobile-icon" aria-label="返回">←</button>
+                <h2>費用與用量</h2>
               </div>
-              <button type="button" class="secondary-btn" id="bill-refresh">重新整理</button>
+              <div class="bill-mobile-topbar__right">
+                <span class="bill-plan-chip">PRO PLAN</span>
+                <button type="button" class="bill-mobile-icon" id="bill-refresh" aria-label="重新整理">⋮</button>
+              </div>
             </header>
 
-            <div class="bill-kpis">
-              <article class="context-shell-card">
-                <p class="context-shell-card__label">今日費用 / 用量</p>
-                <strong id="bill-today">--</strong>
-              </article>
-              <article class="context-shell-card">
-                <p class="context-shell-card__label">專案累計費用 / 用量</p>
-                <strong id="bill-project-total">--</strong>
-              </article>
-              <article class="context-shell-card">
-                <p class="context-shell-card__label">automation / interactive</p>
-                <strong id="bill-mode-summary">--</strong>
-              </article>
-              <article class="context-shell-card">
-                <p class="context-shell-card__label">目前 Run 費用</p>
-                <strong id="bill-current-run">--</strong>
-              </article>
+            <div class="bill-mobile-scroll">
+              <section class="bill-summary-grid" aria-label="費用摘要">
+                <article class="bill-summary-card">
+                  <p>總花費</p>
+                  <strong id="bill-project-total">--</strong>
+                  <small>目前計費週期</small>
+                </article>
+                <article class="bill-summary-card">
+                  <p>今日用量</p>
+                  <strong id="bill-today">--</strong>
+                  <small>日均 token 估算</small>
+                </article>
+              </section>
+
+              <section class="bill-section">
+                <div class="bill-section__header">
+                  <h3>用量趨勢</h3>
+                  <div class="bill-range-tabs"><span class="is-active">7D</span><span>30D</span><span>全部</span></div>
+                </div>
+                <article class="bill-chart-card">
+                  <canvas id="bill-run-chart" height="150" aria-label="每 run 花費長條圖"></canvas>
+                </article>
+              </section>
+
+              <section class="bill-section">
+                <div class="bill-section__header">
+                  <h3>成本分佈</h3>
+                </div>
+                <div class="bill-model-cards">
+                  <article class="bill-model-card">
+                    <header><h4>provider</h4><span>來源</span></header>
+                    <pre id="bill-breakdown-provider">尚未載入。</pre>
+                  </article>
+                  <article class="bill-model-card">
+                    <header><h4>model</h4><span>模型</span></header>
+                    <pre id="bill-breakdown-model">尚未載入。</pre>
+                  </article>
+                  <article class="bill-model-card">
+                    <header><h4>agent</h4><span>代理</span></header>
+                    <pre id="bill-breakdown-agent">尚未載入。</pre>
+                  </article>
+                  <article class="bill-model-card">
+                    <header><h4>node</h4><span>節點</span></header>
+                    <pre id="bill-breakdown-node">尚未載入。</pre>
+                  </article>
+                </div>
+              </section>
+
+              <section class="bill-section">
+                <div class="bill-section__header">
+                  <h3>近期 Session</h3>
+                  <button type="button" class="bill-link-btn">檢視全部</button>
+                </div>
+                <article class="bill-session-list">
+                  <div class="bill-session-item">
+                    <div><strong>目前 Run</strong><small>即時費用與 token</small></div>
+                    <p id="bill-current-run">--</p>
+                  </div>
+                  <div class="bill-session-item">
+                    <div><strong>automation / interactive</strong><small>模式分佈</small></div>
+                    <p id="bill-mode-summary">--</p>
+                  </div>
+                </article>
+              </section>
+
+              <button type="button" class="bill-export-btn">下載發票 CSV</button>
+
+              <section class="bill-advanced" aria-label="進階 billing 原始資料">
+                <article class="config-card">
+                  <h3>Budgets</h3>
+                  <pre id="bill-budgets">尚未載入。</pre>
+                </article>
+                <article class="config-card">
+                  <h3>超限事件（budget_exceeded）</h3>
+                  <ul id="bill-exceeded" class="logs-list"></ul>
+                </article>
+              </section>
             </div>
 
-            <article class="config-card">
-              <h3>每 Run 花費趨勢</h3>
-              <canvas id="bill-run-chart" height="140" aria-label="每 run 花費長條圖"></canvas>
-            </article>
-
-            <section class="bill-grid">
-              <article class="config-card">
-                <h3>Budgets</h3>
-                <pre id="bill-budgets">尚未載入。</pre>
-              </article>
-              <article class="config-card">
-                <h3>超限事件（budget_exceeded）</h3>
-                <ul id="bill-exceeded" class="logs-list"></ul>
-              </article>
-            </section>
-
-            <section class="bill-grid">
-              <article class="config-card">
-                <h3>Breakdown：provider</h3>
-                <pre id="bill-breakdown-provider">尚未載入。</pre>
-              </article>
-              <article class="config-card">
-                <h3>Breakdown：model</h3>
-                <pre id="bill-breakdown-model">尚未載入。</pre>
-              </article>
-              <article class="config-card">
-                <h3>Breakdown：agent</h3>
-                <pre id="bill-breakdown-agent">尚未載入。</pre>
-              </article>
-              <article class="config-card">
-                <h3>Breakdown：node</h3>
-                <pre id="bill-breakdown-node">尚未載入。</pre>
-              </article>
-            </section>
+            <footer class="bill-bottom-nav" aria-label="底部導覽">
+              <a href="#/tools">代理</a>
+              <a href="#/chat">對話</a>
+              <a href="#/billing" class="is-active">Billing</a>
+              <a href="#/config">設定</a>
+            </footer>
           </section>
 
 
-          <section class="main-card config-page" id="config-page" hidden>
-            <header class="config-page__header">
-              <div>
-                <h2>Config</h2>
-                <p class="subtitle">唯讀檢視 Global / Project / Effective 設定，並顯示 Effective 來源。</p>
-              </div>
-              <button type="button" class="secondary-btn" id="config-export">匯出 Effective Config</button>
+          <section class="main-card config-page config-page--settings" id="config-page" hidden>
+            <header class="settings-topbar">
+              <button type="button" class="settings-link">← 對話</button>
+              <h2>代理設定</h2>
+              <button type="button" class="settings-done" id="config-export">完成</button>
             </header>
 
-            <div class="config-toolbar">
-              <label class="field-label config-toolbar__search">
-                搜尋 key path
-                <input type="search" id="config-search" placeholder="例如：amon.ui.theme" />
+            <div class="settings-scroll">
+              <section class="settings-section">
+                <h3>核心智慧</h3>
+                <article class="settings-card">
+                  <button type="button" class="settings-row">
+                    <div class="settings-row__icon settings-row__icon--primary">🤖</div>
+                    <div class="settings-row__content">
+                      <p>模型選擇</p>
+                      <small>Llama-3-8B-Instruct</small>
+                    </div>
+                    <div class="settings-row__meta"><span class="dot-ready"></span> Ready</div>
+                  </button>
+                  <button type="button" class="settings-row settings-row--border">
+                    <div class="settings-row__icon settings-row__icon--purple">🗄️</div>
+                    <div class="settings-row__content">
+                      <p>API Endpoint</p>
+                      <small>Local (127.0.0.1:11434)</small>
+                    </div>
+                    <div class="settings-row__meta">›</div>
+                  </button>
+                </article>
+                <p class="settings-hint">已連線本機 Ollama（port 11434）。</p>
+              </section>
+
+              <section class="settings-section">
+                <h3>個性設定</h3>
+                <article class="settings-card">
+                  <div class="settings-block">
+                    <div class="settings-block__header">
+                      <strong>系統提示詞</strong>
+                      <button type="button" class="settings-pill">編輯</button>
+                    </div>
+                    <pre class="settings-code">You are a helpful, precision-focused coding assistant. Answer concisely and prioritize modern best practices.</pre>
+                  </div>
+                  <div class="settings-block settings-block--border">
+                    <div class="settings-block__header">
+                      <strong>創造力（Temp）</strong>
+                      <span class="settings-value">0.7</span>
+                    </div>
+                    <input type="range" min="0" max="100" value="70" class="settings-range" />
+                    <div class="settings-scale"><span>精準</span><span>創意</span></div>
+                  </div>
+                </article>
+              </section>
+
+              <section class="settings-section">
+                <h3>內容與記憶</h3>
+                <article class="settings-card">
+                  <div class="settings-row settings-row--static">
+                    <div class="settings-row__content">
+                      <p>Context Window</p>
+                    </div>
+                    <div class="settings-segment"><span>4k</span><span class="is-active">8k</span><span>16k</span><span>32k</span></div>
+                  </div>
+                  <div class="settings-row settings-row--border settings-row--static">
+                    <div class="settings-row__content">
+                      <p>向量資料庫</p>
+                      <small>/usr/local/var/chromadb/default</small>
+                    </div>
+                    <div class="settings-row__meta">📁</div>
+                  </div>
+                </article>
+              </section>
+
+              <section class="settings-section">
+                <h3>介面設定</h3>
+                <article class="settings-card">
+                  <label class="settings-toggle-row settings-row--border">
+                    <div><p>串流回覆</p><small>逐字輸出</small></div>
+                    <input type="checkbox" checked />
+                  </label>
+                  <div class="settings-block settings-block--border">
+                    <div class="settings-block__header"><strong>字體大小</strong></div>
+                    <input type="range" min="0" max="2" value="1" class="settings-range" />
+                  </div>
+                  <label class="settings-toggle-row">
+                    <div><p>震動回饋</p></div>
+                    <input type="checkbox" />
+                  </label>
+                </article>
+              </section>
+
+              <section class="settings-section settings-section--advanced">
+                <div class="config-toolbar">
+                  <label class="field-label config-toolbar__search">
+                    搜尋 key path
+                    <input type="search" id="config-search" placeholder="例如：amon.ui.theme" />
+                  </label>
+                  <button type="button" class="secondary-btn" id="config-refresh">重新整理設定資料</button>
+                </div>
+
+                <div class="config-grid">
+                  <article class="config-card">
+                    <h3>Global config</h3>
+                    <pre id="config-global">尚未載入。</pre>
+                  </article>
+                  <article class="config-card">
+                    <h3>Project config</h3>
+                    <pre id="config-project">尚未載入。</pre>
+                  </article>
+                </div>
+
+                <article class="config-card">
+                  <h3>Effective config（含來源）</h3>
+                  <div id="config-effective-summary" class="config-effective-summary">尚未載入。</div>
+                  <div class="config-table-wrap">
+                    <table class="config-table" id="config-table">
+                      <thead>
+                        <tr>
+                          <th>Key path</th>
+                          <th>Effective</th>
+                          <th>Source</th>
+                        </tr>
+                      </thead>
+                      <tbody id="config-table-body"></tbody>
+                    </table>
+                  </div>
+                </article>
+              </section>
+            </div>
+
+            <footer class="settings-bottom-nav" aria-label="底部導航">
+              <a href="#/chat">對話</a>
+              <a href="#/tools">代理</a>
+              <a class="is-active" href="#/config">設定</a>
+              <a href="#/logs">日誌</a>
+            </footer>
+          </section>
+
+          <section class="main-card logs-events-page logs-events-page--mobile" id="logs-events-page" hidden>
+            <header class="logs-mobile-topbar">
+              <div class="logs-mobile-title">
+                <h2>系統活動</h2>
+                <p>本機代理：Omni-Node-01</p>
+              </div>
+              <div class="logs-mobile-actions">
+                <span class="logs-live-pill">● LIVE</span>
+                <button type="button" class="logs-icon-btn" id="logs-download" aria-label="分享匯出">⤴</button>
+                <button type="button" class="logs-icon-btn" aria-label="清理日誌">🗑</button>
+              </div>
+            </header>
+
+            <section class="logs-search-block">
+              <label class="logs-search-input" for="logs-filter-component">
+                <span>🔍</span>
+                <input type="text" id="logs-filter-component" placeholder="搜尋關鍵字或 ID..." />
               </label>
-              <button type="button" class="secondary-btn" id="config-refresh">重新整理</button>
+              <div class="logs-filter-pills">
+                <button type="button" class="is-active" id="logs-refresh">全部</button>
+                <button type="button">Info</button>
+                <button type="button">Warn</button>
+                <button type="button">Error</button>
+                <button type="button">Debug</button>
+              </div>
+            </section>
+
+            <div class="logs-mobile-stream">
+              <div id="logs-summary" class="logs-summary logs-summary--mobile">尚未載入。</div>
+              <div id="logs-list" class="logs-list logs-list--mobile"></div>
+              <div class="pager" id="logs-pager">
+                <button type="button" class="secondary-btn" id="logs-prev">上一頁</button>
+                <span id="logs-page-label">第 1 頁</span>
+                <button type="button" class="secondary-btn" id="logs-next">下一頁</button>
+              </div>
             </div>
 
-            <div class="config-grid">
-              <article class="config-card">
-                <h3>Global config</h3>
-                <pre id="config-global">尚未載入。</pre>
-              </article>
-              <article class="config-card">
-                <h3>Project config</h3>
-                <pre id="config-project">尚未載入。</pre>
-              </article>
-            </div>
-
-            <article class="config-card">
-              <h3>Effective config（含來源）</h3>
-              <div id="config-effective-summary" class="config-effective-summary">尚未載入。</div>
-              <div class="config-table-wrap">
-                <table class="config-table" id="config-table">
-                  <thead>
-                    <tr>
-                      <th>Key path</th>
-                      <th>Effective</th>
-                      <th>Source</th>
-                    </tr>
-                  </thead>
-                  <tbody id="config-table-body"></tbody>
-                </table>
-              </div>
-            </article>
-          </section>
-
-          <section class="main-card logs-events-page" id="logs-events-page" hidden>
-            <header class="logs-events-page__header">
-              <div>
-                <h2>Logs &amp; Events</h2>
-                <p class="subtitle">依來源與條件檢視 log/event，並支援下載與 drilldown。</p>
-              </div>
-            </header>
-
-            <section class="logs-panel">
-              <h3>Logs</h3>
+            <section class="logs-events-advanced" aria-label="進階篩選" hidden>
               <div class="logs-toolbar">
                 <label class="field-label">來源
                   <select id="logs-source">
@@ -322,94 +475,199 @@
                     <option value="ERROR">ERROR</option>
                   </select>
                 </label>
-                <label class="field-label">component<input type="text" id="logs-filter-component" placeholder="component / event" /></label>
-                <button type="button" class="secondary-btn" id="logs-refresh">查詢</button>
-                <button type="button" class="secondary-btn" id="logs-download">下載</button>
               </div>
-              <div id="logs-summary" class="logs-summary">尚未載入。</div>
-              <div id="logs-list" class="logs-list"></div>
-              <div class="pager" id="logs-pager">
-                <button type="button" class="secondary-btn" id="logs-prev">上一頁</button>
-                <span id="logs-page-label">第 1 頁</span>
-                <button type="button" class="secondary-btn" id="logs-next">下一頁</button>
-              </div>
+
+              <section class="events-panel">
+                <h3>Events</h3>
+                <div class="logs-toolbar">
+                  <label class="field-label">type<input type="text" id="events-filter-type" placeholder="event type" /></label>
+                  <label class="field-label">起始時間<input type="datetime-local" id="events-time-from" /></label>
+                  <label class="field-label">結束時間<input type="datetime-local" id="events-time-to" /></label>
+                  <label class="field-label">project<input type="text" id="events-filter-project" placeholder="project_id" /></label>
+                  <label class="field-label">run<input type="text" id="events-filter-run" placeholder="run_id" /></label>
+                  <label class="field-label">node<input type="text" id="events-filter-node" placeholder="node_id" /></label>
+                  <button type="button" class="secondary-btn" id="events-refresh">查詢</button>
+                </div>
+                <div id="events-summary" class="logs-summary">尚未載入。</div>
+                <div id="events-list" class="logs-list"></div>
+                <div class="pager" id="events-pager">
+                  <button type="button" class="secondary-btn" id="events-prev">上一頁</button>
+                  <span id="events-page-label">第 1 頁</span>
+                  <button type="button" class="secondary-btn" id="events-next">下一頁</button>
+                </div>
+              </section>
             </section>
 
-            <section class="events-panel">
-              <h3>Events</h3>
-              <div class="logs-toolbar">
-                <label class="field-label">type<input type="text" id="events-filter-type" placeholder="event type" /></label>
-                <label class="field-label">起始時間<input type="datetime-local" id="events-time-from" /></label>
-                <label class="field-label">結束時間<input type="datetime-local" id="events-time-to" /></label>
-                <label class="field-label">project<input type="text" id="events-filter-project" placeholder="project_id" /></label>
-                <label class="field-label">run<input type="text" id="events-filter-run" placeholder="run_id" /></label>
-                <label class="field-label">node<input type="text" id="events-filter-node" placeholder="node_id" /></label>
-                <button type="button" class="secondary-btn" id="events-refresh">查詢</button>
-              </div>
-              <div id="events-summary" class="logs-summary">尚未載入。</div>
-              <div id="events-list" class="logs-list"></div>
-              <div class="pager" id="events-pager">
-                <button type="button" class="secondary-btn" id="events-prev">上一頁</button>
-                <span id="events-page-label">第 1 頁</span>
-                <button type="button" class="secondary-btn" id="events-next">下一頁</button>
-              </div>
-            </section>
+            <button type="button" class="logs-fab" aria-label="捲動到底部">↓</button>
+
+            <footer class="logs-bottom-nav" aria-label="底部導航">
+              <a href="#/graph">Dashboard</a>
+              <a href="#/chat">Chat</a>
+              <a href="#/logs" class="is-active">Logs</a>
+              <a href="#/config">Settings</a>
+            </footer>
           </section>
 
-          <section class="main-card context-page" id="context-page" hidden>
-            <header class="context-page__header">
-              <div>
-                <h2>Context</h2>
-                <p class="subtitle">這裡會顯示系統提示、資料來源與可注入變數。若尚未接到後端儲存 API，將先以「本機草稿」方式保存。</p>
-              </div>
+          <section class="main-card context-page context-page--mobile" id="context-page" hidden>
+            <header class="context-mobile-topbar">
+              <h2>Context Manager</h2>
+              <button type="button" class="context-clear-btn" id="context-clear-chat">🗑 清理紀錄</button>
             </header>
-            <section class="context-draft" id="context-draft-box">
-              <label class="field-label" for="context-draft-input">Context 草稿（僅本機）</label>
-              <textarea id="context-draft-input" rows="8" placeholder="例如：專案目標、語氣偏好、重要限制條件..."></textarea>
-              <p id="context-draft-meta" class="context-draft__meta">尚未儲存草稿。</p>
-              <div class="context-draft__actions">
-                <button type="button" class="primary-btn" id="context-save-draft">儲存草稿（本機）</button>
-                <label class="secondary-btn file-btn-inline" for="context-import-file">從檔案匯入</label>
-                <input id="context-import-file" type="file" accept=".txt,.md,.json" hidden />
-                <button type="button" class="secondary-btn" id="context-extract-chat">從最近對話擷取</button>
-              </div>
-            </section>
-            <section class="context-danger-zone">
-              <h3>清理動作</h3>
-              <p class="empty-context">高風險操作將需要二次確認。若為本機草稿清理，無法復原。</p>
-              <div class="context-danger-zone__actions">
-                <button type="button" class="secondary-btn" id="context-clear-chat">清空本次對話 Context（本機草稿）</button>
-                <button type="button" class="secondary-btn" id="context-clear-project">清空專案 Context 草稿（本機）</button>
-              </div>
-            </section>
+
+            <div class="context-mobile-scroll">
+              <section class="context-gauge-section" id="context-draft-box">
+                <div class="context-gauge-wrap" aria-label="Context 用量">
+                  <svg viewBox="0 0 100 100" class="context-gauge-svg" aria-hidden="true">
+                    <circle cx="50" cy="50" r="42"></circle>
+                    <circle class="context-gauge-progress" cx="50" cy="50" r="42"></circle>
+                  </svg>
+                  <div class="context-gauge-center">
+                    <p>TOTAL USAGE</p>
+                    <strong>75%</strong>
+                    <span>6,144 / 8,192</span>
+                    <small>Tokens</small>
+                  </div>
+                </div>
+                <p class="context-usage-hint">ℹ️ Context window is filling up rapidly.</p>
+              </section>
+
+              <section class="context-metrics-grid">
+                <article class="context-metric-card">
+                  <p>剩餘</p>
+                  <strong>2,048</strong>
+                  <small>Tokens available</small>
+                </article>
+                <article class="context-metric-card">
+                  <p>預估成本</p>
+                  <strong>$0.04</strong>
+                  <small>Per current session</small>
+                </article>
+              </section>
+
+              <section class="context-breakdown">
+                <h3>詳細拆解</h3>
+                <article class="context-breakdown-card context-breakdown-card--history">
+                  <header><strong>History</strong><span>4,352 · 53%</span></header>
+                  <small>Recent user &amp; AI turns</small>
+                  <div class="context-breakdown-bar"><span style="width:53%"></span></div>
+                  <button type="button" class="context-card-link" id="context-extract-chat">查看記錄 ›</button>
+                </article>
+                <article class="context-breakdown-card">
+                  <header><strong>Tools</strong><span>1,024 · 12.5%</span></header>
+                  <small>JSON Schemas</small>
+                  <div class="context-breakdown-bar"><span style="width:12.5%"></span></div>
+                </article>
+                <article class="context-breakdown-card">
+                  <header><strong>System</strong><span>512 · 6.2%</span></header>
+                  <small>Core Instructions</small>
+                  <div class="context-breakdown-bar"><span style="width:6.2%"></span></div>
+                </article>
+                <article class="context-breakdown-card">
+                  <header><strong>Plugins</strong><span>256 · 3.1%</span></header>
+                  <small>Loaded Scripts</small>
+                  <div class="context-breakdown-bar"><span style="width:3.1%"></span></div>
+                </article>
+              </section>
+
+              <section class="context-editor-card">
+                <label class="field-label" for="context-draft-input">Context 草稿（可編輯）</label>
+                <textarea id="context-draft-input" rows="8" placeholder="例如：專案目標、語氣偏好、重要限制條件..."></textarea>
+                <p id="context-draft-meta" class="context-draft__meta">尚未儲存草稿。</p>
+                <div class="context-draft__actions">
+                  <button type="button" class="primary-btn" id="context-save-draft">儲存草稿（本機）</button>
+                  <label class="secondary-btn file-btn-inline" for="context-import-file">從檔案匯入</label>
+                  <input id="context-import-file" type="file" accept=".txt,.md,.json" hidden />
+                  <button type="button" class="secondary-btn" id="context-clear-project">清空專案草稿</button>
+                </div>
+              </section>
+
+              <button type="button" class="context-optimize-btn">✨ 最佳化 Context 視窗</button>
+            </div>
+
+            <footer class="context-bottom-nav" aria-label="底部導航">
+              <a href="#/chat">Chat</a>
+              <a href="#/tools">Agents</a>
+              <a class="is-active" href="#/context">Context</a>
+              <a href="#/config">Settings</a>
+            </footer>
           </section>
 
-          <section class="main-card graph-page" id="graph-page" hidden>
-            <header class="graph-page__header">
-              <div>
-                <h2>Graph</h2>
-                <p class="subtitle">流程圖主視圖（支援切換歷史 Run）。</p>
+          <section class="main-card graph-page graph-page--mobile" id="graph-page" hidden>
+            <header class="graph-mobile-topbar">
+              <button type="button" class="graph-mobile-back">←</button>
+              <div class="graph-mobile-title">
+                <h2>EXECUTION FLOW</h2>
+                <p>Agent: Research_Bot_v2</p>
               </div>
-              <div class="graph-page__controls">
-                <label class="field-label">
-                  歷史 Run
-                  <select id="graph-run-select"></select>
-                </label>
-                <button type="button" class="secondary-btn" id="graph-history-refresh">重新整理</button>
-                <button type="button" class="secondary-btn" id="copy-run-id" disabled data-i18n="button.copyRunId" data-i18n-attr="aria-label:button.copyRunIdAria">複製 Run ID</button>
-              </div>
+              <button type="button" class="graph-stop-btn">STOP AGENT</button>
             </header>
-            <div class="graph-toolbar">
-              <div class="graph-run-meta-wrap">
-                <span id="graph-run-meta" class="graph-run-meta">尚未偵測到 Run</span>
+
+            <div class="graph-mobile-canvas">
+              <div class="graph-mobile-search"><span>🔍</span><input type="search" placeholder="Search nodes..." /></div>
+              <div class="graph-mobile-node graph-mobile-node--intent">
+                <header><strong>USER INTENT</strong></header>
+                <p>"Analyze current market trends for sustainable energy in EU..."</p>
+                <footer><span>ID：UX-492</span><span>14:02:11</span></footer>
               </div>
-              <div class="graph-toolbar__actions">
-                <button type="button" class="secondary-btn" id="graph-create-template">Create template</button>
+
+              <div class="graph-mobile-arrow">↓</div>
+
+              <div class="graph-mobile-node graph-mobile-node--tool">
+                <header><strong>TOOL CALL</strong></header>
+                <pre>web_search({query: "EU sustainable energy 2024"})</pre>
+                <footer><span>Status: Completed</span><span>342ms</span></footer>
+              </div>
+
+              <div class="graph-mobile-arrow">↓</div>
+
+              <div class="graph-mobile-node graph-mobile-node--thinking">
+                <header><strong>THINKING</strong></header>
+                <div class="graph-mobile-progress"><span></span></div>
+                <p>Synthesizing search results and formulating response structure...</p>
+                <footer><span>Processing...</span><span>Conf: 0.94</span></footer>
+              </div>
+
+              <div class="graph-floating-controls" aria-label="縮放控制">
+                <button type="button">＋</button>
+                <button type="button">－</button>
+                <button type="button" class="is-primary">◎</button>
               </div>
             </div>
-            <div id="graph-preview" class="graph-preview"></div>
-            <ul id="graph-node-list" class="graph-node-list"></ul>
-            <pre id="graph-code" class="graph-code"></pre>
+
+            <div class="graph-mobile-hidden-data" hidden>
+              <header class="graph-page__header">
+                <div>
+                  <h2>Graph</h2>
+                  <p class="subtitle">流程圖主視圖（支援切換歷史 Run）。</p>
+                </div>
+                <div class="graph-page__controls">
+                  <label class="field-label">
+                    歷史 Run
+                    <select id="graph-run-select"></select>
+                  </label>
+                  <button type="button" class="secondary-btn" id="graph-history-refresh">重新整理</button>
+                  <button type="button" class="secondary-btn" id="copy-run-id" disabled data-i18n="button.copyRunId" data-i18n-attr="aria-label:button.copyRunIdAria">複製 Run ID</button>
+                </div>
+              </header>
+              <div class="graph-toolbar">
+                <div class="graph-run-meta-wrap">
+                  <span id="graph-run-meta" class="graph-run-meta">尚未偵測到 Run</span>
+                </div>
+                <div class="graph-toolbar__actions">
+                  <button type="button" class="secondary-btn" id="graph-create-template">Create template</button>
+                </div>
+              </div>
+              <div id="graph-preview" class="graph-preview"></div>
+              <ul id="graph-node-list" class="graph-node-list"></ul>
+              <pre id="graph-code" class="graph-code"></pre>
+            </div>
+
+            <footer class="graph-bottom-nav" aria-label="底部導航">
+              <a href="#/chat">CHAT</a>
+              <a href="#/graph" class="is-active">EXECUTION</a>
+              <a href="#/context">MEMORY</a>
+              <a href="#/config">AGENT SETTINGS</a>
+            </footer>
           </section>
 
           <section class="main-card docs-page" id="docs-page" hidden>

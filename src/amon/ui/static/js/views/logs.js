@@ -38,8 +38,9 @@ export const LOGS_VIEW = {
       listEl.innerHTML = "";
       items.forEach((item) => {
         const card = document.createElement("article");
-        card.className = "log-item";
-        card.innerHTML = `<header><strong>${esc(item.level || item.severity || "INFO")}</strong> · <code>${esc(item.ts || "-")}</code></header><pre>${esc(JSON.stringify(item, null, 2))}</pre>`;
+        const level = String(item.level || item.severity || "INFO").toUpperCase();
+        card.className = `log-item log-item--${level.toLowerCase()}`;
+        card.innerHTML = `<header><strong>${esc(level)}</strong> · <code>${esc(item.ts || "-")}</code></header><pre>${esc(JSON.stringify(item, null, 2))}</pre>`;
         listEl.appendChild(card);
       });
       if (!items.length) {
