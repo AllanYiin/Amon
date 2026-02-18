@@ -281,6 +281,13 @@ body {
   gap: 8px;
 }
 
+.shell-nav.segmented {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+}
+
 .shell-nav__item {
   --nav-icon: "radio_button_checked";
   width: 100%;
