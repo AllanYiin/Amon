@@ -935,41 +935,110 @@ body {
   font-size: 11px;
 }
 
-.chat-bubble {
+.chat-msg {
+  display: grid;
+  gap: 6px;
+  max-width: min(92%, 760px);
+}
+
+.chat-msg--user {
+  align-self: flex-end;
+  justify-items: end;
+}
+
+.chat-msg--agent {
+  align-self: flex-start;
+  justify-items: start;
+}
+
+.chat-msg__header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.chat-msg__identity {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-msg__avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--primary) 22%, var(--c-bg));
+  border: 1px solid color-mix(in srgb, var(--primary) 38%, var(--c-border));
+  color: var(--title);
+  font-size: 12px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chat-msg__name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--title);
+}
+
+.chat-msg__status {
+  font-size: 11px;
+  color: var(--c-info);
+  border: 1px solid color-mix(in srgb, var(--c-info) 50%, var(--c-border));
+  background: color-mix(in srgb, var(--c-info) 15%, var(--c-surface-2));
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.chat-msg__bubble {
   border-radius: 14px;
   padding: 12px 14px;
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.55;
+  width: 100%;
+  border: 1px solid transparent;
 }
 
-.chat-bubble.user {
-  background: var(--card-muted);
+.chat-msg__bubble--user {
+  background: color-mix(in srgb, var(--primary) 14%, var(--c-surface-2));
+  border-color: color-mix(in srgb, var(--primary) 26%, var(--c-border));
 }
 
-.chat-bubble.agent {
-  background: var(--highlight);
+.chat-msg__bubble--agent {
+  background: var(--c-surface-2);
+  border-color: var(--c-border);
 }
 
-.chat-bubble p {
+.chat-msg__bubble.is-typing .chat-msg__body:empty::before {
+  content: "Amon 正在輸入中…";
+  color: var(--muted);
+  font-style: italic;
+}
+
+.chat-msg__body p {
   margin: 0;
 }
 
-.chat-bubble p + p,
-.chat-bubble p + ul,
-.chat-bubble ul + p,
-.chat-bubble pre,
-.chat-bubble h1,
-.chat-bubble h2,
-.chat-bubble h3 {
+.chat-msg__body p + p,
+.chat-msg__body p + ul,
+.chat-msg__body ul + p,
+.chat-msg__body pre,
+.chat-msg__body h1,
+.chat-msg__body h2,
+.chat-msg__body h3 {
   margin-top: 8px;
 }
 
-.chat-bubble ul {
+.chat-msg__body ul {
   margin: 0;
   padding-left: 18px;
 }
 
-.chat-bubble pre {
+.chat-msg__body pre {
   margin-bottom: 0;
   overflow-x: auto;
   background: color-mix(in srgb, var(--c-code-bg) 18%, transparent);
@@ -977,14 +1046,77 @@ body {
   padding: 10px;
 }
 
-.chat-bubble code {
+.chat-msg__body code,
+.chat-artifact-card__body {
   font-family: var(--font-family-mono);
   font-size: 11px;
 }
 
-.chat-bubble a {
+.chat-msg__body a {
   color: var(--primary);
   text-decoration: underline;
+}
+
+.chat-msg__meta {
+  width: 100%;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.chat-msg--user .chat-msg__meta {
+  justify-content: flex-end;
+}
+
+.chat-msg__meta-status::before {
+  content: "• ";
+}
+
+.chat-artifact-card {
+  margin-top: 10px;
+  border-radius: 12px;
+  border: 1px solid var(--c-border-strong);
+  background: color-mix(in srgb, var(--c-bg) 70%, var(--c-surface-2));
+  overflow: hidden;
+}
+
+.chat-artifact-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--c-border);
+  padding: 8px 10px;
+}
+
+.chat-artifact-card__title {
+  font-size: 11px;
+  color: var(--title);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-artifact-card__open {
+  border: 1px solid var(--c-border-strong);
+  border-radius: 8px;
+  background: var(--c-surface-2);
+  color: var(--title);
+  font-size: 11px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.chat-artifact-card__body {
+  margin: 0;
+  max-height: 120px;
+  overflow: auto;
+  padding: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .chat-input {
@@ -1397,16 +1529,6 @@ body.is-resizing-context-panel {
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-
-.timeline-row {
-  display: grid;
-  gap: 6px;
-}
-
-.timeline-meta {
-  font-size: 11px;
-  color: var(--muted);
 }
 
 .timeline-status {
