@@ -393,28 +393,106 @@
             <header class="context-page__header">
               <div>
                 <h2>Context</h2>
-                <p class="subtitle">這裡會顯示系統提示、資料來源與可注入變數。若尚未接到後端儲存 API，將先以「本機草稿」方式保存。</p>
+                <p class="subtitle">Context Usage Dashboard（資料尚未串接時，將顯示為「尚未可取得」）。</p>
+              </div>
+              <div class="context-page__actions">
+                <button type="button" class="btn btn--secondary secondary-btn" id="context-clear-chat">清空本次對話</button>
               </div>
             </header>
-            <section class="context-draft" id="context-draft-box">
-              <label class="field-label" for="context-draft-input">Context 草稿（僅本機）</label>
-              <textarea id="context-draft-input" rows="8" placeholder="例如：專案目標、語氣偏好、重要限制條件..."></textarea>
-              <p id="context-draft-meta" class="context-draft__meta">尚未儲存草稿。</p>
-              <div class="context-draft__actions">
-                <button type="button" class="btn btn--primary primary-btn" id="context-save-draft">儲存草稿（本機）</button>
-                <label class="btn btn--secondary secondary-btn file-btn-inline" for="context-import-file">從檔案匯入</label>
-                <input id="context-import-file" type="file" accept=".txt,.md,.json" hidden />
-                <button type="button" class="btn btn--secondary secondary-btn" id="context-extract-chat">從最近對話擷取</button>
+
+            <section class="context-dashboard" aria-label="Context Usage Dashboard">
+              <article class="context-gauge card">
+                <header class="context-gauge__header">
+                  <h3>Usage Gauge</h3>
+                  <span class="context-status-pill" id="context-usage-status">尚未可取得</span>
+                </header>
+                <div class="context-gauge__body">
+                  <div class="context-gauge__canvas-wrap">
+                    <canvas id="context-usage-chart" width="220" height="220" aria-label="Context 使用量圓環圖"></canvas>
+                    <div class="context-gauge__center">
+                      <strong id="context-usage-percent">--</strong>
+                      <span>Usage</span>
+                    </div>
+                  </div>
+                  <p class="context-gauge__meta" id="context-usage-meta">Token 使用量尚未可取得。</p>
+                </div>
+              </article>
+
+              <div class="context-kpis">
+                <article class="context-kpi card">
+                  <p>Remaining</p>
+                  <strong id="context-kpi-remaining">--</strong>
+                  <small>尚未可取得</small>
+                </article>
+                <article class="context-kpi card">
+                  <p>Est. Cost</p>
+                  <strong id="context-kpi-cost">--</strong>
+                  <small>尚未可取得</small>
+                </article>
               </div>
+
+              <article class="context-breakdown card">
+                <header class="context-breakdown__header">
+                  <h3>Breakdown</h3>
+                  <span>Usage by source</span>
+                </header>
+                <ul class="context-breakdown__list" id="context-breakdown-list">
+                  <li>
+                    <div class="context-breakdown__label"><span>History</span><span>--</span></div>
+                    <div class="context-breakdown__progress is-unavailable"><span></span></div>
+                    <small>尚未可取得</small>
+                  </li>
+                  <li>
+                    <div class="context-breakdown__label"><span>Tools</span><span>--</span></div>
+                    <div class="context-breakdown__progress is-unavailable"><span></span></div>
+                    <small>尚未可取得</small>
+                  </li>
+                  <li>
+                    <div class="context-breakdown__label"><span>System</span><span>--</span></div>
+                    <div class="context-breakdown__progress is-unavailable"><span></span></div>
+                    <small>尚未可取得</small>
+                  </li>
+                  <li>
+                    <div class="context-breakdown__label"><span>Plugins</span><span>--</span></div>
+                    <div class="context-breakdown__progress is-unavailable"><span></span></div>
+                    <small>尚未可取得</small>
+                  </li>
+                </ul>
+              </article>
             </section>
-            <section class="context-danger-zone">
-              <h3>清理動作</h3>
-              <p class="empty-context">高風險操作將需要二次確認。若為本機草稿清理，無法復原。</p>
-              <div class="context-danger-zone__actions">
-                <button type="button" class="btn btn--secondary secondary-btn" id="context-clear-chat">清空本次對話 Context（本機草稿）</button>
-                <button type="button" class="btn btn--secondary secondary-btn" id="context-clear-project">清空專案 Context 草稿（本機）</button>
+
+            <section class="context-draft card" id="context-draft-box">
+              <details open>
+                <summary>Context 草稿與清理操作（僅本機）</summary>
+                <div class="context-draft__content">
+                  <label class="field-label" for="context-draft-input">Context 草稿（僅本機）</label>
+                  <textarea id="context-draft-input" rows="8" placeholder="例如：專案目標、語氣偏好、重要限制條件..."></textarea>
+                  <p id="context-draft-meta" class="context-draft__meta">尚未儲存草稿。</p>
+                  <div class="context-draft__actions">
+                    <button type="button" class="btn btn--primary primary-btn" id="context-save-draft">儲存草稿（本機）</button>
+                    <label class="btn btn--secondary secondary-btn file-btn-inline" for="context-import-file">從檔案匯入</label>
+                    <input id="context-import-file" type="file" accept=".txt,.md,.json" hidden />
+                    <button type="button" class="btn btn--secondary secondary-btn" id="context-extract-chat">從最近對話擷取</button>
+                  </div>
+
+                  <section class="context-danger-zone">
+                    <h3>清理動作</h3>
+                    <p class="empty-context">高風險操作將需要二次確認。若為本機草稿清理，無法復原。</p>
+                    <div class="context-danger-zone__actions">
+                      <button type="button" class="btn btn--secondary secondary-btn" id="context-clear-project">清空專案 Context 草稿（本機）</button>
+                    </div>
+                  </section>
+                </div>
+              </details>
+            </section>
+
+            <footer class="context-page__footer card">
+              <div>
+                <strong>想提升可用 context 嗎？</strong>
+                <p>先整理草稿並儲存，後續即可在聊天時快速套用。</p>
               </div>
-            </section>
+              <button type="button" class="btn btn--primary primary-btn" id="context-save-draft-cta">儲存目前草稿</button>
+            </footer>
           </section>
 
           <section class="main-card card graph-page" id="graph-page" hidden>
