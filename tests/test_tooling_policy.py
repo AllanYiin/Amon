@@ -12,6 +12,22 @@ from amon.tooling.types import ToolCall, ToolResult, ToolSpec
 
 
 class ToolPolicyTests(unittest.TestCase):
+    def test_system_message_discourages_reflexive_followup_question_endings(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("系統訊息測試")
+                project_path = Path(project.path)
+
+                config = core.load_config(project_path)
+                system_message = core._build_system_message("請幫我規劃", project_path, config=config)
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+        self.assertIn("不要以反問句結尾", system_message)
+
     def test_policy_priority(self) -> None:
         policy = ToolPolicy(
             allow=("filesystem.*",),
