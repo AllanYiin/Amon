@@ -6,7 +6,7 @@ from typing import Iterable
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from amon.chat.router import route_intent
-from amon.chat.router_llm import choose_execution_mode_with_llm
+from amon.chat.router_llm import choose_execution_mode_with_llm, should_continue_run_with_llm
 from amon.commands.registry import clear_commands, get_command, register_command
 
 
@@ -101,6 +101,33 @@ class ChatRouterTests(unittest.TestCase):
         mock = MockLLM('{"mode":"team"}')
         mode = choose_execution_mode_with_llm("請產出多代理協作架構研究報告", llm_client=mock)
         self.assertEqual(mode, "team")
+
+    def test_should_continue_run_with_llm_returns_true_for_semantic_followup(self) -> None:
+        mock = MockLLM('{"continue_run":true,"confidence":0.93}')
+        should_continue = should_continue_run_with_llm(
+            user_message="先做後端",
+            last_assistant_text="收到，你想先從哪個部分開始？",
+            llm_client=mock,
+        )
+        self.assertTrue(should_continue)
+
+    def test_should_continue_run_with_llm_returns_false_for_topic_switch(self) -> None:
+        mock = MockLLM('{"continue_run":false,"confidence":0.91}')
+        should_continue = should_continue_run_with_llm(
+            user_message="另外幫我寫旅遊行程",
+            last_assistant_text="你要先做前端還是後端？",
+            llm_client=mock,
+        )
+        self.assertFalse(should_continue)
+
+    def test_should_continue_run_with_llm_fallbacks_false_on_invalid_json(self) -> None:
+        mock = MockLLM('not-json')
+        should_continue = should_continue_run_with_llm(
+            user_message="後端",
+            last_assistant_text="請提供你要先做哪一塊",
+            llm_client=mock,
+        )
+        self.assertFalse(should_continue)
 
     def test_choose_execution_mode_with_llm_fallbacks_to_single_on_invalid_json(self) -> None:
         mock = MockLLM("not-json")
