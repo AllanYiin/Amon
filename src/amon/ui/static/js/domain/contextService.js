@@ -3,6 +3,9 @@ export function createContextService({ api }) {
     async getContext(projectId) {
       return api.request(`/projects/${encodeURIComponent(projectId)}/context`);
     },
+    async getContextStats(projectId) {
+      return api.request(`/projects/${encodeURIComponent(projectId)}/context/stats`);
+    },
     async saveContext(projectId, contextText) {
       return api.request(`/projects/${encodeURIComponent(projectId)}/context`, {
         method: "PUT",

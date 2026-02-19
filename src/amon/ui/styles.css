@@ -2873,26 +2873,28 @@ body.is-resizing-context-panel {
   gap: 10px;
 }
 
-.context-gauge__canvas-wrap {
-  position: relative;
-  width: min(220px, 100%);
-  aspect-ratio: 1 / 1;
+.context-waffle {
+  width: min(260px, 100%);
   display: grid;
-  place-items: center;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: 4px;
 }
 
-.context-gauge__canvas-wrap canvas {
-  width: 100% !important;
-  height: 100% !important;
+.context-waffle__cell {
+  aspect-ratio: 1 / 1;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--c-border) 85%, transparent);
+  background: color-mix(in srgb, var(--c-surface-2) 80%, transparent);
+}
+
+.context-waffle__cell.is-used {
+  border-color: transparent;
 }
 
 .context-gauge__center {
-  position: absolute;
-  inset: 0;
   display: grid;
   place-content: center;
   text-align: center;
-  pointer-events: none;
 }
 
 .context-gauge__center strong {

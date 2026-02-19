@@ -112,6 +112,7 @@ class UIShellSmokeTests(unittest.TestCase):
             'id="context-extract-chat"',
             'id="context-clear-chat"',
             'id="context-clear-project"',
+            'id="context-waffle-grid"',
         ]:
             self.assertIn(token, html)
 
@@ -133,6 +134,7 @@ class UIShellSmokeTests(unittest.TestCase):
         self.assertIn('createHeaderLayout', bootstrap_js)
         self.assertIn('daemonPill: { text: "Daemon：尚未連線"', bootstrap_js)
         self.assertIn('.context-resizer', css)
+        self.assertIn('.context-waffle', css)
 
     def test_app_entry_only_bootstraps_composition_root(self) -> None:
         app_js = Path("src/amon/ui/static/js/app.js").read_text(encoding="utf-8")

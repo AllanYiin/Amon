@@ -574,6 +574,67 @@ class UIAsyncAPITests(unittest.TestCase):
                 os.environ.pop("AMON_HOME", None)
 
 
+
+    def test_project_context_stats_endpoint_returns_required_categories(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("context-stats-test")
+                project_path = Path(project.path)
+
+                sessions_dir = project_path / "sessions" / "chat"
+                sessions_dir.mkdir(parents=True, exist_ok=True)
+                (sessions_dir / "chat-01.jsonl").write_text(
+                    "\n".join(
+                        [
+                            json.dumps({"type": "user", "text": "請幫我搜尋最新 AI 新聞", "ts": "2026-01-01T10:00:00Z"}, ensure_ascii=False),
+                            json.dumps({"type": "assistant", "text": "我先整理 context。", "ts": "2026-01-01T10:00:01Z"}, ensure_ascii=False),
+                        ]
+                    ),
+                    encoding="utf-8",
+                )
+
+                run_dir = project_path / ".amon" / "runs" / "run-context-001"
+                run_dir.mkdir(parents=True, exist_ok=True)
+                (run_dir / "events.jsonl").write_text(
+                    "\n".join(
+                        [
+                            json.dumps({"type": "tool.call", "tool": "web.search"}, ensure_ascii=False),
+                            json.dumps({"event": "mcp_tool_call", "name": "search_web"}, ensure_ascii=False),
+                        ]
+                    ),
+                    encoding="utf-8",
+                )
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port)
+                encoded_project = quote(project.project_id)
+                conn.request("GET", f"/v1/projects/{encoded_project}/context/stats")
+                response = conn.getresponse()
+                payload = json.loads(response.read().decode("utf-8"))
+
+                self.assertEqual(response.status, 200)
+                self.assertIn("token_estimate", payload)
+                self.assertIn("categories", payload)
+                category_keys = {item.get("key") for item in payload["categories"]}
+                self.assertTrue({"system_prompt", "tools_definition", "skills", "tool_use", "chat_history"}.issubset(category_keys))
+                tool_use = next(item for item in payload["categories"] if item.get("key") == "tool_use")
+                self.assertGreaterEqual(tool_use.get("items", 0), 1)
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
     def test_config_view_api_returns_sources_and_chat_override(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"

@@ -438,7 +438,7 @@
             <header class="context-page__header">
               <div>
                 <h2>Context</h2>
-                <p class="subtitle">Context Usage Dashboard（資料尚未串接時，將顯示為「尚未可取得」）。</p>
+                <p class="subtitle">Context 類別統計（含 system prompt、tools definition、skills、tool use、chat history）。</p>
               </div>
               <div class="context-page__actions">
                 <button type="button" class="btn btn--secondary secondary-btn" id="context-clear-chat">清空本次對話</button>
@@ -448,16 +448,14 @@
             <section class="context-dashboard" aria-label="Context Usage Dashboard">
               <article class="context-gauge card">
                 <header class="context-gauge__header">
-                  <h3>Usage Gauge</h3>
+                  <h3>Usage Waffle</h3>
                   <span class="context-status-pill" id="context-usage-status">尚未可取得</span>
                 </header>
                 <div class="context-gauge__body">
-                  <div class="context-gauge__canvas-wrap">
-                    <canvas id="context-usage-chart" width="220" height="220" aria-label="Context 使用量圓環圖"></canvas>
-                    <div class="context-gauge__center">
-                      <strong id="context-usage-percent">--</strong>
-                      <span>Usage</span>
-                    </div>
+                  <div class="context-waffle" id="context-waffle-grid" role="img" aria-label="Context 類別華夫餅圖"></div>
+                  <div class="context-gauge__center">
+                    <strong id="context-usage-percent">--</strong>
+                    <span>Usage</span>
                   </div>
                   <p class="context-gauge__meta" id="context-usage-meta">Token 使用量尚未可取得。</p>
                 </div>
@@ -479,26 +477,26 @@
               <article class="context-breakdown card">
                 <header class="context-breakdown__header">
                   <h3>Breakdown</h3>
-                  <span>Usage by source</span>
+                  <span>Usage by context category</span>
                 </header>
                 <ul class="context-breakdown__list" id="context-breakdown-list">
                   <li>
-                    <div class="context-breakdown__label"><span>History</span><span>--</span></div>
+                    <div class="context-breakdown__label"><span>System Prompt</span><span>--</span></div>
                     <div class="context-breakdown__progress is-unavailable"><span></span></div>
                     <small>尚未可取得</small>
                   </li>
                   <li>
-                    <div class="context-breakdown__label"><span>Tools</span><span>--</span></div>
+                    <div class="context-breakdown__label"><span>Tools Definition</span><span>--</span></div>
                     <div class="context-breakdown__progress is-unavailable"><span></span></div>
                     <small>尚未可取得</small>
                   </li>
                   <li>
-                    <div class="context-breakdown__label"><span>System</span><span>--</span></div>
+                    <div class="context-breakdown__label"><span>Skills</span><span>--</span></div>
                     <div class="context-breakdown__progress is-unavailable"><span></span></div>
                     <small>尚未可取得</small>
                   </li>
                   <li>
-                    <div class="context-breakdown__label"><span>Plugins</span><span>--</span></div>
+                    <div class="context-breakdown__label"><span>Tool Use / Chat History</span><span>--</span></div>
                     <div class="context-breakdown__progress is-unavailable"><span></span></div>
                     <small>尚未可取得</small>
                   </li>

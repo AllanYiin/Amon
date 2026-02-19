@@ -684,6 +684,18 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 return
             self._send_json(200, context)
             return
+        if parsed.path.endswith("/context/stats") and parsed.path.startswith("/v1/projects/"):
+            project_id = self._get_path_segment(parsed.path, 2)
+            if not project_id:
+                self._send_json(400, {"message": "無效的 project_id"})
+                return
+            try:
+                payload = self._build_project_context_stats(project_id)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, payload)
+            return
         if parsed.path.endswith("/docs") and parsed.path.startswith("/v1/projects/"):
             project_id = self._get_path_segment(parsed.path, 2)
             if not project_id:
@@ -1885,6 +1897,126 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             "node_states": run_bundle["node_states"],
             "recent_events": run_bundle["recent_events"],
             "docs": docs,
+        }
+
+    @staticmethod
+    def _estimate_tokens(value: Any) -> int:
+        if value is None:
+            return 0
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return 0
+            return max(1, len(text) // 4)
+        try:
+            serialized = json.dumps(value, ensure_ascii=False)
+        except (TypeError, ValueError):
+            serialized = str(value)
+        text = serialized.strip()
+        if not text:
+            return 0
+        return max(1, len(text) // 4)
+
+    def _build_project_context_stats(self, project_id: str) -> dict[str, Any]:
+        project_path = self.core.get_project_path(project_id)
+        chat_history = self._build_project_chat_history(project_id)
+        tools_catalog = self._build_tools_catalog(project_id=project_id, refresh_mcp=False)
+        skills_catalog = self._build_skills_catalog(project_id=project_id)
+        config_payload = self._build_config_view_payload(project_id=project_id, cli_overrides={}, chat_overrides={})
+        latest_run = self._load_latest_run_bundle(project_path)
+        recent_events = latest_run.get("recent_events") or []
+
+        effective_config = config_payload.get("effective_config") or {}
+        system_prompt = (
+            (effective_config.get("agent") or {}).get("system_prompt")
+            or (effective_config.get("prompts") or {}).get("system")
+            or (effective_config.get("chat") or {}).get("system_prompt")
+            or ""
+        )
+        chat_messages = chat_history.get("messages") or []
+        chat_text = "\n".join(str(item.get("text") or "") for item in chat_messages)
+        tool_defs = tools_catalog.get("tools") or []
+        skills = skills_catalog.get("skills") or []
+
+        tool_use_events = [
+            event
+            for event in recent_events
+            if str(event.get("type") or event.get("event") or "").lower()
+            in {"tool.call", "tool_complete", "tool_error", "mcp_tool_call", "web_search"}
+        ]
+        web_search_events = [
+            event
+            for event in recent_events
+            if "web" in str(event.get("tool") or event.get("name") or event.get("event") or "").lower()
+            and "search" in str(event.get("tool") or event.get("name") or event.get("event") or "").lower()
+        ]
+
+        categories = [
+            {
+                "key": "system_prompt",
+                "label": "System Prompt",
+                "tokens": self._estimate_tokens(system_prompt),
+                "items": 1 if system_prompt else 0,
+                "note": "模型系統指令",
+            },
+            {
+                "key": "tools_definition",
+                "label": "Tools Definition",
+                "tokens": self._estimate_tokens(tool_defs),
+                "items": len(tool_defs),
+                "note": "工具清單與 schema",
+            },
+            {
+                "key": "skills",
+                "label": "Skills",
+                "tokens": self._estimate_tokens(skills),
+                "items": len(skills),
+                "note": "可觸發技能與前言",
+            },
+            {
+                "key": "tool_use",
+                "label": "Tool Use (Web Search…)",
+                "tokens": self._estimate_tokens(tool_use_events),
+                "items": len(tool_use_events),
+                "extra": {"web_search_hits": len(web_search_events)},
+                "note": "最近 run 的工具呼叫與搜尋痕跡",
+            },
+            {
+                "key": "chat_history",
+                "label": "Chat History",
+                "tokens": self._estimate_tokens(chat_text),
+                "items": len(chat_messages),
+                "note": "最近對話訊息",
+            },
+        ]
+
+        total_used = sum(int(item.get("tokens") or 0) for item in categories)
+        provider_name = str((effective_config.get("amon") or {}).get("provider") or "")
+        provider_cfg = (effective_config.get("providers") or {}).get(provider_name) if provider_name else {}
+        capacity = int((provider_cfg or {}).get("context_window") or (provider_cfg or {}).get("max_input_tokens") or 12000)
+        remaining = max(capacity - total_used, 0)
+        usage_ratio = (total_used / capacity) if capacity > 0 else 0.0
+
+        return {
+            "project_id": project_id,
+            "chat_id": chat_history.get("chat_id"),
+            "run_id": latest_run.get("run_id"),
+            "token_estimate": {
+                "used": total_used,
+                "capacity": capacity,
+                "remaining": remaining,
+                "usage_ratio": usage_ratio,
+                "estimated_cost_usd": round(total_used * 0.0000025, 6),
+                "unit": "estimated_tokens",
+            },
+            "categories": categories,
+            "meta": {
+                "has_system_prompt": bool(system_prompt),
+                "tool_count": len(tool_defs),
+                "skill_count": len(skills),
+                "chat_message_count": len(chat_messages),
+                "recent_event_count": len(recent_events),
+            },
         }
 
     def _load_latest_run_bundle(self, project_path: Path) -> dict[str, Any]:
