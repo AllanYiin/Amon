@@ -264,7 +264,9 @@ class UIAsyncAPITests(unittest.TestCase):
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
                 thread.start()
 
-                with patch("amon.ui_server.choose_execution_mode_with_llm", return_value="single"), patch.object(
+                with patch("amon.ui_server.choose_execution_mode_with_llm", return_value="single"), patch(
+                    "amon.ui_server.should_continue_run_with_llm", return_value=True
+                ), patch.object(
                     core,
                     "run_single_stream",
                     side_effect=fake_run_single_stream,
@@ -325,6 +327,108 @@ class UIAsyncAPITests(unittest.TestCase):
                         {"role": "assistant", "content": "好的，請問你要先做前端還是後端？"},
                     ],
                 )
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
+    def test_chat_followup_reuses_previous_run_id_without_question_mark(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("追問延續無問號測試")
+
+                observed_run_ids: list[str | None] = []
+                call_count = 0
+
+                def fake_run_single_stream(
+                    prompt,
+                    project_path,
+                    model=None,
+                    stream_handler=None,
+                    skill_names=None,
+                    run_id=None,
+                    conversation_history=None,
+                ):
+                    nonlocal call_count
+                    call_count += 1
+                    observed_run_ids.append(run_id)
+                    if stream_handler:
+                        stream_handler("token")
+                    response = "請提供你要優先處理的範圍，例如前端或後端" if call_count == 1 else "收到，我會直接延續同一個任務 run。"
+                    resolved_run_id = run_id or "run-followup-guard-001"
+                    return SimpleNamespace(run_id=resolved_run_id), response
+
+                handler = partial(
+                    AmonUIHandler,
+                    directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"),
+                    core=core,
+                )
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                with patch("amon.ui_server.choose_execution_mode_with_llm", return_value="single"), patch(
+                    "amon.ui_server.should_continue_run_with_llm", return_value=True
+                ), patch.object(
+                    core,
+                    "run_single_stream",
+                    side_effect=fake_run_single_stream,
+                ):
+                    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                    conn.request(
+                        "GET",
+                        f"/v1/chat/stream?project_id={quote(project.project_id)}&message={quote('請幫我規劃上線任務')}"
+                    )
+                    resp1 = conn.getresponse()
+                    self.assertEqual(resp1.status, 200)
+                    done_payload_1 = None
+                    event_type = ""
+                    for _ in range(120):
+                        raw_line = resp1.fp.readline()
+                        if not raw_line:
+                            break
+                        decoded = raw_line.decode("utf-8", errors="ignore").strip()
+                        if decoded.startswith("event: "):
+                            event_type = decoded.split(":", 1)[1].strip()
+                        elif decoded.startswith("data: ") and event_type == "done":
+                            done_payload_1 = json.loads(decoded.split(": ", 1)[1])
+                            break
+
+                    self.assertIsNotNone(done_payload_1)
+                    chat_id = done_payload_1["chat_id"]
+                    self.assertEqual(done_payload_1["run_id"], "run-followup-guard-001")
+
+                    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                    conn.request(
+                        "GET",
+                        f"/v1/chat/stream?project_id={quote(project.project_id)}&chat_id={quote(chat_id)}&message={quote('後端')}"
+                    )
+                    resp2 = conn.getresponse()
+                    self.assertEqual(resp2.status, 200)
+                    event_type = ""
+                    done_payload_2 = None
+                    for _ in range(120):
+                        raw_line = resp2.fp.readline()
+                        if not raw_line:
+                            break
+                        decoded = raw_line.decode("utf-8", errors="ignore").strip()
+                        if decoded.startswith("event: "):
+                            event_type = decoded.split(":", 1)[1].strip()
+                        elif decoded.startswith("data: ") and event_type == "done":
+                            done_payload_2 = json.loads(decoded.split(": ", 1)[1])
+                            break
+
+                    self.assertIsNotNone(done_payload_2)
+                    self.assertEqual(done_payload_2["run_id"], "run-followup-guard-001")
+
+                self.assertEqual(observed_run_ids, [None, "run-followup-guard-001"])
             finally:
                 if server:
                     server.shutdown()

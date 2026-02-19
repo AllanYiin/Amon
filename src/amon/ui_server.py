@@ -25,7 +25,7 @@ from amon.chat.project_bootstrap import (
     resolve_project_id_from_message,
 )
 from amon.chat.router import route_intent
-from amon.chat.router_llm import choose_execution_mode_with_llm
+from amon.chat.router_llm import choose_execution_mode_with_llm, should_continue_run_with_llm
 from amon.chat.router_types import RouterResult
 from amon.chat.session_store import (
     append_event,
@@ -294,13 +294,12 @@ def _resolve_command_plan_from_router(message: str, router_result: RouterResult)
     return _build_plan_from_message(message, router_result.type)
 
 
-def _should_continue_chat_run(last_assistant_text: str | None) -> bool:
-    if not last_assistant_text:
-        return False
-    normalized = str(last_assistant_text).strip()
-    if not normalized:
-        return False
-    return "？" in normalized or "?" in normalized
+def _should_continue_chat_run(*, project_id: str | None, last_assistant_text: str | None, user_message: str) -> bool:
+    return should_continue_run_with_llm(
+        project_id=project_id,
+        last_assistant_text=last_assistant_text,
+        user_message=user_message,
+    )
 
 
 def _is_duplicate_project_create(
@@ -1748,7 +1747,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 run_id = ""
                 if execution_mode == "single":
                     continued_run_id = None
-                    if _should_continue_chat_run(run_context.get("last_assistant_text")):
+                    if _should_continue_chat_run(project_id=project_id, last_assistant_text=run_context.get("last_assistant_text"), user_message=message):
                         continued_run_id = str(run_context.get("run_id") or "").strip() or None
                     result, response_text = self.core.run_single_stream(
                         prompt_with_history,

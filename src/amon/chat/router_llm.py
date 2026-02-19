@@ -106,6 +106,42 @@ def choose_execution_mode_with_llm(
     return "single"
 
 
+def should_continue_run_with_llm(
+    *,
+    user_message: str,
+    last_assistant_text: str | None,
+    project_id: str | None = None,
+    llm_client: LLMClient | None = None,
+    model: str | None = None,
+) -> bool:
+    normalized_user = " ".join((user_message or "").split())
+    normalized_assistant = " ".join((last_assistant_text or "").split())
+    if not normalized_user or not normalized_assistant:
+        return False
+    try:
+        if llm_client is None:
+            llm_client, model = _build_default_client(project_id, model)
+        payload = {
+            "assistant_previous_message": normalized_assistant,
+            "user_current_message": normalized_user,
+            "output_schema": {
+                "continue_run": "boolean",
+                "confidence": "number",
+            },
+        }
+        messages = [
+            {"role": "system", "content": _run_continuation_system_prompt()},
+            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+        ]
+        output_text = _collect_stream(llm_client, messages, model)
+        return _parse_run_continuation(output_text)
+    except (ProviderError, OSError, ValueError) as exc:
+        logger.warning("LLM run 延續判斷失敗，改用預設 false：%s", exc)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("LLM run 延續判斷未預期錯誤：%s", exc, exc_info=True)
+    return False
+
+
 def _build_default_client(project_id: str | None, model: str | None) -> tuple[LLMClient, str | None]:
     config = ConfigLoader().resolve(project_id=project_id).effective
     provider_name = config.get("amon", {}).get("provider", "openai")
@@ -176,6 +212,28 @@ def _execution_mode_system_prompt() -> str:
         "只允許輸出 JSON，格式為 {\"mode\":\"single|self_critique|team\"}。"
         "不得輸出額外文字。"
     )
+
+
+def _run_continuation_system_prompt() -> str:
+    return (
+        "你是對話 run 延續判斷器。"
+        "請判斷使用者目前訊息是否是在回覆 assistant 上一則訊息，且語意上應該延續同一個任務 run。"
+        "若是同一任務的追問回覆或補充，continue_run=true；若是改題、新任務或無關訊息，continue_run=false。"
+        "只允許輸出 JSON，格式為 {\"continue_run\": true|false, \"confidence\": 0~1}。"
+        "不得輸出額外文字。"
+    )
+
+
+def _parse_run_continuation(raw_text: str) -> bool:
+    cleaned = _strip_code_fences(raw_text)
+    if not cleaned:
+        raise ValueError("空白回應")
+    payload = json.loads(cleaned)
+    if not isinstance(payload, dict):
+        raise ValueError("run continuation 回傳格式錯誤")
+    if "continue_run" not in payload:
+        raise ValueError("run continuation 缺少 continue_run")
+    return bool(payload.get("continue_run"))
 
 
 def _parse_execution_mode(raw_text: str) -> str:
