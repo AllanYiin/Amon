@@ -1,5 +1,13 @@
 import { t } from "../i18n.js";
 
+const CONTEXT_COLORS = {
+  system_prompt: "#6366f1",
+  tools_definition: "#06b6d4",
+  skills: "#10b981",
+  tool_use: "#f59e0b",
+  chat_history: "#ec4899",
+};
+
 function getProjectId(ctx) {
   return ctx.store?.getState?.()?.layout?.projectId || "";
 }
@@ -26,43 +34,112 @@ function updateDraftMeta(rootEl, text) {
   meta.textContent = text;
 }
 
-function ensureGaugeChart(rootEl, local) {
-  const canvas = rootEl.querySelector("#context-usage-chart");
-  if (!(canvas instanceof HTMLCanvasElement) || typeof window.Chart === "undefined") return;
-  if (local.chart) return;
-  local.chart = new window.Chart(canvas.getContext("2d"), {
-    type: "doughnut",
-    data: {
-      labels: ["used", "available"],
-      datasets: [{
-        data: [0, 1],
-        backgroundColor: ["#7c7cff", "rgba(148, 163, 184, 0.2)"],
-        borderWidth: 0,
-      }],
+function estimateByContextText(text = "") {
+  const content = String(text || "").trim();
+  if (!content) return null;
+  const chatTokens = Math.max(1, Math.floor(content.length / 4));
+  return {
+    token_estimate: {
+      used: chatTokens,
+      capacity: 12000,
+      remaining: Math.max(12000 - chatTokens, 0),
+      usage_ratio: chatTokens / 12000,
+      estimated_cost_usd: Number((chatTokens * 0.0000025).toFixed(6)),
     },
-    options: {
-      animation: false,
-      cutout: "72%",
-      plugins: {
-        tooltip: { enabled: false },
-        legend: { display: false },
-      },
-    },
+    categories: [{ key: "chat_history", label: "Chat History", tokens: chatTokens, items: 1, note: "由草稿推估" }],
+  };
+}
+
+function renderWaffle(rootEl, categories = [], usedPercent = 0) {
+  const waffle = rootEl.querySelector("#context-waffle-grid");
+  if (!waffle) return;
+  waffle.innerHTML = "";
+
+  const totalCells = 100;
+  const usedCells = Math.max(0, Math.min(totalCells, Math.round(usedPercent)));
+  const totalTokens = categories.reduce((sum, item) => sum + Number(item.tokens || 0), 0);
+
+  const assignments = [];
+  if (usedCells > 0 && totalTokens > 0) {
+    categories.forEach((item, index) => {
+      const ratio = Number(item.tokens || 0) / totalTokens;
+      const isLast = index === categories.length - 1;
+      const size = isLast
+        ? Math.max(usedCells - assignments.length, 0)
+        : Math.max(0, Math.round(usedCells * ratio));
+      for (let i = 0; i < size && assignments.length < usedCells; i += 1) {
+        assignments.push(item.key);
+      }
+    });
+  }
+
+  while (assignments.length < usedCells) assignments.push("chat_history");
+
+  for (let i = 0; i < totalCells; i += 1) {
+    const cell = document.createElement("span");
+    cell.className = "context-waffle__cell";
+    if (i < usedCells) {
+      const key = assignments[i] || "chat_history";
+      cell.classList.add("is-used");
+      cell.style.backgroundColor = CONTEXT_COLORS[key] || "#7c7cff";
+    }
+    waffle.appendChild(cell);
+  }
+}
+
+function renderBreakdown(rootEl, categories = []) {
+  const list = rootEl.querySelector("#context-breakdown-list");
+  if (!list) return;
+  list.innerHTML = "";
+
+  const total = categories.reduce((sum, item) => sum + Number(item.tokens || 0), 0);
+  categories.forEach((item) => {
+    const tokens = Number(item.tokens || 0);
+    const ratio = total > 0 ? (tokens / total) * 100 : 0;
+    const li = document.createElement("li");
+    li.innerHTML = `
+      <div class="context-breakdown__label"><span>${item.label || item.key}</span><span>${tokens.toLocaleString("zh-TW")} tok</span></div>
+      <div class="context-breakdown__progress${ratio ? "" : " is-unavailable"}"><span style="width:${Math.max(ratio, 3).toFixed(1)}%; background:${CONTEXT_COLORS[item.key] || "#7c7cff"}"></span></div>
+      <small>${item.note || "來源統計"}${item.items ? `｜項目數：${item.items}` : ""}</small>
+    `;
+    list.appendChild(li);
   });
 }
 
-function setDashboardUnavailable(rootEl, local) {
-  ensureGaugeChart(rootEl, local);
+function setDashboardUnavailable(rootEl) {
   const usagePercent = rootEl.querySelector("#context-usage-percent");
   const usageMeta = rootEl.querySelector("#context-usage-meta");
   const status = rootEl.querySelector("#context-usage-status");
   if (usagePercent) usagePercent.textContent = "--";
   if (usageMeta) usageMeta.textContent = "Token 使用量尚未可取得。";
   if (status) status.textContent = "尚未可取得";
-  if (local.chart) {
-    local.chart.data.datasets[0].data = [0, 1];
-    local.chart.update();
+  renderWaffle(rootEl, [], 0);
+}
+
+function renderContextStats(rootEl, payload) {
+  const usagePercent = rootEl.querySelector("#context-usage-percent");
+  const usageMeta = rootEl.querySelector("#context-usage-meta");
+  const status = rootEl.querySelector("#context-usage-status");
+  const remainingEl = rootEl.querySelector("#context-kpi-remaining");
+  const costEl = rootEl.querySelector("#context-kpi-cost");
+
+  const estimate = payload?.token_estimate || {};
+  const used = Number(estimate.used || 0);
+  const capacity = Number(estimate.capacity || 0);
+  const ratio = capacity > 0 ? used / capacity : Number(estimate.usage_ratio || 0);
+  const percent = Math.max(0, Math.min(100, Math.round(ratio * 100)));
+
+  if (usagePercent) usagePercent.textContent = `${percent}%`;
+  if (status) status.textContent = percent >= 80 ? "接近上限" : "可使用";
+  if (usageMeta) {
+    usageMeta.textContent = `估算 ${used.toLocaleString("zh-TW")} / ${capacity.toLocaleString("zh-TW")} tokens（資料來源：system prompt / tools / skills / tool use / chat history）。`;
   }
+  if (remainingEl) remainingEl.textContent = Number(estimate.remaining || 0).toLocaleString("zh-TW");
+  if (costEl) costEl.textContent = `US$ ${Number(estimate.estimated_cost_usd || 0).toFixed(4)}`;
+
+  const categories = Array.isArray(payload?.categories) ? payload.categories : [];
+  renderWaffle(rootEl, categories, percent);
+  renderBreakdown(rootEl, categories);
 }
 
 async function saveDraft(ctx, rootEl, editor) {
@@ -77,6 +154,7 @@ async function saveDraft(ctx, rootEl, editor) {
     dispatchContext(ctx, { context: text, lastSavedAt: Date.now() });
     updateDraftMeta(rootEl, `已儲存本機草稿（${new Date().toLocaleString("zh-TW")})。`);
     ctx.ui.toast?.show(t("toast.context.saved"), { type: "success", duration: 9000 });
+    renderContextStats(rootEl, estimateByContextText(text));
   } catch (error) {
     ctx.ui.toast?.show(t("toast.context.saveFailed", "", { message: error.message }), { type: "danger", duration: 12000 });
   }
@@ -96,6 +174,7 @@ async function clearDraft(ctx, rootEl, editor, scope) {
     dispatchContext(ctx, { context: "", clearedScope: scope, clearedAt: Date.now() });
     updateDraftMeta(rootEl, scope === "project" ? "已清空專案 Context 草稿。" : "已清空本次對話 Context 草稿。");
     ctx.ui.toast?.show(t("toast.context.cleared"), { type: "success", duration: 9000 });
+    setDashboardUnavailable(rootEl);
   } catch (error) {
     ctx.ui.toast?.show(t("toast.context.clearFailed", "", { message: error.message }), { type: "danger", duration: 12000 });
   }
@@ -138,10 +217,9 @@ export const CONTEXT_VIEW = {
     const editor = rootEl.querySelector("#context-draft-input");
     const importInput = rootEl.querySelector("#context-import-file");
     const emptyCta = ensureEmptyCta(rootEl);
-    const local = { chart: null };
     const handlers = [];
 
-    setDashboardUnavailable(rootEl, local);
+    setDashboardUnavailable(rootEl);
 
     const onClick = async (event) => {
       const target = event.target;
@@ -180,10 +258,6 @@ export const CONTEXT_VIEW = {
     handlers.push(() => importInput?.removeEventListener("change", onImportChange));
 
     ctx.__cleanup = () => {
-      if (local.chart) {
-        local.chart.destroy();
-        local.chart = null;
-      }
       handlers.forEach((fn) => fn());
     };
 
@@ -202,17 +276,23 @@ export const CONTEXT_VIEW = {
       updateDraftMeta(ctx.rootEl, "尚未儲存草稿。請先選擇專案。");
       emptyCta.hidden = false;
       dispatchContext(ctx, { context: "", projectId: "" });
+      setDashboardUnavailable(ctx.rootEl);
       return;
     }
     try {
-      const payload = await ctx.services.context.getContext(projectId);
+      const [payload, statsPayload] = await Promise.all([
+        ctx.services.context.getContext(projectId),
+        ctx.services.context.getContextStats(projectId),
+      ]);
       const contextText = payload?.context || payload?.memory || "";
       if (editor) editor.value = contextText;
       updateDraftMeta(ctx.rootEl, contextText ? "已載入目前專案草稿。" : "目前專案尚無草稿。");
       emptyCta.hidden = Boolean(contextText);
-      dispatchContext(ctx, { context: contextText, projectId, loadedAt: Date.now() });
+      dispatchContext(ctx, { context: contextText, projectId, loadedAt: Date.now(), stats: statsPayload });
+      renderContextStats(ctx.rootEl, statsPayload || estimateByContextText(contextText));
     } catch (error) {
       ctx.ui.toast?.show(t("toast.context.loadFailed", "", { message: error.message }), { type: "danger", duration: 12000 });
+      renderContextStats(ctx.rootEl, estimateByContextText(editor?.value || ""));
     }
   },
 };
