@@ -15,6 +15,7 @@ from pathlib import Path
 from string import Template
 from typing import Any
 
+from .artifacts import ingest_artifacts
 from .fs.atomic import append_jsonl, atomic_write_text
 from .fs.safety import canonicalize_path
 from .events import emit_event
@@ -173,6 +174,16 @@ class GraphRuntime:
                 state["nodes"][node_id]["status"] = "completed"
                 state["nodes"][node_id]["ended_at"] = self._now_iso()
                 state["nodes"][node_id]["output"] = result
+                ingest_summary = result.get("ingest_summary") if isinstance(result, dict) else None
+                if isinstance(ingest_summary, dict):
+                    self._append_event(
+                        events_path,
+                        {
+                            "event": "artifact_ingest_summary",
+                            "node_id": node_id,
+                            "summary": ingest_summary,
+                        },
+                    )
                 self._emit_artifact_written_events(events_path, node_id, result)
                 node_complete_event = {"event": "node_complete", "node_id": node_id, "output": result}
                 node_complete_event.update(self._promote_output_paths(result))
@@ -314,11 +325,21 @@ class GraphRuntime:
             )
             output_path.parent.mkdir(parents=True, exist_ok=True)
             atomic_write_text(output_path, response)
+            ingest_summary = ingest_artifacts(
+                response_text=response,
+                project_path=self.project_path,
+                source={
+                    "run_id": run_id,
+                    "node_id": str(node.get("id") or ""),
+                    "output_path": str(output_path.relative_to(self.project_path)),
+                },
+            )
             if store_key := node.get("store_output"):
                 variables[store_key] = response
             return {
                 "output_path": str(output_path.relative_to(self.project_path)),
                 "content": response,
+                "ingest_summary": ingest_summary,
             }
         if node_type == "write_file":
             rel_path = self._render_template(node.get("path", ""), node_vars)

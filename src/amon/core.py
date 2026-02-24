@@ -3402,6 +3402,8 @@ if __name__ == "__main__":
             "技術與流程選擇由你自行決策並說明理由。"
             "避免重複：同一輪只提供一次完整版本，後續僅更新差異與決策，不重寫等價 PRD/規格。"
             "需要網路資料時優先使用第一方工具 web.search 與 web.fetch，不要直接宣稱無法上網。"
+            "若要輸出可落地的程式碼檔案，必須使用三引號 code fence 並於首行採用"
+            " `<lang> file=workspace/<path>` 格式；禁止輸出 workspace 外路徑（含絕對路徑與 ..）。"
         )
         tool_context = self._first_party_tool_context(project_path)
         if tool_context:

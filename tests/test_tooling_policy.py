@@ -27,6 +27,8 @@ class ToolPolicyTests(unittest.TestCase):
                 os.environ.pop("AMON_HOME", None)
 
         self.assertIn("不要以反問句結尾", system_message)
+        self.assertIn("file=workspace/", system_message)
+        self.assertIn("禁止輸出 workspace 外路徑", system_message)
 
     def test_policy_priority(self) -> None:
         policy = ToolPolicy(
