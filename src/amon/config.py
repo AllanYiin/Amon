@@ -18,6 +18,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "data_dir": "~/.amon",
         "default_mode": "single",
         "provider": "openai",
+        "planner": {
+            "enabled": False,
+            "preview_only": False,
+        },
+        "tools": {
+            "unified_dispatch": False,
+        },
         "ui": {"theme": "light", "streaming": True},
     },
     "paths": {

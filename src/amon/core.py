@@ -37,6 +37,7 @@ from .events import emit_event
 from .logging import log_billing, log_event
 from .logging_utils import setup_logger
 from .mcp_client import MCPClientError, MCPServerConfig, MCPStdioClient
+from .planning import compile_plan_to_exec_graph, dumps_plan, generate_plan_with_llm, render_todo_markdown
 from .models import ProviderError, build_provider, decode_reasoning_chunk
 from .graph_runtime import GraphRuntime, GraphRunResult
 from .sandbox.service import run_sandbox_step
@@ -53,6 +54,7 @@ from .tooling import (
 )
 from .tooling.native import compute_tool_sha256, parse_native_manifest, scan_native_tools
 from .tooling.builtin import build_registry
+from .tooling.types import ToolCall
 from .skills import build_system_prefix_injection
 
 
@@ -853,6 +855,116 @@ class AmonCore:
                 }
             )
             return final_text
+
+    def generate_plan_docs(
+        self,
+        message: str,
+        *,
+        project_path: Path,
+        project_id: str | None = None,
+        llm_client=None,
+        model: str | None = None,
+        available_tools: list[dict[str, Any]] | None = None,
+        available_skills: list[dict[str, Any]] | None = None,
+    ):
+        """Generate PlanGraph and materialize docs/plan.json + docs/TODO.md."""
+        if available_tools is None:
+            available_tools = self.describe_available_tools(project_id=project_id)
+
+        plan = generate_plan_with_llm(
+            message,
+            project_id=project_id,
+            llm_client=llm_client,
+            model=model,
+            available_tools=available_tools,
+            available_skills=available_skills,
+        )
+        docs_dir = project_path / "docs"
+        docs_dir.mkdir(parents=True, exist_ok=True)
+        plan_json = dumps_plan(plan)
+        todo_markdown = render_todo_markdown(plan)
+
+        plan_path = docs_dir / "plan.json"
+        todo_path = docs_dir / "TODO.md"
+        self._atomic_write_text(plan_path, plan_json)
+        self._atomic_write_text(todo_path, todo_markdown)
+
+        plan_hash = hashlib.sha256(plan_json.encode("utf-8")).hexdigest()
+        payload = {
+            "plan_hash": plan_hash,
+            "node_count": len(plan.nodes),
+            "objective": plan.objective,
+            "output_paths": ["docs/plan.json", "docs/TODO.md"],
+        }
+        log_event(
+            {
+                "level": "INFO",
+                "event": "plan_generated",
+                "project_id": project_id or project_path.name,
+                "payload": payload,
+            }
+        )
+        emit_event(
+            {
+                "type": "plan_generated",
+                "scope": "planning",
+                "project_id": project_id or project_path.name,
+                "actor": "system",
+                "payload": payload,
+                "risk": "low",
+            }
+        )
+        return plan
+
+    def run_plan_execute(
+        self,
+        prompt: str,
+        *,
+        project_path: Path,
+        project_id: str | None = None,
+        model: str | None = None,
+        llm_client=None,
+        available_tools: list[dict[str, Any]] | None = None,
+        available_skills: list[dict[str, Any]] | None = None,
+        stream_handler=None,
+    ) -> str:
+        config = self.load_config(project_path)
+        planner_enabled = bool(config.get("amon", {}).get("planner", {}).get("enabled", False))
+        if not planner_enabled:
+            self.logger.info("planner flag 關閉，plan_execute 改走 single 相容路徑")
+            return self.run_single(prompt, project_path=project_path, model=model)
+
+        plan = self.generate_plan_docs(
+            prompt,
+            project_path=project_path,
+            project_id=project_id or project_path.name,
+            llm_client=llm_client,
+            model=model,
+            available_tools=available_tools,
+            available_skills=available_skills,
+        )
+        exec_graph = compile_plan_to_exec_graph(plan)
+        emit_event(
+            {
+                "type": "plan_compiled",
+                "scope": "planning",
+                "project_id": project_id or project_path.name,
+                "actor": "system",
+                "payload": {
+                    "node_count": len(exec_graph.get("nodes", [])),
+                    "edge_count": len(exec_graph.get("edges", [])),
+                },
+                "risk": "low",
+            }
+        )
+        graph_path = self._write_graph_resolved(
+            project_path,
+            exec_graph,
+            exec_graph.get("variables", {}),
+            mode="plan_execute",
+        )
+        result = self.run_graph(project_path=project_path, graph_path=graph_path, stream_handler=stream_handler)
+        return self._load_graph_primary_output(result.run_dir)
 
     def _collect_mnt_data_handover_context(self, project_path: Path) -> str:
         docs_dir = project_path / "docs"
@@ -2289,24 +2401,114 @@ class AmonCore:
             )
             audit_sink.record(call, error_result, "allow", duration_ms=_duration_ms(), source="mcp")
             raise
-        is_error = bool(result.get("isError"))
-        data_prompt = self._format_mcp_result(full_tool, result)
-        log_event(
+
+
+    def call_tool_unified(
+        self,
+        tool_name: str,
+        args: dict[str, Any],
+        project_id: str | None = None,
+        timeout_s: int | None = None,
+        cancel_event: threading.Event | None = None,
+    ) -> dict[str, Any]:
+        route = "toolforge"
+        if ":" in tool_name:
+            route = "mcp"
+            server_name, actual_tool = tool_name.split(":", 1)
+            result = self.call_mcp_tool(server_name, actual_tool, args)
+        elif "." in tool_name:
+            route = "builtin"
+            project_path = self.get_project_path(project_id) if project_id else Path.cwd()
+            registry = build_registry(project_path)
+            call = ToolCall(tool=tool_name, args=args, caller="graph", project_id=project_id)
+            tool_result = registry.call(call)
+            result = {
+                "is_error": bool(tool_result.is_error),
+                "meta": dict(tool_result.meta or {}),
+                "content_text": tool_result.as_text(),
+                "content": list(tool_result.content or []),
+            }
+        else:
+            result = self.run_tool(
+                tool_name,
+                args,
+                project_id=project_id,
+                timeout_s=timeout_s,
+                cancel_event=cancel_event,
+            )
+
+        payload = {
+            "tool_name": tool_name,
+            "route": route,
+            "project_id": project_id,
+            "is_error": bool(result.get("is_error", False)),
+            "status": (result.get("meta") or {}).get("status"),
+        }
+        log_event({"level": "INFO", "event": "tool_dispatch", **payload})
+        emit_event(
             {
-                "level": "ERROR" if is_error else "INFO",
-                "event": "mcp_tool_call",
-                "tool_name": full_tool,
-                "args_summary": self._summarize_value(args),
-                "result_summary": self._summarize_value(result),
+                "type": "tool_dispatch",
+                "scope": "tooling",
+                "project_id": project_id,
+                "actor": "system",
+                "payload": payload,
+                "risk": "low",
             }
         )
-        audit_result = ToolResult(
-            content=[{"type": "json", "data": result}],
-            is_error=is_error,
-            meta={"status": "error" if is_error else "ok"},
+        return result
+
+    def describe_available_tools(self, project_id: str | None = None) -> list[dict[str, Any]]:
+        project_path = self.get_project_path(project_id) if project_id else Path.cwd()
+        registry = build_registry(project_path)
+        builtin_tools = [
+            {
+                "name": spec.name,
+                "description": spec.description,
+                "input_schema": spec.input_schema,
+                "source": "builtin",
+            }
+            for spec in sorted(registry.list_specs(), key=lambda item: item.name)
+        ]
+        toolforge_tools = [
+            {
+                "name": str(item.get("name") or ""),
+                "description": "",
+                "input_schema": {},
+                "source": "toolforge",
+                "scope": item.get("scope"),
+            }
+            for item in self.list_tools(project_id=project_id)
+        ]
+        try:
+            mcp_registry = self.get_mcp_registry(refresh=False)
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning("讀取 MCP tools 失敗，改用空清單：%s", exc)
+            mcp_registry = {"servers": {}}
+
+        mcp_tools: list[dict[str, Any]] = []
+        servers = mcp_registry.get("servers", {}) if isinstance(mcp_registry, dict) else {}
+        for server_name, server_info in sorted(servers.items(), key=lambda item: item[0]):
+            tools = server_info.get("tools", []) if isinstance(server_info, dict) else []
+            for tool in tools:
+                if not isinstance(tool, dict):
+                    continue
+                name = str(tool.get("name") or "")
+                mcp_tools.append(
+                    {
+                        "name": f"{server_name}:{name}" if name else f"{server_name}:",
+                        "description": str(tool.get("description") or ""),
+                        "input_schema": tool.get("input_schema") or {},
+                        "source": "mcp",
+                    }
+                )
+
+        merged = builtin_tools + sorted(toolforge_tools, key=lambda item: item["name"]) + sorted(
+            mcp_tools,
+            key=lambda item: item["name"],
         )
-        audit_sink.record(call, audit_result, "allow", duration_ms=_duration_ms(), source="mcp")
-        return {"tool": full_tool, "data": result, "data_prompt": data_prompt, "is_error": is_error}
+        merged.sort(key=lambda item: (str(item.get("source") or ""), str(item.get("name") or "")))
+        json.dumps(merged, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return merged
 
     def forge_tool(self, project_id: str, tool_name: str, spec: str) -> Path:
         self.ensure_base_structure()
