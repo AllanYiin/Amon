@@ -94,6 +94,23 @@ def append_event(chat_id: str, event: dict[str, Any]) -> None:
         )
 
 
+
+
+def load_latest_chat_id(project_id: str) -> str | None:
+    """Return the most recently updated chat session id for a project."""
+    validate_project_id(project_id)
+    sessions_dir = _resolve_data_dir() / "projects" / project_id / "sessions" / "chat"
+    if not sessions_dir.exists():
+        return None
+    try:
+        candidates = [path for path in sessions_dir.glob("*.jsonl") if path.is_file()]
+    except OSError:
+        return None
+    if not candidates:
+        return None
+    latest = max(candidates, key=lambda item: item.stat().st_mtime)
+    return latest.stem
+
 def load_recent_dialogue(project_id: str, chat_id: str, limit: int = 12) -> list[dict[str, str]]:
     """Load recent user/assistant dialogue turns for contextual continuity."""
     if not chat_id:
