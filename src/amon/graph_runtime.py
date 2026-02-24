@@ -174,6 +174,16 @@ class GraphRuntime:
                 state["nodes"][node_id]["status"] = "completed"
                 state["nodes"][node_id]["ended_at"] = self._now_iso()
                 state["nodes"][node_id]["output"] = result
+                ingest_summary = result.get("ingest_summary") if isinstance(result, dict) else None
+                if isinstance(ingest_summary, dict):
+                    self._append_event(
+                        events_path,
+                        {
+                            "event": "artifact_ingest_summary",
+                            "node_id": node_id,
+                            "summary": ingest_summary,
+                        },
+                    )
                 self._emit_artifact_written_events(events_path, node_id, result)
                 node_complete_event = {"event": "node_complete", "node_id": node_id, "output": result}
                 node_complete_event.update(self._promote_output_paths(result))
