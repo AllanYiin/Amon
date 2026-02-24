@@ -79,8 +79,8 @@ def _request_plan(
     payload: dict[str, Any] = {
         "message": message,
         "plan_schema": _plan_schema_definition(),
-        "available_tools": available_tools or [],
-        "available_skills": available_skills or [],
+        "available_tools": _normalize_available_tools(available_tools),
+        "available_skills": _normalize_available_skills(available_skills),
     }
     if repair_error:
         payload["repair_error"] = repair_error
@@ -160,6 +160,37 @@ def _plan_schema_definition() -> dict[str, Any]:
         ],
         "edges": [{"from": "T1", "to": "T2"}],
     }
+
+
+def _normalize_available_tools(available_tools: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for item in available_tools or []:
+        if not isinstance(item, dict):
+            continue
+        result.append(
+            {
+                "name": str(item.get("name") or item.get("tool_name") or ""),
+                "description": str(item.get("description") or item.get("when_to_use") or ""),
+                "input_schema": item.get("input_schema") or item.get("args_schema_hint") or {},
+            }
+        )
+    return result
+
+
+def _normalize_available_skills(available_skills: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for item in available_skills or []:
+        if not isinstance(item, dict):
+            continue
+        result.append(
+            {
+                "name": str(item.get("name") or ""),
+                "description": str(item.get("description") or ""),
+                "inject_to": item.get("inject_to") or item.get("targets") or [],
+                "targets": item.get("targets") or item.get("inject_to") or [],
+            }
+        )
+    return result
 
 
 def _minimal_plan(message: str) -> PlanGraph:
