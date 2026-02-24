@@ -58,6 +58,22 @@ class CliArtifactsTests(unittest.TestCase):
             self.assertIn("workspace/app.py", buffer.getvalue())
             self.assertIn("valid", buffer.getvalue())
 
+
+    def test_artifacts_check_rejects_workspace_outside_path(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="amon-cli-artifacts-") as tmpdir:
+            project_path = Path(tmpdir)
+            core = SimpleNamespace(data_dir=project_path, get_project_path=lambda project: project_path)
+            args = SimpleNamespace(artifacts_command="check", project=None, path="../oops.py")
+            buffer = io.StringIO()
+            cwd = Path.cwd()
+            try:
+                os.chdir(project_path)
+                with patch("sys.stdout", buffer):
+                    _handle_artifacts(core, args)
+            finally:
+                os.chdir(cwd)
+            self.assertIn("path outside workspace", buffer.getvalue())
+
     @patch("amon.cli.run_sandbox_step")
     @patch("amon.cli.ConfigLoader")
     def test_artifacts_run_uses_auto_language_and_blocks_invalid(self, config_loader_cls, run_step_mock) -> None:
