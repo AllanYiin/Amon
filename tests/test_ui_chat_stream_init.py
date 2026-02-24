@@ -64,7 +64,7 @@ class UIChatStreamInitTests(unittest.TestCase):
                 token_payload = json.loads(resp.read().decode("utf-8"))
                 stream_token = token_payload["stream_token"]
 
-                with patch("amon.ui_server.choose_execution_mode_with_llm", return_value="single"), patch.object(
+                with patch("amon.ui_server.decide_execution_mode", return_value="single"), patch.object(
                     core,
                     "run_single_stream",
                     side_effect=fake_run_single_stream,
