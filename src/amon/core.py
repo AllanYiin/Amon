@@ -37,6 +37,7 @@ from .events import emit_event
 from .logging import log_billing, log_event
 from .logging_utils import setup_logger
 from .mcp_client import MCPClientError, MCPServerConfig, MCPStdioClient
+from .planning import dumps_plan, generate_plan_with_llm, render_todo_markdown
 from .models import ProviderError, build_provider, decode_reasoning_chunk
 from .graph_runtime import GraphRuntime, GraphRunResult
 from .sandbox.service import run_sandbox_step
@@ -853,6 +854,63 @@ class AmonCore:
                 }
             )
             return final_text
+
+    def generate_plan_docs(
+        self,
+        message: str,
+        *,
+        project_path: Path,
+        project_id: str | None = None,
+        llm_client=None,
+        model: str | None = None,
+        available_tools: list[dict[str, Any]] | None = None,
+        available_skills: list[dict[str, Any]] | None = None,
+    ):
+        """Generate PlanGraph and materialize docs/plan.json + docs/TODO.md."""
+        plan = generate_plan_with_llm(
+            message,
+            project_id=project_id,
+            llm_client=llm_client,
+            model=model,
+            available_tools=available_tools,
+            available_skills=available_skills,
+        )
+        docs_dir = project_path / "docs"
+        docs_dir.mkdir(parents=True, exist_ok=True)
+        plan_json = dumps_plan(plan)
+        todo_markdown = render_todo_markdown(plan)
+
+        plan_path = docs_dir / "plan.json"
+        todo_path = docs_dir / "TODO.md"
+        self._atomic_write_text(plan_path, plan_json)
+        self._atomic_write_text(todo_path, todo_markdown)
+
+        plan_hash = hashlib.sha256(plan_json.encode("utf-8")).hexdigest()
+        payload = {
+            "plan_hash": plan_hash,
+            "node_count": len(plan.nodes),
+            "objective": plan.objective,
+            "output_paths": ["docs/plan.json", "docs/TODO.md"],
+        }
+        log_event(
+            {
+                "level": "INFO",
+                "event": "plan_generated",
+                "project_id": project_id or project_path.name,
+                "payload": payload,
+            }
+        )
+        emit_event(
+            {
+                "type": "plan_generated",
+                "scope": "planning",
+                "project_id": project_id or project_path.name,
+                "actor": "system",
+                "payload": payload,
+                "risk": "low",
+            }
+        )
+        return plan
 
     def _collect_mnt_data_handover_context(self, project_path: Path) -> str:
         docs_dir = project_path / "docs"
