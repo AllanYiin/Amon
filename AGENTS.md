@@ -1,4 +1,4 @@
-# Amon 開發與驗收契約（Repo Root）
+# Codex 工作契約（Repo Root）
 
 本文件適用於整個 repo，供 Codex 與人類協作時一致遵守。
 
