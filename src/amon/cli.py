@@ -14,6 +14,7 @@ from pathlib import Path
 
 import yaml
 
+from .artifacts import ensure_manifest, run_validators, update_manifest_for_file
 from .config import ConfigLoader
 from .core import AmonCore
 from .events import emit_event
@@ -263,6 +264,21 @@ def build_parser() -> argparse.ArgumentParser:
     jobs_status = jobs_sub.add_parser("status", help="查看 job 狀態")
     jobs_status.add_argument("job_id", help="job ID")
 
+    artifacts_parser = subparsers.add_parser("artifacts", help="Artifacts 管理")
+    artifacts_sub = artifacts_parser.add_subparsers(dest="artifacts_command")
+    artifacts_list = artifacts_sub.add_parser("list", help="列出已存檔 artifacts")
+    artifacts_list.add_argument("--project", help="指定專案 ID")
+
+    artifacts_check = artifacts_sub.add_parser("check", help="重跑語法檢查並更新 manifest")
+    artifacts_check.add_argument("path", nargs="?", help="指定檔案路徑（例如 workspace/app.py）")
+    artifacts_check.add_argument("--project", help="指定專案 ID")
+
+    artifacts_run = artifacts_sub.add_parser("run", help="執行指定 artifact 檔案")
+    artifacts_run.add_argument("path", help="檔案路徑（例如 workspace/app.py）")
+    artifacts_run.add_argument("--project", help="指定專案 ID")
+    artifacts_run.add_argument("--language", default="auto", help="語言（預設 auto）")
+    artifacts_run.add_argument("--args", nargs="*", default=[], help="傳入程式參數")
+
     sandbox_parser = subparsers.add_parser("sandbox", help="外部 sandbox runner")
     sandbox_sub = sandbox_parser.add_subparsers(dest="sandbox_command")
     sandbox_exec = sandbox_sub.add_parser("exec", help="送出程式到外部 runner 執行")
@@ -354,6 +370,8 @@ def main() -> None:
             _handle_schedules(core, args)
         elif args.command == "jobs":
             _handle_jobs(core, args)
+        elif args.command == "artifacts":
+            _handle_artifacts(core, args)
         elif args.command == "sandbox":
             _handle_sandbox(core, args)
         else:
@@ -1087,6 +1105,135 @@ def _handle_jobs(core: AmonCore, args: argparse.Namespace) -> None:
         print(f"last_event_id：{status.last_event_id}")
         return
     raise ValueError("請指定 jobs 指令")
+
+
+def _resolve_artifacts_project_path(core: AmonCore, project_id: str | None) -> Path:
+    return core.get_project_path(project_id) if project_id else Path.cwd()
+
+
+def _load_artifacts_manifest(project_path: Path) -> dict[str, object]:
+    manifest = ensure_manifest(project_path)
+    if not isinstance(manifest, dict):
+        return {"version": "1", "updated_at": "", "files": {}}
+    files = manifest.get("files")
+    if not isinstance(files, dict):
+        manifest["files"] = {}
+    return manifest
+
+
+def _detect_run_language(path: Path, language: str) -> str:
+    if language != "auto":
+        return language
+    suffix = path.suffix.lower()
+    if suffix == ".py":
+        return "python"
+    if suffix == ".js":
+        return "javascript"
+    if suffix == ".ts":
+        return "typescript"
+    raise ValueError("無法自動判斷語言，請使用 --language 指定")
+
+
+def _render_code_with_args(path: Path, code: str, language: str, args: list[str]) -> str:
+    if not args:
+        return code
+    payload = json.dumps(args, ensure_ascii=False)
+    if language == "python":
+        return f"import sys\nsys.argv = [{json.dumps(path.name)}, *{payload}]\n" + code
+    if language in {"javascript", "typescript", "js", "ts"}:
+        return f"process.argv = [{json.dumps(path.name)}, ...{payload}];\n" + code
+    return code
+
+
+def _handle_artifacts(core: AmonCore, args: argparse.Namespace) -> None:
+    if args.artifacts_command not in {"list", "check", "run"}:
+        raise ValueError("請指定 artifacts 指令")
+
+    project_path = _resolve_artifacts_project_path(core, getattr(args, "project", None))
+    manifest = _load_artifacts_manifest(project_path)
+    files = manifest.get("files") if isinstance(manifest, dict) else {}
+    if not isinstance(files, dict):
+        files = {}
+
+    if args.artifacts_command == "list":
+        rows: list[dict[str, str]] = []
+        for file_path in sorted(files.keys()):
+            entry = files.get(file_path)
+            if not isinstance(entry, dict):
+                continue
+            rows.append(
+                {
+                    "path": str(file_path),
+                    "status": str(entry.get("status") or ""),
+                    "updated_at": str(entry.get("updated_at") or ""),
+                    "language": Path(str(file_path)).suffix.lstrip("."),
+                }
+            )
+        print(yaml.safe_dump({"files": rows}, allow_unicode=True, sort_keys=False))
+        return
+
+    if args.artifacts_command == "check":
+        target_paths = [args.path] if args.path else sorted(files.keys())
+        updated: list[dict[str, str]] = []
+        for rel in target_paths:
+            if not rel:
+                continue
+            target = (project_path / rel).resolve()
+            if not target.exists() or not target.is_file():
+                updated.append({"path": str(rel), "status": "error", "message": "file not found"})
+                continue
+            checks = run_validators(target)
+            entry = update_manifest_for_file(
+                project_path=project_path,
+                target_path=target,
+                write_status="checked",
+                checks=checks,
+            )
+            updated.append(
+                {
+                    "path": str(rel),
+                    "status": str(entry.get("status") or ""),
+                    "message": str((checks[0].get("message") if checks else "") or ""),
+                }
+            )
+        print(yaml.safe_dump({"checked": updated}, allow_unicode=True, sort_keys=False))
+        return
+
+    rel = str(args.path)
+    target = (project_path / rel).resolve()
+    if not target.exists() or not target.is_file():
+        raise FileNotFoundError(f"找不到檔案：{rel}")
+
+    manifest_entry = files.get(rel)
+    if isinstance(manifest_entry, dict) and manifest_entry.get("status") == "invalid":
+        checks = manifest_entry.get("checks")
+        message = ""
+        if isinstance(checks, list) and checks:
+            item = checks[0]
+            if isinstance(item, dict):
+                message = str(item.get("message") or "")
+        raise ValueError(f"檔案語法檢查為 invalid，請先執行 amon artifacts check {rel}。{message}")
+
+    language = _detect_run_language(target, str(args.language))
+    code = target.read_text(encoding="utf-8")
+    code = _render_code_with_args(target, code, language, list(args.args or []))
+
+    loader = ConfigLoader(data_dir=core.data_dir)
+    project_id = getattr(args, "project", None)
+    effective = loader.resolve(project_id=project_id).effective
+    run_id = datetime.now().strftime("run-%Y%m%d%H%M%S")
+    summary = run_sandbox_step(
+        project_path=project_path,
+        config=effective,
+        run_id=run_id,
+        step_id="artifacts_cli",
+        language=language,
+        code=code,
+        input_paths=[rel],
+        output_prefix=f"audits/artifacts/{run_id}/artifacts_cli",
+        timeout_s=None,
+    )
+    print(yaml.safe_dump(summary, allow_unicode=True, sort_keys=False))
 
 
 def _handle_sandbox(core: AmonCore, args: argparse.Namespace) -> None:

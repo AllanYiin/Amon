@@ -131,9 +131,32 @@ amon daemon --tick-interval 5
 
 # 使用外部 sandbox runner 執行程式
 amon sandbox exec --language python --code-file ./script.py --in data/input.txt=./fixtures/input.txt --out-dir ./sandbox-out
+
+# 列出 / 檢查 / 執行自動存檔 artifacts
+amon artifacts list
+amon artifacts check workspace/app.py
+amon artifacts run workspace/app.py --language auto --args --name demo
 ```
 
 > 提醒：模型金鑰需放在環境變數中（例如 `OPENAI_API_KEY`）。  
+
+
+## 自動存檔 code fence（Artifacts）
+
+當 `amon run` / `amon chat` 的模型回覆包含以下格式，Amon 會自動把程式碼落地到專案 `workspace/`：
+
+```text
+<lang> file=workspace/app.py
+print("hello")
+```
+
+你可以透過 CLI 進一步操作：
+
+- `amon artifacts list`：從 `.amon/artifacts/manifest.json` 列出檔案、狀態、更新時間、語言。
+- `amon artifacts check [path]`：重跑語法檢查並更新 manifest。
+- `amon artifacts run path [--language auto] [--args ...]`：使用 sandbox runner 執行指定檔案。
+
+若 manifest 中該檔案狀態為 `invalid`，`amon artifacts run` 會先提示先執行 `amon artifacts check`，並顯示最近一次語法錯誤摘要。
 
 ## 功能更新摘要
 
