@@ -20,6 +20,13 @@ python -m compileall src tests
 # test
 python -m unittest discover -s tests -p "test_*.py"
 
+# continuation guard（PR 必跑，需與 CI 一致）
+python -m unittest \
+  tests.test_chat_continuation_guard \
+  tests.test_chat_continuation_flow \
+  tests.test_ui_chat_stream_init \
+  tests.test_chat_session_store
+
 # dev server
 amon ui --port 8000
 ```
@@ -33,3 +40,8 @@ amon ui --port 8000
 - 嚴禁提交任何 secrets（API Key/Token/密碼）。
 - 金鑰僅可放環境變數（如 `OPENAI_API_KEY`）。
 - 錯誤不可吞沒：需提供可追蹤訊息，必要時寫入 logs。
+
+
+## 5) 續聊回歸防線（CI）
+- GitHub Actions `Chat Continuation Guard` 會在 PR 自動執行，失敗即阻擋合併。
+- 新增續聊相關變更時，請優先擴充 deterministic 測試（禁止依賴外部模型隨機輸出）。
