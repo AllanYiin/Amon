@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,6 +18,12 @@ class ArtifactsStoreTests(unittest.TestCase):
             self.assertEqual(results[0].status, "created")
             target = project_path / "workspace" / "x.py"
             self.assertEqual(target.read_text(encoding="utf-8"), "print('hello')\n")
+            manifest_path = project_path / ".amon" / "artifacts" / "manifest.json"
+            self.assertTrue(manifest_path.exists())
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            entry = manifest["files"]["workspace/x.py"]
+            self.assertEqual(entry["write_status"], "created")
+            self.assertEqual(entry["status"], "valid")
 
     def test_reject_outside_workspace(self) -> None:
         with tempfile.TemporaryDirectory(prefix="amon-artifacts-store-") as tmpdir:
@@ -43,6 +50,9 @@ class ArtifactsStoreTests(unittest.TestCase):
             self.assertTrue(backup.exists())
             self.assertEqual(backup.read_text(encoding="utf-8"), "old\n")
             self.assertEqual(target.read_text(encoding="utf-8"), "print('new')\n")
+            manifest = json.loads((project_path / ".amon" / "artifacts" / "manifest.json").read_text(encoding="utf-8"))
+            entry = manifest["files"]["workspace/x.py"]
+            self.assertEqual(entry["write_status"], "updated")
 
 
 if __name__ == "__main__":

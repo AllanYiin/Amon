@@ -6,8 +6,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .manifest import ensure_manifest, update_manifest_for_file
 from .parser import parse_artifact_blocks
 from .safety import resolve_workspace_target
+from .validators import run_validators
 
 
 @dataclass(frozen=True)
@@ -32,6 +34,7 @@ def ingest_response_artifacts(response_text: str, project_path: Path) -> list[Ar
     """Parse fenced artifacts from response and write under workspace."""
 
     results: list[ArtifactWriteResult] = []
+    ensure_manifest(project_path)
     blocks = parse_artifact_blocks(response_text)
 
     for block in blocks:
@@ -50,6 +53,13 @@ def ingest_response_artifacts(response_text: str, project_path: Path) -> list[Ar
             else:
                 status = "created"
             target.write_text(block.content, encoding="utf-8")
+            checks = run_validators(target)
+            update_manifest_for_file(
+                project_path=project_path,
+                target_path=target,
+                write_status=status,
+                checks=checks,
+            )
             results.append(
                 ArtifactWriteResult(
                     index=block.index,
