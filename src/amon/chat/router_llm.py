@@ -10,22 +10,10 @@ from typing import Any, Iterable, Protocol
 from amon.config import ConfigLoader
 from amon.models import ProviderError, build_provider
 
+from .execution_mode import decide_execution_mode
 from .router_types import RouterResult
 
 logger = logging.getLogger(__name__)
-
-TEAM_MODE_STRONG_SIGNALS = (
-    "研究報告",
-    "白皮書",
-    "論文",
-    "研究計畫",
-    "實驗設計",
-    "多代理",
-    "多 agent",
-    "multi-agent",
-    "team",
-)
-
 
 class LLMClient(Protocol):
     def generate_stream(self, messages: list[dict[str, str]], model: str | None = None) -> Iterable[str]:
@@ -78,32 +66,12 @@ def choose_execution_mode_with_llm(
     llm_client: LLMClient | None = None,
     model: str | None = None,
 ) -> str:
-    if message is None:
-        message = ""
-    normalized = " ".join(message.split())
-    if not normalized:
-        return "single"
-    try:
-        if llm_client is None:
-            llm_client, model = _build_default_client(project_id, model)
-        messages = [
-            {"role": "system", "content": _execution_mode_system_prompt()},
-            {
-                "role": "user",
-                "content": json.dumps({"message": normalized, "allowed_modes": ["single", "self_critique", "team"]}, ensure_ascii=False),
-            },
-        ]
-        output_text = _collect_stream(llm_client, messages, model)
-        mode = _parse_execution_mode(output_text)
-        if mode in {"single", "self_critique", "team"}:
-            if mode == "team" and not _allow_team_mode(normalized):
-                return "single"
-            return mode
-    except (ProviderError, OSError, ValueError) as exc:
-        logger.warning("LLM execution mode 判斷失敗，改用預設 single：%s", exc)
-    except Exception as exc:  # noqa: BLE001
-        logger.error("LLM execution mode 未預期錯誤：%s", exc, exc_info=True)
-    return "single"
+    return decide_execution_mode(
+        message,
+        project_id=project_id,
+        llm_client=llm_client,
+        model=model,
+    )
 
 
 def should_continue_run_with_llm(
@@ -205,15 +173,6 @@ def _system_prompt() -> str:
     )
 
 
-def _execution_mode_system_prompt() -> str:
-    return (
-        "你是執行模式路由器。"
-        "請根據使用者訊息判斷最適合的 execution mode。"
-        "只允許輸出 JSON，格式為 {\"mode\":\"single|self_critique|team\"}。"
-        "不得輸出額外文字。"
-    )
-
-
 def _run_continuation_system_prompt() -> str:
     return (
         "你是對話 run 延續判斷器。"
@@ -234,23 +193,6 @@ def _parse_run_continuation(raw_text: str) -> bool:
     if "continue_run" not in payload:
         raise ValueError("run continuation 缺少 continue_run")
     return bool(payload.get("continue_run"))
-
-
-def _parse_execution_mode(raw_text: str) -> str:
-    cleaned = _strip_code_fences(raw_text)
-    if not cleaned:
-        return ""
-    payload = json.loads(cleaned)
-    if not isinstance(payload, dict):
-        return ""
-    mode = str(payload.get("mode") or "").strip().lower()
-    return mode
-
-
-def _allow_team_mode(message: str) -> bool:
-    lowered = message.lower()
-    compact = "".join(lowered.split())
-    return any(signal in lowered or signal.replace(" ", "") in compact for signal in TEAM_MODE_STRONG_SIGNALS)
 
 
 def _router_schema() -> dict[str, Any]:

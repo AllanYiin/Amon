@@ -114,14 +114,14 @@ class ProjectBootstrapTests(unittest.TestCase):
     def test_choose_execution_mode_prefers_self_critique_for_professional_writing(self) -> None:
         mode = choose_execution_mode(
             "協助撰寫比較OpenClaw與Manus在記憶機制以及多agent任務同步機制比較的技術文章",
-            llm_client=self._MockLLM('{"mode":"self_critique"}'),
+            llm_client=self._MockLLM('{"mode":"self_critique","confidence":0.88,"rationale":["正式寫作"],"requires_planning":false}'),
         )
         self.assertEqual(mode, "self_critique")
 
     def test_choose_execution_mode_prefers_team_for_research_report(self) -> None:
         mode = choose_execution_mode(
             "請撰寫多agent協作架構的研究報告，需含方法論與驗證計畫",
-            llm_client=self._MockLLM('{"mode":"team"}'),
+            llm_client=self._MockLLM('{"mode":"team","confidence":0.92,"rationale":["跨領域分工"],"requires_planning":true}'),
         )
         self.assertEqual(mode, "team")
 
