@@ -47,6 +47,37 @@ from .skills import build_skill_injection_preview
 from .token_counter import count_non_dialogue_tokens, extract_dialogue_input_tokens
 
 
+
+_CHAT_STREAM_INIT_LOCK = threading.Lock()
+_CHAT_STREAM_INIT_TTL_S = 300
+_CHAT_STREAM_INIT_STORE: dict[str, dict[str, Any]] = {}
+
+
+def _create_chat_stream_token(*, message: str, project_id: str | None, chat_id: str | None) -> str:
+    token = uuid.uuid4().hex
+    now = time.time()
+    payload = {"message": message, "project_id": project_id, "chat_id": chat_id, "created_at": now}
+    with _CHAT_STREAM_INIT_LOCK:
+        _CHAT_STREAM_INIT_STORE[token] = payload
+        expired = [key for key, item in _CHAT_STREAM_INIT_STORE.items() if now - float(item.get("created_at") or now) > _CHAT_STREAM_INIT_TTL_S]
+        for key in expired:
+            _CHAT_STREAM_INIT_STORE.pop(key, None)
+    return token
+
+
+def _consume_chat_stream_token(token: str) -> dict[str, Any] | None:
+    if not token:
+        return None
+    now = time.time()
+    with _CHAT_STREAM_INIT_LOCK:
+        payload = _CHAT_STREAM_INIT_STORE.pop(token, None)
+    if not payload:
+        return None
+    if now - float(payload.get("created_at") or now) > _CHAT_STREAM_INIT_TTL_S:
+        return None
+    return payload
+
+
 class _TaskManager:
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -1070,6 +1101,22 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             request_id = _TASK_MANAGER.submit_schedule_tick(request_id=None, core=self.core)
             self._send_json(202, {"request_id": request_id})
             return
+        if parsed.path == "/v1/chat/stream/init":
+            payload = self._read_json()
+            if payload is None:
+                return
+            message = str(payload.get("message", "")).strip()
+            project_id = str(payload.get("project_id", "")).strip() or None
+            chat_id = str(payload.get("chat_id", "")).strip() or None
+            if not message:
+                self._send_json(400, {"message": "請提供 message"})
+                return
+            if len(message) > 100_000:
+                self._send_json(413, {"message": "message 過長"})
+                return
+            token = _create_chat_stream_token(message=message, project_id=project_id, chat_id=chat_id)
+            self._send_json(201, {"stream_token": token, "ttl_s": _CHAT_STREAM_INIT_TTL_S})
+            return
         if parsed.path == "/v1/chat/sessions":
             payload = self._read_json()
             if payload is None:
@@ -1563,8 +1610,16 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         project_id = params.get("project_id", [""])[0].strip() or None
         chat_id = params.get("chat_id", [""])[0].strip()
         message = params.get("message", [""])[0].strip()
+        stream_token = params.get("stream_token", [""])[0].strip()
         last_event_id_raw = params.get("last_event_id", [""])[0].strip()
         request_id = uuid.uuid4().hex
+
+        if not message and stream_token:
+            token_payload = _consume_chat_stream_token(stream_token)
+            if token_payload:
+                message = str(token_payload.get("message", "")).strip()
+                project_id = project_id or str(token_payload.get("project_id", "")).strip() or None
+                chat_id = chat_id or str(token_payload.get("chat_id", "")).strip()
 
         if not message:
             self.send_error(400, "缺少 message")
