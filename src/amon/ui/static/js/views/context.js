@@ -1,6 +1,7 @@
 import { t } from "../i18n.js";
 
 const CONTEXT_COLORS = {
+  project_context: "#22c55e",
   system_prompt: "#6366f1",
   tools_definition: "#06b6d4",
   skills: "#10b981",
@@ -34,20 +35,19 @@ function updateDraftMeta(rootEl, text) {
   meta.textContent = text;
 }
 
-function estimateByContextText(text = "") {
-  const content = String(text || "").trim();
-  if (!content) return null;
-  const chatTokens = Math.max(1, Math.floor(content.length / 4));
-  return {
-    token_estimate: {
-      used: chatTokens,
-      capacity: 12000,
-      remaining: Math.max(12000 - chatTokens, 0),
-      usage_ratio: chatTokens / 12000,
-      estimated_cost_usd: Number((chatTokens * 0.0000025).toFixed(6)),
-    },
-    categories: [{ key: "chat_history", label: "Chat History", tokens: chatTokens, items: 1, note: "由草稿推估" }],
-  };
+async function refreshContextStats(ctx, rootEl, projectId) {
+  if (!projectId) {
+    setDashboardUnavailable(rootEl);
+    return null;
+  }
+  try {
+    const statsPayload = await ctx.services.context.getContextStats(projectId);
+    renderContextStats(rootEl, statsPayload);
+    return statsPayload;
+  } catch (error) {
+    setDashboardUnavailable(rootEl);
+    throw error;
+  }
 }
 
 function renderWaffle(rootEl, categories = [], usedPercent = 0) {
@@ -151,10 +151,10 @@ async function saveDraft(ctx, rootEl, editor) {
   try {
     const text = editor?.value || "";
     await ctx.services.context.saveContext(projectId, text);
-    dispatchContext(ctx, { context: text, lastSavedAt: Date.now() });
+    const statsPayload = await refreshContextStats(ctx, rootEl, projectId);
+    dispatchContext(ctx, { context: text, lastSavedAt: Date.now(), stats: statsPayload });
     updateDraftMeta(rootEl, `已儲存本機草稿（${new Date().toLocaleString("zh-TW")})。`);
     ctx.ui.toast?.show(t("toast.context.saved"), { type: "success", duration: 9000 });
-    renderContextStats(rootEl, estimateByContextText(text));
   } catch (error) {
     ctx.ui.toast?.show(t("toast.context.saveFailed", "", { message: error.message }), { type: "danger", duration: 12000 });
   }
@@ -174,7 +174,12 @@ async function clearDraft(ctx, rootEl, editor, scope) {
     dispatchContext(ctx, { context: "", clearedScope: scope, clearedAt: Date.now() });
     updateDraftMeta(rootEl, scope === "project" ? "已清空專案 Context 草稿。" : "已清空本次對話 Context 草稿。");
     ctx.ui.toast?.show(t("toast.context.cleared"), { type: "success", duration: 9000 });
-    setDashboardUnavailable(rootEl);
+    if (scope === "project") {
+      setDashboardUnavailable(rootEl);
+    } else {
+      const statsPayload = await refreshContextStats(ctx, rootEl, getProjectId(ctx));
+      dispatchContext(ctx, { stats: statsPayload });
+    }
   } catch (error) {
     ctx.ui.toast?.show(t("toast.context.clearFailed", "", { message: error.message }), { type: "danger", duration: 12000 });
   }
@@ -282,17 +287,16 @@ export const CONTEXT_VIEW = {
     try {
       const [payload, statsPayload] = await Promise.all([
         ctx.services.context.getContext(projectId),
-        ctx.services.context.getContextStats(projectId),
+        refreshContextStats(ctx, ctx.rootEl, projectId),
       ]);
       const contextText = payload?.context || payload?.memory || "";
       if (editor) editor.value = contextText;
       updateDraftMeta(ctx.rootEl, contextText ? "已載入目前專案草稿。" : "目前專案尚無草稿。");
       emptyCta.hidden = Boolean(contextText);
       dispatchContext(ctx, { context: contextText, projectId, loadedAt: Date.now(), stats: statsPayload });
-      renderContextStats(ctx.rootEl, statsPayload || estimateByContextText(contextText));
     } catch (error) {
       ctx.ui.toast?.show(t("toast.context.loadFailed", "", { message: error.message }), { type: "danger", duration: 12000 });
-      renderContextStats(ctx.rootEl, estimateByContextText(editor?.value || ""));
+      setDashboardUnavailable(ctx.rootEl);
     }
   },
 };

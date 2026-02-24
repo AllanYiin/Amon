@@ -124,6 +124,15 @@ class UIShellSmokeTests(unittest.TestCase):
         ]:
             self.assertIn(token, bootstrap_js)
 
+
+    def test_context_view_uses_backend_stats_instead_of_local_estimate(self) -> None:
+        context_js = Path("src/amon/ui/static/js/views/context.js").read_text(encoding="utf-8")
+
+        self.assertIn("async function refreshContextStats", context_js)
+        self.assertIn("ctx.services.context.getContextStats(projectId)", context_js)
+        self.assertNotIn("estimateByContextText", context_js)
+        self.assertNotIn("由草稿推估", context_js)
+
     def test_status_semantics_and_run_copy_controls_exist(self) -> None:
         html = Path("src/amon/ui/index.html").read_text(encoding="utf-8")
         css = Path("src/amon/ui/styles.css").read_text(encoding="utf-8")
