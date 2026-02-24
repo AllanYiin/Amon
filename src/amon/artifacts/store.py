@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from .manifest import ensure_manifest, update_manifest_for_file
 from .parser import parse_artifact_blocks
@@ -30,7 +31,7 @@ def _history_backup_path(project_path: Path, target_path: Path) -> Path:
     return history_root / relative.parent / f"{relative.name}.{stamp}.bak"
 
 
-def ingest_response_artifacts(response_text: str, project_path: Path) -> list[ArtifactWriteResult]:
+def ingest_artifacts(response_text: str, project_path: Path, source: dict[str, Any] | None = None) -> dict[str, Any]:
     """Parse fenced artifacts from response and write under workspace."""
 
     results: list[ArtifactWriteResult] = []
@@ -81,4 +82,42 @@ def ingest_response_artifacts(response_text: str, project_path: Path) -> list[Ar
                     error=str(exc),
                 )
             )
-    return results
+
+    errors = [result.error for result in results if result.error]
+    return {
+        "source": source or {},
+        "total": len(blocks),
+        "created": sum(1 for result in results if result.status == "created"),
+        "updated": sum(1 for result in results if result.status == "updated"),
+        "errors": len(errors),
+        "error_messages": errors,
+        "results": [
+            {
+                "index": result.index,
+                "declared_path": result.declared_path,
+                "target_path": result.target_path,
+                "status": result.status,
+                "backup_path": result.backup_path,
+                "error": result.error,
+            }
+            for result in results
+        ],
+    }
+
+
+def ingest_response_artifacts(response_text: str, project_path: Path) -> list[ArtifactWriteResult]:
+    """Compatibility wrapper returning per-block write results only."""
+
+    summary = ingest_artifacts(response_text=response_text, project_path=project_path)
+    return [
+        ArtifactWriteResult(
+            index=int(item.get("index", 0)),
+            declared_path=str(item.get("declared_path", "")),
+            target_path=str(item.get("target_path", "")),
+            status=str(item.get("status", "error")),
+            backup_path=str(item.get("backup_path", "")),
+            error=str(item.get("error", "")),
+        )
+        for item in summary.get("results", [])
+        if isinstance(item, dict)
+    ]
