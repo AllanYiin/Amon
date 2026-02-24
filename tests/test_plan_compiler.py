@@ -43,6 +43,9 @@ class PlanCompilerTests(unittest.TestCase):
         self.assertIn("plan_T1_tool_1", node_ids)
         self.assertIn("plan_T1_llm", node_ids)
         self.assertIn("plan_T2_llm", node_ids)
+        tool_node = next(node for node in graph["nodes"] if node["id"] == "plan_T1_tool_1")
+        self.assertEqual(tool_node["metadata"]["when_to_use"], "查詢")
+
 
     def test_compile_plan_detects_cycle(self) -> None:
         plan = PlanGraph(
@@ -56,6 +59,34 @@ class PlanCompilerTests(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             compile_plan_to_exec_graph(plan)
+
+    def test_compile_plan_tool_args_prefers_args_over_schema_hint(self) -> None:
+        plan = PlanGraph(
+            schema_version="1.0",
+            objective="測試",
+            nodes=[
+                PlanNode(
+                    id="T1",
+                    title="工具",
+                    goal="跑工具",
+                    definition_of_done=["done"],
+                    depends_on=[],
+                    requires_llm=False,
+                    tools=[
+                        {
+                            "tool_name": "process.run",
+                            "args": {"cmd": "echo hi"},
+                            "args_schema_hint": {"cmd": "string"},
+                            "when_to_use": "執行",
+                        }
+                    ],
+                )
+            ],
+            context=PlanContext(),
+        )
+        graph = compile_plan_to_exec_graph(plan)
+        tool_node = next(node for node in graph["nodes"] if node["id"] == "plan_T1_tool_1")
+        self.assertEqual(tool_node["args"], {"cmd": "echo hi"})
 
 
 if __name__ == "__main__":

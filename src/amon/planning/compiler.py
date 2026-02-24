@@ -14,23 +14,23 @@ def compile_plan_to_exec_graph(plan: PlanGraph, *, run_id_var: str = "${run_id}"
     terminal_by_task: dict[str, str] = {}
 
     for task in plan.nodes:
-        task_start_nodes: list[str] = []
         prev_id: str | None = None
 
         for index, tool in enumerate(task.tools):
             tool_id = f"plan_{task.id}_tool_{index + 1}"
+            tool_args = tool.get("args") if isinstance(tool.get("args"), dict) else None
             node = {
                 "id": tool_id,
                 "type": "tool.call",
                 "tool": str(tool.get("tool_name") or ""),
-                "args": tool.get("args_schema_hint") or {},
+                "args": tool_args if tool_args is not None else (tool.get("args_schema_hint") or {}),
+                "metadata": {"when_to_use": str(tool.get("when_to_use") or "")},
                 "variables": {
                     "mode": task.llm.get("mode") if isinstance(task.llm, dict) and task.llm.get("mode") else "single",
                     "skill_names": list(task.skills),
                 },
             }
             nodes.append(node)
-            task_start_nodes.append(tool_id)
             if prev_id:
                 edges.append({"from": prev_id, "to": tool_id})
             prev_id = tool_id
@@ -50,7 +50,6 @@ def compile_plan_to_exec_graph(plan: PlanGraph, *, run_id_var: str = "${run_id}"
                 },
             }
             nodes.append(llm_node)
-            task_start_nodes.append(llm_id)
             if prev_id:
                 edges.append({"from": prev_id, "to": llm_id})
             prev_id = llm_id
@@ -65,7 +64,6 @@ def compile_plan_to_exec_graph(plan: PlanGraph, *, run_id_var: str = "${run_id}"
                     "content": f"{task.title}\n{task.goal}",
                 }
             )
-            task_start_nodes.append(passthrough_id)
             prev_id = passthrough_id
 
         terminal_by_task[task.id] = prev_id
