@@ -14,7 +14,7 @@ from pathlib import Path
 
 import yaml
 
-from .artifacts import ensure_manifest, run_validators, update_manifest_for_file
+from .artifacts import ensure_manifest, resolve_workspace_target, run_validators, update_manifest_for_file
 from .config import ConfigLoader
 from .core import AmonCore
 from .events import emit_event
@@ -1178,7 +1178,11 @@ def _handle_artifacts(core: AmonCore, args: argparse.Namespace) -> None:
         for rel in target_paths:
             if not rel:
                 continue
-            target = (project_path / rel).resolve()
+            try:
+                target = resolve_workspace_target(project_path, str(rel))
+            except ValueError:
+                updated.append({"path": str(rel), "status": "error", "message": "path outside workspace"})
+                continue
             if not target.exists() or not target.is_file():
                 updated.append({"path": str(rel), "status": "error", "message": "file not found"})
                 continue
@@ -1200,7 +1204,8 @@ def _handle_artifacts(core: AmonCore, args: argparse.Namespace) -> None:
         return
 
     rel = str(args.path)
-    target = (project_path / rel).resolve()
+    target = resolve_workspace_target(project_path, rel)
+    rel = target.relative_to(project_path).as_posix()
     if not target.exists() or not target.is_file():
         raise FileNotFoundError(f"找不到檔案：{rel}")
 
