@@ -20,6 +20,7 @@ from typing import Any
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from amon.chat.cli import _build_plan_from_message
+from amon.chat.continuation import assemble_chat_turn, is_short_continuation_message
 from amon.chat.project_bootstrap import (
     bootstrap_project_if_needed,
     resolve_project_id_from_message,
@@ -29,10 +30,7 @@ from amon.chat.router_llm import choose_execution_mode_with_llm, should_continue
 from amon.chat.router_types import RouterResult
 from amon.chat.session_store import (
     append_event,
-    build_prompt_with_history,
     create_chat_session,
-    load_latest_run_context,
-    load_recent_dialogue,
 )
 from amon.commands.executor import CommandPlan, execute
 from amon.config import ConfigLoader
@@ -47,6 +45,37 @@ from .logging import log_event
 from .models import decode_reasoning_chunk
 from .skills import build_skill_injection_preview
 from .token_counter import count_non_dialogue_tokens, extract_dialogue_input_tokens
+
+
+
+_CHAT_STREAM_INIT_LOCK = threading.Lock()
+_CHAT_STREAM_INIT_TTL_S = 300
+_CHAT_STREAM_INIT_STORE: dict[str, dict[str, Any]] = {}
+
+
+def _create_chat_stream_token(*, message: str, project_id: str | None, chat_id: str | None) -> str:
+    token = uuid.uuid4().hex
+    now = time.time()
+    payload = {"message": message, "project_id": project_id, "chat_id": chat_id, "created_at": now}
+    with _CHAT_STREAM_INIT_LOCK:
+        _CHAT_STREAM_INIT_STORE[token] = payload
+        expired = [key for key, item in _CHAT_STREAM_INIT_STORE.items() if now - float(item.get("created_at") or now) > _CHAT_STREAM_INIT_TTL_S]
+        for key in expired:
+            _CHAT_STREAM_INIT_STORE.pop(key, None)
+    return token
+
+
+def _consume_chat_stream_token(token: str) -> dict[str, Any] | None:
+    if not token:
+        return None
+    now = time.time()
+    with _CHAT_STREAM_INIT_LOCK:
+        payload = _CHAT_STREAM_INIT_STORE.pop(token, None)
+    if not payload:
+        return None
+    if now - float(payload.get("created_at") or now) > _CHAT_STREAM_INIT_TTL_S:
+        return None
+    return payload
 
 
 class _TaskManager:
@@ -296,6 +325,8 @@ def _resolve_command_plan_from_router(message: str, router_result: RouterResult)
 
 
 def _should_continue_chat_run(*, project_id: str | None, last_assistant_text: str | None, user_message: str) -> bool:
+    if is_short_continuation_message(user_message) and (last_assistant_text or "").strip():
+        return True
     return should_continue_run_with_llm(
         project_id=project_id,
         last_assistant_text=last_assistant_text,
@@ -1070,6 +1101,22 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             request_id = _TASK_MANAGER.submit_schedule_tick(request_id=None, core=self.core)
             self._send_json(202, {"request_id": request_id})
             return
+        if parsed.path == "/v1/chat/stream/init":
+            payload = self._read_json()
+            if payload is None:
+                return
+            message = str(payload.get("message", "")).strip()
+            project_id = str(payload.get("project_id", "")).strip() or None
+            chat_id = str(payload.get("chat_id", "")).strip() or None
+            if not message:
+                self._send_json(400, {"message": "請提供 message"})
+                return
+            if len(message) > 100_000:
+                self._send_json(413, {"message": "message 過長"})
+                return
+            token = _create_chat_stream_token(message=message, project_id=project_id, chat_id=chat_id)
+            self._send_json(201, {"stream_token": token, "ttl_s": _CHAT_STREAM_INIT_TTL_S})
+            return
         if parsed.path == "/v1/chat/sessions":
             payload = self._read_json()
             if payload is None:
@@ -1563,8 +1610,16 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         project_id = params.get("project_id", [""])[0].strip() or None
         chat_id = params.get("chat_id", [""])[0].strip()
         message = params.get("message", [""])[0].strip()
+        stream_token = params.get("stream_token", [""])[0].strip()
         last_event_id_raw = params.get("last_event_id", [""])[0].strip()
         request_id = uuid.uuid4().hex
+
+        if not message and stream_token:
+            token_payload = _consume_chat_stream_token(stream_token)
+            if token_payload:
+                message = str(token_payload.get("message", "")).strip()
+                project_id = project_id or str(token_payload.get("project_id", "")).strip() or None
+                chat_id = chat_id or str(token_payload.get("chat_id", "")).strip()
 
         if not message:
             self.send_error(400, "缺少 message")
@@ -1616,25 +1671,19 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 inferred_project_id = resolve_project_id_from_message(self.core, message)
                 if inferred_project_id:
                     project_id = inferred_project_id
-            initial_context: dict[str, Any] | None = None
-            if project_id and chat_id:
-                history = load_recent_dialogue(project_id, chat_id)
-                if history:
-                    initial_context = {"conversation_history": history}
-            initial_run_context = load_latest_run_context(project_id, chat_id) if project_id and chat_id else {"run_id": None, "last_assistant_text": None}
-            router_result = route_intent(
-                message,
-                project_id=project_id,
-                run_id=str(initial_run_context.get("run_id") or "") or None,
-                context=initial_context,
-            )
             created_project: ProjectRecord | None = None
             if project_id is None:
+                bootstrap_router = route_intent(
+                    message,
+                    project_id=project_id,
+                    run_id=None,
+                    context=None,
+                )
                 created_project = bootstrap_project_if_needed(
                     core=self.core,
                     project_id=project_id,
                     message=message,
-                    router_type=router_result.type,
+                    router_type=bootstrap_router.type,
                     build_plan_from_message=_build_plan_from_message,
                     is_slash_command=message.startswith("/"),
                 )
@@ -1669,17 +1718,27 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     send_event("error", {"message": "缺少 project_id"})
                     send_event("done", {"status": "project_required"})
                     return
-            if not chat_id:
-                chat_id = create_chat_session(project_id)
-            history = load_recent_dialogue(project_id, chat_id)
-            run_context = load_latest_run_context(project_id, chat_id)
-            router_context = {"conversation_history": history} if history else None
+            turn_bundle = assemble_chat_turn(project_id=project_id, chat_id=chat_id, message=message)
+            chat_id = turn_bundle.chat_id
+            history = turn_bundle.history
+            run_context = turn_bundle.run_context
             router_result = route_intent(
                 message,
                 project_id=project_id,
                 run_id=str(run_context.get("run_id") or "") or None,
-                context=router_context,
+                context=turn_bundle.router_context,
             )
+            if turn_bundle.short_continuation and router_result.type != "chat_response":
+                log_event(
+                    {
+                        "level": "INFO",
+                        "event": "ui_chat_force_continuation",
+                        "project_id": project_id,
+                        "chat_id": chat_id,
+                        "original_router_type": router_result.type,
+                    }
+                )
+                router_result = RouterResult(type="chat_response", confidence=1.0, reason="short_continuation")
             append_event(chat_id, {"type": "user", "text": message, "project_id": project_id})
             append_event(
                 chat_id,
@@ -1774,7 +1833,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             if router_result.type == "chat_response":
                 send_event("notice", {"text": "Amon：正在分析需求並進入執行流程。"})
                 execution_mode = choose_execution_mode_with_llm(message, project_id=project_id)
-                prompt_with_history = build_prompt_with_history(message, history)
+                prompt_with_history = turn_bundle.prompt_with_history
 
                 streamed_token_count = 0
 

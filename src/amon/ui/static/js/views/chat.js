@@ -119,11 +119,44 @@ export const CHAT_VIEW = {
       timelineRenderer.updateExecutionStep("node_status", { title: "Node 狀態", status: "pending", details: "等待 run/node 事件", inferred: true });
       setStreaming(true);
 
+      const messageLength = finalMessage.length;
+      let streamToken = null;
+      if (messageLength > 1800) {
+        try {
+          const response = await fetch("/v1/chat/stream/init", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              message: finalMessage,
+              project_id: appState.projectId,
+              chat_id: appState.chatId,
+            }),
+          });
+          if (!response.ok) {
+            throw new Error(`stream init failed: ${response.status}`);
+          }
+          const payload = await response.json();
+          streamToken = payload.stream_token || null;
+          if (!streamToken) {
+            throw new Error("stream token missing");
+          }
+        } catch (error) {
+          ui.toast?.show("訊息較長，初始化串流失敗，請稍後重試。", { type: "danger", duration: 9000 });
+          stopStream();
+          return;
+        }
+      }
+
       appState.streamClient = new EventStreamClient({
         preferSSE: true,
         maxReconnectAttempts: 0,
         sseUrlBuilder: (params, lastEventId) => {
-          const query = new URLSearchParams({ message: params.message });
+          const query = new URLSearchParams();
+          if (params.stream_token) {
+            query.set("stream_token", params.stream_token);
+          } else {
+            query.set("message", params.message);
+          }
           if (params.project_id) query.set("project_id", params.project_id);
           if (params.chat_id) query.set("chat_id", params.chat_id);
           if (lastEventId) query.set("last_event_id", lastEventId);
@@ -131,7 +164,12 @@ export const CHAT_VIEW = {
         },
         wsUrlBuilder: (params, lastEventId) => {
           const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-          const query = new URLSearchParams({ message: params.message });
+          const query = new URLSearchParams();
+          if (params.stream_token) {
+            query.set("stream_token", params.stream_token);
+          } else {
+            query.set("message", params.message);
+          }
           if (params.project_id) query.set("project_id", params.project_id);
           if (params.chat_id) query.set("chat_id", params.chat_id);
           if (lastEventId) query.set("last_event_id", lastEventId);
@@ -202,7 +240,8 @@ export const CHAT_VIEW = {
       });
 
       appState.streamClient.start({
-        message: finalMessage,
+        message: streamToken ? "" : finalMessage,
+        stream_token: streamToken,
         project_id: appState.projectId,
         chat_id: appState.chatId,
       });

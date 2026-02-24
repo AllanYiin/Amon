@@ -157,6 +157,8 @@ class ChatSessionStoreTests(unittest.TestCase):
         self.assertIn("[目前訊息]", prompt)
         self.assertIn("使用者: 請繼續", prompt)
         self.assertIn("請直接沿用既有任務往下執行", prompt)
+        self.assertIn("除非缺少關鍵資訊而無法完成任務", prompt)
+        self.assertIn("不要用問句收尾", prompt)
 
     def test_build_prompt_with_history_trims_long_assistant_turn(self) -> None:
         long_assistant = "A" * 1200
@@ -195,6 +197,38 @@ class ChatSessionStoreTests(unittest.TestCase):
 
         self.assertEqual(context["run_id"], "run-123")
         self.assertEqual(context["last_assistant_text"], "好的，請問你想先做 UI 還是 API？")
+
+    def test_rejects_invalid_chat_id_path_traversal(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                with self.assertRaises(ValueError):
+                    append_event("../evil", {"type": "user", "text": "hi", "project_id": "proj-safe-001"})
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+    def test_load_recent_dialogue_reads_tail_with_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                project_id = "proj-tail-001"
+                chat_id = create_chat_session(project_id)
+                for idx in range(80):
+                    append_event(chat_id, {"type": "user", "text": f"u{idx}", "project_id": project_id})
+                    append_event(chat_id, {"type": "assistant", "text": f"a{idx}", "project_id": project_id})
+                dialogue = load_recent_dialogue(project_id, chat_id, limit=4)
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+        self.assertEqual(
+            dialogue,
+            [
+                {"role": "user", "content": "u78"},
+                {"role": "assistant", "content": "a78"},
+                {"role": "user", "content": "u79"},
+                {"role": "assistant", "content": "a79"},
+            ],
+        )
 
 
 if __name__ == "__main__":
