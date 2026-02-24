@@ -26,7 +26,8 @@ from amon.chat.project_bootstrap import (
     resolve_project_id_from_message,
 )
 from amon.chat.router import route_intent
-from amon.chat.router_llm import choose_execution_mode_with_llm, should_continue_run_with_llm
+from amon.chat.execution_mode import decide_execution_mode
+from amon.chat.router_llm import should_continue_run_with_llm
 from amon.chat.router_types import RouterResult
 from amon.chat.session_store import (
     append_event,
@@ -1832,7 +1833,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 return
             if router_result.type == "chat_response":
                 send_event("notice", {"text": "Amon：正在分析需求並進入執行流程。"})
-                execution_mode = choose_execution_mode_with_llm(message, project_id=project_id)
+                execution_mode = decide_execution_mode(message, project_id=project_id, context=turn_bundle.router_context)
                 prompt_with_history = turn_bundle.prompt_with_history
 
                 streamed_token_count = 0
@@ -1874,13 +1875,22 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         project_path=self.core.get_project_path(project_id),
                         stream_handler=stream_handler,
                     )
-                else:
+                elif execution_mode == "team":
                     send_event("notice", {"text": "Amon：這題我會改用 team 流程分工處理，完成後用自然語氣一次整理回覆給你。"})
                     response_text = self.core.run_team(
                         prompt_with_history,
                         project_path=self.core.get_project_path(project_id),
                         stream_handler=None,
                     )
+                else:
+                    send_event("notice", {"text": "Amon：已路由到 plan_execute，先以相容模式執行（Phase 3 會接 planner/compiler）。"})
+                    result, response_text = self.core.run_single_stream(
+                        prompt_with_history,
+                        project_path=self.core.get_project_path(project_id),
+                        stream_handler=stream_handler,
+                        conversation_history=history,
+                    )
+                    run_id = result.run_id
                 assistant_payload: dict[str, Any] = {"type": "assistant", "text": response_text, "project_id": project_id}
                 if run_id:
                     assistant_payload["run_id"] = run_id

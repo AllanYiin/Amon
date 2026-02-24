@@ -264,7 +264,7 @@ class UIAsyncAPITests(unittest.TestCase):
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
                 thread.start()
 
-                with patch("amon.ui_server.choose_execution_mode_with_llm", return_value="single"), patch(
+                with patch("amon.ui_server.decide_execution_mode", return_value="single"), patch(
                     "amon.ui_server.should_continue_run_with_llm", return_value=True
                 ), patch.object(
                     core,
@@ -374,7 +374,7 @@ class UIAsyncAPITests(unittest.TestCase):
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
                 thread.start()
 
-                with patch("amon.ui_server.choose_execution_mode_with_llm", return_value="single"), patch(
+                with patch("amon.ui_server.decide_execution_mode", return_value="single"), patch(
                     "amon.ui_server.should_continue_run_with_llm", return_value=True
                 ), patch.object(
                     core,
