@@ -1883,14 +1883,13 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         stream_handler=None,
                     )
                 else:
-                    send_event("notice", {"text": "Amon：已路由到 plan_execute，先以相容模式執行（Phase 3 會接 planner/compiler）。"})
-                    result, response_text = self.core.run_single_stream(
+                    send_event("notice", {"text": "Amon：已路由到 plan_execute，將先產生計畫並編譯執行圖。"})
+                    response_text = self.core.run_plan_execute(
                         prompt_with_history,
                         project_path=self.core.get_project_path(project_id),
+                        project_id=project_id,
                         stream_handler=stream_handler,
-                        conversation_history=history,
                     )
-                    run_id = result.run_id
                 assistant_payload: dict[str, Any] = {"type": "assistant", "text": response_text, "project_id": project_id}
                 if run_id:
                     assistant_payload["run_id"] = run_id

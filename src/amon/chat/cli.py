@@ -128,8 +128,12 @@ def run_chat_repl(
                 elif execution_mode == "team":
                     response = core.run_team(prompt, project_path=project_path)
                 else:
-                    output_func("[notice] plan_execute 目前先走相容執行路徑（Phase 3 會接 planner/compiler）。")
-                    response = core.run_single(prompt, project_path=project_path)
+                    output_func("[notice] plan_execute 會先產生計畫並編譯執行圖。")
+                    response = core.run_plan_execute(
+                        prompt,
+                        project_path=project_path,
+                        project_id=project_id,
+                    )
                 append_event(chat_id, {"type": "assistant", "text": response, "project_id": project_id})
                 continue
             output_func("目前尚未支援此類型的操作。")

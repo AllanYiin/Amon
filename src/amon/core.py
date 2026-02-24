@@ -37,7 +37,7 @@ from .events import emit_event
 from .logging import log_billing, log_event
 from .logging_utils import setup_logger
 from .mcp_client import MCPClientError, MCPServerConfig, MCPStdioClient
-from .planning import dumps_plan, generate_plan_with_llm, render_todo_markdown
+from .planning import compile_plan_to_exec_graph, dumps_plan, generate_plan_with_llm, render_todo_markdown
 from .models import ProviderError, build_provider, decode_reasoning_chunk
 from .graph_runtime import GraphRuntime, GraphRunResult
 from .sandbox.service import run_sandbox_step
@@ -911,6 +911,56 @@ class AmonCore:
             }
         )
         return plan
+
+    def run_plan_execute(
+        self,
+        prompt: str,
+        *,
+        project_path: Path,
+        project_id: str | None = None,
+        model: str | None = None,
+        llm_client=None,
+        available_tools: list[dict[str, Any]] | None = None,
+        available_skills: list[dict[str, Any]] | None = None,
+        stream_handler=None,
+    ) -> str:
+        config = self.load_config(project_path)
+        planner_enabled = bool(config.get("amon", {}).get("planner", {}).get("enabled", False))
+        if not planner_enabled:
+            self.logger.info("planner flag 關閉，plan_execute 改走 single 相容路徑")
+            return self.run_single(prompt, project_path=project_path, model=model)
+
+        plan = self.generate_plan_docs(
+            prompt,
+            project_path=project_path,
+            project_id=project_id or project_path.name,
+            llm_client=llm_client,
+            model=model,
+            available_tools=available_tools,
+            available_skills=available_skills,
+        )
+        exec_graph = compile_plan_to_exec_graph(plan)
+        emit_event(
+            {
+                "type": "plan_compiled",
+                "scope": "planning",
+                "project_id": project_id or project_path.name,
+                "actor": "system",
+                "payload": {
+                    "node_count": len(exec_graph.get("nodes", [])),
+                    "edge_count": len(exec_graph.get("edges", [])),
+                },
+                "risk": "low",
+            }
+        )
+        graph_path = self._write_graph_resolved(
+            project_path,
+            exec_graph,
+            exec_graph.get("variables", {}),
+            mode="plan_execute",
+        )
+        result = self.run_graph(project_path=project_path, graph_path=graph_path, stream_handler=stream_handler)
+        return self._load_graph_primary_output(result.run_dir)
 
     def _collect_mnt_data_handover_context(self, project_path: Path) -> str:
         docs_dir = project_path / "docs"
