@@ -46,6 +46,7 @@ from .core import AmonCore, ProjectRecord
 from .logging import log_event
 from .models import decode_reasoning_chunk
 from .skills import build_skill_injection_preview
+from .token_counter import count_non_dialogue_tokens, extract_dialogue_input_tokens
 
 
 class _TaskManager:
@@ -354,6 +355,13 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         _HEALTH_METRICS.record_request()
         if self.path.startswith("/v1/"):
             self._handle_api_patch()
+            return
+        self.send_error(404, "Not Found")
+
+    def do_PUT(self) -> None:  # noqa: N802
+        _HEALTH_METRICS.record_request()
+        if self.path.startswith("/v1/"):
+            self._handle_api_put()
             return
         self.send_error(404, "Not Found")
 
@@ -901,6 +909,28 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
 
     def _handle_api_post(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/v1/context/clear":
+            payload = self._read_json()
+            if payload is None:
+                return
+            scope = str(payload.get("scope") or "project").strip().lower() or "project"
+            project_id = str(payload.get("project_id") or "").strip()
+            if scope not in {"project", "chat"}:
+                self._send_json(400, {"message": "scope 僅允許 project 或 chat"})
+                return
+            if not project_id:
+                self._send_json(400, {"message": "請提供 project_id"})
+                return
+            try:
+                project_path = self.core.get_project_path(project_id)
+                if scope == "project":
+                    context_path = self._project_context_file(project_path)
+                    if context_path.exists():
+                        context_path.unlink()
+                self._send_json(200, {"status": "ok", "scope": scope})
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+            return
         if parsed.path == "/v1/ui/toasts":
             payload = self._read_json()
             if payload is None:
@@ -1204,6 +1234,27 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 self._handle_error(exc, status=500)
                 return
             self._send_json(200, {"project": record.to_dict()})
+            return
+        self._send_json(404, {"message": "找不到 API 路徑"})
+
+    def _handle_api_put(self) -> None:
+        parsed = urlparse(self.path)
+        if parsed.path.endswith("/context") and parsed.path.startswith("/v1/projects/"):
+            project_id = self._get_path_segment(parsed.path, 2)
+            if not project_id:
+                self._send_json(400, {"message": "無效的 project_id"})
+                return
+            payload = self._read_json()
+            if payload is None:
+                return
+            context_text = str(payload.get("context") or "")
+            try:
+                project_path = self.core.get_project_path(project_id)
+                self._write_project_context(project_path, context_text)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, {"project_id": project_id, "context": context_text})
             return
         self._send_json(404, {"message": "找不到 API 路徑"})
 
@@ -1888,6 +1939,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         run_bundle = self._load_latest_run_bundle(project_path)
         graph = run_bundle["graph"]
         docs = self._build_docs_catalog(project_id=project_id, project_path=project_path)
+        project_context_text = self._read_project_context(project_path)
         return {
             "graph_mermaid": self._graph_to_mermaid(graph),
             "graph": graph,
@@ -1896,25 +1948,9 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             "node_states": run_bundle["node_states"],
             "recent_events": run_bundle["recent_events"],
             "docs": docs,
+            "context": project_context_text,
         }
 
-    @staticmethod
-    def _estimate_tokens(value: Any) -> int:
-        if value is None:
-            return 0
-        if isinstance(value, str):
-            text = value.strip()
-            if not text:
-                return 0
-            return max(1, len(text) // 4)
-        try:
-            serialized = json.dumps(value, ensure_ascii=False)
-        except (TypeError, ValueError):
-            serialized = str(value)
-        text = serialized.strip()
-        if not text:
-            return 0
-        return max(1, len(text) // 4)
 
     def _build_project_context_stats(self, project_id: str) -> dict[str, Any]:
         project_path = self.core.get_project_path(project_id)
@@ -1926,6 +1962,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         recent_events = latest_run.get("recent_events") or []
 
         effective_config = config_payload.get("effective_config") or {}
+        project_context_text = self._read_project_context(project_path)
         system_prompt = (
             (effective_config.get("agent") or {}).get("system_prompt")
             or (effective_config.get("prompts") or {}).get("system")
@@ -1933,9 +1970,15 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             or ""
         )
         chat_messages = chat_history.get("messages") or []
-        chat_text = "\n".join(str(item.get("text") or "") for item in chat_messages)
         tool_defs = tools_catalog.get("tools") or []
         skills = skills_catalog.get("skills") or []
+
+        non_dialogue_counts = {
+            "project_context": count_non_dialogue_tokens(project_context_text, effective_config=effective_config),
+            "system_prompt": count_non_dialogue_tokens(system_prompt, effective_config=effective_config),
+            "tools_definition": count_non_dialogue_tokens(tool_defs, effective_config=effective_config),
+            "skills": count_non_dialogue_tokens(skills, effective_config=effective_config),
+        }
 
         tool_use_events = [
             event
@@ -1950,40 +1993,49 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             and "search" in str(event.get("tool") or event.get("name") or event.get("event") or "").lower()
         ]
 
+        dialogue_usage = extract_dialogue_input_tokens(recent_events)
+
         categories = [
+            {
+                "key": "project_context",
+                "label": "Project Context",
+                "tokens": int(non_dialogue_counts["project_context"].tokens or 0),
+                "items": 1 if project_context_text else 0,
+                "note": "專案 Context 草稿",
+            },
             {
                 "key": "system_prompt",
                 "label": "System Prompt",
-                "tokens": self._estimate_tokens(system_prompt),
+                "tokens": int(non_dialogue_counts["system_prompt"].tokens or 0),
                 "items": 1 if system_prompt else 0,
                 "note": "模型系統指令",
             },
             {
                 "key": "tools_definition",
                 "label": "Tools Definition",
-                "tokens": self._estimate_tokens(tool_defs),
+                "tokens": int(non_dialogue_counts["tools_definition"].tokens or 0),
                 "items": len(tool_defs),
                 "note": "工具清單與 schema",
             },
             {
                 "key": "skills",
                 "label": "Skills",
-                "tokens": self._estimate_tokens(skills),
+                "tokens": int(non_dialogue_counts["skills"].tokens or 0),
                 "items": len(skills),
                 "note": "可觸發技能與前言",
             },
             {
                 "key": "tool_use",
                 "label": "Tool Use (Web Search…)",
-                "tokens": self._estimate_tokens(tool_use_events),
+                "tokens": 0,
                 "items": len(tool_use_events),
                 "extra": {"web_search_hits": len(web_search_events)},
-                "note": "最近 run 的工具呼叫與搜尋痕跡",
+                "note": "最近 run 的工具呼叫與搜尋痕跡（tokens 併入 API 對話統計）",
             },
             {
                 "key": "chat_history",
                 "label": "Chat History",
-                "tokens": self._estimate_tokens(chat_text),
+                "tokens": int(dialogue_usage.tokens or 0),
                 "items": len(chat_messages),
                 "note": "最近對話訊息",
             },
@@ -2011,12 +2063,37 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             "categories": categories,
             "meta": {
                 "has_system_prompt": bool(system_prompt),
+                "has_project_context": bool(project_context_text),
+                "dialogue_token_source": dialogue_usage.method,
+                "non_dialogue_tokenizer": {
+                    key: value.method for key, value in non_dialogue_counts.items()
+                },
                 "tool_count": len(tool_defs),
                 "skill_count": len(skills),
                 "chat_message_count": len(chat_messages),
                 "recent_event_count": len(recent_events),
             },
         }
+
+    @staticmethod
+    def _project_context_file(project_path: Path) -> Path:
+        return project_path / ".amon" / "context" / "project_context.md"
+
+    def _read_project_context(self, project_path: Path) -> str:
+        context_path = self._project_context_file(project_path)
+        if not context_path.exists():
+            return ""
+        try:
+            return context_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            self.logger.warning("讀取 project context 失敗：%s", exc)
+            return ""
+
+    def _write_project_context(self, project_path: Path, context_text: str) -> None:
+        context_path = self._project_context_file(project_path)
+        context_path.parent.mkdir(parents=True, exist_ok=True)
+        safe_text = str(context_text or "")
+        context_path.write_text(safe_text, encoding="utf-8")
 
     def _load_latest_run_bundle(self, project_path: Path) -> dict[str, Any]:
         fallback_graph = self._load_latest_graph(project_path)

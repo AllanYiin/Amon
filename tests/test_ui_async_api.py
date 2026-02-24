@@ -679,6 +679,62 @@ class UIAsyncAPITests(unittest.TestCase):
 
 
 
+
+    def test_project_context_stats_reads_persisted_project_context(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("context-persist-test")
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port)
+                encoded_project = quote(project.project_id)
+                context_text = "這是正式專案情境，包含產品目標與限制。"
+
+                conn.request(
+                    "PUT",
+                    f"/v1/projects/{encoded_project}/context",
+                    body=json.dumps({"context": context_text}, ensure_ascii=False).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                )
+                put_response = conn.getresponse()
+                put_payload = json.loads(put_response.read().decode("utf-8"))
+                self.assertEqual(put_response.status, 200)
+                self.assertEqual(put_payload.get("context"), context_text)
+
+                conn.request("GET", f"/v1/projects/{encoded_project}/context")
+                get_response = conn.getresponse()
+                get_payload = json.loads(get_response.read().decode("utf-8"))
+                self.assertEqual(get_response.status, 200)
+                self.assertEqual(get_payload.get("context"), context_text)
+
+                conn.request("GET", f"/v1/projects/{encoded_project}/context/stats")
+                stats_response = conn.getresponse()
+                stats_payload = json.loads(stats_response.read().decode("utf-8"))
+
+                self.assertEqual(stats_response.status, 200)
+                category_keys = {item.get("key") for item in stats_payload.get("categories", [])}
+                self.assertIn("project_context", category_keys)
+                project_context = next(item for item in stats_payload["categories"] if item.get("key") == "project_context")
+                self.assertGreaterEqual(project_context.get("tokens", 0), 0)
+                self.assertTrue(stats_payload.get("meta", {}).get("has_project_context"))
+                tokenizer_meta = stats_payload.get("meta", {}).get("non_dialogue_tokenizer", {})
+                self.assertIn("project_context", tokenizer_meta)
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
     def test_project_context_stats_endpoint_returns_required_categories(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"
@@ -733,6 +789,54 @@ class UIAsyncAPITests(unittest.TestCase):
                 self.assertTrue({"system_prompt", "tools_definition", "skills", "tool_use", "chat_history"}.issubset(category_keys))
                 tool_use = next(item for item in payload["categories"] if item.get("key") == "tool_use")
                 self.assertGreaterEqual(tool_use.get("items", 0), 1)
+                chat_history = next(item for item in payload["categories"] if item.get("key") == "chat_history")
+                self.assertEqual(chat_history.get("tokens"), 0)
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
+
+    def test_project_context_stats_chat_tokens_follow_api_usage(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("context-chat-usage-test")
+                project_path = Path(project.path)
+
+                run_dir = project_path / ".amon" / "runs" / "run-context-usage-001"
+                run_dir.mkdir(parents=True, exist_ok=True)
+                (run_dir / "events.jsonl").write_text(
+                    "\n".join(
+                        [
+                            json.dumps({"event": "run_usage", "usage": {"prompt_tokens": 321, "completion_tokens": 123}}, ensure_ascii=False),
+                            json.dumps({"event": "run_usage", "prompt_tokens": 79}, ensure_ascii=False),
+                        ]
+                    ),
+                    encoding="utf-8",
+                )
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port)
+                encoded_project = quote(project.project_id)
+                conn.request("GET", f"/v1/projects/{encoded_project}/context/stats")
+                response = conn.getresponse()
+                payload = json.loads(response.read().decode("utf-8"))
+
+                self.assertEqual(response.status, 200)
+                chat_history = next(item for item in payload["categories"] if item.get("key") == "chat_history")
+                self.assertEqual(chat_history.get("tokens"), 400)
+                self.assertEqual(payload.get("meta", {}).get("dialogue_token_source"), "api_usage")
             finally:
                 if server:
                     server.shutdown()
