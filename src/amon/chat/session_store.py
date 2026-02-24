@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 import os
 import uuid
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from amon.logging import log_event
-from amon.fs.safety import validate_project_id
+from amon.fs.atomic import append_jsonl
+from amon.fs.safety import validate_identifier, validate_project_id
 
 
 NOISY_EVENT_TYPES = {"assistant_chunk"}
@@ -47,6 +49,7 @@ def create_chat_session(project_id: str) -> str:
 def append_event(chat_id: str, event: dict[str, Any]) -> None:
     if not chat_id:
         raise ValueError("chat_id 不可為空")
+    validate_identifier(chat_id, "chat_id")
     if not isinstance(event, dict):
         raise ValueError("event 需為 dict")
 
@@ -65,10 +68,7 @@ def append_event(chat_id: str, event: dict[str, Any]) -> None:
     session_path = _chat_session_path(payload["project_id"], chat_id)
 
     try:
-        session_path.parent.mkdir(parents=True, exist_ok=True)
-        with session_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, ensure_ascii=False))
-            handle.write("\n")
+        append_jsonl(session_path, payload)
     except OSError as exc:
         log_event(
             {
@@ -94,10 +94,28 @@ def append_event(chat_id: str, event: dict[str, Any]) -> None:
         )
 
 
+
+
+def load_latest_chat_id(project_id: str) -> str | None:
+    """Return the most recently updated chat session id for a project."""
+    validate_project_id(project_id)
+    sessions_dir = _resolve_data_dir() / "projects" / project_id / "sessions" / "chat"
+    if not sessions_dir.exists():
+        return None
+    try:
+        candidates = [path for path in sessions_dir.glob("*.jsonl") if path.is_file()]
+    except OSError:
+        return None
+    if not candidates:
+        return None
+    latest = max(candidates, key=lambda item: item.stat().st_mtime)
+    return latest.stem
+
 def load_recent_dialogue(project_id: str, chat_id: str, limit: int = 12) -> list[dict[str, str]]:
     """Load recent user/assistant dialogue turns for contextual continuity."""
     if not chat_id:
         return []
+    validate_identifier(chat_id, "chat_id")
     if limit <= 0:
         return []
     validate_project_id(project_id)
@@ -108,14 +126,7 @@ def load_recent_dialogue(project_id: str, chat_id: str, limit: int = 12) -> list
 
     dialogue: list[dict[str, str]] = []
     try:
-        for raw_line in session_path.read_text(encoding="utf-8").splitlines():
-            line = raw_line.strip()
-            if not line:
-                continue
-            try:
-                payload = json.loads(line)
-            except json.JSONDecodeError:
-                continue
+        for payload in _iter_recent_session_payloads(session_path, max_lines=max(limit * 8, 64), max_bytes=256 * 1024):
             event_type = payload.get("type")
             text = payload.get("text")
             if event_type not in {"user", "assistant"} or not isinstance(text, str) or not text.strip():
@@ -140,6 +151,7 @@ def load_latest_run_context(project_id: str, chat_id: str) -> dict[str, str | No
     """Load the latest run_id and assistant reply text from a chat session."""
     if not chat_id:
         return {"run_id": None, "last_assistant_text": None}
+    validate_identifier(chat_id, "chat_id")
     validate_project_id(project_id)
 
     session_path = _chat_session_path(project_id, chat_id)
@@ -149,14 +161,7 @@ def load_latest_run_context(project_id: str, chat_id: str) -> dict[str, str | No
     latest_run_id: str | None = None
     last_assistant_text: str | None = None
     try:
-        for raw_line in session_path.read_text(encoding="utf-8").splitlines():
-            line = raw_line.strip()
-            if not line:
-                continue
-            try:
-                payload = json.loads(line)
-            except json.JSONDecodeError:
-                continue
+        for payload in _iter_recent_session_payloads(session_path, max_lines=512, max_bytes=384 * 1024):
             run_id = payload.get("run_id")
             if isinstance(run_id, str) and run_id.strip():
                 latest_run_id = run_id.strip()
@@ -202,7 +207,9 @@ def build_prompt_with_history(message: str, dialogue: list[dict[str, str]] | Non
     blocks: list[str] = [
         "請根據以下歷史對話延續回覆，保持脈絡一致，不要改題。"
         "若目前訊息是對上一輪提問的簡短回答（例如選項、片語或關鍵字），"
-        "請直接沿用既有任務往下執行，不要改成其他主題，也不要再次要求使用者重複確認。"
+        "請直接沿用既有任務往下執行，不要改成其他主題，也不要再次要求使用者重複確認。",
+        "回覆收尾規約：除非缺少關鍵資訊而無法完成任務（例如缺參數、缺檔案、缺環境設定），"
+        "否則不要用問句收尾；請以明確結論或下一步行動收束。",
     ]
     if anchor_task:
         blocks.append("[核心任務]\n" + anchor_task)
@@ -259,6 +266,36 @@ def _trim_content(content: str, limit: int) -> str:
         return content
     return content[: max(0, limit - 1)].rstrip() + "…"
 
+
+
+def _iter_recent_session_payloads(session_path: Path, *, max_lines: int, max_bytes: int) -> list[dict[str, Any]]:
+    if max_lines <= 0 or max_bytes <= 0:
+        return []
+    with session_path.open("rb") as handle:
+        handle.seek(0, os.SEEK_END)
+        file_size = handle.tell()
+        if file_size <= 0:
+            return []
+        target = min(file_size, max_bytes)
+        handle.seek(file_size - target)
+        chunk = handle.read(target)
+    if file_size > target:
+        newline_index = chunk.find(b"\n")
+        if newline_index >= 0:
+            chunk = chunk[newline_index + 1 :]
+    tail_lines = deque(chunk.splitlines(), maxlen=max_lines)
+    payloads: list[dict[str, Any]] = []
+    for raw in tail_lines:
+        line = raw.decode("utf-8", errors="ignore").strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            payloads.append(payload)
+    return payloads
 
 def _chat_session_path(project_id: str, chat_id: str) -> Path:
     return _resolve_data_dir() / "projects" / project_id / "sessions" / "chat" / f"{chat_id}.jsonl"
