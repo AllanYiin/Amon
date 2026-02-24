@@ -94,6 +94,23 @@ def append_event(chat_id: str, event: dict[str, Any]) -> None:
         )
 
 
+
+
+def load_latest_chat_id(project_id: str) -> str | None:
+    """Return the most recently updated chat session id for a project."""
+    validate_project_id(project_id)
+    sessions_dir = _resolve_data_dir() / "projects" / project_id / "sessions" / "chat"
+    if not sessions_dir.exists():
+        return None
+    try:
+        candidates = [path for path in sessions_dir.glob("*.jsonl") if path.is_file()]
+    except OSError:
+        return None
+    if not candidates:
+        return None
+    latest = max(candidates, key=lambda item: item.stat().st_mtime)
+    return latest.stem
+
 def load_recent_dialogue(project_id: str, chat_id: str, limit: int = 12) -> list[dict[str, str]]:
     """Load recent user/assistant dialogue turns for contextual continuity."""
     if not chat_id:
@@ -202,7 +219,9 @@ def build_prompt_with_history(message: str, dialogue: list[dict[str, str]] | Non
     blocks: list[str] = [
         "請根據以下歷史對話延續回覆，保持脈絡一致，不要改題。"
         "若目前訊息是對上一輪提問的簡短回答（例如選項、片語或關鍵字），"
-        "請直接沿用既有任務往下執行，不要改成其他主題，也不要再次要求使用者重複確認。"
+        "請直接沿用既有任務往下執行，不要改成其他主題，也不要再次要求使用者重複確認。",
+        "回覆收尾規約：除非缺少關鍵資訊而無法完成任務（例如缺參數、缺檔案、缺環境設定），"
+        "否則不要用問句收尾；請以明確結論或下一步行動收束。",
     ]
     if anchor_task:
         blocks.append("[核心任務]\n" + anchor_task)

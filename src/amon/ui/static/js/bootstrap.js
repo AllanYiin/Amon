@@ -1254,6 +1254,8 @@ appStore.patch({ bootstrappedAt: Date.now() });
 
       async function ensureChatSession() {
         if (!state.projectId) return;
+        const existingChatId = String(state.chatId || "").trim();
+        if (existingChatId) return;
         const payload = await services.runs.ensureChatSession(state.projectId);
         state.chatId = payload.chat_id;
       }

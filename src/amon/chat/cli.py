@@ -5,13 +5,12 @@ from __future__ import annotations
 import json
 from typing import Callable
 
+from amon.chat.continuation import assemble_chat_turn
 from amon.chat.project_bootstrap import bootstrap_project_if_needed
 from amon.chat.router import RouterResult, route_intent
 from amon.chat.session_store import (
     append_event,
-    build_prompt_with_history,
     create_chat_session,
-    load_recent_dialogue,
 )
 from amon.commands.executor import CommandPlan, execute
 from amon.core import AmonCore
@@ -53,12 +52,10 @@ def run_chat_repl(
 
         try:
             is_slash_command = message.startswith("/")
-            history = load_recent_dialogue(project_id, chat_id) if project_id and chat_id else []
             if is_slash_command:
                 router_result = RouterResult(type="command_plan")
             else:
-                context = {"conversation_history": history} if history else None
-                router_result = route_intent(message, project_id=project_id, run_id=last_run_id, context=context)
+                router_result = RouterResult(type="chat_response")
             created_project = bootstrap_project_if_needed(
                 core=core,
                 project_id=project_id,
@@ -74,6 +71,19 @@ def run_chat_repl(
                 output_func(f"已建立專案：{created_project.name} ({project_id})")
                 output_func(f"已建立 chat session：{chat_id}")
                 router_result = route_intent(message, project_id=project_id, run_id=last_run_id)
+            turn_bundle = None
+            if project_id:
+                turn_bundle = assemble_chat_turn(project_id=project_id, chat_id=chat_id, message=message)
+                chat_id = turn_bundle.chat_id
+                if not is_slash_command:
+                    router_result = route_intent(
+                        message,
+                        project_id=project_id,
+                        run_id=str(turn_bundle.run_context.get("run_id") or "") or None,
+                        context=turn_bundle.router_context,
+                    )
+                    if turn_bundle.short_continuation and router_result.type != "chat_response":
+                        router_result = RouterResult(type="chat_response", confidence=1.0, reason="short_continuation")
             if chat_id and project_id:
                 append_event(chat_id, {"type": "user", "text": message, "project_id": project_id})
             if chat_id and project_id:
@@ -105,7 +115,7 @@ def run_chat_repl(
                     continue
                 output_func("Amon：")
                 response = core.run_single(
-                    build_prompt_with_history(message, history),
+                    turn_bundle.prompt_with_history if turn_bundle else message,
                     project_path=project_path,
                 )
                 append_event(chat_id, {"type": "assistant", "text": response, "project_id": project_id})
