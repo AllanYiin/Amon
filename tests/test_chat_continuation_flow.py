@@ -57,7 +57,7 @@ class ChatContinuationFlowTests(unittest.TestCase):
                 port = server.server_address[1]
                 threading.Thread(target=server.serve_forever, daemon=True).start()
 
-                with patch("amon.ui_server.choose_execution_mode_with_llm", return_value="single"), patch(
+                with patch("amon.ui_server.decide_execution_mode", return_value="single"), patch(
                     "amon.ui_server.should_continue_run_with_llm", return_value=True
                 ), patch.object(core, "run_single_stream", side_effect=fake_run_single_stream):
                     conn1 = HTTPConnection("127.0.0.1", port, timeout=5)
