@@ -6,6 +6,7 @@ import json
 import logging
 from typing import Any, Callable, Iterable, Protocol
 
+from amon.chat.execution_mode import decide_execution_mode
 from amon.config import ConfigLoader
 from amon.core import AmonCore, ProjectRecord
 from amon.models import ProviderError, build_provider
@@ -186,36 +187,12 @@ def choose_execution_mode(
     llm_client: LLMClient | None = None,
     model: str | None = None,
 ) -> str:
-    """Return suggested execution mode for chat tasks.
-
-    Professional writing tasks should be at least self_critique; research-scale
-    writing that implies multi-agent collaboration should run in team mode.
-    """
-
-    normalized = " ".join(message.split())
-    if not normalized:
-        return "single"
-    try:
-        selected_model = model
-        client = llm_client
-        if client is None:
-            client, selected_model = _build_default_client(project_id=project_id, model=model)
-        messages = [
-            {"role": "system", "content": _execution_mode_system_prompt()},
-            {
-                "role": "user",
-                "content": json.dumps({"message": normalized, "allowed_modes": ["single", "self_critique", "team"]}, ensure_ascii=False),
-            },
-        ]
-        raw = _collect_stream(client, messages, selected_model)
-        mode = _parse_execution_mode(raw)
-        if mode in {"single", "self_critique", "team"}:
-            return mode
-    except (ProviderError, OSError, ValueError, json.JSONDecodeError) as exc:
-        logger.warning("LLM execution mode 判斷失敗，改用預設 single：%s", exc)
-    except Exception as exc:  # noqa: BLE001
-        logger.error("LLM execution mode 未預期錯誤：%s", exc, exc_info=True)
-    return "single"
+    return decide_execution_mode(
+        message,
+        project_id=project_id,
+        llm_client=llm_client,
+        model=model,
+    )
 
 
 def resolve_project_id_from_message(core: AmonCore, message: str) -> str | None:
@@ -331,15 +308,6 @@ def _task_intent_system_prompt() -> str:
     )
 
 
-def _execution_mode_system_prompt() -> str:
-    return (
-        "你是執行模式路由器。"
-        "請根據使用者訊息判斷最適合的 execution mode。"
-        "只允許輸出 JSON，格式為 {\"mode\":\"single|self_critique|team\"}。"
-        "不得輸出額外文字。"
-    )
-
-
 def _parse_task_intent(raw_text: str) -> bool:
     cleaned = _strip_code_fences(raw_text)
     if not cleaned:
@@ -350,11 +318,3 @@ def _parse_task_intent(raw_text: str) -> bool:
     return bool(payload.get("is_task_intent"))
 
 
-def _parse_execution_mode(raw_text: str) -> str:
-    cleaned = _strip_code_fences(raw_text)
-    if not cleaned:
-        return ""
-    payload = json.loads(cleaned)
-    if not isinstance(payload, dict):
-        return ""
-    return str(payload.get("mode") or "").strip().lower()
