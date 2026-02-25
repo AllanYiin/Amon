@@ -2397,6 +2397,10 @@ class AmonCore:
             )
             audit_sink.record(call, error_result, "allow", duration_ms=_duration_ms(), source="mcp")
             raise
+        if result is None:
+            result = {}
+        elif not isinstance(result, dict):
+            result = {"content": [{"type": "text", "text": str(result)}], "isError": False}
         is_error = bool(result.get("isError"))
         data_prompt = self._format_mcp_result(full_tool, result)
         log_event(

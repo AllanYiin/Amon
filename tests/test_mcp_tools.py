@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -90,6 +91,30 @@ class MCPToolsTests(unittest.TestCase):
                 with self.assertRaises(PermissionError) as ctx:
                     core.call_mcp_tool("stub", "echo", {"text": "hello"})
                 self.assertIn("DENIED_BY_POLICY", str(ctx.exception))
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+
+    def test_mcp_tool_none_result_is_normalized(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                core.initialize()
+                stub_path = Path(__file__).with_name("mcp_stub_server.py")
+                core.set_config_value(
+                    "mcp.servers.stub",
+                    {
+                        "transport": "stdio",
+                        "command": [sys.executable, str(stub_path)],
+                        "allowed": ["echo"],
+                    },
+                )
+                with patch("amon.core.MCPStdioClient.call_tool", return_value=None):
+                    result = core.call_mcp_tool("stub", "echo", {"text": "hello"})
+                self.assertIsInstance(result, dict)
+                self.assertEqual(result.get("data"), {})
+                self.assertFalse(result.get("is_error"))
             finally:
                 os.environ.pop("AMON_HOME", None)
 
