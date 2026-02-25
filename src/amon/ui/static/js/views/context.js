@@ -1,4 +1,5 @@
 import { t } from "../i18n.js";
+import { logViewInitDebug } from "../utils/debug.js";
 
 const CONTEXT_COLORS = {
   project_context: "#22c55e",
@@ -219,6 +220,12 @@ export const CONTEXT_VIEW = {
   mount: (ctx) => {
     const { rootEl } = ctx;
     if (!rootEl) return;
+    logViewInitDebug("context", {
+      project_id: ctx.appState?.projectId || getProjectId(ctx) || null,
+      run_id: ctx.appState?.graphRunId || null,
+      chat_id: ctx.appState?.chatId || null,
+      node_states_count: Object.keys(ctx.appState?.graphNodeStates || {}).length,
+    });
     const editor = rootEl.querySelector("#context-draft-input");
     const importInput = rootEl.querySelector("#context-import-file");
     const emptyCta = ensureEmptyCta(rootEl);

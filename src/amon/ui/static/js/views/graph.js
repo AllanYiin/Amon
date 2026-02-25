@@ -1,3 +1,5 @@
+import { logViewInitDebug } from "../utils/debug.js";
+
 function getProjectId(ctx) {
   return ctx.store?.getState?.()?.layout?.projectId || "";
 }
@@ -9,6 +11,12 @@ export const GRAPH_VIEW = {
   mount: (ctx) => {
     const rootEl = ctx.rootEl;
     if (!rootEl) return;
+    logViewInitDebug("graph", {
+      project_id: ctx.appState?.projectId || getProjectId(ctx) || null,
+      run_id: ctx.appState?.graphRunId || null,
+      chat_id: ctx.appState?.chatId || null,
+      node_states_count: Object.keys(ctx.appState?.graphNodeStates || {}).length,
+    });
 
     const previewEl = rootEl.querySelector("#graph-preview");
     const listEl = rootEl.querySelector("#graph-node-list");
