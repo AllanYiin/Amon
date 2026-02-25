@@ -2402,6 +2402,31 @@ class AmonCore:
             audit_sink.record(call, error_result, "allow", duration_ms=_duration_ms(), source="mcp")
             raise
 
+        is_error = bool(result.get("isError") or result.get("is_error"))
+        formatted_result = {
+            "data": result,
+            "is_error": is_error,
+            "meta": {"status": "error" if is_error else "ok"},
+        }
+        formatted_result["data_prompt"] = self._format_mcp_result(full_tool, result)
+
+        audit_result = ToolResult(
+            content=list(result.get("content") or []),
+            is_error=is_error,
+            meta=formatted_result["meta"],
+        )
+        audit_sink.record(call, audit_result, "allow", duration_ms=_duration_ms(), source="mcp")
+        log_event(
+            {
+                "level": "INFO",
+                "event": "mcp_tool_call",
+                "server": server_name,
+                "tool_name": tool_name,
+                "is_error": is_error,
+            }
+        )
+        return formatted_result
+
 
     def call_tool_unified(
         self,
