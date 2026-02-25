@@ -6,6 +6,7 @@ import functools
 import json
 import mimetypes
 import re
+import sys
 import threading
 import time
 import traceback
@@ -349,6 +350,21 @@ def _is_duplicate_project_create(
     active_name = " ".join(active_project.name.split()).lower()
     active_project_id = active_project.project_id.lower()
     return requested_name in {active_name, active_project_id}
+
+
+class AmonThreadingHTTPServer(ThreadingHTTPServer):
+    def handle_error(self, request: Any, client_address: tuple[str, int]) -> None:
+        exc_type, _, _ = sys.exc_info()
+        if exc_type and issubclass(exc_type, (BrokenPipeError, ConnectionResetError)):
+            log_event(
+                {
+                    "level": "INFO",
+                    "event": "ui_client_disconnected",
+                    "client": client_address[0] if client_address else "unknown",
+                }
+            )
+            return
+        super().handle_error(request, client_address)
 
 
 class AmonUIHandler(SimpleHTTPRequestHandler):
@@ -2918,7 +2934,7 @@ def serve_ui(port: int = 8000, data_dir: Path | None = None) -> None:
     core = AmonCore(data_dir=data_dir)
     core.ensure_base_structure()
     handler = functools.partial(AmonUIHandler, directory=str(ui_dir), core=core)
-    server = ThreadingHTTPServer(("0.0.0.0", port), handler)
+    server = AmonThreadingHTTPServer(("0.0.0.0", port), handler)
     print(f"UI 已啟動：http://localhost:{port}")
     try:
         server.serve_forever()
