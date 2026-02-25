@@ -114,3 +114,18 @@
   - `node_states_count`
 - 預設關閉，不會在 production 無條件輸出 console log。
 
+## 7) Phase 2：Graph Node Drawer 串接驗收步驟
+
+1. 進入 `#/graph`，選擇任一有節點的 run。
+2. 點擊 node list 任一 node。
+   - 預期：`graph-node-drawer` 開啟，顯示 `title / status / inputs / outputs / events`。
+   - 預期：被點擊的 list item 帶有 selected 樣式。
+3. 點擊 Mermaid SVG 上任一 node。
+   - 預期：與 list 點擊共用 `selectNode(nodeId)` 路徑，會開啟同一 drawer 並顯示對應 node detail。
+   - 預期：SVG node 也有 selected 樣式，不影響既有 status class。
+4. 測試 drawer 關閉動作：
+   - 點 close button → drawer 關閉。
+   - 按 `ESC` → drawer 關閉。
+   - 點擊 drawer 外背景區域（非 drawer、非 graph node 互動元素）→ drawer 關閉。
+5. 測試 run 切換：
+   - 切換 run 後，selected 狀態與 drawer 應重置，避免殘留上一個 run 的 node detail。
