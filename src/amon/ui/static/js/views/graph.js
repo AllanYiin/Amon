@@ -1,4 +1,5 @@
-import { logViewInitDebug } from "../utils/debug.js";
+import { logUiDebug, logViewInitDebug } from "../utils/debug.js";
+import { buildGraphRuntimeViewModel } from "../domain/graphRuntimeAdapter.js";
 
 function getProjectId(ctx) {
   return ctx.store?.getState?.()?.layout?.projectId || "";
@@ -26,20 +27,32 @@ export const GRAPH_VIEW = {
     const refreshEl = rootEl.querySelector("#graph-history-refresh");
     const copyRunIdEl = ctx.elements?.copyRunId;
 
-    const local = { graph: null, panZoom: null, runId: "" };
+    const local = { graph: null, panZoom: null, runId: "", viewModel: null };
 
-    async function renderGraph(payload) {
-      const graph = payload?.graph || {};
+    async function renderGraph(payload, runtimeNodeStates = null) {
+      const viewModel = buildGraphRuntimeViewModel({
+        graphPayload: payload,
+        nodeStates: runtimeNodeStates,
+        runMeta: { run_id: local.runId, run_status: payload?.run_status },
+      });
+      local.viewModel = viewModel;
+      if (viewModel.diagnostics.length) {
+        logUiDebug("graph.view-model", {
+          run_id: viewModel.runId,
+          diagnostics: viewModel.diagnostics,
+          node_count: viewModel.nodes.length,
+        });
+      }
+      const graph = viewModel.graph || {};
       local.graph = graph;
-      codeEl.textContent = payload?.graph_mermaid || "";
+      codeEl.textContent = viewModel.graphMermaid || "";
       listEl.innerHTML = "";
-      const nodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
+      const nodes = Array.isArray(viewModel?.nodes) ? viewModel.nodes : [];
       if (!nodes.length) {
         listEl.innerHTML = '<li><p class="graph-empty-state">目前沒有可顯示的節點資料。</p></li>';
       }
-      nodes.forEach((node) => {
-        const rawStatus = String(node?.status || node?.state || "pending").toLowerCase();
-        const normalizedStatus = ["running", "succeeded", "failed"].includes(rawStatus) ? rawStatus : "pending";
+      nodes.forEach((nodeVm) => {
+        const node = nodeVm?.graphNode || {};
         const progressValue = Number.isFinite(Number(node?.progress)) ? Math.max(0, Math.min(100, Number(node.progress))) : null;
         const progressMeta = progressValue === null ? "" : `<span>${Math.round(progressValue)}%</span>`;
         const progressBlock = progressValue === null
@@ -48,12 +61,12 @@ export const GRAPH_VIEW = {
         const li = document.createElement("li");
         li.className = "graph-node-item";
         li.innerHTML = `
-          <button type="button" class="graph-node-item__button list-row" data-node-id="${node.id}">
+          <button type="button" class="graph-node-item__button list-row" data-node-id="${nodeVm.id}">
             <span class="graph-node-item__content">
-              <strong class="graph-node-item__title">${node.id || "(unknown node)"}</strong>
+              <strong class="graph-node-item__title">${nodeVm.id || "(unknown node)"}</strong>
               <span class="graph-node-item__meta">${progressMeta}${progressBlock}</span>
             </span>
-            <span class="node-status node-status--${normalizedStatus}">${normalizedStatus}</span>
+            <span class="node-status ${nodeVm.statusUi.cssClass}">${nodeVm.statusUi.label}</span>
           </button>
         `;
         listEl.appendChild(li);
@@ -63,8 +76,8 @@ export const GRAPH_VIEW = {
       local.panZoom?.destroy?.();
       local.panZoom = null;
 
-      if (payload?.graph_mermaid && window.__mermaid) {
-        const { svg } = await window.__mermaid.render(`graph-preview-${Date.now()}`, payload.graph_mermaid);
+      if (viewModel.graphMermaid && window.__mermaid) {
+        const { svg } = await window.__mermaid.render(`graph-preview-${Date.now()}`, viewModel.graphMermaid);
         previewEl.innerHTML = svg;
         const svgEl = previewEl.querySelector("svg");
         if (svgEl && window.svgPanZoom) {
@@ -139,7 +152,8 @@ export const GRAPH_VIEW = {
           copyRunIdEl.disabled = false;
           copyRunIdEl.dataset.runId = runId;
         }
-        await renderGraph(graphPayload || {});
+        const fallbackNodeStates = ctx.appState?.graphRunId === runId ? (ctx.appState?.graphNodeStates || null) : null;
+        await renderGraph(graphPayload || {}, fallbackNodeStates);
       } catch (error) {
         if (copyRunIdEl) {
           copyRunIdEl.disabled = true;

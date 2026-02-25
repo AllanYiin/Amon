@@ -16,3 +16,8 @@ export function logViewInitDebug(viewId, payload = {}) {
   if (!isUiDebugEnabled()) return;
   console.debug(`[amon-ui-debug][${viewId}] init`, payload);
 }
+
+export function logUiDebug(scope, payload = {}) {
+  if (!isUiDebugEnabled()) return;
+  console.debug(`[amon-ui-debug][${scope}]`, payload);
+}
