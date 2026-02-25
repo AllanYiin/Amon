@@ -357,9 +357,9 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         self.core = core
         super().__init__(*args, **kwargs)
 
-    def handle(self) -> None:
+    def handle_one_request(self) -> None:
         try:
-            super().handle()
+            super().handle_one_request()
         except (BrokenPipeError, ConnectionResetError):
             self.close_connection = True
             log_event(
