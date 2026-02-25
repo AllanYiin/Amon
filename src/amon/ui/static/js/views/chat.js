@@ -187,6 +187,7 @@ export const CHAT_VIEW = {
           if (streamAbortController?.signal.aborted) return;
           try {
             appState.uiStore.applyEvent(eventType, data);
+            ctx.bus?.emit?.("stream:event", { eventType, data });
             await ctx.chatDeps.applySessionFromEvent(data);
             if (appState.projectId && ["result", "done", "notice"].includes(eventType)) {
               await ctx.chatDeps.loadContext();

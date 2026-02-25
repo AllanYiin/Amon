@@ -51,7 +51,13 @@ export const GRAPH_VIEW = {
       selectedNodeId: "",
       nodeDetails: new Map(),
       svgNodeGroups: new Map(),
+      unsubscribeLiveUpdates: null,
+      refreshTimer: null,
+      pendingRefreshKind: null,
+      refreshInFlight: false,
     };
+
+    const REFRESH_THROTTLE_MS = 450;
 
     function closeGraphNodeDrawer() {
       if (!drawerEl) return;
@@ -121,7 +127,8 @@ export const GRAPH_VIEW = {
       }
     }
 
-    async function selectNode(nodeId) {
+    async function selectNode(nodeId, options = {}) {
+      const { forceRefresh = false, openDrawer = true } = options;
       const normalizedNodeId = String(nodeId || "").trim();
       if (!normalizedNodeId || !local.runId) return;
       local.selectedNodeId = normalizedNodeId;
@@ -129,7 +136,7 @@ export const GRAPH_VIEW = {
       const cacheKey = `${local.runId}::${normalizedNodeId}`;
       try {
         let detail = local.nodeDetails.get(cacheKey);
-        if (!detail) {
+        if (!detail || forceRefresh) {
           detail = await ctx.services.graph.getNodeDetail(local.runId, normalizedNodeId, getProjectId(ctx));
           local.nodeDetails.set(cacheKey, detail);
         }
@@ -138,10 +145,97 @@ export const GRAPH_VIEW = {
           payload: { graphView: { selectedNodeId: normalizedNodeId, selectedNode: detail } },
         });
         renderGraphNodeDrawer(detail);
-        openGraphNodeDrawer();
+        if (openDrawer) openGraphNodeDrawer();
       } catch (error) {
         ctx.ui.toast?.show(`讀取節點失敗：${error.message}`, { type: "danger", duration: 12000 });
       }
+    }
+
+    function scheduleRefresh(kind = "runListOnly") {
+      const normalizedKind = kind === "currentRunGraph" ? "currentRunGraph" : "runListOnly";
+      if (normalizedKind === "currentRunGraph" || !local.pendingRefreshKind) {
+        local.pendingRefreshKind = normalizedKind;
+      }
+      if (local.refreshTimer || local.refreshInFlight) return;
+      local.refreshTimer = window.setTimeout(async () => {
+        local.refreshTimer = null;
+        const nextKind = local.pendingRefreshKind;
+        local.pendingRefreshKind = null;
+        if (!nextKind) return;
+        local.refreshInFlight = true;
+        try {
+          if (nextKind === "currentRunGraph" && local.runId) {
+            await loadGraph(local.runId, { preserveSelection: true, preserveDrawer: true, silent: true });
+          } else {
+            await loadRuns({ preserveSelection: true });
+          }
+        } finally {
+          local.refreshInFlight = false;
+          if (local.pendingRefreshKind) {
+            scheduleRefresh(local.pendingRefreshKind);
+          }
+        }
+      }, REFRESH_THROTTLE_MS);
+    }
+
+    function subscribeGraphLiveUpdates() {
+      if (typeof local.unsubscribeLiveUpdates === "function") return;
+      const unsubscribers = [];
+      const handleLiveEvent = ({ eventType = "", data = {} } = {}) => {
+        const type = String(eventType || "").toLowerCase();
+        if (!type) return;
+        const eventRunId = String(data?.run_id || data?.runId || "").trim();
+        const selectedRunId = String(local.runId || "").trim();
+        if (["run", "run.update", "node.update", "done"].includes(type)) {
+          if (eventRunId && selectedRunId && eventRunId === selectedRunId) {
+            scheduleRefresh("currentRunGraph");
+            return;
+          }
+          if (eventRunId && selectedRunId && eventRunId !== selectedRunId) {
+            scheduleRefresh("runListOnly");
+            return;
+          }
+          if (type === "done" || type === "run" || type === "run.update") {
+            scheduleRefresh(selectedRunId ? "currentRunGraph" : "runListOnly");
+          }
+        }
+      };
+
+      const uiStore = ctx.appState?.uiStore;
+      if (uiStore?.subscribe) {
+        let previousRunId = String(uiStore.getState?.()?.run?.run_id || "");
+        const unsubscribeUiStore = uiStore.subscribe((snapshot = {}) => {
+          const currentRunId = String(snapshot?.run?.run_id || "");
+          if (currentRunId && currentRunId === String(local.runId || "")) {
+            scheduleRefresh("currentRunGraph");
+          } else if (currentRunId && currentRunId !== previousRunId) {
+            scheduleRefresh("runListOnly");
+          }
+          previousRunId = currentRunId;
+        });
+        unsubscribers.push(unsubscribeUiStore);
+      }
+
+      const unsubscribeBus = ctx.bus?.on?.("stream:event", handleLiveEvent);
+      if (typeof unsubscribeBus === "function") {
+        unsubscribers.push(unsubscribeBus);
+      }
+
+      local.unsubscribeLiveUpdates = () => {
+        unsubscribers.forEach((fn) => fn?.());
+        unsubscribers.length = 0;
+      };
+    }
+
+    function unsubscribeGraphLiveUpdates() {
+      local.unsubscribeLiveUpdates?.();
+      local.unsubscribeLiveUpdates = null;
+      if (local.refreshTimer) {
+        window.clearTimeout(local.refreshTimer);
+        local.refreshTimer = null;
+      }
+      local.pendingRefreshKind = null;
+      local.refreshInFlight = false;
     }
 
     function buildLabelToNodeIds(viewModel) {
@@ -292,9 +386,11 @@ export const GRAPH_VIEW = {
       updateSelectedState();
     }
 
-    async function loadRuns() {
+    async function loadRuns(options = {}) {
+      const { preserveSelection = false } = options;
       const projectId = getProjectId(ctx);
       const runs = await ctx.services.graph.listRuns(projectId);
+      const previousSelectedRunId = String(local.runId || "");
       runSelectEl.innerHTML = "";
       if (!runs.length) {
         const option = document.createElement("option");
@@ -327,11 +423,15 @@ export const GRAPH_VIEW = {
         runSelectEl.prepend(fallback);
       }
 
-      local.runId = preferredRunId || runs[0]?.id || runs[0]?.run_id || "";
+      const resolvedPreferredRunId = preserveSelection
+        ? previousSelectedRunId
+        : (preferredRunId || "");
+      local.runId = resolvedPreferredRunId || preferredRunId || runs[0]?.id || runs[0]?.run_id || "";
       runSelectEl.value = local.runId;
     }
 
-    async function loadGraph(runId = "") {
+    async function loadGraph(runId = "", options = {}) {
+      const { preserveSelection = false, preserveDrawer = false, silent = false } = options;
       if (!runId) {
         previewEl.innerHTML = '<p class="empty-context">請先選擇 Run。</p>';
         codeEl.textContent = "";
@@ -342,7 +442,11 @@ export const GRAPH_VIEW = {
         return;
       }
       local.runId = runId;
-      local.selectedNodeId = "";
+      const previousSelectedNodeId = String(local.selectedNodeId || "");
+      const shouldKeepSelection = preserveSelection && previousSelectedNodeId;
+      if (!shouldKeepSelection) {
+        local.selectedNodeId = "";
+      }
       try {
         const graphPayload = await ctx.services.graph.getGraph(runId, getProjectId(ctx));
         runMetaEl.textContent = `Run：${runId}（${graphPayload?.run_status || "unknown"}）`;
@@ -352,14 +456,24 @@ export const GRAPH_VIEW = {
         }
         const fallbackNodeStates = ctx.appState?.graphRunId === runId ? (ctx.appState?.graphNodeStates || null) : null;
         await renderGraph(graphPayload || {}, fallbackNodeStates);
-        renderGraphNodeDrawer(null);
-        closeGraphNodeDrawer();
+        if (shouldKeepSelection && local.viewModel?.nodes?.some((node) => node.id === previousSelectedNodeId)) {
+          local.selectedNodeId = previousSelectedNodeId;
+          updateSelectedState();
+          if (preserveDrawer && drawerEl && !drawerEl.hidden) {
+            await selectNode(previousSelectedNodeId, { forceRefresh: true, openDrawer: true });
+          }
+        } else {
+          renderGraphNodeDrawer(null);
+          if (!preserveDrawer) closeGraphNodeDrawer();
+        }
       } catch (error) {
         if (copyRunIdEl) {
           copyRunIdEl.disabled = true;
           copyRunIdEl.dataset.runId = "";
         }
-        ctx.ui.toast?.show(`載入 Graph 失敗：${error.message}`, { type: "danger", duration: 12000 });
+        if (!silent) {
+          ctx.ui.toast?.show(`載入 Graph 失敗：${error.message}`, { type: "danger", duration: 12000 });
+        }
       }
     }
 
@@ -408,6 +522,7 @@ export const GRAPH_VIEW = {
     drawerCloseEl?.addEventListener("click", onDrawerClose);
     document.addEventListener("keydown", onDocumentKeyDown);
     document.addEventListener("click", onDocumentClick);
+    subscribeGraphLiveUpdates();
     renderGraphNodeDrawer(null);
 
     this.__graphCleanup = () => {
@@ -416,6 +531,7 @@ export const GRAPH_VIEW = {
       drawerCloseEl?.removeEventListener("click", onDrawerClose);
       document.removeEventListener("keydown", onDocumentKeyDown);
       document.removeEventListener("click", onDocumentClick);
+      unsubscribeGraphLiveUpdates();
       local.panZoom?.destroy?.();
       local.panZoom = null;
       closeGraphNodeDrawer();

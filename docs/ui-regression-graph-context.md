@@ -129,3 +129,15 @@
    - 點擊 drawer 外背景區域（非 drawer、非 graph node 互動元素）→ drawer 關閉。
 5. 測試 run 切換：
    - 切換 run 後，selected 狀態與 drawer 應重置，避免殘留上一個 run 的 node detail。
+
+## 8) Phase 3：Graph page 自動同步刷新驗收步驟
+
+1. 開啟 `#/graph` 並選定一個 run（建議同時開啟 `?ui_debug=1` 觀察 diagnostics）。
+2. 在 chat 流程觸發 run / run.update / node.update / done 類型事件。
+3. 驗證自動刷新：
+   - 若事件 `run_id` 等於目前 Graph 選取 run：應自動 refresh current graph（node list + SVG 狀態同步更新）。
+   - 若事件 `run_id` 不同：應只 refresh run list，不應強制切換目前選取 run。
+4. 驗證節流：
+   - 高頻事件時，Graph 不應狂閃或連續重繪到不可操作；更新應以節流批次進行。
+5. 驗證 drawer 保留：
+   - drawer 開啟且 `selectedNodeId` 仍存在時，自動 refresh 後 drawer 應保持開啟並刷新內容（不應被關掉）。
