@@ -357,6 +357,19 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         self.core = core
         super().__init__(*args, **kwargs)
 
+    def handle_one_request(self) -> None:
+        try:
+            super().handle_one_request()
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True
+            log_event(
+                {
+                    "level": "INFO",
+                    "event": "ui_client_disconnected",
+                    "client": self.client_address[0] if self.client_address else "unknown",
+                }
+            )
+
     def do_GET(self) -> None:  # noqa: N802
         _HEALTH_METRICS.record_request()
         parsed = urlparse(self.path)
