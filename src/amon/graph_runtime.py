@@ -380,7 +380,7 @@ class GraphRuntime:
             if not tool_name:
                 raise ValueError("tool.call node 缺少 tool")
             args = self._render_payload(node.get("args") or {}, node_vars)
-            result = self.core.run_tool(
+            result = self.core.call_tool_unified(
                 tool_name,
                 args,
                 project_id=self.project_path.name,
