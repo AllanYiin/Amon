@@ -25,6 +25,8 @@ import { copyText } from "./utils/clipboard.js";
 import { createSidebarLayout } from "./layout/sidebar.js";
 import { createHeaderLayout } from "./layout/header.js";
 import { createInspectorLayout } from "./layout/inspector.js";
+import { buildGraphRuntimeViewModel } from "./domain/graphRuntimeAdapter.js";
+import { logUiDebug } from "./utils/debug.js";
 
 
 export function bootstrapApp() {
@@ -1270,6 +1272,14 @@ appStore.patch({ bootstrappedAt: Date.now() });
         state.graphRunId = payload.run_id || null;
         state.graphNodeStates = payload.node_states || {};
         state.graphEvents = payload.recent_events || [];
+        const runtimeVm = buildGraphRuntimeViewModel({ graphPayload: payload });
+        if (runtimeVm.diagnostics.length) {
+          logUiDebug("context.graph-runtime", {
+            run_id: runtimeVm.runId,
+            diagnostics: runtimeVm.diagnostics,
+            node_count: runtimeVm.nodes.length,
+          });
+        }
         elements.graphCode.textContent = payload.graph_mermaid || "";
         renderGraph(payload.graph_mermaid || "");
         renderNodeList();
@@ -1280,13 +1290,14 @@ appStore.patch({ bootstrappedAt: Date.now() });
         const runHint = state.graphRunId ? `已連結 Run ${shortenId(state.graphRunId)}` : "尚未有 Run";
         elements.contextOverview.textContent = `已同步專案內容：Graph ${hasGraph}、文件 ${docCount} 筆；${runHint}。`;
         elements.contextOverview.title = state.graphRunId ? `完整 Run ID：${state.graphRunId}` : "尚未取得任何 Run。";
-        const nodeStatuses = Object.values(state.graphNodeStates || {}).map((node) => normalizeNodeStatus(node?.status));
-        const hasFailedNode = nodeStatuses.includes("failed");
-        const hasRunningNode = nodeStatuses.includes("running");
+        const statusSet = new Set(runtimeVm.nodes.map((node) => node.effectiveStatus));
+        const hasFailedNode = statusSet.has("failed");
+        const hasRunningNode = statusSet.has("running");
+        const hasUnknownNode = statusSet.has("unknown");
         updateExecutionStep("node_status", {
           title: "Node 狀態",
-          status: hasFailedNode ? "failed" : hasRunningNode ? "running" : nodeStatuses.length ? "succeeded" : "pending",
-          details: nodeStatuses.length ? `共 ${nodeStatuses.length} 個節點狀態已同步` : "尚無節點事件",
+          status: hasFailedNode ? "failed" : hasRunningNode ? "running" : hasUnknownNode ? "pending" : runtimeVm.nodes.length ? "succeeded" : "pending",
+          details: runtimeVm.nodes.length ? `共 ${runtimeVm.nodes.length} 個節點狀態已同步` : "尚無節點事件",
           inferred: false,
         });
         await loadRunArtifacts();
@@ -1498,50 +1509,57 @@ appStore.patch({ bootstrappedAt: Date.now() });
         }
       }
 
-      function normalizeNodeStatus(status) {
-        if (status === "completed") return "succeeded";
-        if (["pending", "running", "failed", "succeeded"].includes(status)) return status;
-        return "pending";
-      }
-
-      function getNodeState(nodeId) {
-        return state.graphNodeStates?.[nodeId] || { status: "pending" };
+      function buildCurrentRuntimeViewModel() {
+        return buildGraphRuntimeViewModel({
+          graphPayload: {
+            graph: state.graph,
+            graph_mermaid: elements.graphCode?.textContent || "",
+            node_states: state.graphNodeStates,
+            run_id: state.graphRunId,
+          },
+          runMeta: { run_id: state.graphRunId },
+        });
       }
 
       function nodeStatusLabel(status) {
-        const normalized = normalizeNodeStatus(status);
+        const normalized = String(status || "unknown").toLowerCase();
         if (normalized === "running") return "執行中";
         if (normalized === "succeeded") return "成功";
         if (normalized === "failed") return "失敗";
-        return "等待中";
+        if (normalized === "pending") return "等待中";
+        return "未知";
       }
 
       function renderNodeList() {
         elements.graphNodeList.innerHTML = "";
-        const nodes = state.graph?.nodes || [];
+        const runtimeVm = buildCurrentRuntimeViewModel();
+        if (runtimeVm.diagnostics.length) {
+          logUiDebug("graph.node-list", { diagnostics: runtimeVm.diagnostics, run_id: runtimeVm.runId });
+        }
+        const nodes = runtimeVm.nodes || [];
         if (!nodes.length) return;
-        nodes.forEach((node) => {
-          const stateItem = getNodeState(node.id);
-          const status = normalizeNodeStatus(stateItem.status);
+        nodes.forEach((nodeVm) => {
           const item = document.createElement("li");
           item.className = "graph-node-item";
           const btn = document.createElement("button");
           btn.type = "button";
           btn.className = "graph-node-item__button";
-          btn.innerHTML = `<span>${node.id}</span><span class="node-status node-status--${status}">${nodeStatusLabel(status)}</span>`;
-          btn.addEventListener("click", () => openNodeDrawer(node.id));
+          btn.innerHTML = `<span>${nodeVm.id}</span><span class="node-status ${nodeVm.statusUi.cssClass}">${nodeVm.statusUi.label || nodeStatusLabel(nodeVm.effectiveStatus)}</span>`;
+          btn.addEventListener("click", () => openNodeDrawer(nodeVm.id));
           item.appendChild(btn);
           elements.graphNodeList.appendChild(item);
         });
       }
 
       function decorateMermaidNodes() {
+        const runtimeVm = buildCurrentRuntimeViewModel();
+        const statusById = new Map(runtimeVm.nodes.map((node) => [node.id, node]));
         const groups = elements.graphPreview.querySelectorAll("g.node");
         groups.forEach((group) => {
           const label = group.querySelector(".nodeLabel")?.textContent?.trim();
           if (!label) return;
-          const status = normalizeNodeStatus(getNodeState(label).status);
-          group.classList.add(`node-status--${status}`);
+          const nodeVm = statusById.get(label);
+          group.classList.add(nodeVm?.statusUi?.mermaidClass || "node-status--unknown");
           group.style.cursor = "pointer";
           group.setAttribute("role", "button");
           group.setAttribute("tabindex", "0");
@@ -1576,10 +1594,12 @@ appStore.patch({ bootstrappedAt: Date.now() });
         const node = (state.graph?.nodes || []).find((item) => item.id === nodeId);
         if (!node) return;
         state.graphSelectedNodeId = nodeId;
-        const nodeState = getNodeState(nodeId);
+        const runtimeVm = buildCurrentRuntimeViewModel();
+        const nodeVm = runtimeVm.nodes.find((item) => item.id === nodeId);
+        const nodeState = nodeVm?.runtimeState || {};
         const executionEngine = node.type && String(node.type).includes("tool") ? "tool" : "llm";
         elements.graphNodeTitle.textContent = `Node：${nodeId}`;
-        elements.graphNodeMeta.textContent = `status：${nodeStatusLabel(nodeState.status)} ｜ execution_engine：${executionEngine}`;
+        elements.graphNodeMeta.textContent = `status：${nodeVm?.statusUi?.label || nodeStatusLabel(nodeVm?.effectiveStatus)} ｜ execution_engine：${executionEngine}`;
         elements.graphNodeInputs.textContent = JSON.stringify(inferNodeInputs(node), null, 2);
         elements.graphNodeOutputs.textContent = JSON.stringify(extractOutputArtifacts(nodeState.output), null, 2);
         elements.graphNodeEvents.innerHTML = "";
