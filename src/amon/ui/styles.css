@@ -2100,6 +2100,18 @@ body.is-resizing-context-panel {
   border-color: color-mix(in srgb, var(--c-border-strong) 50%, var(--c-border));
 }
 
+.node-status--unknown {
+  color: var(--c-text-muted);
+  background: color-mix(in srgb, var(--c-surface-2) 85%, transparent);
+  border-color: color-mix(in srgb, var(--c-border-strong) 45%, var(--c-border));
+}
+
+.graph-node-item__button.is-selected {
+  border-color: color-mix(in srgb, var(--c-info) 60%, var(--c-border-strong));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--c-info) 30%, transparent);
+  background: color-mix(in srgb, var(--c-info) 8%, var(--c-surface-2));
+}
+
 .graph-empty-state {
   margin: 0;
   border: 1px dashed color-mix(in srgb, var(--c-border-strong) 55%, var(--c-border));
@@ -2129,6 +2141,20 @@ body.is-resizing-context-panel {
 .graph-preview g.node.node-status--failed path {
   stroke: var(--color-danger) !important;
   stroke-width: 2px !important;
+}
+
+.graph-preview g.node.node-status--unknown rect,
+.graph-preview g.node.node-status--unknown polygon,
+.graph-preview g.node.node-status--unknown path {
+  stroke: var(--c-border-strong) !important;
+  stroke-width: 2px !important;
+}
+
+.graph-preview g.node.graph-node--selected rect,
+.graph-preview g.node.graph-node--selected polygon,
+.graph-preview g.node.graph-node--selected path {
+  stroke-width: 3px !important;
+  filter: drop-shadow(0 0 2px color-mix(in srgb, var(--c-info) 45%, transparent));
 }
 
 .graph-node-drawer {
