@@ -1,4 +1,5 @@
 import { t } from "../i18n.js";
+import { logViewInitDebug } from "../utils/debug.js";
 
 const CONTEXT_COLORS = {
   project_context: "#22c55e",
@@ -11,6 +12,18 @@ const CONTEXT_COLORS = {
 
 function getProjectId(ctx) {
   return ctx.store?.getState?.()?.layout?.projectId || "";
+}
+
+function getChatId(ctx) {
+  return String(ctx.appState?.chatId || "").trim();
+}
+
+function updateChatClearAvailability(rootEl, chatId = "") {
+  const clearChatButton = rootEl?.querySelector("#context-clear-chat");
+  if (!(clearChatButton instanceof HTMLButtonElement)) return;
+  const enabled = Boolean(String(chatId || "").trim());
+  clearChatButton.disabled = !enabled;
+  clearChatButton.title = enabled ? "清空目前聊天 Context" : "目前沒有可用 chat_id，無法清空本次對話 Context。";
 }
 
 function dispatchContext(ctx, payload = {}) {
@@ -169,7 +182,14 @@ async function clearDraft(ctx, rootEl, editor, scope) {
   });
   if (!confirmed) return;
   try {
-    await ctx.services.context.clearContext(scope, getProjectId(ctx));
+    const projectId = getProjectId(ctx);
+    const chatId = getChatId(ctx);
+    if (scope === "chat" && !chatId) {
+      ctx.ui.toast?.show("目前沒有可用的 chat_id，無法清空本次對話 Context。", { type: "warning", duration: 9000 });
+      updateChatClearAvailability(rootEl, chatId);
+      return;
+    }
+    await ctx.services.context.clearContext(scope, { projectId, chatId });
     if (editor) editor.value = "";
     dispatchContext(ctx, { context: "", clearedScope: scope, clearedAt: Date.now() });
     updateDraftMeta(rootEl, scope === "project" ? "已清空專案 Context 草稿。" : "已清空本次對話 Context 草稿。");
@@ -219,12 +239,19 @@ export const CONTEXT_VIEW = {
   mount: (ctx) => {
     const { rootEl } = ctx;
     if (!rootEl) return;
+    logViewInitDebug("context", {
+      project_id: ctx.appState?.projectId || getProjectId(ctx) || null,
+      run_id: ctx.appState?.graphRunId || null,
+      chat_id: ctx.appState?.chatId || null,
+      node_states_count: Object.keys(ctx.appState?.graphNodeStates || {}).length,
+    });
     const editor = rootEl.querySelector("#context-draft-input");
     const importInput = rootEl.querySelector("#context-import-file");
     const emptyCta = ensureEmptyCta(rootEl);
     const handlers = [];
 
     setDashboardUnavailable(rootEl);
+    updateChatClearAvailability(rootEl, getChatId(ctx));
 
     const onClick = async (event) => {
       const target = event.target;
@@ -276,6 +303,7 @@ export const CONTEXT_VIEW = {
     const editor = ctx.rootEl?.querySelector("#context-draft-input");
     const emptyCta = ensureEmptyCta(ctx.rootEl);
     const projectId = getProjectId(ctx);
+    updateChatClearAvailability(ctx.rootEl, getChatId(ctx));
     if (!projectId) {
       if (editor) editor.value = "";
       updateDraftMeta(ctx.rootEl, "尚未儲存草稿。請先選擇專案。");

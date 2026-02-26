@@ -1,6 +1,7 @@
 import { createMessageRenderer } from "./chat/renderers/messageRenderer.js";
 import { createTimelineRenderer } from "./chat/renderers/timelineRenderer.js";
 import { createInputBar } from "./chat/renderers/inputBar.js";
+import { logViewInitDebug } from "../utils/debug.js";
 
 const { EventStreamClient } = window.AmonUIEventStream || {};
 
@@ -20,6 +21,12 @@ export const CHAT_VIEW = {
   mount(ctx) {
     const { elements, appState, store, t, ui } = ctx;
     if (!elements?.timeline || !elements?.chatForm || !EventStreamClient) return;
+    logViewInitDebug("chat", {
+      project_id: appState.projectId || null,
+      run_id: appState.graphRunId || null,
+      chat_id: appState.chatId || null,
+      node_states_count: Object.keys(appState.graphNodeStates || {}).length,
+    });
 
     const messageRenderer = createMessageRenderer({
       timelineEl: elements.timeline,
@@ -180,6 +187,7 @@ export const CHAT_VIEW = {
           if (streamAbortController?.signal.aborted) return;
           try {
             appState.uiStore.applyEvent(eventType, data);
+            ctx.bus?.emit?.("stream:event", { eventType, data });
             await ctx.chatDeps.applySessionFromEvent(data);
             if (appState.projectId && ["result", "done", "notice"].includes(eventType)) {
               await ctx.chatDeps.loadContext();
