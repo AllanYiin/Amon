@@ -843,6 +843,125 @@ class UIAsyncAPITests(unittest.TestCase):
                     server.server_close()
                 os.environ.pop("AMON_HOME", None)
 
+    def test_context_clear_chat_requires_chat_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("context-clear-chat-requires-chat-id")
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port)
+                conn.request(
+                    "POST",
+                    "/v1/context/clear",
+                    body=json.dumps({"scope": "chat", "project_id": project.project_id}, ensure_ascii=False),
+                    headers={"Content-Type": "application/json"},
+                )
+                response = conn.getresponse()
+                payload = json.loads(response.read().decode("utf-8"))
+
+                self.assertEqual(response.status, 400)
+                self.assertIn("chat_id", payload.get("message", ""))
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
+    def test_context_clear_chat_only_removes_target_chat(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("context-clear-chat-target-only")
+                project_path = Path(project.path)
+                sessions_dir = project_path / "sessions" / "chat"
+                sessions_dir.mkdir(parents=True, exist_ok=True)
+                (sessions_dir / "chat-a.jsonl").write_text('{"type":"user","text":"A"}\n', encoding="utf-8")
+                (sessions_dir / "chat-b.jsonl").write_text('{"type":"user","text":"B"}\n', encoding="utf-8")
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port)
+                conn.request(
+                    "POST",
+                    "/v1/context/clear",
+                    body=json.dumps({"scope": "chat", "project_id": project.project_id, "chat_id": "chat-a"}, ensure_ascii=False),
+                    headers={"Content-Type": "application/json"},
+                )
+                response = conn.getresponse()
+                payload = json.loads(response.read().decode("utf-8"))
+
+                self.assertEqual(response.status, 200)
+                self.assertEqual(payload.get("scope"), "chat")
+                self.assertEqual(payload.get("chat_id"), "chat-a")
+                self.assertFalse((sessions_dir / "chat-a.jsonl").exists())
+                self.assertTrue((sessions_dir / "chat-b.jsonl").exists())
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
+    def test_context_clear_project_preserves_chat_sessions(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("context-clear-project-preserve-chat")
+                project_path = Path(project.path)
+                context_path = project_path / ".amon" / "context" / "project_context.md"
+                context_path.parent.mkdir(parents=True, exist_ok=True)
+                context_path.write_text("project context", encoding="utf-8")
+                sessions_dir = project_path / "sessions" / "chat"
+                sessions_dir.mkdir(parents=True, exist_ok=True)
+                (sessions_dir / "chat-a.jsonl").write_text('{"type":"user","text":"A"}\n', encoding="utf-8")
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port)
+                conn.request(
+                    "POST",
+                    "/v1/context/clear",
+                    body=json.dumps({"scope": "project", "project_id": project.project_id}, ensure_ascii=False),
+                    headers={"Content-Type": "application/json"},
+                )
+                response = conn.getresponse()
+                payload = json.loads(response.read().decode("utf-8"))
+
+                self.assertEqual(response.status, 200)
+                self.assertEqual(payload.get("scope"), "project")
+                self.assertFalse(context_path.exists())
+                self.assertTrue((sessions_dir / "chat-a.jsonl").exists())
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
     def test_config_view_api_returns_sources_and_chat_override(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"

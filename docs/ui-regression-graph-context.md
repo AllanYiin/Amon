@@ -141,3 +141,17 @@
    - 高頻事件時，Graph 不應狂閃或連續重繪到不可操作；更新應以節流批次進行。
 5. 驗證 drawer 保留：
    - drawer 開啟且 `selectedNodeId` 仍存在時，自動 refresh 後 drawer 應保持開啟並刷新內容（不應被關掉）。
+
+## 9) Phase 4：Context clear(chat) 帶 chat_id 驗收步驟
+
+1. 進入 `#/context` 並確認已選 project。
+2. 檢查「清空本次對話」按鈕狀態：
+   - 若目前沒有 `chat_id`：按鈕應 disabled，提示需先有聊天 session。
+   - 若已有 `chat_id`：按鈕可操作。
+3. 送出 clear(chat)（帶 `chat_id`）：
+   - 預期 request body 含 `scope=chat, project_id, chat_id`。
+   - 預期只清除該 `chat_id` 對話資料，不影響同專案其他 chat。
+4. 送出 clear(chat) 且缺 `chat_id`：
+   - 預期後端回 400，前端顯示可理解錯誤，不可默默改清 project。
+5. clear(project) 驗證：
+   - 預期仍只清 project context，既有行為不變。

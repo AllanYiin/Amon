@@ -976,11 +976,15 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 return
             scope = str(payload.get("scope") or "project").strip().lower() or "project"
             project_id = str(payload.get("project_id") or "").strip()
+            chat_id = str(payload.get("chat_id") or "").strip()
             if scope not in {"project", "chat"}:
                 self._send_json(400, {"message": "scope 僅允許 project 或 chat"})
                 return
             if not project_id:
                 self._send_json(400, {"message": "請提供 project_id"})
+                return
+            if scope == "chat" and not chat_id:
+                self._send_json(400, {"message": "scope=chat 時請提供 chat_id"})
                 return
             try:
                 project_path = self.core.get_project_path(project_id)
@@ -988,7 +992,13 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     context_path = self._project_context_file(project_path)
                     if context_path.exists():
                         context_path.unlink()
-                self._send_json(200, {"status": "ok", "scope": scope})
+                elif scope == "chat":
+                    session_path = self._chat_session_file(project_path, chat_id)
+                    if session_path.exists():
+                        session_path.unlink()
+                self._send_json(200, {"status": "ok", "scope": scope, "chat_id": chat_id or None})
+            except ValueError as exc:
+                self._send_json(400, {"message": str(exc)})
             except Exception as exc:  # noqa: BLE001
                 self._handle_error(exc, status=500)
             return
@@ -2175,6 +2185,13 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
     @staticmethod
     def _project_context_file(project_path: Path) -> Path:
         return project_path / ".amon" / "context" / "project_context.md"
+
+    @staticmethod
+    def _chat_session_file(project_path: Path, chat_id: str) -> Path:
+        normalized_chat_id = str(chat_id or "").strip()
+        if not normalized_chat_id or "/" in normalized_chat_id or "\\" in normalized_chat_id or ".." in normalized_chat_id:
+            raise ValueError("chat_id 格式不合法")
+        return project_path / "sessions" / "chat" / f"{normalized_chat_id}.jsonl"
 
     def _read_project_context(self, project_path: Path) -> str:
         context_path = self._project_context_file(project_path)
