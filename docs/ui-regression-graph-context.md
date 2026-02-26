@@ -155,3 +155,28 @@
    - 預期後端回 400，前端顯示可理解錯誤，不可默默改清 project。
 5. clear(project) 驗證：
    - 預期仍只清 project context，既有行為不變。
+
+## 10) Phase 5：收斂與可維護性驗收步驟（最新行為）
+
+1. **單一權威狀態 mapping**
+   - 驗證 Graph 與 Chat 右側 inspector 的 node status 標籤都來自 `graphRuntimeAdapter` 的 `statusUi`。
+   - 檢查不應再出現各自私有 `pending/running/...` label mapping（僅 adapter 保留權威規則）。
+
+2. **Graph page 自動刷新（節流 + 可操作性）**
+   - 開著 `#/graph` 觸發高頻 `run.update` / `node.update`：
+     - Run 非當前選取 run：僅刷新 run 下拉。
+     - Run 為當前選取 run：刷新 current run graph（含 node_states）。
+   - 預期：畫面不應無限重繪；refresh 維持節流（約 450ms）。
+
+3. **Graph drawer 穩定性（刷新中不中斷）**
+   - 打開某個 node drawer 後觸發同步更新。
+   - 預期：drawer 不會被強制關閉；若選取節點仍存在，內容會更新且 selected 樣式保留。
+
+4. **增量更新策略（避免不必要 SVG 重繪）**
+   - 在 mermaid 圖結構（graph_mermaid）未變化時，僅更新 node status class / list status，不重新 render SVG。
+   - 在 mermaid 圖結構變更時，才走完整 render + re-bind click。
+
+5. **訂閱釋放與 leak 檢查（dev-only）**
+   - 使用 `?ui_debug=1` 或 `localStorage['amon.ui.debug']=1`。
+   - 進入/離開 `#/graph` 多次，確認 console 有 `graph.live-subscriptions` subscribe/unsubscribe 記錄，且離開路由後 active_subscribers 會回到 0。
+

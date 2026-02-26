@@ -26,6 +26,8 @@ const STATUS_UI = {
   unknown: { tag: "unknown", label: "未知", cssClass: "node-status--unknown", mermaidClass: "node-status--unknown" },
 };
 
+export const GRAPH_STATUS_CLASS_LIST = Object.freeze(Object.values(STATUS_UI).map((item) => item.cssClass));
+
 function normalizeStatus(rawStatus) {
   const key = String(rawStatus || "").trim().toLowerCase();
   return STATUS_MAP[key] || "unknown";
@@ -49,6 +51,10 @@ function pickStatusSource(nodeState = {}, graphNode = {}) {
 
 export function mapGraphStatusToUi(status) {
   return STATUS_UI[normalizeStatus(status)] || STATUS_UI.unknown;
+}
+
+export function getGraphStatusClassList() {
+  return GRAPH_STATUS_CLASS_LIST;
 }
 
 export function buildGraphRuntimeViewModel({ graphPayload = {}, nodeStates = null, runMeta = {} } = {}) {

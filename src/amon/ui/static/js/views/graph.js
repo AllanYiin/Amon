@@ -1,5 +1,5 @@
 import { logUiDebug, logViewInitDebug } from "../utils/debug.js";
-import { buildGraphRuntimeViewModel } from "../domain/graphRuntimeAdapter.js";
+import { buildGraphRuntimeViewModel, getGraphStatusClassList } from "../domain/graphRuntimeAdapter.js";
 
 function getProjectId(ctx) {
   return ctx.store?.getState?.()?.layout?.projectId || "";
@@ -58,6 +58,7 @@ export const GRAPH_VIEW = {
     };
 
     const REFRESH_THROTTLE_MS = 450;
+    const STATUS_CLASS_LIST = getGraphStatusClassList();
 
     function closeGraphNodeDrawer() {
       if (!drawerEl) return;
@@ -181,6 +182,7 @@ export const GRAPH_VIEW = {
     function subscribeGraphLiveUpdates() {
       if (typeof local.unsubscribeLiveUpdates === "function") return;
       const unsubscribers = [];
+      logUiDebug("graph.live-subscriptions", { action: "subscribe", active_subscribers: 0 });
       const handleLiveEvent = ({ eventType = "", data = {} } = {}) => {
         const type = String(eventType || "").toLowerCase();
         if (!type) return;
@@ -214,15 +216,18 @@ export const GRAPH_VIEW = {
           previousRunId = currentRunId;
         });
         unsubscribers.push(unsubscribeUiStore);
+        logUiDebug("graph.live-subscriptions", { action: "subscribe", source: "uiStore", active_subscribers: unsubscribers.length });
       }
 
       const unsubscribeBus = ctx.bus?.on?.("stream:event", handleLiveEvent);
       if (typeof unsubscribeBus === "function") {
         unsubscribers.push(unsubscribeBus);
+        logUiDebug("graph.live-subscriptions", { action: "subscribe", source: "bus", active_subscribers: unsubscribers.length });
       }
 
       local.unsubscribeLiveUpdates = () => {
         unsubscribers.forEach((fn) => fn?.());
+        logUiDebug("graph.live-subscriptions", { action: "unsubscribe", active_subscribers: 0 });
         unsubscribers.length = 0;
       };
     }
@@ -325,12 +330,45 @@ export const GRAPH_VIEW = {
       updateSelectedState();
     }
 
-    async function renderGraph(payload, runtimeNodeStates = null) {
+    function updateGraphNodeStatusDom(viewModel) {
+      const nodesById = new Map((viewModel?.nodes || []).map((node) => [node.id, node]));
+      listEl.querySelectorAll("[data-node-id]").forEach((buttonEl) => {
+        const nodeId = String(buttonEl.getAttribute("data-node-id") || "").trim();
+        const nodeVm = nodesById.get(nodeId);
+        if (!nodeVm) return;
+        const statusEl = buttonEl.querySelector(".node-status");
+        if (!(statusEl instanceof HTMLElement)) return;
+        statusEl.className = `node-status ${nodeVm.statusUi.cssClass}`;
+        statusEl.textContent = nodeVm.statusUi.label;
+      });
+      local.svgNodeGroups.forEach((groups, nodeId) => {
+        const nodeVm = nodesById.get(nodeId);
+        groups.forEach((group) => {
+          group.classList.remove(...STATUS_CLASS_LIST);
+          group.classList.add(nodeVm?.statusUi?.mermaidClass || "node-status--unknown");
+        });
+      });
+      updateSelectedState();
+    }
+
+    async function renderGraph(payload, nodeStates = null, options = {}) {
+      const { allowIncrementalUpdate = false } = options;
       const viewModel = buildGraphRuntimeViewModel({
         graphPayload: payload,
-        nodeStates: runtimeNodeStates,
+        nodeStates,
         runMeta: { run_id: local.runId, run_status: payload?.run_status },
       });
+      const canIncrementalUpdate = allowIncrementalUpdate
+        && !!local.viewModel
+        && local.viewModel.graphMermaid === viewModel.graphMermaid
+        && local.svgNodeGroups.size > 0;
+
+      if (canIncrementalUpdate) {
+        local.viewModel = viewModel;
+        updateGraphNodeStatusDom(viewModel);
+        return;
+      }
+
       local.viewModel = viewModel;
       if (viewModel.diagnostics.length) {
         logUiDebug("graph.view-model", {
@@ -455,7 +493,7 @@ export const GRAPH_VIEW = {
           copyRunIdEl.dataset.runId = runId;
         }
         const fallbackNodeStates = ctx.appState?.graphRunId === runId ? (ctx.appState?.graphNodeStates || null) : null;
-        await renderGraph(graphPayload || {}, fallbackNodeStates);
+        await renderGraph(graphPayload || {}, fallbackNodeStates, { allowIncrementalUpdate: preserveSelection });
         if (shouldKeepSelection && local.viewModel?.nodes?.some((node) => node.id === previousSelectedNodeId)) {
           local.selectedNodeId = previousSelectedNodeId;
           updateSelectedState();

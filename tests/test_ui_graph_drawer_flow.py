@@ -26,6 +26,18 @@ class GraphDrawerFlowContractTests(unittest.TestCase):
         self.assertIn("REFRESH_THROTTLE_MS", graph_js)
         self.assertIn("ctx.bus?.on?.(\"stream:event\"", graph_js)
 
+
+    def test_graph_view_has_incremental_status_refresh_path(self) -> None:
+        graph_js = Path("src/amon/ui/static/js/views/graph.js").read_text(encoding="utf-8")
+        self.assertIn("function updateGraphNodeStatusDom(viewModel)", graph_js)
+        self.assertIn("allowIncrementalUpdate", graph_js)
+        self.assertIn("local.viewModel.graphMermaid === viewModel.graphMermaid", graph_js)
+
+    def test_bootstrap_uses_adapter_status_label_without_private_mapping(self) -> None:
+        bootstrap_js = Path("src/amon/ui/static/js/bootstrap.js").read_text(encoding="utf-8")
+        self.assertNotIn("function nodeStatusLabel(status)", bootstrap_js)
+        self.assertIn("nodeVm.statusUi.label", bootstrap_js)
+
     def test_event_stream_client_registers_node_update_events(self) -> None:
         stream_js = Path("src/amon/ui/event_stream_client.js").read_text(encoding="utf-8")
         self.assertIn('"node.update"', stream_js)
