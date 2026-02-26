@@ -1521,15 +1521,6 @@ appStore.patch({ bootstrappedAt: Date.now() });
         });
       }
 
-      function nodeStatusLabel(status) {
-        const normalized = String(status || "unknown").toLowerCase();
-        if (normalized === "running") return "執行中";
-        if (normalized === "succeeded") return "成功";
-        if (normalized === "failed") return "失敗";
-        if (normalized === "pending") return "等待中";
-        return "未知";
-      }
-
       function renderNodeList() {
         elements.graphNodeList.innerHTML = "";
         const runtimeVm = buildCurrentRuntimeViewModel();
@@ -1544,7 +1535,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
           const btn = document.createElement("button");
           btn.type = "button";
           btn.className = "graph-node-item__button";
-          btn.innerHTML = `<span>${nodeVm.id}</span><span class="node-status ${nodeVm.statusUi.cssClass}">${nodeVm.statusUi.label || nodeStatusLabel(nodeVm.effectiveStatus)}</span>`;
+          btn.innerHTML = `<span>${nodeVm.id}</span><span class="node-status ${nodeVm.statusUi.cssClass}">${nodeVm.statusUi.label}</span>`;
           btn.addEventListener("click", () => openNodeDrawer(nodeVm.id));
           item.appendChild(btn);
           elements.graphNodeList.appendChild(item);
