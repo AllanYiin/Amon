@@ -2,12 +2,15 @@ import sys
 import unittest
 from pathlib import Path
 from typing import Iterable
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from amon.chat.router import route_intent
-from amon.chat.router_llm import choose_execution_mode_with_llm, should_continue_run_with_llm
+import amon.chat.router_llm as router_llm
+from amon.chat.router_llm import choose_execution_mode_with_llm, route_with_llm, should_continue_run_with_llm
 from amon.commands.registry import clear_commands, get_command, register_command
+from amon.models import ProviderError
 
 
 class MockLLM:
@@ -146,6 +149,31 @@ class ChatRouterTests(unittest.TestCase):
         mock = MockLLM(["not-json", "still-not-json"])
         mode = choose_execution_mode_with_llm("我要把模型改裝為擴散語言模型", llm_client=mock)
         self.assertEqual(mode, "plan_execute")
+
+    def test_route_with_llm_enters_cooldown_after_provider_error(self) -> None:
+        class FailingLLM:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def generate_stream(self, messages: list[dict[str, str]], model: str | None = None) -> Iterable[str]:
+                _ = messages, model
+                self.calls += 1
+                raise ProviderError("network down")
+
+        router_llm._router_cooldown_until = 0.0
+        failing = FailingLLM()
+        with (
+            patch("amon.chat.router_llm._build_default_client", return_value=(failing, None)),
+            patch("amon.chat.router_llm._router_cooldown_s", return_value=60.0),
+        ):
+            first = route_with_llm("你好", {}, [], project_id="p1")
+            second = route_with_llm("你好", {}, [], project_id="p1")
+
+        self.assertEqual(first.type, "chat_response")
+        self.assertEqual(second.reason, "路由冷卻中，已切換安全模式")
+        self.assertEqual(failing.calls, 1)
+
+        router_llm._router_cooldown_until = 0.0
 
 
 if __name__ == "__main__":
