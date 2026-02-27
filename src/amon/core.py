@@ -978,12 +978,16 @@ class AmonCore:
     ) -> tuple[GraphRunResult, str]:
         config = self.load_config(project_path)
         planner_enabled = self._coerce_config_bool(config.get("amon", {}).get("planner", {}).get("enabled", True))
-        legacy_fallback_enabled = self._coerce_config_bool(os.getenv("AMON_PLAN_EXECUTE_LEGACY_SINGLE_FALLBACK", ""))
-        if not planner_enabled and legacy_fallback_enabled:
-            self.logger.info("planner flag 關閉且 legacy fallback 啟用，plan_execute 改走 single 相容路徑")
-            return self.run_single(prompt, project_path=project_path, model=model)
         if not planner_enabled:
-            self.logger.info("planner flag 關閉，但 plan_execute 預設仍使用 planner；如需舊行為請設定 AMON_PLAN_EXECUTE_LEGACY_SINGLE_FALLBACK=1")
+            self.logger.info("planner flag 關閉，plan_execute stream 改走 single_stream 相容路徑")
+            return self.run_single_stream(
+                prompt,
+                project_path=project_path,
+                model=model,
+                stream_handler=stream_handler,
+                run_id=run_id,
+                conversation_history=conversation_history,
+            )
 
         plan = self.generate_plan_docs(
             prompt,
@@ -1035,6 +1039,13 @@ class AmonCore:
         available_skills: list[dict[str, Any]] | None = None,
         stream_handler=None,
     ) -> str:
+        config = self.load_config(project_path)
+        planner_enabled = self._coerce_config_bool(config.get("amon", {}).get("planner", {}).get("enabled", True))
+        legacy_fallback_enabled = self._coerce_config_bool(os.getenv("AMON_PLAN_EXECUTE_LEGACY_SINGLE_FALLBACK", ""))
+        if not planner_enabled and legacy_fallback_enabled:
+            self.logger.info("planner flag 關閉且 legacy fallback 啟用，plan_execute 改走 single 相容路徑")
+            return self.run_single(prompt, project_path=project_path, model=model)
+
         _, response = self.run_plan_execute_stream(
             prompt,
             project_path=project_path,
