@@ -792,6 +792,7 @@ class AmonCore:
         run_id: str | None = None,
         conversation_history: list[dict[str, str]] | None = None,
         chat_id: str | None = None,
+        request_id: str | None = None,
     ) -> tuple[GraphRunResult, str]:
         if not project_path:
             raise ValueError("執行 stream 需要指定專案")
@@ -813,6 +814,8 @@ class AmonCore:
                 variables=variables,
                 stream_handler=stream_handler,
                 run_id=run_id,
+                chat_id=chat_id,
+                request_id=request_id,
             )
             response = self._load_graph_primary_output(result.run_dir)
             return result, response
@@ -826,6 +829,7 @@ class AmonCore:
         stream_handler=None,
         run_id: str | None = None,
         chat_id: str | None = None,
+        request_id: str | None = None,
     ) -> str:
         if not project_path:
             raise ValueError("執行 self_critique 需要指定專案")
@@ -861,7 +865,7 @@ class AmonCore:
                 },
                 mode="self_critique",
             )
-            self.run_graph(project_path=project_path, graph_path=graph_path, stream_handler=stream_handler, run_id=run_id, chat_id=chat_id)
+            self.run_graph(project_path=project_path, graph_path=graph_path, stream_handler=stream_handler, run_id=run_id, chat_id=chat_id, request_id=request_id)
             log_event(
                 {
                     "level": "INFO",
@@ -881,6 +885,7 @@ class AmonCore:
         stream_handler=None,
         run_id: str | None = None,
         chat_id: str | None = None,
+        request_id: str | None = None,
     ) -> str:
         if not project_path:
             raise ValueError("執行 team 需要指定專案")
@@ -918,7 +923,7 @@ class AmonCore:
                 },
                 mode="team",
             )
-            self.run_graph(project_path=project_path, graph_path=graph_path, stream_handler=stream_handler, run_id=run_id, chat_id=chat_id)
+            self.run_graph(project_path=project_path, graph_path=graph_path, stream_handler=stream_handler, run_id=run_id, chat_id=chat_id, request_id=request_id)
             tasks_dir = project_path / "tasks"
             tasks_dir.mkdir(parents=True, exist_ok=True)
             self._sync_team_tasks(project_path, tasks_dir, docs_dir)
@@ -1006,6 +1011,7 @@ class AmonCore:
         run_id: str | None = None,
         chat_id: str | None = None,
         conversation_history: list[dict[str, str]] | None = None,
+        request_id: str | None = None,
     ) -> tuple[GraphRunResult, str]:
         config = self.load_config(project_path)
         planner_enabled = self._coerce_config_bool(config.get("amon", {}).get("planner", {}).get("enabled", True))
@@ -1041,6 +1047,7 @@ class AmonCore:
                 run_id=run_id,
                 conversation_history=conversation_history,
                 chat_id=chat_id,
+                request_id=request_id,
             )
             setattr(result, "execution_route", "single_fallback")
             setattr(result, "planner_enabled", False)
@@ -1083,6 +1090,7 @@ class AmonCore:
             stream_handler=stream_handler,
             run_id=run_id,
             chat_id=chat_id,
+            request_id=request_id,
         )
         return result, self._load_graph_primary_output(result.run_dir)
 

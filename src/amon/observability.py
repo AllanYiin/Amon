@@ -6,7 +6,7 @@ import uuid
 from typing import Any
 
 VIRTUAL_PROJECT_ID = "__virtual__"
-CORRELATION_KEYS = ("project_id", "run_id", "node_id", "event_id", "request_id", "tool")
+CORRELATION_KEYS = ("project_id", "run_id", "chat_id", "session_id", "node_id", "event_id", "request_id", "tool")
 
 
 def normalize_project_id(project_id: str | None) -> str:
@@ -23,11 +23,15 @@ def ensure_correlation_fields(
     node_id: str | None = None,
     request_id: str | None = None,
     tool: str | None = None,
+    chat_id: str | None = None,
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     """Ensure correlation keys exist on payload."""
     merged = dict(payload)
     merged["project_id"] = normalize_project_id(str(merged.get("project_id") or project_id or ""))
     merged.setdefault("run_id", run_id)
+    merged.setdefault("chat_id", chat_id)
+    merged.setdefault("session_id", session_id)
     merged.setdefault("node_id", node_id)
     merged.setdefault("request_id", request_id)
     merged.setdefault("tool", tool)

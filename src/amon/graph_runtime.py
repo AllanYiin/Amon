@@ -838,9 +838,8 @@ class GraphRuntime:
             node_id=str(payload.get("node_id") or "") or None,
             request_id=self.request_id,
             tool=str(payload.get("tool") or "") or None,
+            chat_id=self.chat_id,
         )
-        if self.chat_id:
-            enriched.setdefault("chat_id", self.chat_id)
         append_jsonl(path, enriched)
 
     def _write_json(self, path: Path, payload: dict[str, Any]) -> None:

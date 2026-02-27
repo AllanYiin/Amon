@@ -1302,27 +1302,28 @@ class UIAsyncAPITests(unittest.TestCase):
                 logs_dir = data_dir / "logs"
                 logs_dir.mkdir(parents=True, exist_ok=True)
                 (logs_dir / "amon.log").write_text(
-                    "\n".join(
-                        [
-                            json.dumps({"ts": "2026-01-01T00:00:00+00:00", "level": "INFO", "component": "daemon", "project_id": project.project_id}, ensure_ascii=False),
-                            json.dumps({"ts": "2026-01-02T00:00:00+00:00", "level": "ERROR", "component": "runner", "project_id": project.project_id, "run_id": "run-001"}, ensure_ascii=False),
-                        ]
-                    )
+                    json.dumps({"ts": "2026-01-01T00:00:00+00:00", "level": "INFO", "component": "daemon", "project_id": project.project_id}, ensure_ascii=False)
                     + "\n",
                     encoding="utf-8",
                 )
-                (logs_dir / "billing.log").write_text(
-                    json.dumps({"ts": "2026-01-03T00:00:00+00:00", "level": "INFO", "project_id": project.project_id, "cost": 0.15}, ensure_ascii=False) + "\n",
+
+                project_logs_dir = project_path / ".amon" / "logs"
+                project_logs_dir.mkdir(parents=True, exist_ok=True)
+                (project_logs_dir / "app.jsonl").write_text(
+                    json.dumps({"ts": "2026-01-02T00:00:00+00:00", "level": "ERROR", "component": "runner", "project_id": project.project_id, "run_id": "run-001"}, ensure_ascii=False)
+                    + "\n",
                     encoding="utf-8",
                 )
-
-                run_dir = project_path / ".amon" / "runs" / "run-001"
-                run_dir.mkdir(parents=True, exist_ok=True)
-                (run_dir / "events.jsonl").write_text(
+                (project_logs_dir / "billing.jsonl").write_text(
+                    json.dumps({"ts": "2026-01-03T00:00:00+00:00", "level": "INFO", "project_id": project.project_id, "cost": 0.15}, ensure_ascii=False)
+                    + "\n",
+                    encoding="utf-8",
+                )
+                (project_logs_dir / "events.jsonl").write_text(
                     "\n".join(
                         [
-                            json.dumps({"ts": "2026-01-02T01:00:00+00:00", "event": "node_start", "node_id": "n1"}, ensure_ascii=False),
-                            json.dumps({"ts": "2026-01-02T01:01:00+00:00", "event": "job_triggered", "job_id": "job-1"}, ensure_ascii=False),
+                            json.dumps({"ts": "2026-01-02T01:00:00+00:00", "event": "run.start", "project_id": project.project_id, "run_id": "run-001"}, ensure_ascii=False),
+                            json.dumps({"ts": "2026-01-02T01:01:00+00:00", "event": "job_triggered", "project_id": project.project_id, "run_id": "run-001", "job_id": "job-1"}, ensure_ascii=False),
                         ]
                     )
                     + "\n",

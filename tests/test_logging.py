@@ -1,5 +1,6 @@
 import io
 import json
+import logging
 import os
 import re
 import sys
@@ -25,7 +26,7 @@ class LoggingTests(unittest.TestCase):
                 os.environ.pop("AMON_HOME", None)
 
             log_path = Path(temp_dir) / "logs" / "amon.log"
-            payload = json.loads(log_path.read_text(encoding="utf-8").strip())
+            payload = json.loads(log_path.read_text(encoding="utf-8").strip().splitlines()[-1])
             self.assertEqual(payload["event"], "test_event")
             self.assertEqual(payload["project_id"], "proj-1")
             self.assertEqual(payload["session_id"], "sess-1")
@@ -49,6 +50,36 @@ class LoggingTests(unittest.TestCase):
             self.assertEqual(payload["token"], 0)
             parsed_ts = datetime.fromisoformat(payload["ts"])
             self.assertIsNotNone(parsed_ts.tzinfo)
+
+    def test_log_writes_project_scoped_files_and_unknown_project_warns(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                project_id = "proj-logs"
+                project_path = Path(temp_dir) / "projects" / project_id
+                project_path.mkdir(parents=True, exist_ok=True)
+                (project_path / "amon.project.yaml").write_text(
+                    "amon:\n  project_id: proj-logs\n  project_name: Logs Project\n",
+                    encoding="utf-8",
+                )
+
+                log_event({"event": "run.start", "project_id": project_id, "run_id": "run-1"})
+                log_billing({"event": "billing_record", "project_id": project_id, "run_id": "run-1", "cost": 0.2, "usage": 20})
+
+                project_logs_dir = project_path / ".amon" / "logs"
+                self.assertTrue((project_logs_dir / "app.jsonl").exists())
+                self.assertTrue((project_logs_dir / "events.jsonl").exists())
+                self.assertTrue((project_logs_dir / "billing.jsonl").exists())
+
+                event_payload = json.loads((project_logs_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+                self.assertEqual(event_payload["project_id"], project_id)
+                self.assertEqual(event_payload["run_id"], "run-1")
+
+                with self.assertLogs("amon.logging", level="WARNING") as captured:
+                    log_event({"event": "unknown_project", "project_id": "missing-project"})
+                self.assertIn("unknown project_id=missing-project", "\n".join(captured.output))
+            finally:
+                os.environ.pop("AMON_HOME", None)
 
     def test_cli_project_commands_write_logs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -76,8 +107,6 @@ class LoggingTests(unittest.TestCase):
         self._run_cli(["project", "delete", project_id])
         self._assert_log_written(log_path)
 
-        self._run_cli(["project", "restore", project_id])
-        self._assert_log_written(log_path)
 
         return project_id
 

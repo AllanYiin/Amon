@@ -2020,6 +2020,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                             run_id=continued_run_id,
                             conversation_history=history,
                             chat_id=chat_id,
+                            request_id=request_id,
                         )
                     except TypeError as exc:
                         if "unexpected keyword argument" not in str(exc):
@@ -2041,6 +2042,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         stream_handler=stream_handler,
                         run_id=active_run_id,
                         chat_id=chat_id,
+                        request_id=request_id,
                     )
                 elif execution_mode == "team":
                     active_run_id = uuid.uuid4().hex
@@ -2051,6 +2053,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         stream_handler=stream_handler,
                         run_id=active_run_id,
                         chat_id=chat_id,
+                        request_id=request_id,
                     )
                 else:
                     active_run_id = uuid.uuid4().hex
@@ -2063,6 +2066,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         run_id=active_run_id,
                         chat_id=chat_id,
                         conversation_history=history,
+                        request_id=request_id,
                     )
                     active_run_id = plan_result.run_id
                     if getattr(plan_result, "execution_route", "") == "single_fallback":
@@ -2573,7 +2577,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         page = max(int(params.get("page", ["1"])[0] or "1"), 1)
         page_size = min(max(int(params.get("page_size", ["50"])[0] or "50"), 1), 200)
 
-        entries = self._read_project_run_events(project_id=project_id)
+        entries = self._read_events_source(project_id=project_id)
         filtered = []
         for item in entries:
             if project_id and str(item.get("project_id") or "") != project_id:
@@ -2610,10 +2614,25 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
 
     def _read_logs_source(self, source: str, *, project_id: str | None) -> list[dict[str, Any]]:
         if source == "amon":
-            return self._read_jsonl_records(self.core.data_dir / "logs" / "amon.log")
+            if project_id:
+                return self._read_jsonl_records(self._project_logs_path(project_id, "app.jsonl"), source="project")
+            return self._read_jsonl_records(self.core.data_dir / "logs" / "amon.log", source="global")
         if source == "billing":
-            return self._read_jsonl_records(self.core.data_dir / "logs" / "billing.log")
+            if project_id:
+                return self._read_jsonl_records(self._project_logs_path(project_id, "billing.jsonl"), source="project")
+            return self._read_jsonl_records(self.core.data_dir / "logs" / "billing.log", source="global")
         return self._read_project_run_events(project_id=project_id)
+
+    def _read_events_source(self, *, project_id: str | None) -> list[dict[str, Any]]:
+        if project_id:
+            return self._read_jsonl_records(self._project_logs_path(project_id, "events.jsonl"), source="project")
+        records = self._read_jsonl_records(self.core.data_dir / "logs" / "events.log", source="global")
+        records.extend(self._read_project_run_events(project_id=None))
+        return records
+
+    def _project_logs_path(self, project_id: str, filename: str) -> Path:
+        project_path = self.core.get_project_path(project_id)
+        return project_path / ".amon" / "logs" / filename
 
     def _read_project_run_events(self, *, project_id: str | None) -> list[dict[str, Any]]:
         records: list[dict[str, Any]] = []
@@ -2625,7 +2644,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 continue
             run_dirs = [path for path in runs_dir.iterdir() if path.is_dir()]
             for run_dir in run_dirs:
-                for payload in self._read_jsonl_records(run_dir / "events.jsonl"):
+                for payload in self._read_jsonl_records(run_dir / "events.jsonl", source="project"):
                     payload.setdefault("project_id", project.project_id)
                     payload.setdefault("run_id", run_dir.name)
                     payload.setdefault("source", "project")
@@ -2871,7 +2890,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             return
 
-    def _read_jsonl_records(self, path: Path) -> list[dict[str, Any]]:
+    def _read_jsonl_records(self, path: Path, *, source: str | None = None) -> list[dict[str, Any]]:
         if not path.exists():
             return []
         records: list[dict[str, Any]] = []
@@ -2885,6 +2904,8 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 except json.JSONDecodeError:
                     continue
                 if isinstance(payload, dict):
+                    if source:
+                        payload.setdefault("source", source)
                     records.append(payload)
         except OSError:
             return []
