@@ -2107,6 +2107,15 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     if route == "single_fallback":
                         done_payload["fallback_reason"] = str(getattr(plan_result, "fallback_reason", "planner disabled -> fallback single"))
                         done_payload["fallback_hint"] = str(getattr(plan_result, "fallback_hint", "請將 amon.planner.enabled 設為 true（可在設定頁切換）"))
+                if active_run_id and project_id:
+                    try:
+                        _, _, artifacts = self._resolve_run_artifacts(
+                            active_run_id,
+                            project_id=project_id,
+                        )
+                        done_payload["artifacts"] = [self._artifact_public_fields(item) for item in artifacts]
+                    except Exception:
+                        done_payload["artifacts"] = []
                 if streamed_token_count == 0 and response_text:
                     done_payload["final_text"] = response_text
                 send_event("done", done_payload, run_id=active_run_id)
@@ -3099,7 +3108,19 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             except (OSError, json.JSONDecodeError) as exc:
                 self.core.logger.warning("讀取 artifacts manifest 失敗：%s", exc)
                 manifest = {}
-            for entry in manifest.get("artifacts", []) if isinstance(manifest, dict) else []:
+            manifest_entries: list[dict[str, Any]] = []
+            if isinstance(manifest, dict):
+                for entry in manifest.get("artifacts", []):
+                    if isinstance(entry, dict):
+                        manifest_entries.append(entry)
+                file_entries = manifest.get("files", {})
+                if isinstance(file_entries, dict):
+                    for key, entry in file_entries.items():
+                        if isinstance(entry, dict):
+                            manifest_entries.append(entry)
+                        elif isinstance(key, str):
+                            manifest_entries.append({"path": key})
+            for entry in manifest_entries:
                 if not isinstance(entry, dict):
                     continue
                 relative_path = str(entry.get("path") or "").strip()

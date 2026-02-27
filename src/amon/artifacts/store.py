@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import mimetypes
 from pathlib import Path
 from typing import Any
 
@@ -84,13 +85,34 @@ def ingest_artifacts(response_text: str, project_path: Path, source: dict[str, A
             )
 
     errors = [result.error for result in results if result.error]
+    source_meta = source or {}
+    artifacts = []
+    for result in results:
+        if result.status not in {"created", "updated"} or not result.target_path:
+            continue
+        target_path = project_path / result.target_path
+        if not target_path.exists() or not target_path.is_file():
+            continue
+        mime_type, _ = mimetypes.guess_type(str(target_path))
+        stat = target_path.stat()
+        artifacts.append(
+            {
+                "path": result.target_path,
+                "mime": mime_type or "application/octet-stream",
+                "size": stat.st_size,
+                "createdAt": datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat().replace("+00:00", "Z"),
+                "run_id": str(source_meta.get("run_id") or ""),
+                "node_id": str(source_meta.get("node_id") or ""),
+            }
+        )
     return {
-        "source": source or {},
+        "source": source_meta,
         "total": len(blocks),
         "created": sum(1 for result in results if result.status == "created"),
         "updated": sum(1 for result in results if result.status == "updated"),
         "errors": len(errors),
         "error_messages": errors,
+        "artifacts": artifacts,
         "results": [
             {
                 "index": result.index,
