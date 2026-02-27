@@ -79,6 +79,16 @@ class ProjectRegistryTests(unittest.TestCase):
             target = next(item for item in listed if item.project_id == project.project_id)
             self.assertEqual(Path(target.path), new_path)
 
+    def test_core_get_project_path_falls_back_to_direct_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            core = AmonCore(data_dir=Path(tmp))
+            direct_path = core.projects_dir / "proj-tail-001"
+            direct_path.mkdir(parents=True, exist_ok=True)
+
+            resolved = core.get_project_path("proj-tail-001")
+
+            self.assertEqual(resolved, direct_path)
+
 
 
 if __name__ == "__main__":
