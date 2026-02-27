@@ -14,6 +14,14 @@ class TokenCountResult:
     available: bool
 
 
+def _estimate_tokens_from_text(text: str) -> int:
+    # Deterministic fallback: approximately 1 token per 4 chars, with a minimum cost for non-empty payload.
+    normalized = text.strip()
+    if not normalized:
+        return 0
+    return max(1, (len(normalized) + 3) // 4)
+
+
 def _get_provider_type(effective_config: dict[str, Any], provider_name: str) -> str:
     if not provider_name:
         return ""
@@ -46,10 +54,13 @@ def _openai_tiktoken_count(text: str, model: str) -> TokenCountResult:
         return TokenCountResult(tokens=None, method="openai_tiktoken_unavailable", available=False)
     module = importlib.import_module("tiktoken")
     try:
-        encoding = module.encoding_for_model(model or "gpt-4o-mini")
-    except KeyError:
-        encoding = module.get_encoding("cl100k_base")
-    return TokenCountResult(tokens=len(encoding.encode(text)), method="openai_tiktoken", available=True)
+        try:
+            encoding = module.encoding_for_model(model or "gpt-4o-mini")
+        except KeyError:
+            encoding = module.get_encoding("cl100k_base")
+        return TokenCountResult(tokens=len(encoding.encode(text)), method="openai_tiktoken", available=True)
+    except Exception:
+        return TokenCountResult(tokens=None, method="openai_tiktoken_unavailable", available=False)
 
 
 def count_non_dialogue_tokens(value: Any, *, effective_config: dict[str, Any]) -> TokenCountResult:
@@ -62,9 +73,11 @@ def count_non_dialogue_tokens(value: Any, *, effective_config: dict[str, Any]) -
     provider_model = _get_provider_model(effective_config, provider_name)
 
     if provider_type in {"openai", "openai_compatible", "openai-compatible"}:
-        return _openai_tiktoken_count(text, provider_model)
-
-    return TokenCountResult(tokens=None, method=f"{provider_type or 'unknown'}_tokenizer_unavailable", available=False)
+        result = _openai_tiktoken_count(text, provider_model)
+        if result.available and result.tokens is not None:
+            return result
+        return TokenCountResult(tokens=_estimate_tokens_from_text(text), method="estimated_chars_div4", available=False)
+    return TokenCountResult(tokens=_estimate_tokens_from_text(text), method=f"{provider_type or 'unknown'}_estimated_chars_div4", available=False)
 
 
 def extract_dialogue_input_tokens(recent_events: list[dict[str, Any]]) -> TokenCountResult:

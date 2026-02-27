@@ -49,8 +49,49 @@ class BillingSchemaContractTests(unittest.TestCase):
                 self.assertIsInstance(series, list)
                 self.assertGreaterEqual(len(series), 1)
                 first = series[0]
-                for key in ["date", "cost", "tokens", "usage", "calls"]:
+                for key in ["run_id", "cost", "tokens", "usage", "calls", "records"]:
                     self.assertIn(key, first)
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+
+    def test_billing_stats_filter_by_project_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                core.initialize()
+                project_a = core.create_project("billing-a")
+                project_b = core.create_project("billing-b")
+
+                usage_a = Path(project_a.path) / ".amon" / "billing" / "usage.jsonl"
+                usage_a.parent.mkdir(parents=True, exist_ok=True)
+                usage_a.write_text(
+                    "\n".join(
+                        [
+                            json.dumps({"ts": "2026-01-03T00:00:00+00:00", "project_id": project_a.project_id, "run_id": "run-a1", "provider": "openai", "model": "gpt-5.2", "cost": 1.0, "total_tokens": 100}, ensure_ascii=False),
+                            json.dumps({"ts": "2026-01-03T01:00:00+00:00", "project_id": project_a.project_id, "run_id": "run-a2", "provider": "openai", "model": "gpt-5.2", "cost": 2.0, "total_tokens": 200}, ensure_ascii=False),
+                        ]
+                    ) + "\n",
+                    encoding="utf-8",
+                )
+
+                usage_b = Path(project_b.path) / ".amon" / "billing" / "usage.jsonl"
+                usage_b.parent.mkdir(parents=True, exist_ok=True)
+                usage_b.write_text(
+                    json.dumps({"ts": "2026-01-03T02:00:00+00:00", "project_id": project_b.project_id, "run_id": "run-b1", "provider": "openai", "model": "gpt-5.2", "cost": 9.0, "total_tokens": 900}, ensure_ascii=False) + "\n",
+                    encoding="utf-8",
+                )
+
+                handler = object.__new__(AmonUIHandler)
+                handler.core = core
+
+                summary = handler._build_billing_summary(project_id=project_a.project_id)
+                series = handler._build_billing_series(project_id=project_a.project_id)
+
+                self.assertAlmostEqual(summary["project_total"]["cost"], 3.0)
+                self.assertEqual(summary["project_total"]["tokens"], 300)
+                self.assertEqual({item["run_id"] for item in series}, {"run-a1", "run-a2"})
             finally:
                 os.environ.pop("AMON_HOME", None)
 
