@@ -166,7 +166,7 @@
         source.close();
         this._scheduleReconnect();
       };
-      ["reasoning", "token", "notice", "plan", "result", "run", "run.update", "job", "job.update", "billing", "billing.update", "docs", "docs.update", "error", "done"].forEach((eventType) => {
+      ["reasoning", "token", "notice", "plan", "result", "run", "run.update", "node", "node.update", "job", "job.update", "billing", "billing.update", "docs", "docs.update", "error", "done"].forEach((eventType) => {
         source.addEventListener(eventType, (event) => {
           const payload = safeParseJson(event.data);
           const eventId = event.lastEventId || null;
