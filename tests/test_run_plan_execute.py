@@ -26,6 +26,21 @@ class RunPlanExecuteTests(unittest.TestCase):
             finally:
                 os.environ.pop("AMON_HOME", None)
 
+    def test_run_plan_execute_falls_back_when_flag_is_false_string(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore(data_dir=Path(temp_dir))
+                record = core.create_project("plan-exec-string-false")
+                project_path = core.get_project_path(record.project_id)
+                core.set_config_value("amon.planner.enabled", "false", project_path=project_path)
+                with patch.object(core, "run_single", return_value="single-path") as run_single:
+                    response = core.run_plan_execute("任務", project_path=project_path, project_id=record.project_id)
+                self.assertEqual(response, "single-path")
+                self.assertTrue(run_single.called)
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
     def test_run_plan_execute_compiles_and_runs_when_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir
