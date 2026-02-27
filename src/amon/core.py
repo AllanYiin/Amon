@@ -4442,6 +4442,7 @@ if __name__ == "__main__":
             self.logger.error("找不到 memory chunks 檔案：%s", chunks_path)
             raise FileNotFoundError(f"找不到 memory chunks 檔案：{chunks_path}")
         state = self._load_memory_ingest_state(memory_dir)
+        project_id = project_path.name
         pending_chunks = self._count_pending_chunks(chunks_path, state.get("stages", {}).get("normalized", {}))
         if pending_chunks > max_queue_size:
             emit_event(

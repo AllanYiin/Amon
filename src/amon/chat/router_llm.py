@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import time
 from dataclasses import asdict
 from typing import Any, Iterable, Protocol
 
@@ -14,6 +16,30 @@ from .execution_mode import decide_execution_mode
 from .router_types import RouterResult
 
 logger = logging.getLogger(__name__)
+
+_router_cooldown_until: float = 0.0
+_run_cooldown_until: float = 0.0
+
+
+def _router_cooldown_s() -> float:
+    raw = os.environ.get("AMON_ROUTER_LLM_COOLDOWN_S", "15")
+    try:
+        return max(float(raw), 0.0)
+    except ValueError:
+        return 15.0
+
+
+def _cooldown_active(until: float) -> bool:
+    return until > time.monotonic()
+
+
+def _arm_cooldown(kind: str) -> None:
+    global _router_cooldown_until, _run_cooldown_until
+    until = time.monotonic() + _router_cooldown_s()
+    if kind == "router":
+        _router_cooldown_until = until
+    else:
+        _run_cooldown_until = until
 
 class LLMClient(Protocol):
     def generate_stream(self, messages: list[dict[str, str]], model: str | None = None) -> Iterable[str]:
@@ -28,11 +54,16 @@ def route_with_llm(
     llm_client: LLMClient | None = None,
     model: str | None = None,
 ) -> RouterResult:
+    global _router_cooldown_until
     if message is None:
         message = ""
 
+    use_default_client = llm_client is None
+    if use_default_client and _cooldown_active(_router_cooldown_until):
+        return RouterResult(type="chat_response", confidence=0.0, reason="路由冷卻中，已切換安全模式")
+
     try:
-        if llm_client is None:
+        if use_default_client:
             llm_client, model = _build_default_client(project_id, model)
         payload = {
             "message": message,
@@ -53,6 +84,8 @@ def route_with_llm(
         output_text = _collect_stream(llm_client, messages, model)
         return _parse_router_result(output_text)
     except (ProviderError, OSError, ValueError) as exc:
+        if use_default_client:
+            _arm_cooldown("router")
         logger.warning("LLM router 失敗，改用安全模式：%s", exc)
     except Exception as exc:  # noqa: BLE001
         logger.error("LLM router 未預期錯誤：%s", exc, exc_info=True)
@@ -82,12 +115,16 @@ def should_continue_run_with_llm(
     llm_client: LLMClient | None = None,
     model: str | None = None,
 ) -> bool:
+    global _run_cooldown_until
     normalized_user = " ".join((user_message or "").split())
     normalized_assistant = " ".join((last_assistant_text or "").split())
     if not normalized_user or not normalized_assistant:
         return False
+    use_default_client = llm_client is None
+    if use_default_client and _cooldown_active(_run_cooldown_until):
+        return False
     try:
-        if llm_client is None:
+        if use_default_client:
             llm_client, model = _build_default_client(project_id, model)
         payload = {
             "assistant_previous_message": normalized_assistant,
@@ -104,6 +141,8 @@ def should_continue_run_with_llm(
         output_text = _collect_stream(llm_client, messages, model)
         return _parse_run_continuation(output_text)
     except (ProviderError, OSError, ValueError) as exc:
+        if use_default_client:
+            _arm_cooldown("run")
         logger.warning("LLM run 延續判斷失敗，改用預設 false：%s", exc)
     except Exception as exc:  # noqa: BLE001
         logger.error("LLM run 延續判斷未預期錯誤：%s", exc, exc_info=True)
