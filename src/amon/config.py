@@ -213,4 +213,20 @@ class ConfigLoader:
 
     def _project_config_path(self, project_id: str) -> Path:
         validate_project_id(project_id)
-        return self.data_dir / "projects" / project_id / DEFAULT_CONFIG["projects"]["config_name"]
+        config_name = DEFAULT_CONFIG["projects"]["config_name"]
+        direct_path = self.data_dir / "projects" / project_id / config_name
+        if direct_path.exists():
+            return direct_path
+        projects_dir = self.data_dir / "projects"
+        if projects_dir.exists():
+            for candidate in projects_dir.iterdir():
+                if not candidate.is_dir():
+                    continue
+                config_path = candidate / config_name
+                if not config_path.exists():
+                    continue
+                config = read_yaml(config_path)
+                amon_cfg = config.get("amon", {}) if isinstance(config, dict) else {}
+                if str(amon_cfg.get("project_id") or "").strip() == project_id:
+                    return config_path
+        return direct_path

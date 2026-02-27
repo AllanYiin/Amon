@@ -12,6 +12,7 @@ from typing import Any
 
 from amon.logging import log_event
 from amon.fs.atomic import append_jsonl
+from amon.config import read_yaml
 from amon.fs.safety import validate_identifier, validate_project_id
 
 
@@ -99,7 +100,7 @@ def append_event(chat_id: str, event: dict[str, Any]) -> None:
 def load_latest_chat_id(project_id: str) -> str | None:
     """Return the most recently updated chat session id for a project."""
     validate_project_id(project_id)
-    sessions_dir = _resolve_data_dir() / "projects" / project_id / "sessions" / "chat"
+    sessions_dir = _resolve_project_path(project_id) / "sessions" / "chat"
     if not sessions_dir.exists():
         return None
     try:
@@ -298,7 +299,28 @@ def _iter_recent_session_payloads(session_path: Path, *, max_lines: int, max_byt
     return payloads
 
 def _chat_session_path(project_id: str, chat_id: str) -> Path:
-    return _resolve_data_dir() / "projects" / project_id / "sessions" / "chat" / f"{chat_id}.jsonl"
+    return _resolve_project_path(project_id) / "sessions" / "chat" / f"{chat_id}.jsonl"
+
+
+def _resolve_project_path(project_id: str) -> Path:
+    data_dir = _resolve_data_dir()
+    projects_dir = data_dir / "projects"
+    direct_path = projects_dir / project_id
+    if direct_path.exists():
+        return direct_path
+    config_name = "amon.project.yaml"
+    if projects_dir.exists():
+        for candidate in projects_dir.iterdir():
+            if not candidate.is_dir():
+                continue
+            config_path = candidate / config_name
+            if not config_path.exists():
+                continue
+            config = read_yaml(config_path)
+            amon_cfg = config.get("amon", {}) if isinstance(config, dict) else {}
+            if str(amon_cfg.get("project_id") or "").strip() == project_id:
+                return candidate
+    return direct_path
 
 
 def _resolve_data_dir() -> Path:

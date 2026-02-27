@@ -561,6 +561,34 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if parsed.path.startswith("/v1/projects/") and parsed.path.endswith("/artifacts/file"):
+            project_id = self._get_path_segment(parsed.path, 2)
+            if not project_id:
+                self._send_json(400, {"message": "缺少 project_id"})
+                return
+            params = parse_qs(parsed.query)
+            raw_path = params.get("path", [""])[0].strip()
+            if not raw_path:
+                self._send_json(400, {"message": "請提供 path"})
+                return
+            try:
+                project_path = self.core.get_project_path(project_id)
+                resolved = self._resolve_allowed_project_path(
+                    project_path,
+                    raw_path,
+                    [project_path / "docs", project_path / "audits", project_path / "workspace"],
+                )
+            except FileNotFoundError as exc:
+                self._handle_error(exc, status=404)
+                return
+            except ValueError as exc:
+                self._send_json(400, {"message": str(exc)})
+                return
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_artifact_file(resolved)
+            return
         if parsed.path.startswith("/api/runs/") and parsed.path.endswith("/artifacts"):
             run_id = self._get_path_segment(parsed.path, 2)
             if not run_id:
@@ -2036,11 +2064,20 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             error_text = str(exc)
             is_timeout = "timeout" in error_text.lower()
             if chat_id and project_id:
-                assistant_summary = "執行過程逾時，系統已停止等待；若稍後有完整輸出，將於下一次載入聊天紀錄時補上。" if is_timeout else f"執行失敗：{error_text}"
+                assistant_summary = "回覆生成較久，系統先回報目前狀態；你可以稍後重試或縮小任務範圍。" if is_timeout else f"執行失敗：{error_text}"
                 append_event(chat_id, {"type": "assistant", "text": assistant_summary, "project_id": project_id})
             if is_timeout:
-                send_event("notice", {"text": "Amon：執行較久，先回報目前狀態；你可以稍後重試或縮小任務範圍。", "kind": "warning"})
-                send_event("done", {"status": "timeout", "chat_id": chat_id, "project_id": project_id})
+                warning_kind = "inactivity_timeout" if "inactivity" in error_text.lower() else "soft_timeout"
+                send_event(
+                    "warning",
+                    {
+                        "message": "回覆生成較久，仍在處理中；你可以稍後重試，或把任務拆小一點。",
+                        "kind": warning_kind,
+                        "chat_id": chat_id,
+                        "project_id": project_id,
+                    },
+                )
+                send_event("done", {"status": "warning", "chat_id": chat_id, "project_id": project_id, "warning_kind": warning_kind})
             else:
                 send_event("error", {"message": error_text, "chat_id": chat_id, "project_id": project_id})
                 send_event("done", {"status": "failed", "chat_id": chat_id, "project_id": project_id})
@@ -2948,6 +2985,27 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 rel = str(file_path.relative_to(project_path))
                 candidates.setdefault(rel, file_path)
 
+        manifest_path = project_path / ".amon" / "artifacts" / "manifest.json"
+        if manifest_path.exists() and manifest_path.is_file():
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                self.core.logger.warning("讀取 artifacts manifest 失敗：%s", exc)
+                manifest = {}
+            for entry in manifest.get("artifacts", []) if isinstance(manifest, dict) else []:
+                if not isinstance(entry, dict):
+                    continue
+                relative_path = str(entry.get("path") or "").strip()
+                if not relative_path:
+                    continue
+                if not relative_path.startswith(("workspace/", "docs/", "audits/")):
+                    continue
+                try:
+                    resolved = self._resolve_allowed_project_path(project_path, relative_path, allowed_dirs)
+                except (FileNotFoundError, ValueError):
+                    continue
+                candidates.setdefault(relative_path, resolved)
+
         artifacts: list[dict[str, Any]] = []
         encoded_project_id = quote(project_id, safe="")
         for relative_path, resolved_path in sorted(candidates.items()):
@@ -2984,6 +3042,23 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         if not candidate.exists() or not candidate.is_file():
             raise FileNotFoundError("找不到 artifact")
         return candidate
+
+    def _send_artifact_file(self, resolved_path: Path) -> None:
+        body = resolved_path.read_bytes()
+        filename = resolved_path.name
+        content_type = mimetypes.guess_type(str(resolved_path))[0] or "application/octet-stream"
+        is_html = content_type.startswith("text/html") or filename.lower().endswith(".html")
+        if is_html:
+            content_type = "text/html; charset=utf-8"
+        disposition = "inline" if is_html else "attachment"
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Disposition", f'{disposition}; filename="{filename}"')
+        if is_html:
+            self.send_header("X-Frame-Options", "SAMEORIGIN")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _artifact_public_fields(self, item: dict[str, Any]) -> dict[str, Any]:
         return {

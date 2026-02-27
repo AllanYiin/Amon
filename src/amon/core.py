@@ -98,7 +98,11 @@ class AmonCore:
         self.logger = setup_logger("amon", self.logs_dir)
         # Backward-compatible registry handle for UI/legacy callers.
         self.tool_registry = build_registry(Path.cwd())
-        self.project_registry = ProjectRegistry(self.projects_dir)
+        self.project_registry = ProjectRegistry(
+            self.projects_dir,
+            slug_builder=self._generate_project_slug,
+            logger=self.logger,
+        )
 
     def ensure_base_structure(self) -> None:
         for path in [
@@ -287,14 +291,17 @@ class AmonCore:
     def create_project(self, name: str) -> ProjectRecord:
         self.ensure_base_structure()
         project_id = self._generate_project_id(name)
-        project_path = self.projects_dir / project_id
+        existing_dir_names = {path.name for path in self.projects_dir.iterdir() if path.is_dir()}
+        project_slug = self._generate_project_slug(name, existing_dir_names)
+        project_path = self.projects_dir / project_slug
 
         if project_path.exists():
-            raise FileExistsError(f"專案已存在：{project_id}")
+            raise FileExistsError(f"專案已存在：{project_slug}")
 
         try:
             self._create_project_structure(project_path)
-            self._write_project_config(project_path, name, project_id)
+            self._write_project_config(project_path, name, project_id, project_slug)
+            self._ensure_project_id_alias(project_path, project_id)
         except OSError as exc:
             self.logger.error("建立專案資料夾失敗：%s", exc, exc_info=True)
             raise
@@ -459,10 +466,14 @@ class AmonCore:
             if record.project_id == project_id:
                 if record.status != "deleted" or not record.trash_path:
                     raise ValueError("專案不在回收桶")
-                original_path = self.projects_dir / project_id
+                original_path = Path(record.path)
+                alias_path = self.projects_dir / project_id
+                if alias_path.is_symlink():
+                    alias_path.unlink()
                 if original_path.exists():
                     raise FileExistsError("專案路徑已存在，無法還原")
                 self._safe_move(Path(record.trash_path), original_path, "還原專案")
+                self._ensure_project_id_alias(original_path, project_id)
                 record.status = "active"
                 record.trash_path = None
                 record.path = str(original_path)
@@ -957,7 +968,7 @@ class AmonCore:
             {
                 "level": "INFO",
                 "event": "plan_generated",
-                "project_id": project_id or project_path.name,
+                "project_id": project_id or self.resolve_project_identity(project_path)[0],
                 "payload": payload,
             }
         )
@@ -965,7 +976,7 @@ class AmonCore:
             {
                 "type": "plan_generated",
                 "scope": "planning",
-                "project_id": project_id or project_path.name,
+                "project_id": project_id or self.resolve_project_identity(project_path)[0],
                 "actor": "system",
                 "payload": payload,
                 "risk": "low",
@@ -1015,7 +1026,7 @@ class AmonCore:
             {
                 "type": "plan_compiled",
                 "scope": "planning",
-                "project_id": project_id or project_path.name,
+                "project_id": project_id or self.resolve_project_identity(project_path)[0],
                 "actor": "system",
                 "payload": {
                     "node_count": len(exec_graph.get("nodes", [])),
@@ -1140,7 +1151,7 @@ class AmonCore:
             project_path / "sessions",
             project_path / "logs",
         ]
-        base_prefix = project_path.name
+        base_prefix = project_id
         try:
             with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
                 for path in payload_paths:
@@ -2426,6 +2437,9 @@ class AmonCore:
         try:
             return self.project_registry.get_path(project_id)
         except KeyError:
+            for record in self._load_records():
+                if record.project_id == project_id:
+                    return Path(record.path)
             record = self.get_project(project_id)
             return Path(record.path)
 
@@ -2852,7 +2866,7 @@ class AmonCore:
                 "event": "tool_run",
                 "tool_name": tool_name,
                 "scope": scope,
-                "project_id": project_path.name if project_path else None,
+                "project_id": self.resolve_project_identity(project_path)[0] if project_path else None,
             }
         )
         return output
@@ -2895,7 +2909,7 @@ class AmonCore:
         tool_dir, scope, project_path = self._resolve_tool_dir(tool_name, project_id)
         spec = load_tool_spec(tool_dir)
         registry_path = self.cache_dir / "tool_registry.json"
-        entry = format_registry_entry(spec, tool_dir, scope, project_path.name if project_path else None)
+        entry = format_registry_entry(spec, tool_dir, scope, self.resolve_project_identity(project_path)[0] if project_path else None)
         try:
             data = json.loads(registry_path.read_text(encoding="utf-8")) if registry_path.exists() else {"tools": []}
         except (OSError, json.JSONDecodeError) as exc:
@@ -2915,7 +2929,7 @@ class AmonCore:
                 "event": "tool_register",
                 "tool_name": tool_name,
                 "scope": scope,
-                "project_id": project_path.name if project_path else None,
+                "project_id": self.resolve_project_identity(project_path)[0] if project_path else None,
             }
         )
         return entry
@@ -2988,7 +3002,7 @@ class AmonCore:
             "version": manifest.version,
             "path": str(dest),
             "scope": "project" if project_path else "global",
-            "project_id": project_path.name if project_path else None,
+            "project_id": self.resolve_project_identity(project_path)[0] if project_path else None,
             "sha256": compute_tool_sha256(dest),
             "risk": manifest.risk,
             "default_permission": manifest.default_permission,
@@ -3022,7 +3036,7 @@ class AmonCore:
             raise
         matched = None
         for item in data.get("tools", []):
-            if item.get("name") == name and item.get("scope") == scope and item.get("project_id") == (project_path.name if project_path else None):
+            if item.get("name") == name and item.get("scope") == scope and item.get("project_id") == (self.resolve_project_identity(project_path)[0] if project_path else None):
                 item["status"] = status
                 item["revoked_at"] = self._now() if status == "disabled" else None
                 matched = item
@@ -3350,6 +3364,72 @@ if __name__ == "__main__":
         short_id = uuid.uuid4().hex[:6]
         return f"project-{short_id}"
 
+    def _generate_project_slug(self, project_name: str, existing_dir_names: set[str]) -> str:
+        base_slug = self._llm_generate_project_slug(project_name) or self._fallback_project_slug(project_name)
+        candidate = base_slug
+        suffix = uuid.uuid4().hex[:3]
+        if candidate in existing_dir_names:
+            if self._contains_cjk(candidate):
+                candidate = f"{candidate[:6]}·{suffix}"[:10]
+            else:
+                words = candidate.split("-")
+                trimmed = "-".join(words[:4]) if words else "project"
+                candidate = f"{trimmed}-{suffix}"
+        return candidate or f"project-{suffix}"
+
+    def _llm_generate_project_slug(self, project_name: str) -> str:
+        cleaned_name = " ".join(project_name.split()).strip()
+        if not cleaned_name:
+            return ""
+        try:
+            config = self.load_config()
+            provider_name = config.get("amon", {}).get("provider", "openai")
+            provider_cfg = config.get("providers", {}).get(provider_name, {})
+            selected_model = provider_cfg.get("default_model") or provider_cfg.get("model")
+            provider = build_provider(provider_cfg, model=selected_model)
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是專案命名助手。請輸出 JSON：{\"slug\":\"...\"}。"
+                        "中文 slug 必須 <=10 字；英文 <=5 words。"
+                        "必須語意濃縮，不可直接截斷。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps({"project_name": cleaned_name}, ensure_ascii=False),
+                },
+            ]
+            chunks = []
+            for token in provider.generate_stream(messages, model=selected_model):
+                chunks.append(token)
+            payload = json.loads("".join(chunks).strip().strip("`"))
+            if not isinstance(payload, dict):
+                return ""
+            return self._sanitize_project_slug(str(payload.get("slug") or ""))
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning("LLM 產生 project slug 失敗：%s", exc)
+            return ""
+
+    def _fallback_project_slug(self, project_name: str) -> str:
+        cleaned = self._sanitize_project_slug(project_name)
+        if self._contains_cjk(cleaned):
+            return cleaned[:10] or "專案"
+        words = [word for word in re.split(r"[^A-Za-z0-9]+", cleaned) if word]
+        return "-".join(words[:5]).lower() or "project"
+
+    def _sanitize_project_slug(self, slug: str) -> str:
+        cleaned = "".join(ch for ch in slug.strip() if ch.isalnum() or ch in {"-", "_", "·", " "})
+        cleaned = "-".join(part for part in cleaned.split() if part)
+        if self._contains_cjk(cleaned):
+            return cleaned.replace("-", "")[:10]
+        return cleaned.lower()
+
+    @staticmethod
+    def _contains_cjk(text: str) -> bool:
+        return any("一" <= char <= "鿿" for char in text)
+
     def fs_delete(self, target: str | Path) -> str | None:
         self.ensure_base_structure()
         allowed_paths = [self.projects_dir]
@@ -3409,6 +3489,17 @@ if __name__ == "__main__":
         )
         return restored_path
 
+
+    def _ensure_project_id_alias(self, project_path: Path, project_id: str) -> None:
+        alias_path = self.projects_dir / project_id
+        if alias_path == project_path or alias_path.exists():
+            return
+        try:
+            alias_path.symlink_to(project_path, target_is_directory=True)
+        except OSError:
+            # Windows 或受限環境可能無法建立 symlink；忽略相容別名。
+            return
+
     def _create_project_structure(self, project_path: Path) -> None:
         (project_path / "workspace").mkdir(parents=True, exist_ok=True)
         (project_path / "docs").mkdir(parents=True, exist_ok=True)
@@ -3425,12 +3516,13 @@ if __name__ == "__main__":
         if not tasks_path.exists():
             self._atomic_write_text(tasks_path, json.dumps({"tasks": []}, ensure_ascii=False, indent=2))
 
-    def _write_project_config(self, project_path: Path, name: str, project_id: str) -> None:
+    def _write_project_config(self, project_path: Path, name: str, project_id: str, project_slug: str | None = None) -> None:
         config_path = project_path / "amon.project.yaml"
         config_data = {
             "amon": {
                 "project_id": project_id,
                 "project_name": name,
+                "project_slug": project_slug or project_path.name,
                 "mode": "auto",
             },
             "tools": {"allowed_paths": ["workspace"]},
@@ -4448,7 +4540,7 @@ if __name__ == "__main__":
                     text = str(event.get("content") or "")
                     chunk = {
                         "chunk_id": uuid.uuid4().hex,
-                        "project_id": project_id or project_path.name,
+                        "project_id": project_id or self.resolve_project_identity(project_path)[0],
                         "session_id": session_id,
                         "source_path": source_rel_path,
                         "text": text,
@@ -4484,7 +4576,7 @@ if __name__ == "__main__":
             self.logger.error("找不到 memory chunks 檔案：%s", chunks_path)
             raise FileNotFoundError(f"找不到 memory chunks 檔案：{chunks_path}")
         state = self._load_memory_ingest_state(memory_dir)
-        project_id = project_path.name
+        project_id = self.resolve_project_identity(project_path)[0] or project_path.name
         pending_chunks = self._count_pending_chunks(chunks_path, state.get("stages", {}).get("normalized", {}))
         if pending_chunks > max_queue_size:
             emit_event(

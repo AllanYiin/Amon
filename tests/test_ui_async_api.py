@@ -522,6 +522,74 @@ class UIAsyncAPITests(unittest.TestCase):
                     server.server_close()
                 os.environ.pop("AMON_HOME", None)
 
+    def test_chat_stream_timeout_emits_warning_not_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("chat-timeout-warning")
+
+                def fake_run_single_stream(*_args, **_kwargs):
+                    raise RuntimeError("node inactivity timeout")
+
+                handler = partial(
+                    AmonUIHandler,
+                    directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"),
+                    core=core,
+                )
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                with patch("amon.ui_server.decide_execution_mode", return_value="single"), patch.object(
+                    core,
+                    "run_single_stream",
+                    side_effect=fake_run_single_stream,
+                ):
+                    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                    conn.request(
+                        "GET",
+                        f"/v1/chat/stream?project_id={quote(project.project_id)}&message={quote('請幫我處理長任務')}"
+                    )
+                    resp = conn.getresponse()
+                    self.assertEqual(resp.status, 200)
+
+                    event_type = ""
+                    warning_payload = None
+                    error_payload = None
+                    done_payload = None
+                    for _ in range(200):
+                        raw_line = resp.fp.readline()
+                        if not raw_line:
+                            break
+                        decoded = raw_line.decode("utf-8", errors="ignore").strip()
+                        if decoded.startswith("event: "):
+                            event_type = decoded.split(":", 1)[1].strip()
+                        elif decoded.startswith("data: "):
+                            payload = json.loads(decoded.split(": ", 1)[1])
+                            if event_type == "warning":
+                                warning_payload = payload
+                            elif event_type == "error":
+                                error_payload = payload
+                            elif event_type == "done":
+                                done_payload = payload
+                                break
+
+                    self.assertIsNotNone(warning_payload)
+                    self.assertIsNone(error_payload)
+                    self.assertIsNotNone(done_payload)
+                    self.assertEqual(done_payload.get("status"), "warning")
+                    self.assertEqual(done_payload.get("warning_kind"), "inactivity_timeout")
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
     def test_run_request_is_non_blocking_and_cancelable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"
@@ -1495,6 +1563,83 @@ class UIAsyncAPITests(unittest.TestCase):
                 self.assertEqual(rendered.getheader("X-Frame-Options"), "SAMEORIGIN")
                 self.assertEqual(rendered.getheader("Content-Type"), "text/html; charset=utf-8")
                 self.assertIn("preview ok", rendered.read().decode("utf-8"))
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
+    def test_run_artifacts_api_includes_workspace_html_from_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("artifacts-manifest-workspace-html")
+                project_path = Path(project.path)
+                run_id = "run_art_manifest_001"
+                run_dir = project_path / ".amon" / "runs" / run_id
+                run_dir.mkdir(parents=True, exist_ok=True)
+                (run_dir / "events.jsonl").write_text("", encoding="utf-8")
+                html_path = project_path / "workspace" / "index.html"
+                html_path.write_text("<html><body><h1>manifest preview</h1></body></html>", encoding="utf-8")
+                manifest_path = project_path / ".amon" / "artifacts" / "manifest.json"
+                manifest_path.parent.mkdir(parents=True, exist_ok=True)
+                manifest_path.write_text(
+                    json.dumps({"artifacts": [{"path": "workspace/index.html"}]}, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                conn.request("GET", f"/v1/runs/{run_id}/artifacts?project_id={quote(project.project_id)}")
+                response = conn.getresponse()
+                payload = json.loads(response.read().decode("utf-8"))
+                self.assertEqual(response.status, 200)
+                self.assertTrue(any(item.get("path") == "workspace/index.html" for item in payload.get("artifacts", [])))
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
+    def test_project_artifacts_file_api_supports_inline_html(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("project-artifact-file-api")
+                project_path = Path(project.path)
+                html_path = project_path / "workspace" / "index.html"
+                html_path.write_text("<html><body><h1>project endpoint preview</h1></body></html>", encoding="utf-8")
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                encoded_project = quote(project.project_id)
+                encoded_path = quote("workspace/index.html", safe="")
+                conn.request("GET", f"/v1/projects/{encoded_project}/artifacts/file?path={encoded_path}")
+                response = conn.getresponse()
+                body = response.read().decode("utf-8")
+                self.assertEqual(response.status, 200)
+                self.assertEqual(response.getheader("Content-Type"), "text/html; charset=utf-8")
+                self.assertIn("inline", response.getheader("Content-Disposition", ""))
+                self.assertEqual(response.getheader("X-Frame-Options"), "SAMEORIGIN")
+                self.assertIn("project endpoint preview", body)
             finally:
                 if server:
                     server.shutdown()

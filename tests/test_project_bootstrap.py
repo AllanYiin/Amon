@@ -134,6 +134,7 @@ class ProjectBootstrapTests(unittest.TestCase):
                 project = core.create_project("開發一個俄羅斯方塊")
 
                 self.assertRegex(project.project_id, r"^project-[0-9a-f]{6}$")
+                self.assertNotEqual(Path(project.path).name, project.project_id)
             finally:
                 os.environ.pop("AMON_HOME", None)
 
