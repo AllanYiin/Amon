@@ -2471,6 +2471,9 @@ class AmonCore:
         try:
             return self.project_registry.get_path(project_id)
         except KeyError:
+            direct_path = self.projects_dir / project_id
+            if direct_path.exists():
+                return direct_path
             for record in self._load_records():
                 if record.project_id == project_id:
                     return Path(record.path)
