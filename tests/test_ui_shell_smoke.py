@@ -20,6 +20,9 @@ class UIShellSmokeTests(unittest.TestCase):
             'id="inspector-execution"',
             'id="inspector-thinking"',
             'id="inspector-artifacts"',
+            'id="artifacts-inline-preview"',
+            'id="artifacts-inline-preview-frame"',
+            'id="artifacts-list-details"',
             'script type="module" src="/static/js/app.js"',
         ]:
             self.assertIn(token, html)

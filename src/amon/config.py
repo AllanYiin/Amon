@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -213,4 +214,33 @@ class ConfigLoader:
 
     def _project_config_path(self, project_id: str) -> Path:
         validate_project_id(project_id)
-        return self.data_dir / "projects" / project_id / DEFAULT_CONFIG["projects"]["config_name"]
+        projects_dir = self.data_dir / "projects"
+        direct = projects_dir / project_id / DEFAULT_CONFIG["projects"]["config_name"]
+        if direct.exists():
+            return direct
+        index_path = self.data_dir / "cache" / "projects_index.json"
+        if index_path.exists():
+            try:
+                payload = json.loads(index_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                payload = {}
+            for item in payload.get("projects", []) if isinstance(payload, dict) else []:
+                if str(item.get("project_id") or "") != project_id:
+                    continue
+                mapped_path = Path(str(item.get("path") or ""))
+                mapped_config = mapped_path / DEFAULT_CONFIG["projects"]["config_name"]
+                if mapped_config.exists():
+                    return mapped_config
+        if projects_dir.exists():
+            for child in projects_dir.iterdir():
+                if not child.is_dir():
+                    continue
+                config_path = child / DEFAULT_CONFIG["projects"]["config_name"]
+                if not config_path.exists():
+                    continue
+                payload = read_yaml(config_path)
+                amon_payload = payload.get("amon") if isinstance(payload, dict) else None
+                candidate_id = str((amon_payload or {}).get("project_id") or "").strip()
+                if candidate_id == project_id:
+                    return config_path
+        return direct

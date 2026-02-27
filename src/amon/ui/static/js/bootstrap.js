@@ -1727,6 +1727,23 @@ appStore.patch({ bootstrappedAt: Date.now() });
         return /\.(md|markdown)$/i.test(name);
       }
 
+      function isWorkspaceHtmlArtifact(artifact = {}) {
+        const path = String(artifact.path || "").toLowerCase();
+        return path.startsWith("workspace/") && path.endsWith(".html");
+      }
+
+      function pickArtifactsEntrypoint(artifacts = []) {
+        const exact = artifacts.find((artifact) => String(artifact.path || "").toLowerCase() === "workspace/index.html");
+        if (exact) return exact;
+        return artifacts.find((artifact) => isWorkspaceHtmlArtifact(artifact)) || null;
+      }
+
+      function withPreviewRefreshToken(url = "") {
+        if (!url) return "";
+        const separator = url.includes("?") ? "&" : "?";
+        return `${url}${separator}_preview_ts=${Date.now()}`;
+      }
+
       function isConversationArtifact(artifact = {}) {
         const path = String(artifact.path || "").toLowerCase();
         const name = String(artifact.name || "").toLowerCase();
@@ -1754,19 +1771,48 @@ appStore.patch({ bootstrappedAt: Date.now() });
 
       function renderArtifactsInspector(artifacts = []) {
         elements.artifactsInspectorList.innerHTML = "";
+        const entrypoint = pickArtifactsEntrypoint(artifacts);
+        const compactItems = entrypoint ? artifacts.filter((artifact) => artifact !== entrypoint) : artifacts;
+
         if (!state.graphRunId) {
           elements.artifactsOverview.textContent = "尚未偵測到 Run，請先執行流程。";
           elements.artifactsEmpty.hidden = false;
+          elements.artifactsInlinePreview.hidden = true;
+          elements.artifactsListDetails.open = false;
           return;
         }
         elements.artifactsOverview.textContent = `Run ${shortenId(state.graphRunId)} 共 ${artifacts.length} 份產出物。`;
         if (!artifacts.length) {
           elements.artifactsEmpty.hidden = false;
+          elements.artifactsInlinePreview.hidden = true;
+          elements.artifactsListDetails.open = false;
           return;
         }
         elements.artifactsEmpty.hidden = true;
 
-        artifacts.forEach((artifact) => {
+        if (entrypoint) {
+          elements.artifactsInlinePreview.hidden = false;
+          elements.artifactsInlinePreviewTitle.textContent = entrypoint.path || entrypoint.name || "workspace/index.html";
+          elements.artifactsInlinePreviewFrame.src = withPreviewRefreshToken(entrypoint.url || "");
+          elements.artifactsPreviewOpenTab.onclick = () => window.open(entrypoint.url, "_blank", "noopener");
+          elements.artifactsPreviewRefresh.onclick = () => {
+            elements.artifactsInlinePreviewFrame.src = withPreviewRefreshToken(entrypoint.url || "");
+          };
+        } else {
+          elements.artifactsInlinePreview.hidden = true;
+          elements.artifactsInlinePreviewFrame.removeAttribute("src");
+          elements.artifactsPreviewOpenTab.onclick = null;
+          elements.artifactsPreviewRefresh.onclick = null;
+        }
+
+        elements.artifactsListDetails.open = !entrypoint;
+        if (!compactItems.length) {
+          elements.artifactsListDetails.hidden = true;
+          return;
+        }
+        elements.artifactsListDetails.hidden = false;
+
+        compactItems.forEach((artifact) => {
           const card = document.createElement("article");
           card.className = "artifact-inspector-card";
 
@@ -1774,7 +1820,9 @@ appStore.patch({ bootstrappedAt: Date.now() });
           const title = document.createElement("strong");
           title.textContent = artifact.name || artifact.path || "(未命名)";
           const meta = document.createElement("span");
-          meta.textContent = `${formatFileSize(artifact.size)} · ${artifact.mime || "未知類型"}`;
+          const parts = [formatFileSize(artifact.size)];
+          if (artifact.created_at) parts.push(artifact.created_at);
+          meta.textContent = parts.join(" · ");
           header.append(title, meta);
           card.appendChild(header);
 
@@ -1783,22 +1831,13 @@ appStore.patch({ bootstrappedAt: Date.now() });
           path.textContent = artifact.path || "";
           card.appendChild(path);
 
-          if (isImageMime(artifact.mime)) {
-            const preview = document.createElement("img");
-            preview.className = "artifact-inspector-card__thumb";
-            preview.src = artifact.url;
-            preview.alt = `${artifact.name} 縮圖`;
-            preview.loading = "lazy";
-            card.appendChild(preview);
-          }
-
           const actions = document.createElement("div");
           actions.className = "artifact-inspector-card__actions";
           const openBtn = document.createElement("button");
           openBtn.type = "button";
           openBtn.className = "secondary-btn small";
-          openBtn.textContent = "預覽";
-          openBtn.addEventListener("click", () => void openArtifactPreview(artifact));
+          openBtn.textContent = "開啟";
+          openBtn.addEventListener("click", () => window.open(artifact.url, "_blank", "noopener"));
           const downloadBtn = document.createElement("button");
           downloadBtn.type = "button";
           downloadBtn.className = "secondary-btn small";

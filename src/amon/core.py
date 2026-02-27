@@ -39,7 +39,7 @@ from .logging_utils import setup_logger
 from .mcp_client import MCPClientError, MCPServerConfig, MCPStdioClient
 from .planning import compile_plan_to_exec_graph, dumps_plan, generate_plan_with_llm, render_todo_markdown
 from .models import ProviderError, build_provider, decode_reasoning_chunk
-from .project_registry import ProjectRegistry, load_project_config
+from .project_registry import ProjectRegistry, generate_project_slug, load_project_config, uniquify_project_slug
 from .graph_runtime import GraphRuntime, GraphRunResult
 from .sandbox.service import run_sandbox_step
 from .tooling import (
@@ -287,14 +287,16 @@ class AmonCore:
     def create_project(self, name: str) -> ProjectRecord:
         self.ensure_base_structure()
         project_id = self._generate_project_id(name)
-        project_path = self.projects_dir / project_id
+        slug = generate_project_slug(name, fallback=project_id)
+        slug = uniquify_project_slug(slug, root_dir=self.projects_dir)
+        project_path = self.projects_dir / slug
 
         if project_path.exists():
             raise FileExistsError(f"專案已存在：{project_id}")
 
         try:
             self._create_project_structure(project_path)
-            self._write_project_config(project_path, name, project_id)
+            self._write_project_config(project_path, name, project_id, slug)
         except OSError as exc:
             self.logger.error("建立專案資料夾失敗：%s", exc, exc_info=True)
             raise
@@ -785,10 +787,13 @@ class AmonCore:
                 {"prompt": prompt, "mode": "single", "model": model or "", "skill_names": skill_names or []},
                 mode="single",
             )
+            variables: dict[str, Any] = {"conversation_history": conversation_history or []}
+            if chat_id:
+                variables["chat_id"] = chat_id
             result = self.run_graph(
                 project_path=project_path,
                 graph_path=graph_path,
-                variables={"conversation_history": conversation_history or [], "chat_id": chat_id or ""},
+                variables=variables,
                 stream_handler=stream_handler,
                 run_id=run_id,
             )
@@ -1137,7 +1142,7 @@ class AmonCore:
             project_path / "sessions",
             project_path / "logs",
         ]
-        base_prefix = project_path.name
+        base_prefix = project_id
         try:
             with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
                 for path in payload_paths:
@@ -3422,12 +3427,13 @@ if __name__ == "__main__":
         if not tasks_path.exists():
             self._atomic_write_text(tasks_path, json.dumps({"tasks": []}, ensure_ascii=False, indent=2))
 
-    def _write_project_config(self, project_path: Path, name: str, project_id: str) -> None:
+    def _write_project_config(self, project_path: Path, name: str, project_id: str, project_slug: str) -> None:
         config_path = project_path / "amon.project.yaml"
         config_data = {
             "amon": {
                 "project_id": project_id,
                 "project_name": name,
+                "project_slug": project_slug,
                 "mode": "auto",
             },
             "tools": {"allowed_paths": ["workspace"]},

@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from amon.config import read_yaml
 from amon.logging import log_event
 from amon.fs.atomic import append_jsonl
 from amon.fs.safety import validate_identifier, validate_project_id
@@ -99,7 +100,7 @@ def append_event(chat_id: str, event: dict[str, Any]) -> None:
 def load_latest_chat_id(project_id: str) -> str | None:
     """Return the most recently updated chat session id for a project."""
     validate_project_id(project_id)
-    sessions_dir = _resolve_data_dir() / "projects" / project_id / "sessions" / "chat"
+    sessions_dir = _resolve_project_path(project_id) / "sessions" / "chat"
     if not sessions_dir.exists():
         return None
     try:
@@ -298,7 +299,47 @@ def _iter_recent_session_payloads(session_path: Path, *, max_lines: int, max_byt
     return payloads
 
 def _chat_session_path(project_id: str, chat_id: str) -> Path:
-    return _resolve_data_dir() / "projects" / project_id / "sessions" / "chat" / f"{chat_id}.jsonl"
+    return _resolve_project_path(project_id) / "sessions" / "chat" / f"{chat_id}.jsonl"
+
+
+def _resolve_project_path(project_id: str) -> Path:
+    projects_dir = _resolve_data_dir() / "projects"
+    direct = projects_dir / project_id
+    if direct.exists() and direct.is_dir():
+        return direct
+    index_path = _resolve_data_dir() / "cache" / "projects_index.json"
+    if index_path.exists():
+        try:
+            payload = json.loads(index_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            payload = {}
+        for item in payload.get("projects", []) if isinstance(payload, dict) else []:
+            if str(item.get("project_id") or "") != project_id:
+                continue
+            mapped = Path(str(item.get("path") or ""))
+            if mapped.exists() and mapped.is_dir():
+                return mapped
+    if projects_dir.exists():
+        for child in projects_dir.iterdir():
+            if not child.is_dir():
+                continue
+            config_path = child / "amon.project.yaml"
+            if not config_path.exists():
+                continue
+            try:
+                payload = _load_yaml_like(config_path)
+            except OSError:
+                continue
+            amon_payload = payload.get("amon") if isinstance(payload, dict) else None
+            candidate_id = str((amon_payload or {}).get("project_id") or "").strip()
+            if candidate_id == project_id:
+                return child
+    return direct
+
+
+def _load_yaml_like(path: Path) -> dict[str, Any]:
+    loaded = read_yaml(path)
+    return loaded if isinstance(loaded, dict) else {}
 
 
 def _resolve_data_dir() -> Path:

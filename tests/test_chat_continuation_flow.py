@@ -91,7 +91,7 @@ class ChatContinuationFlowTests(unittest.TestCase):
                     ],
                 )
 
-                session_file = data_dir / "projects" / project.project_id / "sessions" / "chat" / f"{first_chat_id}.jsonl"
+                session_file = Path(project.path) / "sessions" / "chat" / f"{first_chat_id}.jsonl"
                 payloads = [json.loads(line) for line in session_file.read_text(encoding="utf-8").splitlines() if line.strip()]
                 assistant_events = [item for item in payloads if item.get("type") == "assistant"]
                 self.assertGreaterEqual(len(assistant_events), 2)

@@ -28,14 +28,7 @@ class ChatCliTests(unittest.TestCase):
             finally:
                 os.environ.pop("AMON_HOME", None)
 
-            session_path = (
-                Path(temp_dir)
-                / "projects"
-                / record.project_id
-                / "sessions"
-                / "chat"
-                / f"{chat_id}.jsonl"
-            )
+            session_path = Path(record.path) / "sessions" / "chat" / f"{chat_id}.jsonl"
             self.assertTrue(session_path.exists())
             payloads = [
                 json.loads(line)
