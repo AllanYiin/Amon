@@ -198,10 +198,28 @@
           <section class="context-section" id="inspector-artifacts" hidden>
             <h3>Artifacts Inspector</h3>
             <p class="context-overview" id="artifacts-overview">這裡僅顯示流程產生的檔案；對話紀錄請使用下方「下載對話紀錄」。</p>
+            <section id="artifacts-inline-preview" class="artifacts-inline-preview" hidden>
+              <header class="artifacts-inline-preview__header">
+                <strong id="artifacts-inline-preview-title">workspace/index.html</strong>
+                <div class="artifacts-inline-preview__actions">
+                  <button type="button" class="btn btn--secondary secondary-btn small" id="artifacts-preview-open-tab">在新分頁開啟</button>
+                  <button type="button" class="btn btn--secondary secondary-btn small" id="artifacts-preview-refresh">重新整理預覽</button>
+                </div>
+              </header>
+              <iframe
+                id="artifacts-inline-preview-frame"
+                class="artifacts-inline-preview__frame"
+                title="Artifacts HTML Preview"
+                sandbox="allow-scripts allow-same-origin allow-forms"
+              ></iframe>
+            </section>
             <div class="artifacts-empty__actions">
               <button type="button" class="btn btn--secondary secondary-btn small" id="artifacts-download-chat">下載對話紀錄</button>
             </div>
-            <div id="artifacts-inspector-list" class="artifacts-inspector-list list-row-group"></div>
+            <details id="artifacts-list-details" class="artifacts-list-details">
+              <summary>其他 artifacts</summary>
+              <div id="artifacts-inspector-list" class="artifacts-inspector-list list-row-group"></div>
+            </details>
             <div id="artifacts-empty" class="artifacts-empty" hidden>
               <p>尚無 artifacts（可能是 run 尚未完成或此流程未產出檔案）。</p>
               <div class="artifacts-empty__actions">

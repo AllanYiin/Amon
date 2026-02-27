@@ -785,10 +785,13 @@ class AmonCore:
                 {"prompt": prompt, "mode": "single", "model": model or "", "skill_names": skill_names or []},
                 mode="single",
             )
+            variables: dict[str, Any] = {"conversation_history": conversation_history or []}
+            if chat_id:
+                variables["chat_id"] = chat_id
             result = self.run_graph(
                 project_path=project_path,
                 graph_path=graph_path,
-                variables={"conversation_history": conversation_history or [], "chat_id": chat_id or ""},
+                variables=variables,
                 stream_handler=stream_handler,
                 run_id=run_id,
             )
