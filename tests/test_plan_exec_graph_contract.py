@@ -15,11 +15,11 @@ from amon.events import (
 
 
 class PlanExecGraphContractTests(unittest.TestCase):
-    def test_feature_flags_default_false(self) -> None:
+    def test_feature_flags_default_values(self) -> None:
         planner = DEFAULT_CONFIG["amon"]["planner"]
         tools = DEFAULT_CONFIG["amon"]["tools"]
 
-        self.assertFalse(planner["enabled"])
+        self.assertTrue(planner["enabled"])
         self.assertFalse(planner["preview_only"])
         self.assertFalse(tools["unified_dispatch"])
 

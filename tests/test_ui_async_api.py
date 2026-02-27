@@ -1162,6 +1162,131 @@ class UIAsyncAPITests(unittest.TestCase):
                 os.environ.pop("AMON_HOME", None)
 
 
+    def test_config_set_api_can_toggle_planner_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("config-set-planner")
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port)
+                conn.request(
+                    "POST",
+                    "/v1/config/set",
+                    body=json.dumps(
+                        {
+                            "scope": "project",
+                            "project_id": project.project_id,
+                            "key_path": "amon.planner.enabled",
+                            "value": False,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    headers={"Content-Type": "application/json"},
+                )
+                set_resp = conn.getresponse()
+                set_payload = json.loads(set_resp.read().decode("utf-8"))
+                self.assertEqual(set_resp.status, 200)
+                self.assertEqual(set_payload["updated"]["value"], False)
+
+                conn.request("GET", f"/v1/config/view?project_id={quote(project.project_id)}")
+                view_resp = conn.getresponse()
+                view_payload = json.loads(view_resp.read().decode("utf-8"))
+                self.assertEqual(view_resp.status, 200)
+                self.assertFalse(view_payload["planner"]["enabled"])
+                self.assertEqual(view_payload["planner"]["source"], "project")
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
+    def test_chat_stream_plan_execute_reports_planner_route_and_fallback_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("plan-route-test")
+
+                handler = partial(
+                    AmonUIHandler,
+                    directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"),
+                    core=core,
+                )
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                fallback_result = SimpleNamespace(
+                    run_id="run-plan-fallback",
+                    execution_route="single_fallback",
+                    planner_enabled=False,
+                    fallback_reason="planner disabled -> fallback single",
+                    fallback_hint="請將 amon.planner.enabled 設為 true（可在設定頁切換）",
+                )
+
+                with patch("amon.ui_server.decide_execution_mode", return_value="plan_execute"), patch.object(
+                    core,
+                    "run_plan_execute_stream",
+                    return_value=(fallback_result, "fallback-response"),
+                ):
+                    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                    conn.request(
+                        "GET",
+                        f"/v1/chat/stream?project_id={quote(project.project_id)}&message={quote('請規劃並執行')}"
+                    )
+                    resp = conn.getresponse()
+                    self.assertEqual(resp.status, 200)
+
+                    event_type = ""
+                    noticed_plan = False
+                    warning_payload = None
+                    done_payload = None
+                    for _ in range(220):
+                        raw_line = resp.fp.readline()
+                        if not raw_line:
+                            break
+                        decoded = raw_line.decode("utf-8", errors="ignore").strip()
+                        if decoded.startswith("event: "):
+                            event_type = decoded.split(":", 1)[1].strip()
+                        elif decoded.startswith("data: "):
+                            payload = json.loads(decoded.split(": ", 1)[1])
+                            if event_type == "notice" and "plan_execute" in str(payload.get("text") or ""):
+                                noticed_plan = True
+                            elif event_type == "warning" and payload.get("kind") == "planner_disabled_fallback":
+                                warning_payload = payload
+                            elif event_type == "done":
+                                done_payload = payload
+                                break
+
+                self.assertTrue(noticed_plan)
+                self.assertIsNotNone(warning_payload)
+                self.assertIsNotNone(done_payload)
+                self.assertEqual(done_payload.get("execution_mode"), "plan_execute")
+                self.assertEqual(done_payload.get("execution_route"), "single_fallback")
+                self.assertFalse(done_payload.get("planner_enabled"))
+                self.assertIn("fallback_reason", done_payload)
+                self.assertIn("fallback_hint", done_payload)
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
+
 
     def test_logs_and_events_query_api_supports_filters_and_paging(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

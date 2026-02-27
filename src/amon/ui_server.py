@@ -1057,6 +1057,39 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             except Exception as exc:  # noqa: BLE001
                 self._handle_error(exc, status=500)
             return
+        if parsed.path == "/v1/config/set":
+            payload = self._read_json()
+            if payload is None:
+                return
+            if not isinstance(payload, dict):
+                self._send_json(400, {"message": "payload 需為物件"})
+                return
+            key_path = str(payload.get("key_path") or "").strip()
+            if key_path != "amon.planner.enabled":
+                self._send_json(400, {"message": "目前僅支援切換 amon.planner.enabled"})
+                return
+            value = payload.get("value")
+            if not isinstance(value, bool):
+                self._send_json(400, {"message": "value 必須是布林值"})
+                return
+            scope = str(payload.get("scope") or "project").strip().lower() or "project"
+            if scope not in {"global", "project"}:
+                self._send_json(400, {"message": "scope 僅允許 global 或 project"})
+                return
+            project_id = str(payload.get("project_id") or "").strip() or None
+            if scope == "project" and not project_id:
+                self._send_json(400, {"message": "scope=project 時請提供 project_id"})
+                return
+            try:
+                project_path = self.core.get_project_path(project_id) if scope == "project" else None
+                self.core.set_config_value(key_path, value, project_path=project_path)
+                refreshed = self._build_config_view_payload(project_id=project_id, cli_overrides={}, chat_overrides={})
+                self._send_json(200, {"status": "ok", "updated": {"scope": scope, "project_id": project_id, "key_path": key_path, "value": value}, "config": refreshed})
+            except KeyError as exc:
+                self._handle_error(exc, status=404)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+            return
         if parsed.path == "/v1/ui/toasts":
             payload = self._read_json()
             if payload is None:
@@ -1551,12 +1584,20 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         sources = resolution.sources
         if chat_overrides:
             self._overlay_with_source(effective, sources, chat_overrides, "chat")
+        planner_raw = ((effective.get("amon") or {}).get("planner") or {}).get("enabled", True)
+        planner_enabled = AmonCore._coerce_config_bool(planner_raw)
+        planner_source = str((((sources.get("amon") or {}).get("planner") or {}).get("enabled")) or "default")
         return {
             "project_id": project_id,
             "global_config": global_config,
             "project_config": project_config,
             "effective_config": effective,
             "sources": sources,
+            "planner": {
+                "enabled": planner_enabled,
+                "source": planner_source,
+                "toggle_allowed": True,
+            },
         }
 
     @staticmethod
@@ -1586,6 +1627,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         if not isinstance(value, dict):
             return None
         return value
+
     def _build_skill_trigger_preview(self, *, skill_name: str, project_id: str | None) -> dict[str, Any]:
         project_path = self.core.get_project_path(project_id) if project_id else None
         skill = self.core.load_skill(skill_name, project_path=project_path)
@@ -1965,6 +2007,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     )
 
                 response_text = ""
+                plan_result = None
                 if execution_mode == "single":
                     continued_run_id = None
                     if _should_continue_chat_run(project_id=project_id, last_assistant_text=run_context.get("last_assistant_text"), user_message=message):
@@ -2012,7 +2055,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 else:
                     active_run_id = uuid.uuid4().hex
                     send_event("notice", {"text": "Amon：已路由到 plan_execute，將先產生計畫並編譯執行圖。"}, run_id=active_run_id)
-                    result, response_text = self.core.run_plan_execute_stream(
+                    plan_result, response_text = self.core.run_plan_execute_stream(
                         prompt_with_history,
                         project_path=self.core.get_project_path(project_id),
                         project_id=project_id,
@@ -2021,7 +2064,20 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         chat_id=chat_id,
                         conversation_history=history,
                     )
-                    active_run_id = result.run_id
+                    active_run_id = plan_result.run_id
+                    if getattr(plan_result, "execution_route", "") == "single_fallback":
+                        fallback_reason = str(getattr(plan_result, "fallback_reason", "planner disabled -> fallback single"))
+                        fallback_hint = str(getattr(plan_result, "fallback_hint", "請將 amon.planner.enabled 設為 true（可在設定頁切換）"))
+                        send_event(
+                            "warning",
+                            {
+                                "kind": "planner_disabled_fallback",
+                                "message": f"Amon：{fallback_reason}。{fallback_hint}",
+                                "project_id": project_id,
+                                "chat_id": chat_id,
+                            },
+                            run_id=active_run_id,
+                        )
 
                 assistant_payload: dict[str, Any] = {
                     "type": "assistant",
@@ -2037,6 +2093,13 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     "run_id": active_run_id,
                     "execution_mode": execution_mode,
                 }
+                if execution_mode == "plan_execute":
+                    route = getattr(plan_result, "execution_route", "planner")
+                    done_payload["execution_route"] = route
+                    done_payload["planner_enabled"] = bool(getattr(plan_result, "planner_enabled", True))
+                    if route == "single_fallback":
+                        done_payload["fallback_reason"] = str(getattr(plan_result, "fallback_reason", "planner disabled -> fallback single"))
+                        done_payload["fallback_hint"] = str(getattr(plan_result, "fallback_hint", "請將 amon.planner.enabled 設為 true（可在設定頁切換）"))
                 if streamed_token_count == 0 and response_text:
                     done_payload["final_text"] = response_text
                 send_event("done", done_payload, run_id=active_run_id)

@@ -19,7 +19,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "default_mode": "single",
         "provider": "openai",
         "planner": {
-            "enabled": False,
+            "enabled": True,
             "preview_only": False,
         },
         "tools": {
@@ -84,7 +84,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "max_output_total_kb": 5120,
             },
             "features": {
-                "enabled": False,
+                "enabled": True,
                 "allow_artifact_write": False,
             },
         }
