@@ -977,18 +977,13 @@ class AmonCore:
         conversation_history: list[dict[str, str]] | None = None,
     ) -> tuple[GraphRunResult, str]:
         config = self.load_config(project_path)
-        planner_enabled = bool(config.get("amon", {}).get("planner", {}).get("enabled", False))
+        planner_enabled = self._coerce_config_bool(config.get("amon", {}).get("planner", {}).get("enabled", True))
+        legacy_fallback_enabled = self._coerce_config_bool(os.getenv("AMON_PLAN_EXECUTE_LEGACY_SINGLE_FALLBACK", ""))
+        if not planner_enabled and legacy_fallback_enabled:
+            self.logger.info("planner flag 關閉且 legacy fallback 啟用，plan_execute 改走 single 相容路徑")
+            return self.run_single(prompt, project_path=project_path, model=model)
         if not planner_enabled:
-            self.logger.info("planner flag 關閉，plan_execute 改走 single 相容路徑")
-            return self.run_single_stream(
-                prompt,
-                project_path=project_path,
-                model=model,
-                stream_handler=stream_handler,
-                skill_names=available_skills or [],
-                run_id=run_id,
-                conversation_history=conversation_history,
-            )
+            self.logger.info("planner flag 關閉，但 plan_execute 預設仍使用 planner；如需舊行為請設定 AMON_PLAN_EXECUTE_LEGACY_SINGLE_FALLBACK=1")
 
         plan = self.generate_plan_docs(
             prompt,
@@ -1051,6 +1046,18 @@ class AmonCore:
             stream_handler=stream_handler,
         )
         return response
+
+    @staticmethod
+    def _coerce_config_bool(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"", "0", "false", "no", "off"}:
+                return False
+            if normalized in {"1", "true", "yes", "on"}:
+                return True
+        return bool(value)
 
     def _collect_mnt_data_handover_context(self, project_path: Path) -> str:
         docs_dir = project_path / "docs"
