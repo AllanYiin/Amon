@@ -315,15 +315,31 @@ class GraphRuntime:
         if node_type == "agent_task":
             prompt = self._render_template(node.get("prompt", ""), node_vars)
             prompt = self._inject_run_constraints(prompt, run_id)
-            response = self.core.run_agent_task(
-                prompt,
-                project_path=self.project_path,
-                model=node_vars.get("model") or node.get("model"),
-                mode=node_vars.get("mode", "single"),
-                stream_handler=self.stream_handler,
-                skill_names=node_vars.get("skill_names"),
-                conversation_history=node_vars.get("conversation_history"),
-            )
+            try:
+                response = self.core.run_agent_task(
+                    prompt,
+                    project_path=self.project_path,
+                    model=node_vars.get("model") or node.get("model"),
+                    mode=node_vars.get("mode", "single"),
+                    stream_handler=self.stream_handler,
+                    skill_names=node_vars.get("skill_names"),
+                    conversation_history=node_vars.get("conversation_history"),
+                    run_id=run_id,
+                    node_id=str(node.get("id") or "") or None,
+                    chat_id=str(node_vars.get("chat_id") or "") or None,
+                )
+            except TypeError as exc:
+                if "unexpected keyword argument" not in str(exc):
+                    raise
+                response = self.core.run_agent_task(
+                    prompt,
+                    project_path=self.project_path,
+                    model=node_vars.get("model") or node.get("model"),
+                    mode=node_vars.get("mode", "single"),
+                    stream_handler=self.stream_handler,
+                    skill_names=node_vars.get("skill_names"),
+                    conversation_history=node_vars.get("conversation_history"),
+                )
             output_path = self._resolve_output_path(
                 node,
                 run_id,
