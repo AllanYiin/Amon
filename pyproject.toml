@@ -9,18 +9,16 @@ authors = [
   { name = "Amon Contributors" }
 ]
 dependencies = [
-  "PyYAML>=6.0"
+  "PyYAML==6.0.2",
+  "fastapi==0.116.1",
+  "uvicorn==0.35.0",
+  "tiktoken==0.9.0"
 ]
 
 [project.scripts]
 amon = "amon.cli:main"
 amon-sandbox-runner = "amon_sandbox_runner.app:main"
 
-[project.optional-dependencies]
-sandbox-runner = [
-  "fastapi>=0.111",
-  "uvicorn>=0.30"
-]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
