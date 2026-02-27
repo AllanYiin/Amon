@@ -970,10 +970,13 @@ class AmonCore:
         stream_handler=None,
     ) -> str:
         config = self.load_config(project_path)
-        planner_enabled = self._coerce_config_bool(config.get("amon", {}).get("planner", {}).get("enabled", False))
-        if not planner_enabled:
-            self.logger.info("planner flag 關閉，plan_execute 改走 single 相容路徑")
+        planner_enabled = self._coerce_config_bool(config.get("amon", {}).get("planner", {}).get("enabled", True))
+        legacy_fallback_enabled = self._coerce_config_bool(os.getenv("AMON_PLAN_EXECUTE_LEGACY_SINGLE_FALLBACK", ""))
+        if not planner_enabled and legacy_fallback_enabled:
+            self.logger.info("planner flag 關閉且 legacy fallback 啟用，plan_execute 改走 single 相容路徑")
             return self.run_single(prompt, project_path=project_path, model=model)
+        if not planner_enabled:
+            self.logger.info("planner flag 關閉，但 plan_execute 預設仍使用 planner；如需舊行為請設定 AMON_PLAN_EXECUTE_LEGACY_SINGLE_FALLBACK=1")
 
         plan = self.generate_plan_docs(
             prompt,
