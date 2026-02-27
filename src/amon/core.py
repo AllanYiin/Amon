@@ -29,7 +29,7 @@ import urllib.request
 
 import yaml
 
-from .config import DEFAULT_CONFIG, deep_merge, get_config_value, read_yaml, set_config_value, write_yaml
+from .config import ConfigLoader, DEFAULT_CONFIG, deep_merge, get_config_value, read_yaml, set_config_value, write_yaml
 from .fs.atomic import atomic_write_text, file_lock
 from .fs.safety import canonicalize_path, make_change_plan, require_confirm
 from .fs.trash import trash_move, trash_restore
@@ -1013,19 +1013,32 @@ class AmonCore:
         conversation_history: list[dict[str, str]] | None = None,
         request_id: str | None = None,
     ) -> tuple[GraphRunResult, str]:
-        config = self.load_config(project_path)
-        planner_enabled = self._coerce_config_bool(config.get("amon", {}).get("planner", {}).get("enabled", True))
+        project_identity = project_id or self.resolve_project_identity(project_path)[0]
+        planner_enabled, planner_source, planner_raw = self._resolve_planner_enabled(
+            project_path=project_path,
+            project_id=project_identity,
+        )
         if not planner_enabled:
-            project_identity = project_id or self.resolve_project_identity(project_path)[0]
             fallback_reason = "planner disabled -> fallback single"
-            hint = "請將 amon.planner.enabled 設為 true（可在設定頁切換）"
-            self.logger.warning("%s（project_id=%s）", fallback_reason, project_identity)
+            hint = (
+                "請將 amon.planner.enabled 設為 true（可在設定頁切換）；"
+                f"目前來源={planner_source}，值={planner_raw!r}"
+            )
+            self.logger.warning(
+                "%s（project_id=%s, planner_source=%s, planner_value=%r）",
+                fallback_reason,
+                project_identity,
+                planner_source,
+                planner_raw,
+            )
             log_event(
                 {
                     "level": "WARNING",
                     "event": "plan_execute_fallback_single",
                     "project_id": project_identity,
                     "reason": fallback_reason,
+                    "planner_source": planner_source,
+                    "planner_value": planner_raw,
                     "hint": hint,
                 }
             )
@@ -1035,7 +1048,12 @@ class AmonCore:
                     "scope": "planning",
                     "project_id": project_identity,
                     "actor": "system",
-                    "payload": {"reason": fallback_reason, "hint": hint},
+                    "payload": {
+                        "reason": fallback_reason,
+                        "hint": hint,
+                        "planner_source": planner_source,
+                        "planner_value": planner_raw,
+                    },
                     "risk": "low",
                 }
             )
@@ -1051,6 +1069,8 @@ class AmonCore:
             )
             setattr(result, "execution_route", "single_fallback")
             setattr(result, "planner_enabled", False)
+            setattr(result, "planner_source", planner_source)
+            setattr(result, "planner_value", planner_raw)
             setattr(result, "fallback_reason", fallback_reason)
             setattr(result, "fallback_hint", hint)
             return result, response
@@ -1106,10 +1126,18 @@ class AmonCore:
         available_skills: list[dict[str, Any]] | None = None,
         stream_handler=None,
     ) -> str:
-        config = self.load_config(project_path)
-        planner_enabled = self._coerce_config_bool(config.get("amon", {}).get("planner", {}).get("enabled", True))
+        project_identity = project_id or self.resolve_project_identity(project_path)[0]
+        planner_enabled, planner_source, planner_raw = self._resolve_planner_enabled(
+            project_path=project_path,
+            project_id=project_identity,
+        )
         if not planner_enabled:
-            self.logger.warning("planner disabled -> fallback single（非串流 plan_execute）")
+            self.logger.warning(
+                "planner disabled -> fallback single（非串流 plan_execute，project_id=%s, planner_source=%s, planner_value=%r）",
+                project_identity,
+                planner_source,
+                planner_raw,
+            )
 
         _, response = self.run_plan_execute_stream(
             prompt,
@@ -1134,6 +1162,13 @@ class AmonCore:
             if normalized in {"1", "true", "yes", "on"}:
                 return True
         return bool(value)
+
+    def _resolve_planner_enabled(self, *, project_path: Path, project_id: str | None) -> tuple[bool, str, Any]:
+        project_identity = project_id or self.resolve_project_identity(project_path)[0]
+        resolution = ConfigLoader(data_dir=self.data_dir).resolve(project_id=project_identity)
+        planner_raw = ((resolution.effective.get("amon") or {}).get("planner") or {}).get("enabled", True)
+        planner_source = str((((resolution.sources.get("amon") or {}).get("planner") or {}).get("enabled")) or "default")
+        return self._coerce_config_bool(planner_raw), planner_source, planner_raw
 
     @staticmethod
     def _coerce_config_bool(value: Any) -> bool:
