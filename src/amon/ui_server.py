@@ -1963,35 +1963,18 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     "event": "ui_chat_stream_error",
                     "message": str(exc),
                     "stack": traceback.format_exc(),
+                    "project_id": normalize_project_id(project_id),
+                    "chat_id": chat_id or None,
                 }
             )
             if chat_id and project_id:
                 append_event(chat_id, {"type": "error", "text": str(exc), "project_id": project_id})
-            send_event("error", {"message": str(exc)})
-            send_event("done", {"status": "failed", "chat_id": chat_id})
+            send_event("error", {"message": str(exc), "chat_id": chat_id, "project_id": project_id})
+            send_event("done", {"status": "failed", "chat_id": chat_id, "project_id": project_id})
 
     def _list_projects_for_ui(self, *, include_deleted: bool = False) -> list[dict[str, Any]]:
         records = self.core.list_projects(include_deleted=include_deleted)
-        merged: dict[str, dict[str, Any]] = {record.project_id: record.to_dict() for record in records}
-
-        projects_dir = self.core.projects_dir
-        if projects_dir.exists():
-            for child in projects_dir.iterdir():
-                if not child.is_dir():
-                    continue
-                project_id = child.name.strip()
-                if not project_id or project_id in merged:
-                    continue
-                merged[project_id] = {
-                    "project_id": project_id,
-                    "name": project_id,
-                    "path": str(child),
-                    "created_at": "",
-                    "updated_at": "",
-                    "status": "active",
-                }
-
-        projects = list(merged.values())
+        projects = [record.to_dict() for record in records]
         projects.sort(key=lambda item: item.get("project_id") or "")
         return projects
 

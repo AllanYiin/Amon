@@ -39,6 +39,7 @@ from .logging_utils import setup_logger
 from .mcp_client import MCPClientError, MCPServerConfig, MCPStdioClient
 from .planning import compile_plan_to_exec_graph, dumps_plan, generate_plan_with_llm, render_todo_markdown
 from .models import ProviderError, build_provider, decode_reasoning_chunk
+from .project_registry import ProjectRegistry, load_project_config
 from .graph_runtime import GraphRuntime, GraphRunResult
 from .sandbox.service import run_sandbox_step
 from .tooling import (
@@ -97,6 +98,7 @@ class AmonCore:
         self.logger = setup_logger("amon", self.logs_dir)
         # Backward-compatible registry handle for UI/legacy callers.
         self.tool_registry = build_registry(Path.cwd())
+        self.project_registry = ProjectRegistry(self.projects_dir)
 
     def ensure_base_structure(self) -> None:
         for path in [
@@ -292,7 +294,7 @@ class AmonCore:
 
         try:
             self._create_project_structure(project_path)
-            self._write_project_config(project_path, name)
+            self._write_project_config(project_path, name, project_id)
         except OSError as exc:
             self.logger.error("建立專案資料夾失敗：%s", exc, exc_info=True)
             raise
@@ -329,21 +331,57 @@ class AmonCore:
         return record
 
     def list_projects(self, include_deleted: bool = False) -> list[ProjectRecord]:
+        self.project_registry.scan()
         records = self._load_records()
+        records_by_id = {record.project_id: record for record in records}
+
+        merged: list[ProjectRecord] = []
+        for meta in self.project_registry.list_projects():
+            project_id = str(meta.get("project_id") or "")
+            if not project_id:
+                continue
+            existing = records_by_id.get(project_id)
+            if existing is not None:
+                existing.path = str(meta.get("project_path") or existing.path)
+                if not existing.name:
+                    existing.name = str(meta.get("project_name") or project_id)
+                merged.append(existing)
+                continue
+            timestamp = self._now()
+            merged.append(
+                ProjectRecord(
+                    project_id=project_id,
+                    name=str(meta.get("project_name") or project_id),
+                    path=str(meta.get("project_path") or ""),
+                    created_at=timestamp,
+                    updated_at=timestamp,
+                    status="active",
+                )
+            )
+
+        if include_deleted:
+            for record in records:
+                if record.status == "deleted" and record.project_id not in {item.project_id for item in merged}:
+                    merged.append(record)
+
+        if merged:
+            merged = sorted(merged, key=lambda item: item.project_id)
+            self._write_records(merged)
+
         log_event(
             {
                 "level": "INFO",
                 "event": "project_list",
                 "include_deleted": include_deleted,
-                "count": len(records),
+                "count": len(merged),
             }
         )
         if include_deleted:
-            return records
-        return [record for record in records if record.status == "active"]
+            return merged
+        return [record for record in merged if record.status == "active"]
 
     def get_project(self, project_id: str) -> ProjectRecord:
-        for record in self._load_records():
+        for record in self.list_projects(include_deleted=True):
             if record.project_id == project_id:
                 return record
         raise KeyError(f"找不到專案：{project_id}")
@@ -485,7 +523,7 @@ class AmonCore:
         conversation_history: list[dict[str, str]] | None = None,
     ) -> str:
         config = self.load_config(project_path)
-        project_id = project_path.name if project_path else None
+        project_id, _ = self.resolve_project_identity(project_path)
         budget_status = self._evaluate_budget(config, project_id=project_id)
         if budget_status["exceeded"]:
             if mode == "single":
@@ -524,6 +562,7 @@ class AmonCore:
                 "provider": provider_name,
                 "model": provider_model,
                 "session_id": session_id,
+                "project_id": project_id,
             }
         )
         self._append_session_event(
@@ -591,6 +630,7 @@ class AmonCore:
                 "provider": provider_name,
                 "model": provider_model,
                 "session_id": session_id,
+                "project_id": project_id,
             }
         )
         self._log_billing(
@@ -642,6 +682,7 @@ class AmonCore:
             from .tooling.types import ToolCall
 
             workspace_root = project_path or Path.cwd()
+            project_id, _ = self.resolve_project_identity(project_path)
             registry = build_registry(workspace_root)
             policy = registry.policy
             allow = tuple(dict.fromkeys((*policy.allow, "web.search", "web.fetch")))
@@ -652,7 +693,7 @@ class AmonCore:
                     tool="web.search",
                     args={"query": prompt, "max_results": 5},
                     caller="agent",
-                    project_id=project_path.name if project_path else None,
+                    project_id=project_id,
                 )
             )
             if result.is_error:
@@ -757,7 +798,7 @@ class AmonCore:
             raise ValueError("執行 self_critique 需要指定專案")
         with self._project_lock(project_path, "self_critique"):
             config = self.load_config(project_path)
-            project_id = project_path.name
+            project_id, _ = self.resolve_project_identity(project_path)
             budget_status = self._evaluate_budget(config, project_id=project_id)
             if budget_status["exceeded"]:
                 self._log_budget_event(budget_status, mode="self_critique", project_id=project_id, action="reject")
@@ -769,7 +810,7 @@ class AmonCore:
                     "level": "INFO",
                     "event": "self_critique_start",
                     "doc_version": version,
-                    "project_id": project_path.name,
+                    "project_id": project_id,
                 }
             )
             graph = self._build_self_critique_graph()
@@ -793,7 +834,7 @@ class AmonCore:
                     "level": "INFO",
                     "event": "self_critique_complete",
                     "doc_version": version,
-                    "project_id": project_path.name,
+                    "project_id": project_id,
                 }
             )
             return final_path.read_text(encoding="utf-8")
@@ -810,7 +851,7 @@ class AmonCore:
             raise ValueError("執行 team 需要指定專案")
         with self._project_lock(project_path, "team"):
             config = self.load_config(project_path)
-            project_id = project_path.name
+            project_id, _ = self.resolve_project_identity(project_path)
             budget_status = self._evaluate_budget(config, project_id=project_id)
             if budget_status["exceeded"]:
                 self._log_budget_event(budget_status, mode="team", project_id=project_id, action="reject")
@@ -820,7 +861,7 @@ class AmonCore:
                 {
                     "level": "INFO",
                     "event": "team_start",
-                    "project_id": project_path.name,
+                    "project_id": project_id,
                 }
             )
             docs_dir.mkdir(parents=True, exist_ok=True)
@@ -851,7 +892,7 @@ class AmonCore:
                 {
                     "level": "INFO",
                     "event": "team_complete",
-                    "project_id": project_path.name,
+                    "project_id": project_id,
                 }
             )
             return final_text
@@ -1687,7 +1728,7 @@ class AmonCore:
                 "level": "INFO",
                 "event": "eval_start",
                 "suite": suite,
-                "project_id": project_path.name,
+                "project_id": project.project_id,
             }
         )
 
@@ -1721,7 +1762,7 @@ class AmonCore:
         status = "passed" if not failures else "failed"
         payload = {
             "suite": suite,
-            "project_id": project_path.name,
+            "project_id": project.project_id,
             "status": status,
             "tasks": results,
             "checks": checks,
@@ -1731,7 +1772,7 @@ class AmonCore:
                 "level": "INFO" if status == "passed" else "ERROR",
                 "event": "eval_complete",
                 "suite": suite,
-                "project_id": project_path.name,
+                "project_id": project.project_id,
                 "status": status,
             }
         )
@@ -2287,9 +2328,26 @@ class AmonCore:
             return {**skill, "content": content, "references": references}
         raise KeyError(f"找不到技能：{name}")
 
+    def load_project_config(self, project_path: Path) -> tuple[str, str, dict[str, Any]]:
+        identity = load_project_config(project_path)
+        return identity.project_id, identity.project_name, identity.config
+
     def get_project_path(self, project_id: str) -> Path:
-        record = self.get_project(project_id)
-        return Path(record.path)
+        self.project_registry.scan()
+        try:
+            return self.project_registry.get_path(project_id)
+        except KeyError:
+            record = self.get_project(project_id)
+            return Path(record.path)
+
+    def resolve_project_identity(self, project_path: Path | None) -> tuple[str | None, str | None]:
+        if not project_path:
+            return None, None
+        try:
+            identity = load_project_config(project_path)
+            return identity.project_id, identity.project_name
+        except Exception:
+            return project_path.name, project_path.name
 
     def add_allowed_tool(self, tool_name: str) -> None:
         config_path = self._global_config_path()
@@ -3278,10 +3336,11 @@ if __name__ == "__main__":
         if not tasks_path.exists():
             self._atomic_write_text(tasks_path, json.dumps({"tasks": []}, ensure_ascii=False, indent=2))
 
-    def _write_project_config(self, project_path: Path, name: str) -> None:
+    def _write_project_config(self, project_path: Path, name: str, project_id: str) -> None:
         config_path = project_path / "amon.project.yaml"
         config_data = {
             "amon": {
+                "project_id": project_id,
                 "project_name": name,
                 "mode": "auto",
             },

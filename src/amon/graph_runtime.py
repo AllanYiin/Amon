@@ -56,6 +56,14 @@ class GraphRuntime:
         self._cancel_path: Path | None = None
         self.request_id = request_id
         self._active_run_id: str | None = run_id
+        resolved_project_id = None
+        resolver = getattr(core, "resolve_project_identity", None)
+        if callable(resolver):
+            try:
+                resolved_project_id, _ = resolver(project_path)
+            except Exception:
+                resolved_project_id = None
+        self.project_id = resolved_project_id or project_path.name
 
     def run(self) -> GraphRunResult:
         run_id = self.run_id or uuid.uuid4().hex
@@ -79,7 +87,7 @@ class GraphRuntime:
             {
                 "type": "run.started",
                 "scope": "graph",
-                "project_id": normalize_project_id(self.project_path.name),
+                "project_id": normalize_project_id(self.project_id),
                 "actor": "system",
                 "payload": {"run_id": run_id, "graph_path": str(self.graph_path)},
                 "run_id": run_id,
@@ -224,7 +232,7 @@ class GraphRuntime:
                     {
                         "type": "run.completed",
                         "scope": "graph",
-                        "project_id": normalize_project_id(self.project_path.name),
+                        "project_id": normalize_project_id(self.project_id),
                         "actor": "system",
                         "payload": {"run_id": run_id, "graph_path": str(self.graph_path)},
                         "run_id": run_id,
@@ -383,7 +391,7 @@ class GraphRuntime:
             result = self.core.call_tool_unified(
                 tool_name,
                 args,
-                project_id=self.project_path.name,
+                project_id=self.project_id,
                 timeout_s=timeout_s,
                 cancel_event=cancel_event,
             )
@@ -763,7 +771,7 @@ class GraphRuntime:
         enriched = {**payload, "ts": self._now_iso()}
         enriched = ensure_correlation_fields(
             enriched,
-            project_id=self.project_path.name,
+            project_id=self.project_id,
             run_id=self._active_run_id,
             node_id=str(payload.get("node_id") or "") or None,
             request_id=self.request_id,

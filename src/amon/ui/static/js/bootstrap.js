@@ -1590,7 +1590,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
         const nodeState = nodeVm?.runtimeState || {};
         const executionEngine = node.type && String(node.type).includes("tool") ? "tool" : "llm";
         elements.graphNodeTitle.textContent = `Node：${nodeId}`;
-        elements.graphNodeMeta.textContent = `status：${nodeVm?.statusUi?.label || nodeStatusLabel(nodeVm?.effectiveStatus)} ｜ execution_engine：${executionEngine}`;
+        elements.graphNodeMeta.textContent = `status：${nodeVm?.statusUi?.label || "未知"} ｜ execution_engine：${executionEngine}`;
         elements.graphNodeInputs.textContent = JSON.stringify(inferNodeInputs(node), null, 2);
         elements.graphNodeOutputs.textContent = JSON.stringify(extractOutputArtifacts(nodeState.output), null, 2);
         elements.graphNodeEvents.innerHTML = "";
