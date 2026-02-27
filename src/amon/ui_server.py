@@ -2064,11 +2064,20 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             error_text = str(exc)
             is_timeout = "timeout" in error_text.lower()
             if chat_id and project_id:
-                assistant_summary = "執行過程逾時，系統已停止等待；若稍後有完整輸出，將於下一次載入聊天紀錄時補上。" if is_timeout else f"執行失敗：{error_text}"
+                assistant_summary = "回覆生成較久，系統先回報目前狀態；你可以稍後重試或縮小任務範圍。" if is_timeout else f"執行失敗：{error_text}"
                 append_event(chat_id, {"type": "assistant", "text": assistant_summary, "project_id": project_id})
             if is_timeout:
-                send_event("notice", {"text": "Amon：執行較久，先回報目前狀態；你可以稍後重試或縮小任務範圍。", "kind": "warning"})
-                send_event("done", {"status": "timeout", "chat_id": chat_id, "project_id": project_id})
+                warning_kind = "inactivity_timeout" if "inactivity" in error_text.lower() else "soft_timeout"
+                send_event(
+                    "warning",
+                    {
+                        "message": "回覆生成較久，仍在處理中；你可以稍後重試，或把任務拆小一點。",
+                        "kind": warning_kind,
+                        "chat_id": chat_id,
+                        "project_id": project_id,
+                    },
+                )
+                send_event("done", {"status": "warning", "chat_id": chat_id, "project_id": project_id, "warning_kind": warning_kind})
             else:
                 send_event("error", {"message": error_text, "chat_id": chat_id, "project_id": project_id})
                 send_event("done", {"status": "failed", "chat_id": chat_id, "project_id": project_id})

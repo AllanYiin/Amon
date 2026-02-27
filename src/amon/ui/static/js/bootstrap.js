@@ -914,7 +914,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
         if (eventType === "done") {
           updateExecutionStep("thinking", { title: "Thinking", status: "succeeded", details: `流程完成（${data.status || "ok"}）`, inferred: false });
           updateExecutionStep("planning", { title: "Planning", status: data.status === "confirm_required" ? "running" : "succeeded", details: data.status === "confirm_required" ? "等待使用者確認" : "規劃流程已完成", inferred: false });
-          updateExecutionStep("node_status", { title: "Node 狀態", status: data.status === "ok" ? "succeeded" : "running", details: state.graphRunId ? `Run ${shortenId(state.graphRunId)} 已更新` : "等待下一次 context refresh", inferred: true });
+          updateExecutionStep("node_status", { title: "Node 狀態", status: data.status === "ok" ? "succeeded" : "running", details: state.graphRunId ? `Run ${shortenId(state.graphRunId)} 已更新` : "等待下一次 上下文刷新", inferred: true });
           return;
         }
         if (eventType === "error") {
@@ -1147,14 +1147,14 @@ appStore.patch({ bootstrappedAt: Date.now() });
         elements.contextDraftMeta.textContent = text
           ? `已儲存本機草稿（${new Date().toLocaleString("zh-TW")})。`
           : "草稿為空，已清空本機草稿。";
-        showToast(text ? "Context 草稿已儲存（僅本機）。" : "已清空本機草稿。", 9000, "success");
+        showToast(text ? "上下文草稿已儲存（僅本機）。" : "已清空本機草稿。", 9000, "success");
       }
 
       async function clearContextDraft(scope = "chat") {
-        const title = scope === "project" ? "清空專案 Context 草稿" : "清空本次對話 Context 草稿";
+        const title = scope === "project" ? "清空專案上下文草稿" : "清空本次對話上下文草稿";
         const description = scope === "project"
-          ? "將刪除目前專案在此瀏覽器的 Context 草稿。此動作只影響本機，不會刪除伺服器資料，且不可復原。"
-          : "將刪除目前對話在此瀏覽器的 Context 草稿。此動作只影響本機，不會刪除伺服器資料，且不可復原。";
+          ? "將刪除目前專案在此瀏覽器的 上下文草稿。此動作只影響本機，不會刪除伺服器資料，且不可復原。"
+          : "將刪除目前對話在此瀏覽器的 上下文草稿。此動作只影響本機，不會刪除伺服器資料，且不可復原。";
         const confirmed = await confirmModal.open({
           title,
           description,
@@ -1162,7 +1162,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
           cancelText: "取消",
         });
         if (!confirmed) {
-          showToast("已取消清空 Context。", 5000, "neutral");
+          showToast("已取消清空上下文。", 5000, "neutral");
           return;
         }
         const key = getContextDraftStorageKey(scope === "project" ? state.projectId : null);
@@ -1171,9 +1171,9 @@ appStore.patch({ bootstrappedAt: Date.now() });
           refreshContextDraftUi();
         } else {
           elements.contextDraftInput.value = "";
-          elements.contextDraftMeta.textContent = "已清空本次對話 Context 草稿。";
+          elements.contextDraftMeta.textContent = "已清空本次對話上下文草稿。";
         }
-        showToast("已清空 Context 草稿（僅本機）。", 9000, "success");
+        showToast("已清空上下文草稿（僅本機）。", 9000, "success");
       }
 
       function importContextDraftFromFile(file) {
@@ -1199,7 +1199,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
         const text = latestUser.textContent.replace(/^你：/, "").trim();
         elements.contextDraftInput.value = text;
         elements.contextDraftMeta.textContent = "已帶入最近一則使用者對話，請檢查後儲存。";
-        showToast("已從最近對話擷取 Context 草稿。", 9000, "success");
+        showToast("已從最近對話擷取 上下文草稿。", 9000, "success");
       }
 
       function renderRunMeta(runId, runStatus) {
@@ -2028,7 +2028,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
         try {
           await loadContext();
         } catch (error) {
-          showToast(`載入專案 Context 失敗：${error.message}`, 9000, "warning");
+          showToast(`載入專案上下文失敗：${error.message}`, 9000, "warning");
         }
       }
 

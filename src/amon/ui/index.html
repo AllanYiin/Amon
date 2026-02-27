@@ -61,7 +61,7 @@
             </div>
             <div class="chat-controls">
               <span class="chat-project-label" id="chat-project-label">目前專案：未指定專案</span>
-              <button class="btn btn--secondary secondary-btn" id="refresh-context">刷新 Context</button>
+              <button class="btn btn--secondary secondary-btn" id="refresh-context">刷新上下文</button>
             </div>
           </header>
 
@@ -455,22 +455,22 @@
           <section class="main-card card context-page" id="context-page" hidden>
             <header class="context-page__header">
               <div>
-                <h2>Context</h2>
-                <p class="subtitle">Context 類別統計（含 system prompt、tools definition、skills、tool use、chat history）。</p>
+                <h2>上下文</h2>
+                <p class="subtitle">上下文類別統計（含 system prompt、tools definition、skills、tool use、chat history）。</p>
               </div>
               <div class="context-page__actions">
                 <button type="button" class="btn btn--secondary secondary-btn" id="context-clear-chat">清空本次對話</button>
               </div>
             </header>
 
-            <section class="context-dashboard" aria-label="Context Usage Dashboard">
+            <section class="context-dashboard" aria-label="上下文使用儀表板">
               <article class="context-gauge card">
                 <header class="context-gauge__header">
                   <h3>Usage Waffle</h3>
                   <span class="context-status-pill" id="context-usage-status">尚未可取得</span>
                 </header>
                 <div class="context-gauge__body">
-                  <div class="context-waffle" id="context-waffle-grid" role="img" aria-label="Context 類別華夫餅圖"></div>
+                  <div class="context-waffle" id="context-waffle-grid" role="img" aria-label="上下文類別華夫餅圖"></div>
                   <div class="context-gauge__center">
                     <strong id="context-usage-percent">--</strong>
                     <span>Usage</span>

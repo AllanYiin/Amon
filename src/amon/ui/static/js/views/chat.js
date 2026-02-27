@@ -50,6 +50,8 @@ export const CHAT_VIEW = {
     });
 
     let streamAbortController = null;
+    let streamCompleted = false;
+    let receivedSoftWarning = false;
 
     const setStreaming = (active) => {
       appState.streaming = active;
@@ -81,12 +83,16 @@ export const CHAT_VIEW = {
             },
           },
         });
-        ui.toast?.show(`串流中斷（${ctx.chatDeps.formatUnknownValue(transport, "未知傳輸")}），請重新送出訊息以續接。`, {
-          type: "warning",
-          duration: 9000,
-        });
-        stopStream();
+        if (!streamCompleted) {
+          ui.toast?.show(`串流暫時中斷（${ctx.chatDeps.formatUnknownValue(transport, "未知傳輸")}），系統正在嘗試續傳。`, {
+            type: "warning",
+            duration: 7000,
+          });
+        }
       } else if (status === "error") {
+        if (streamCompleted || receivedSoftWarning) {
+          return;
+        }
         store.patch({
           layout: {
             ...layoutState,
@@ -113,6 +119,8 @@ export const CHAT_VIEW = {
 
     const startStream = async (message, attachments = []) => {
       stopStream();
+      streamCompleted = false;
+      receivedSoftWarning = false;
       streamAbortController = new AbortController();
       ctx.chatDeps.resetPlanCard();
 
@@ -197,6 +205,14 @@ export const CHAT_VIEW = {
               ctx.chatDeps.updateThinking({ status: "reasoning", brief: "收到 reasoning 摘要", verbose: data.text || "" });
               return;
             }
+            if (eventType === "warning") {
+              const warningKind = String(data.kind || "").toLowerCase();
+              if (warningKind.includes("timeout")) {
+                receivedSoftWarning = true;
+              }
+              ui.toast?.show(data.message || "系統回覆較慢，仍在繼續處理。", { type: "warning", duration: 7000 });
+              return;
+            }
             if (eventType === "token") {
               messageRenderer.applyTokenChunk(data.text || "");
               return;
@@ -220,12 +236,14 @@ export const CHAT_VIEW = {
             if (eventType === "error") {
               ctx.chatDeps.updateThinking({ status: "error", brief: data.message || "流程失敗" });
               ui.toast?.show(data.message || "串流失敗", { type: "danger", duration: 9000 });
+              stopStream();
               return;
             }
             if (eventType === "done") {
+              streamCompleted = true;
               await ctx.chatDeps.applySessionFromEvent(data);
               const doneStatus = data.status || "ok";
-              if (doneStatus !== "ok" && doneStatus !== "confirm_required") {
+              if (doneStatus !== "ok" && doneStatus !== "confirm_required" && doneStatus !== "warning") {
                 messageRenderer.appendMessage("agent", `流程結束（${doneStatus}）。我已收到你的訊息，請調整描述後再送出，我會持續回應。`);
                 messageRenderer.appendTimelineStatus(`流程狀態：${doneStatus}`);
               }
