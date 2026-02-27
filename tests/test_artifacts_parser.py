@@ -23,6 +23,27 @@ class ArtifactsParserTests(unittest.TestCase):
         self.assertIn("print('ok')", blocks[0].content)
         self.assertEqual(blocks[1].lang, "ts")
 
+
+    def test_supports_filename_in_info_string(self) -> None:
+        content = """```html filename=index.html
+<h1>ok</h1>
+```
+"""
+        blocks = parse_artifact_blocks(content)
+        self.assertEqual(len(blocks), 1)
+        self.assertEqual(blocks[0].file_path, "index.html")
+        self.assertEqual(blocks[0].lang, "html")
+
+    def test_supports_header_filename_comment_when_info_missing(self) -> None:
+        content = """```html
+<!-- filename: index.html -->
+<h1>ok</h1>
+```
+"""
+        blocks = parse_artifact_blocks(content)
+        self.assertEqual(len(blocks), 1)
+        self.assertEqual(blocks[0].file_path, "index.html")
+
     def test_skip_when_missing_file_token(self) -> None:
         content = "```python\nprint('x')\n```\n"
         self.assertEqual(parse_artifact_blocks(content), [])

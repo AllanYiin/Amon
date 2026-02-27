@@ -40,6 +40,7 @@ class UIEventStreamClientTests(unittest.TestCase):
                   emit('job', { job_id: 'job-1', status: 'running', progress: 40 });
                   emit('billing', { item: 'token_usage', cost: 1.25, currency: 'USD' });
                   emit('docs', { op: 'add', path: 'docs/design.md' });
+                  emit('artifact', { path: 'workspace/index.html', mime: 'text/html' });
                   emit('done', { status: 'ok' });
                 }, 0);
               }
@@ -69,6 +70,9 @@ class UIEventStreamClientTests(unittest.TestCase):
               }
               if (!snapshot.docs.includes('docs/design.md')) {
                 throw new Error('docs state was not updated');
+              }
+              if (!snapshot.artifacts.some((item) => item.path === 'workspace/index.html')) {
+                throw new Error('artifacts state was not updated');
               }
               process.exit(0);
             }, 10);

@@ -847,6 +847,10 @@ appStore.patch({ bootstrappedAt: Date.now() });
         if (snapshot.docs.length > 0) {
           renderDocs(snapshot.docs);
         }
+        if (Array.isArray(snapshot.artifacts) && snapshot.artifacts.length > 0) {
+          state.runArtifacts = snapshot.artifacts.filter((artifact) => !isConversationArtifact(artifact));
+          renderArtifactsInspector(state.runArtifacts);
+        }
       });
       renderStoreSummary(state.uiStore.getState());
 
@@ -1665,6 +1669,10 @@ appStore.patch({ bootstrappedAt: Date.now() });
         }
         if (data.chat_id) {
           state.chatId = data.chat_id;
+        }
+        if (Array.isArray(data.artifacts)) {
+          state.runArtifacts = data.artifacts.filter((artifact) => !isConversationArtifact(artifact));
+          renderArtifactsInspector(state.runArtifacts);
         }
         if (projectChanged) {
           await loadProjects();

@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from amon.artifacts.store import ingest_response_artifacts
+from amon.artifacts.store import ingest_artifacts, ingest_response_artifacts
 
 
 class ArtifactsStoreTests(unittest.TestCase):
@@ -53,6 +53,24 @@ class ArtifactsStoreTests(unittest.TestCase):
             manifest = json.loads((project_path / ".amon" / "artifacts" / "manifest.json").read_text(encoding="utf-8"))
             entry = manifest["files"]["workspace/x.py"]
             self.assertEqual(entry["write_status"], "updated")
+
+
+    def test_ingest_supports_filename_info_and_returns_artifact_metadata(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="amon-artifacts-store-") as tmpdir:
+            project_path = Path(tmpdir)
+            response = "```html filename=index.html\n<html><body>tetris</body></html>\n```\n"
+            summary = ingest_artifacts(
+                response_text=response,
+                project_path=project_path,
+                source={"run_id": "run-demo", "node_id": "writer"},
+            )
+            target = project_path / "workspace" / "index.html"
+            self.assertTrue(target.exists())
+            self.assertEqual(summary["created"], 1)
+            self.assertEqual(summary["artifacts"][0]["path"], "workspace/index.html")
+            self.assertEqual(summary["artifacts"][0]["mime"], "text/html")
+            self.assertEqual(summary["artifacts"][0]["run_id"], "run-demo")
+            self.assertEqual(summary["artifacts"][0]["node_id"], "writer")
 
 
 if __name__ == "__main__":

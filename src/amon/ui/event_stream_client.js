@@ -20,6 +20,7 @@
       jobs: {},
       billing: { total_cost: 0, items: [] },
       docs: [],
+      artifacts: [],
       ...initialState,
     };
     const listeners = new Set();
@@ -47,6 +48,30 @@
           state.billing.total_cost += amount;
         }
         state.billing.items.push(payload || {});
+        notify();
+        return;
+      }
+      if (eventType === "artifact" || eventType === "artifact.update") {
+        if (Array.isArray(payload && payload.artifacts)) {
+          state.artifacts = payload.artifacts.slice();
+          notify();
+          return;
+        }
+        const artifactPath = payload && (payload.path || payload.artifact_path);
+        if (artifactPath) {
+          const normalized = { ...(payload || {}), path: artifactPath };
+          const existingIndex = state.artifacts.findIndex((item) => item.path === artifactPath);
+          if (existingIndex >= 0) {
+            state.artifacts[existingIndex] = { ...state.artifacts[existingIndex], ...normalized };
+          } else {
+            state.artifacts.push(normalized);
+          }
+          notify();
+          return;
+        }
+      }
+      if (eventType === "done" && Array.isArray(payload && payload.artifacts)) {
+        state.artifacts = payload.artifacts.slice();
         notify();
         return;
       }
@@ -81,6 +106,7 @@
             items: state.billing.items.slice(),
           },
           docs: state.docs.slice(),
+          artifacts: state.artifacts.slice(),
         };
       },
       subscribe(listener) {
@@ -166,7 +192,7 @@
         source.close();
         this._scheduleReconnect();
       };
-      ["reasoning", "token", "notice", "plan", "result", "run", "run.update", "node", "node.update", "job", "job.update", "billing", "billing.update", "docs", "docs.update", "error", "done"].forEach((eventType) => {
+      ["reasoning", "token", "notice", "plan", "result", "run", "run.update", "node", "node.update", "job", "job.update", "billing", "billing.update", "docs", "docs.update", "artifact", "artifact.update", "error", "done"].forEach((eventType) => {
         source.addEventListener(eventType, (event) => {
           const payload = safeParseJson(event.data);
           const eventId = event.lastEventId || null;
