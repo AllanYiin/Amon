@@ -221,6 +221,93 @@ class UIAsyncAPITests(unittest.TestCase):
                     server.server_close()
                 os.environ.pop("AMON_HOME", None)
 
+
+    def test_chat_stream_token_and_session_events_include_run_chat_project_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("stream-contract")
+
+                def fake_run_single_stream(
+                    prompt,
+                    project_path,
+                    model=None,
+                    stream_handler=None,
+                    skill_names=None,
+                    run_id=None,
+                    conversation_history=None,
+                ):
+                    if stream_handler:
+                        stream_handler("tok-A")
+                        stream_handler("tok-B")
+                    return SimpleNamespace(run_id=run_id or "run-contract-001"), "final-contract"
+
+                handler = partial(
+                    AmonUIHandler,
+                    directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"),
+                    core=core,
+                )
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                with patch("amon.ui_server.decide_execution_mode", return_value="single"), patch.object(
+                    core,
+                    "run_single_stream",
+                    side_effect=fake_run_single_stream,
+                ):
+                    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                    conn.request(
+                        "GET",
+                        f"/v1/chat/stream?project_id={quote(project.project_id)}&message={quote('請輸出完整結果')}",
+                    )
+                    resp = conn.getresponse()
+                    self.assertEqual(resp.status, 200)
+
+                    event_type = ""
+                    token_payload = None
+                    done_payload = None
+                    for _ in range(200):
+                        raw_line = resp.fp.readline()
+                        if not raw_line:
+                            break
+                        decoded = raw_line.decode("utf-8", errors="ignore").strip()
+                        if decoded.startswith("event: "):
+                            event_type = decoded.split(":", 1)[1].strip()
+                        elif decoded.startswith("data: "):
+                            payload = json.loads(decoded.split(": ", 1)[1])
+                            if event_type == "token" and token_payload is None:
+                                token_payload = payload
+                            if event_type == "done":
+                                done_payload = payload
+                                break
+
+                self.assertIsNotNone(token_payload)
+                self.assertIsNotNone(done_payload)
+                self.assertEqual(token_payload["project_id"], project.project_id)
+                self.assertTrue(token_payload.get("chat_id"))
+                self.assertIn("run_id", token_payload)
+
+                chat_id = done_payload.get("chat_id")
+                self.assertTrue(chat_id)
+                session_path = core.get_project_path(project.project_id) / "sessions" / "chat" / f"{chat_id}.jsonl"
+                lines = [json.loads(line) for line in session_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+                assistant_events = [item for item in lines if item.get("type") == "assistant"]
+                self.assertTrue(assistant_events)
+                self.assertEqual(assistant_events[-1].get("run_id"), done_payload.get("run_id"))
+                self.assertEqual(assistant_events[-1].get("project_id"), project.project_id)
+                self.assertEqual(assistant_events[-1].get("chat_id"), chat_id)
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
     def test_chat_followup_reuses_previous_run_id_when_assistant_asked_question(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"
@@ -843,6 +930,125 @@ class UIAsyncAPITests(unittest.TestCase):
                     server.server_close()
                 os.environ.pop("AMON_HOME", None)
 
+    def test_context_clear_chat_requires_chat_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("context-clear-chat-requires-chat-id")
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port)
+                conn.request(
+                    "POST",
+                    "/v1/context/clear",
+                    body=json.dumps({"scope": "chat", "project_id": project.project_id}, ensure_ascii=False),
+                    headers={"Content-Type": "application/json"},
+                )
+                response = conn.getresponse()
+                payload = json.loads(response.read().decode("utf-8"))
+
+                self.assertEqual(response.status, 400)
+                self.assertIn("chat_id", payload.get("message", ""))
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
+    def test_context_clear_chat_only_removes_target_chat(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("context-clear-chat-target-only")
+                project_path = Path(project.path)
+                sessions_dir = project_path / "sessions" / "chat"
+                sessions_dir.mkdir(parents=True, exist_ok=True)
+                (sessions_dir / "chat-a.jsonl").write_text('{"type":"user","text":"A"}\n', encoding="utf-8")
+                (sessions_dir / "chat-b.jsonl").write_text('{"type":"user","text":"B"}\n', encoding="utf-8")
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port)
+                conn.request(
+                    "POST",
+                    "/v1/context/clear",
+                    body=json.dumps({"scope": "chat", "project_id": project.project_id, "chat_id": "chat-a"}, ensure_ascii=False),
+                    headers={"Content-Type": "application/json"},
+                )
+                response = conn.getresponse()
+                payload = json.loads(response.read().decode("utf-8"))
+
+                self.assertEqual(response.status, 200)
+                self.assertEqual(payload.get("scope"), "chat")
+                self.assertEqual(payload.get("chat_id"), "chat-a")
+                self.assertFalse((sessions_dir / "chat-a.jsonl").exists())
+                self.assertTrue((sessions_dir / "chat-b.jsonl").exists())
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
+    def test_context_clear_project_preserves_chat_sessions(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("context-clear-project-preserve-chat")
+                project_path = Path(project.path)
+                context_path = project_path / ".amon" / "context" / "project_context.md"
+                context_path.parent.mkdir(parents=True, exist_ok=True)
+                context_path.write_text("project context", encoding="utf-8")
+                sessions_dir = project_path / "sessions" / "chat"
+                sessions_dir.mkdir(parents=True, exist_ok=True)
+                (sessions_dir / "chat-a.jsonl").write_text('{"type":"user","text":"A"}\n', encoding="utf-8")
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port)
+                conn.request(
+                    "POST",
+                    "/v1/context/clear",
+                    body=json.dumps({"scope": "project", "project_id": project.project_id}, ensure_ascii=False),
+                    headers={"Content-Type": "application/json"},
+                )
+                response = conn.getresponse()
+                payload = json.loads(response.read().decode("utf-8"))
+
+                self.assertEqual(response.status, 200)
+                self.assertEqual(payload.get("scope"), "project")
+                self.assertFalse(context_path.exists())
+                self.assertTrue((sessions_dir / "chat-a.jsonl").exists())
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
     def test_config_view_api_returns_sources_and_chat_override(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"
@@ -900,9 +1106,9 @@ class UIAsyncAPITests(unittest.TestCase):
                 project = core.create_project("logs-events-test")
                 project_path = Path(project.path)
 
-                logs_dir = data_dir / "logs"
-                logs_dir.mkdir(parents=True, exist_ok=True)
-                (logs_dir / "amon.log").write_text(
+                project_logs_dir = project_path / ".amon" / "logs"
+                project_logs_dir.mkdir(parents=True, exist_ok=True)
+                (project_logs_dir / "app.jsonl").write_text(
                     "\n".join(
                         [
                             json.dumps({"ts": "2026-01-01T00:00:00+00:00", "level": "INFO", "component": "daemon", "project_id": project.project_id}, ensure_ascii=False),
@@ -912,8 +1118,8 @@ class UIAsyncAPITests(unittest.TestCase):
                     + "\n",
                     encoding="utf-8",
                 )
-                (logs_dir / "billing.log").write_text(
-                    json.dumps({"ts": "2026-01-03T00:00:00+00:00", "level": "INFO", "project_id": project.project_id, "cost": 0.15}, ensure_ascii=False) + "\n",
+                (project_logs_dir / "events.jsonl").write_text(
+                    json.dumps({"ts": "2026-01-03T00:00:00+00:00", "level": "INFO", "event": "billing_usage", "project_id": project.project_id, "cost": 0.15}, ensure_ascii=False) + "\n",
                     encoding="utf-8",
                 )
 
@@ -958,6 +1164,49 @@ class UIAsyncAPITests(unittest.TestCase):
                 self.assertEqual(download_resp.status, 200)
                 self.assertIn("application/x-ndjson", download_resp.getheader("Content-Type"))
                 self.assertIn("cost", body)
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
+
+    def test_chat_stream_writes_project_level_logs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("project-log-write")
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                with patch("amon.ui_server.decide_execution_mode", return_value="single"), patch.object(
+                    core,
+                    "run_single_stream",
+                    return_value=(SimpleNamespace(run_id="run-log-001"), "完成"),
+                ):
+                    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                    conn.request("GET", f"/v1/chat/stream?project_id={quote(project.project_id)}&message={quote('測試寫入 logs')}")
+                    resp = conn.getresponse()
+                    self.assertEqual(resp.status, 200)
+                    for _ in range(120):
+                        raw_line = resp.fp.readline()
+                        if not raw_line:
+                            break
+                        if raw_line.decode("utf-8", errors="ignore").strip() == "event: done":
+                            break
+
+                project_logs = core.get_project_path(project.project_id) / ".amon" / "logs"
+                self.assertTrue((project_logs / "events.jsonl").exists())
+                self.assertTrue((project_logs / "app.jsonl").exists())
+                events_content = (project_logs / "events.jsonl").read_text(encoding="utf-8")
+                self.assertIn(project.project_id, events_content)
             finally:
                 if server:
                     server.shutdown()

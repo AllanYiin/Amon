@@ -12,10 +12,12 @@ export function createContextService({ api }) {
         body: JSON.stringify({ context: contextText }),
       });
     },
-    async clearContext(scope = "project", projectId = "") {
+    async clearContext(scope = "project", options = {}) {
+      const projectId = String(options?.projectId || "").trim();
+      const chatId = String(options?.chatId || "").trim();
       return api.request("/context/clear", {
         method: "POST",
-        body: JSON.stringify({ scope, project_id: projectId }),
+        body: JSON.stringify({ scope, project_id: projectId, chat_id: chatId || null }),
       });
     },
   };
