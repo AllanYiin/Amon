@@ -521,6 +521,9 @@ class AmonCore:
         stream_handler=None,
         skill_names: list[str] | None = None,
         conversation_history: list[dict[str, str]] | None = None,
+        run_id: str | None = None,
+        node_id: str | None = None,
+        chat_id: str | None = None,
     ) -> str:
         config = self.load_config(project_path)
         project_id, _ = self.resolve_project_identity(project_path)
@@ -641,6 +644,11 @@ class AmonCore:
             response_text,
             session_id=session_id,
             project_id=project_id,
+            project_path=project_path,
+            run_id=run_id,
+            node_id=node_id,
+            chat_id=chat_id,
+            mode=mode,
         )
         return response_text
 
@@ -764,6 +772,7 @@ class AmonCore:
         skill_names: list[str] | None = None,
         run_id: str | None = None,
         conversation_history: list[dict[str, str]] | None = None,
+        chat_id: str | None = None,
     ) -> tuple[GraphRunResult, str]:
         if not project_path:
             raise ValueError("執行 stream 需要指定專案")
@@ -779,7 +788,7 @@ class AmonCore:
             result = self.run_graph(
                 project_path=project_path,
                 graph_path=graph_path,
-                variables={"conversation_history": conversation_history or []},
+                variables={"conversation_history": conversation_history or [], "chat_id": chat_id or ""},
                 stream_handler=stream_handler,
                 run_id=run_id,
             )
@@ -1057,6 +1066,18 @@ class AmonCore:
             stream_handler=stream_handler,
         )
         return response
+
+    @staticmethod
+    def _coerce_config_bool(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"", "0", "false", "no", "off"}:
+                return False
+            if normalized in {"1", "true", "yes", "on"}:
+                return True
+        return bool(value)
 
     @staticmethod
     def _coerce_config_bool(value: Any) -> bool:
@@ -5237,6 +5258,7 @@ if __name__ == "__main__":
             response_text,
             session_id=session_id,
             project_id=project_id,
+            project_path=session_path.parents[1] if len(session_path.parents) > 1 else None,
         )
         return response_text
 
@@ -5319,6 +5341,7 @@ if __name__ == "__main__":
             response_text,
             session_id=session_id,
             project_id=project_id,
+            project_path=session_path.parents[1] if len(session_path.parents) > 1 else None,
         )
         return response_text
 
@@ -5482,22 +5505,92 @@ if __name__ == "__main__":
         response: str,
         session_id: str | None = None,
         project_id: str | None = None,
+        project_path: Path | None = None,
+        run_id: str | None = None,
+        node_id: str | None = None,
+        chat_id: str | None = None,
+        mode: str | None = None,
     ) -> None:
         if not config.get("billing", {}).get("enabled", True):
             return
-        log_billing(
-            {
-                "level": "INFO",
-                "event": "billing_record",
-                "provider": provider,
-                "model": model,
-                "prompt_chars": len(prompt),
-                "response_chars": len(response),
-                "token": 0,
-                "session_id": session_id,
-                "project_id": project_id,
-            }
+        prompt_tokens, completion_tokens = self._estimate_llm_tokens(prompt, response, config=config)
+        total_tokens = prompt_tokens + completion_tokens
+        cost_estimate = self._estimate_cost(provider, model, prompt_tokens, completion_tokens)
+        payload = {
+            "level": "INFO",
+            "event": "billing_record",
+            "provider": provider,
+            "model": model,
+            "prompt_chars": len(prompt),
+            "response_chars": len(response),
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+            "token": total_tokens,
+            "cost": cost_estimate,
+            "cost_estimate": cost_estimate,
+            "session_id": session_id,
+            "project_id": project_id,
+            "project_path": str(project_path) if project_path else None,
+            "run_id": run_id,
+            "node_id": node_id,
+            "chat_id": chat_id,
+            "mode": mode or "interactive",
+            "ts": datetime.now().isoformat(timespec="seconds"),
+        }
+        log_billing(payload)
+        if project_path and project_id:
+            self._append_project_usage_ledger(project_path=project_path, payload=payload)
+
+    def _append_project_usage_ledger(self, *, project_path: Path, payload: dict[str, Any]) -> None:
+        ledger_dir = project_path / ".amon" / "billing"
+        ledger_dir.mkdir(parents=True, exist_ok=True)
+        ledger_path = ledger_dir / "usage.jsonl"
+        record = {
+            "ts": payload.get("ts") or datetime.now().isoformat(timespec="seconds"),
+            "project_id": payload.get("project_id"),
+            "run_id": payload.get("run_id"),
+            "chat_id": payload.get("chat_id"),
+            "node_id": payload.get("node_id"),
+            "provider": payload.get("provider"),
+            "model": payload.get("model"),
+            "prompt_tokens": int(payload.get("prompt_tokens") or 0),
+            "completion_tokens": int(payload.get("completion_tokens") or 0),
+            "total_tokens": int(payload.get("total_tokens") or 0),
+            "cost_estimate": float(payload.get("cost_estimate") or payload.get("cost") or 0.0),
+            "cost": float(payload.get("cost") or payload.get("cost_estimate") or 0.0),
+            "session_id": payload.get("session_id"),
+            "mode": payload.get("mode") or "interactive",
+        }
+        try:
+            with ledger_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, ensure_ascii=False))
+                handle.write("\n")
+        except OSError as exc:
+            self.logger.error("寫入專案 billing usage ledger 失敗：%s", exc, exc_info=True)
+            raise
+
+    def _estimate_llm_tokens(self, prompt: str, response: str, *, config: dict[str, Any]) -> tuple[int, int]:
+        prompt_count = count_non_dialogue_tokens(prompt, effective_config=config)
+        completion_count = count_non_dialogue_tokens(response, effective_config=config)
+        prompt_tokens = int(prompt_count.tokens) if prompt_count.available and prompt_count.tokens is not None else max(len(prompt) // 4, 0)
+        completion_tokens = (
+            int(completion_count.tokens)
+            if completion_count.available and completion_count.tokens is not None
+            else max(len(response) // 4, 0)
         )
+        return prompt_tokens, completion_tokens
+
+    @staticmethod
+    def _estimate_cost(provider: str, model: str, prompt_tokens: int, completion_tokens: int) -> float:
+        pricing = {
+            "gpt-4o-mini": (0.00015, 0.0006),
+            "gpt-4.1-mini": (0.0004, 0.0016),
+            "gpt-4.1": (0.002, 0.008),
+        }
+        input_rate, output_rate = pricing.get(str(model or "").strip().lower(), (0.0005, 0.0015))
+        cost = (prompt_tokens / 1000.0) * input_rate + (completion_tokens / 1000.0) * output_rate
+        return round(cost, 8)
 
     @staticmethod
     def _now() -> str:

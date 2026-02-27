@@ -1278,17 +1278,19 @@ class UIAsyncAPITests(unittest.TestCase):
                     encoding="utf-8",
                 )
 
-                logs_dir = data_dir / "logs"
-                logs_dir.mkdir(parents=True, exist_ok=True)
-                (logs_dir / "billing.log").write_text(
+                usage_path = project_path / ".amon" / "billing" / "usage.jsonl"
+                usage_path.parent.mkdir(parents=True, exist_ok=True)
+                usage_path.write_text(
                     "\n".join(
                         [
-                            json.dumps({"ts": "2026-01-03T00:00:00+00:00", "project_id": project.project_id, "provider": "openai", "model": "gpt-5.2", "agent": "planner", "node": "n1", "mode": "interactive", "cost": 1.2}, ensure_ascii=False),
-                            json.dumps({"ts": "2026-01-03T01:00:00+00:00", "project_id": project.project_id, "provider": "openai", "model": "gpt-5.2", "agent": "runner", "node": "n2", "mode": "automation", "cost": 0.8}, ensure_ascii=False),
+                            json.dumps({"ts": "2026-01-03T00:00:00+00:00", "project_id": project.project_id, "provider": "openai", "model": "gpt-5.2", "node_id": "n1", "mode": "interactive", "prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150, "cost": 1.2}, ensure_ascii=False),
+                            json.dumps({"ts": "2026-01-03T01:00:00+00:00", "project_id": project.project_id, "provider": "openai", "model": "gpt-5.2", "node_id": "n2", "mode": "automation", "prompt_tokens": 120, "completion_tokens": 80, "total_tokens": 200, "cost": 0.8}, ensure_ascii=False),
                         ]
                     ) + "\n",
                     encoding="utf-8",
                 )
+                logs_dir = data_dir / "logs"
+                logs_dir.mkdir(parents=True, exist_ok=True)
                 (logs_dir / "amon.log").write_text(
                     json.dumps({"ts": "2026-01-03T02:00:00+00:00", "event": "budget_exceeded", "project_id": project.project_id, "daily_usage": 5.6}, ensure_ascii=False) + "\n",
                     encoding="utf-8",
@@ -1308,6 +1310,7 @@ class UIAsyncAPITests(unittest.TestCase):
                 self.assertEqual(resp.status, 200)
                 self.assertIn("openai", payload["breakdown"]["provider"])
                 self.assertAlmostEqual(payload["mode_breakdown"]["automation"]["cost"], 0.8)
+                self.assertEqual(payload["project_total"]["tokens"], 350)
                 self.assertEqual(payload["budgets"]["automation_budget"], 2.0)
                 self.assertEqual(len(payload["exceeded_events"]), 1)
                 self.assertIn("run_trend", payload)
@@ -1334,17 +1337,19 @@ class UIAsyncAPITests(unittest.TestCase):
                     encoding="utf-8",
                 )
 
-                logs_dir = data_dir / "logs"
-                logs_dir.mkdir(parents=True, exist_ok=True)
-                (logs_dir / "billing.log").write_text(
+                usage_path = project_path / ".amon" / "billing" / "usage.jsonl"
+                usage_path.parent.mkdir(parents=True, exist_ok=True)
+                usage_path.write_text(
                     "\n".join(
                         [
-                            json.dumps({"ts": "2026-01-03T00:00:00+00:00", "project_id": project.project_id, "provider": "openai", "model": "gpt-5.2", "agent": "planner", "node": "n1", "mode": "interactive", "cost": 1.2}, ensure_ascii=False),
-                            json.dumps({"ts": "2026-01-03T01:00:00+00:00", "project_id": project.project_id, "provider": "openai", "model": "gpt-5.2", "agent": "runner", "node": "n2", "mode": "automation", "cost": 0.8}, ensure_ascii=False),
+                            json.dumps({"ts": "2026-01-03T00:00:00+00:00", "project_id": project.project_id, "provider": "openai", "model": "gpt-5.2", "node_id": "n1", "mode": "interactive", "prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150, "cost": 1.2}, ensure_ascii=False),
+                            json.dumps({"ts": "2026-01-03T01:00:00+00:00", "project_id": project.project_id, "provider": "openai", "model": "gpt-5.2", "node_id": "n2", "mode": "automation", "prompt_tokens": 120, "completion_tokens": 80, "total_tokens": 200, "cost": 0.8}, ensure_ascii=False),
                         ]
                     ) + "\n",
                     encoding="utf-8",
                 )
+                logs_dir = data_dir / "logs"
+                logs_dir.mkdir(parents=True, exist_ok=True)
                 (logs_dir / "amon.log").write_text(
                     json.dumps({"ts": "2026-01-03T02:00:00+00:00", "event": "budget_exceeded", "project_id": project.project_id, "daily_usage": 5.6}, ensure_ascii=False) + "\n",
                     encoding="utf-8",
@@ -1364,10 +1369,36 @@ class UIAsyncAPITests(unittest.TestCase):
                 self.assertEqual(resp.status, 200)
                 self.assertIn("openai", payload["breakdown"]["provider"])
                 self.assertAlmostEqual(payload["mode_breakdown"]["automation"]["cost"], 0.8)
+                self.assertEqual(payload["project_total"]["tokens"], 350)
                 self.assertEqual(payload["budgets"]["automation_budget"], 2.0)
                 self.assertEqual(len(payload["exceeded_events"]), 1)
                 self.assertIn("run_trend", payload)
                 self.assertIn("current_run", payload)
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
+
+    def test_billing_summary_api_requires_project_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port)
+                conn.request("GET", "/v1/billing/summary")
+                resp = conn.getresponse()
+                self.assertEqual(resp.status, 400)
             finally:
                 if server:
                     server.shutdown()
