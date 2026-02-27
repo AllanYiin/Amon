@@ -1680,13 +1680,17 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             except ValueError:
                 event_seq = 0
 
-        def send_event(event: str, data: dict[str, Any] | str) -> None:
+        def send_event(event: str, data: dict[str, Any] | str, *, run_id: str | None = None, chat_id_override: str | None = None) -> None:
             nonlocal event_seq
             event_seq += 1
             payload_obj = {"text": data} if isinstance(data, str) else dict(data)
+            resolved_chat_id = chat_id_override if chat_id_override is not None else chat_id
+            if resolved_chat_id:
+                payload_obj.setdefault("chat_id", resolved_chat_id)
             payload_obj = ensure_correlation_fields(
                 payload_obj,
                 project_id=project_id,
+                run_id=run_id,
                 request_id=request_id,
             )
             payload = json.dumps(payload_obj, ensure_ascii=False)
@@ -1876,76 +1880,100 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 prompt_with_history = turn_bundle.prompt_with_history
 
                 streamed_token_count = 0
+                active_run_id: str | None = None
 
                 def stream_handler(token: str) -> None:
                     nonlocal streamed_token_count
                     is_reasoning, reasoning_text = decode_reasoning_chunk(token)
                     if is_reasoning:
-                        send_event("reasoning", {"text": reasoning_text})
+                        send_event("reasoning", {"text": reasoning_text}, run_id=active_run_id)
                         append_event(
                             chat_id,
-                            {"type": "assistant_reasoning", "text": reasoning_text, "project_id": project_id},
+                            {
+                                "type": "assistant_reasoning",
+                                "text": reasoning_text,
+                                "project_id": project_id,
+                                "run_id": active_run_id or None,
+                            },
                         )
                         return
                     streamed_token_count += 1
-                    send_event("token", {"text": token})
+                    send_event("token", {"text": token}, run_id=active_run_id)
                     append_event(
                         chat_id,
-                        {"type": "assistant_chunk", "text": token, "project_id": project_id},
+                        {
+                            "type": "assistant_chunk",
+                            "text": token,
+                            "project_id": project_id,
+                            "run_id": active_run_id or None,
+                        },
                     )
 
-                run_id = ""
+                response_text = ""
                 if execution_mode == "single":
                     continued_run_id = None
                     if _should_continue_chat_run(project_id=project_id, last_assistant_text=run_context.get("last_assistant_text"), user_message=message):
                         continued_run_id = str(run_context.get("run_id") or "").strip() or None
+                    active_run_id = continued_run_id or None
                     result, response_text = self.core.run_single_stream(
                         prompt_with_history,
                         project_path=self.core.get_project_path(project_id),
                         stream_handler=stream_handler,
-                        run_id=continued_run_id,
+                        run_id=active_run_id,
                         conversation_history=history,
                     )
-                    run_id = result.run_id
+                    active_run_id = result.run_id
                 elif execution_mode == "self_critique":
-                    send_event("notice", {"text": "Amon：偵測為專業文件撰寫，改用 self_critique 流程。"})
+                    active_run_id = uuid.uuid4().hex
+                    send_event("notice", {"text": "Amon：偵測為專業文件撰寫，改用 self_critique 流程。"}, run_id=active_run_id)
                     response_text = self.core.run_self_critique(
                         prompt_with_history,
                         project_path=self.core.get_project_path(project_id),
                         stream_handler=stream_handler,
+                        run_id=active_run_id,
+                        chat_id=chat_id,
                     )
                 elif execution_mode == "team":
-                    send_event("notice", {"text": "Amon：這題我會改用 team 流程分工處理，完成後用自然語氣一次整理回覆給你。"})
+                    active_run_id = uuid.uuid4().hex
+                    send_event("notice", {"text": "Amon：這題我會改用 team 流程分工處理，完成後用自然語氣一次整理回覆給你。"}, run_id=active_run_id)
                     response_text = self.core.run_team(
                         prompt_with_history,
                         project_path=self.core.get_project_path(project_id),
-                        stream_handler=None,
+                        stream_handler=stream_handler,
+                        run_id=active_run_id,
+                        chat_id=chat_id,
                     )
                 else:
-                    send_event("notice", {"text": "Amon：已路由到 plan_execute，將先產生計畫並編譯執行圖。"})
-                    response_text = self.core.run_plan_execute(
+                    active_run_id = uuid.uuid4().hex
+                    send_event("notice", {"text": "Amon：已路由到 plan_execute，將先產生計畫並編譯執行圖。"}, run_id=active_run_id)
+                    result, response_text = self.core.run_plan_execute_stream(
                         prompt_with_history,
                         project_path=self.core.get_project_path(project_id),
                         project_id=project_id,
                         stream_handler=stream_handler,
+                        run_id=active_run_id,
+                        chat_id=chat_id,
+                        conversation_history=history,
                     )
-                assistant_payload: dict[str, Any] = {"type": "assistant", "text": response_text, "project_id": project_id}
-                if run_id:
-                    assistant_payload["run_id"] = run_id
+                    active_run_id = result.run_id
+
+                assistant_payload: dict[str, Any] = {
+                    "type": "assistant",
+                    "text": response_text,
+                    "project_id": project_id,
+                    "run_id": active_run_id or None,
+                }
                 append_event(chat_id, assistant_payload)
                 done_payload: dict[str, Any] = {
                     "status": "ok",
                     "chat_id": chat_id,
                     "project_id": project_id,
-                    "run_id": run_id,
+                    "run_id": active_run_id,
                     "execution_mode": execution_mode,
                 }
                 if streamed_token_count == 0 and response_text:
                     done_payload["final_text"] = response_text
-                send_event(
-                    "done",
-                    done_payload,
-                )
+                send_event("done", done_payload, run_id=active_run_id)
                 return
             send_event(
                 "notice",
@@ -1967,10 +1995,17 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     "chat_id": chat_id or None,
                 }
             )
+            error_text = str(exc)
+            is_timeout = "timeout" in error_text.lower()
             if chat_id and project_id:
-                append_event(chat_id, {"type": "error", "text": str(exc), "project_id": project_id})
-            send_event("error", {"message": str(exc), "chat_id": chat_id, "project_id": project_id})
-            send_event("done", {"status": "failed", "chat_id": chat_id, "project_id": project_id})
+                assistant_summary = "執行過程逾時，系統已停止等待；若稍後有完整輸出，將於下一次載入聊天紀錄時補上。" if is_timeout else f"執行失敗：{error_text}"
+                append_event(chat_id, {"type": "assistant", "text": assistant_summary, "project_id": project_id})
+            if is_timeout:
+                send_event("notice", {"text": "Amon：執行較久，先回報目前狀態；你可以稍後重試或縮小任務範圍。", "kind": "warning"})
+                send_event("done", {"status": "timeout", "chat_id": chat_id, "project_id": project_id})
+            else:
+                send_event("error", {"message": error_text, "chat_id": chat_id, "project_id": project_id})
+                send_event("done", {"status": "failed", "chat_id": chat_id, "project_id": project_id})
 
     def _list_projects_for_ui(self, *, include_deleted: bool = False) -> list[dict[str, Any]]:
         records = self.core.list_projects(include_deleted=include_deleted)

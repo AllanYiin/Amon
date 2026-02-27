@@ -221,6 +221,93 @@ class UIAsyncAPITests(unittest.TestCase):
                     server.server_close()
                 os.environ.pop("AMON_HOME", None)
 
+
+    def test_chat_stream_token_and_session_events_include_run_chat_project_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("stream-contract")
+
+                def fake_run_single_stream(
+                    prompt,
+                    project_path,
+                    model=None,
+                    stream_handler=None,
+                    skill_names=None,
+                    run_id=None,
+                    conversation_history=None,
+                ):
+                    if stream_handler:
+                        stream_handler("tok-A")
+                        stream_handler("tok-B")
+                    return SimpleNamespace(run_id=run_id or "run-contract-001"), "final-contract"
+
+                handler = partial(
+                    AmonUIHandler,
+                    directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"),
+                    core=core,
+                )
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                with patch("amon.ui_server.decide_execution_mode", return_value="single"), patch.object(
+                    core,
+                    "run_single_stream",
+                    side_effect=fake_run_single_stream,
+                ):
+                    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                    conn.request(
+                        "GET",
+                        f"/v1/chat/stream?project_id={quote(project.project_id)}&message={quote('請輸出完整結果')}",
+                    )
+                    resp = conn.getresponse()
+                    self.assertEqual(resp.status, 200)
+
+                    event_type = ""
+                    token_payload = None
+                    done_payload = None
+                    for _ in range(200):
+                        raw_line = resp.fp.readline()
+                        if not raw_line:
+                            break
+                        decoded = raw_line.decode("utf-8", errors="ignore").strip()
+                        if decoded.startswith("event: "):
+                            event_type = decoded.split(":", 1)[1].strip()
+                        elif decoded.startswith("data: "):
+                            payload = json.loads(decoded.split(": ", 1)[1])
+                            if event_type == "token" and token_payload is None:
+                                token_payload = payload
+                            if event_type == "done":
+                                done_payload = payload
+                                break
+
+                self.assertIsNotNone(token_payload)
+                self.assertIsNotNone(done_payload)
+                self.assertEqual(token_payload["project_id"], project.project_id)
+                self.assertTrue(token_payload.get("chat_id"))
+                self.assertIn("run_id", token_payload)
+
+                chat_id = done_payload.get("chat_id")
+                self.assertTrue(chat_id)
+                session_path = core.get_project_path(project.project_id) / "sessions" / "chat" / f"{chat_id}.jsonl"
+                lines = [json.loads(line) for line in session_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+                assistant_events = [item for item in lines if item.get("type") == "assistant"]
+                self.assertTrue(assistant_events)
+                self.assertEqual(assistant_events[-1].get("run_id"), done_payload.get("run_id"))
+                self.assertEqual(assistant_events[-1].get("project_id"), project.project_id)
+                self.assertEqual(assistant_events[-1].get("chat_id"), chat_id)
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
     def test_chat_followup_reuses_previous_run_id_when_assistant_asked_question(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"
