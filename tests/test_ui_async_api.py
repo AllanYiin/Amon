@@ -1106,9 +1106,9 @@ class UIAsyncAPITests(unittest.TestCase):
                 project = core.create_project("logs-events-test")
                 project_path = Path(project.path)
 
-                logs_dir = data_dir / "logs"
-                logs_dir.mkdir(parents=True, exist_ok=True)
-                (logs_dir / "amon.log").write_text(
+                project_logs_dir = project_path / ".amon" / "logs"
+                project_logs_dir.mkdir(parents=True, exist_ok=True)
+                (project_logs_dir / "app.jsonl").write_text(
                     "\n".join(
                         [
                             json.dumps({"ts": "2026-01-01T00:00:00+00:00", "level": "INFO", "component": "daemon", "project_id": project.project_id}, ensure_ascii=False),
@@ -1118,8 +1118,8 @@ class UIAsyncAPITests(unittest.TestCase):
                     + "\n",
                     encoding="utf-8",
                 )
-                (logs_dir / "billing.log").write_text(
-                    json.dumps({"ts": "2026-01-03T00:00:00+00:00", "level": "INFO", "project_id": project.project_id, "cost": 0.15}, ensure_ascii=False) + "\n",
+                (project_logs_dir / "events.jsonl").write_text(
+                    json.dumps({"ts": "2026-01-03T00:00:00+00:00", "level": "INFO", "event": "billing_usage", "project_id": project.project_id, "cost": 0.15}, ensure_ascii=False) + "\n",
                     encoding="utf-8",
                 )
 
@@ -1164,6 +1164,49 @@ class UIAsyncAPITests(unittest.TestCase):
                 self.assertEqual(download_resp.status, 200)
                 self.assertIn("application/x-ndjson", download_resp.getheader("Content-Type"))
                 self.assertIn("cost", body)
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
+
+    def test_chat_stream_writes_project_level_logs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("project-log-write")
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                with patch("amon.ui_server.decide_execution_mode", return_value="single"), patch.object(
+                    core,
+                    "run_single_stream",
+                    return_value=(SimpleNamespace(run_id="run-log-001"), "完成"),
+                ):
+                    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                    conn.request("GET", f"/v1/chat/stream?project_id={quote(project.project_id)}&message={quote('測試寫入 logs')}")
+                    resp = conn.getresponse()
+                    self.assertEqual(resp.status, 200)
+                    for _ in range(120):
+                        raw_line = resp.fp.readline()
+                        if not raw_line:
+                            break
+                        if raw_line.decode("utf-8", errors="ignore").strip() == "event: done":
+                            break
+
+                project_logs = core.get_project_path(project.project_id) / ".amon" / "logs"
+                self.assertTrue((project_logs / "events.jsonl").exists())
+                self.assertTrue((project_logs / "app.jsonl").exists())
+                events_content = (project_logs / "events.jsonl").read_text(encoding="utf-8")
+                self.assertIn(project.project_id, events_content)
             finally:
                 if server:
                     server.shutdown()

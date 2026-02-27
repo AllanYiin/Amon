@@ -45,6 +45,7 @@ from amon.tooling.types import ToolCall
 from .core import AmonCore, ProjectRecord
 from .logging import log_event
 from .models import decode_reasoning_chunk
+from .project_log_store import ProjectLogStore
 from .skills import build_skill_injection_preview
 from .token_counter import count_non_dialogue_tokens, extract_dialogue_input_tokens
 
@@ -2471,6 +2472,13 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         }
 
     def _read_logs_source(self, source: str, *, project_id: str | None) -> list[dict[str, Any]]:
+        if project_id:
+            store = ProjectLogStore(self.core.data_dir)
+            if source == "amon":
+                return store.read_app(project_id)
+            if source == "billing":
+                return [item for item in store.read_events(project_id) if str(item.get("event") or "").startswith("billing") or "cost" in item or "usage" in item]
+            return store.read_events(project_id)
         if source == "amon":
             return self._read_jsonl_records(self.core.data_dir / "logs" / "amon.log")
         if source == "billing":
