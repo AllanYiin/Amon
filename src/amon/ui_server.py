@@ -1960,7 +1960,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                             run_id=continued_run_id,
                             conversation_history=history,
                         )
-                    run_id = result.run_id
+                    active_run_id = result.run_id
                 elif execution_mode == "self_critique":
                     active_run_id = uuid.uuid4().hex
                     send_event("notice", {"text": "Amon：偵測為專業文件撰寫，改用 self_critique 流程。"}, run_id=active_run_id)
