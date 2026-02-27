@@ -802,6 +802,8 @@ class AmonCore:
         model: str | None = None,
         skill_names: list[str] | None = None,
         stream_handler=None,
+        run_id: str | None = None,
+        chat_id: str | None = None,
     ) -> str:
         if not project_path:
             raise ValueError("執行 self_critique 需要指定專案")
@@ -837,7 +839,7 @@ class AmonCore:
                 },
                 mode="self_critique",
             )
-            self.run_graph(project_path=project_path, graph_path=graph_path, stream_handler=stream_handler)
+            self.run_graph(project_path=project_path, graph_path=graph_path, stream_handler=stream_handler, run_id=run_id, chat_id=chat_id)
             log_event(
                 {
                     "level": "INFO",
@@ -855,6 +857,8 @@ class AmonCore:
         model: str | None = None,
         skill_names: list[str] | None = None,
         stream_handler=None,
+        run_id: str | None = None,
+        chat_id: str | None = None,
     ) -> str:
         if not project_path:
             raise ValueError("執行 team 需要指定專案")
@@ -892,7 +896,7 @@ class AmonCore:
                 },
                 mode="team",
             )
-            self.run_graph(project_path=project_path, graph_path=graph_path, stream_handler=stream_handler)
+            self.run_graph(project_path=project_path, graph_path=graph_path, stream_handler=stream_handler, run_id=run_id, chat_id=chat_id)
             tasks_dir = project_path / "tasks"
             tasks_dir.mkdir(parents=True, exist_ok=True)
             self._sync_team_tasks(project_path, tasks_dir, docs_dir)
@@ -966,7 +970,7 @@ class AmonCore:
         )
         return plan
 
-    def run_plan_execute(
+    def run_plan_execute_stream(
         self,
         prompt: str,
         *,
@@ -977,7 +981,10 @@ class AmonCore:
         available_tools: list[dict[str, Any]] | None = None,
         available_skills: list[dict[str, Any]] | None = None,
         stream_handler=None,
-    ) -> str:
+        run_id: str | None = None,
+        chat_id: str | None = None,
+        conversation_history: list[dict[str, str]] | None = None,
+    ) -> tuple[GraphRunResult, str]:
         config = self.load_config(project_path)
         planner_enabled = self._coerce_config_bool(config.get("amon", {}).get("planner", {}).get("enabled", True))
         legacy_fallback_enabled = self._coerce_config_bool(os.getenv("AMON_PLAN_EXECUTE_LEGACY_SINGLE_FALLBACK", ""))
@@ -1016,8 +1023,50 @@ class AmonCore:
             exec_graph.get("variables", {}),
             mode="plan_execute",
         )
-        result = self.run_graph(project_path=project_path, graph_path=graph_path, stream_handler=stream_handler)
-        return self._load_graph_primary_output(result.run_dir)
+        result = self.run_graph(
+            project_path=project_path,
+            graph_path=graph_path,
+            stream_handler=stream_handler,
+            run_id=run_id,
+            chat_id=chat_id,
+        )
+        return result, self._load_graph_primary_output(result.run_dir)
+
+    def run_plan_execute(
+        self,
+        prompt: str,
+        *,
+        project_path: Path,
+        project_id: str | None = None,
+        model: str | None = None,
+        llm_client=None,
+        available_tools: list[dict[str, Any]] | None = None,
+        available_skills: list[dict[str, Any]] | None = None,
+        stream_handler=None,
+    ) -> str:
+        _, response = self.run_plan_execute_stream(
+            prompt,
+            project_path=project_path,
+            project_id=project_id,
+            model=model,
+            llm_client=llm_client,
+            available_tools=available_tools,
+            available_skills=available_skills,
+            stream_handler=stream_handler,
+        )
+        return response
+
+    @staticmethod
+    def _coerce_config_bool(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"", "0", "false", "no", "off"}:
+                return False
+            if normalized in {"1", "true", "yes", "on"}:
+                return True
+        return bool(value)
 
     @staticmethod
     def _coerce_config_bool(value: Any) -> bool:
@@ -1474,6 +1523,7 @@ class AmonCore:
         stream_handler=None,
         run_id: str | None = None,
         request_id: str | None = None,
+        chat_id: str | None = None,
     ) -> GraphRunResult:
         if not project_path:
             raise ValueError("執行 graph 需要指定專案")
@@ -1485,6 +1535,7 @@ class AmonCore:
             stream_handler=stream_handler,
             run_id=run_id,
             request_id=request_id,
+            chat_id=chat_id,
         )
         return runtime.run()
 

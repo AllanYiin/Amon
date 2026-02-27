@@ -43,6 +43,7 @@ class GraphRuntime:
         cancel_event: threading.Event | None = None,
         node_timeout_s: int | None = None,
         request_id: str | None = None,
+        chat_id: str | None = None,
     ) -> None:
         self.core = core
         self.project_path = project_path
@@ -56,6 +57,7 @@ class GraphRuntime:
         self._cancel_path: Path | None = None
         self.request_id = request_id
         self._active_run_id: str | None = run_id
+        self.chat_id = str(chat_id or "").strip() or None
         resolved_project_id = None
         resolver = getattr(core, "resolve_project_identity", None)
         if callable(resolver):
@@ -92,6 +94,7 @@ class GraphRuntime:
                 "payload": {"run_id": run_id, "graph_path": str(self.graph_path)},
                 "run_id": run_id,
                 "request_id": self.request_id,
+                "chat_id": self.chat_id,
                 "risk": "low",
             }
         )
@@ -307,6 +310,7 @@ class GraphRuntime:
         *,
         cancel_event: threading.Event | None = None,
         timeout_s: int | None = None,
+        stream_handler=None,
     ) -> dict[str, Any]:
         if cancel_event and cancel_event.is_set():
             raise _NodeCanceledError()
@@ -678,16 +682,26 @@ class GraphRuntime:
         events_path: Path,
         executor: ThreadPoolExecutor,
     ) -> dict[str, Any]:
-        timeout_s = self._resolve_node_timeout(node)
+        inactivity_timeout_s, hard_timeout_s = self._resolve_node_timeouts(node)
         node_cancel = threading.Event()
         start = time.monotonic()
+        last_progress_ts = start
+        hard_timeout_warned = False
+
+        def wrapped_stream_handler(token: str) -> None:
+            nonlocal last_progress_ts
+            last_progress_ts = time.monotonic()
+            if self.stream_handler:
+                self.stream_handler(token)
+
         future = executor.submit(
             self._execute_node,
             node,
             variables,
             run_id,
             cancel_event=node_cancel,
-            timeout_s=timeout_s,
+            timeout_s=hard_timeout_s,
+            stream_handler=wrapped_stream_handler,
         )
         while True:
             if self._refresh_cancel(None):
@@ -698,25 +712,57 @@ class GraphRuntime:
                     raise _NodeCanceledError()
                 return result
             except FutureTimeoutError:
+                now = time.monotonic()
                 if self.cancel_event.is_set():
                     node_cancel.set()
                 if node_cancel.is_set() and future.done():
                     raise _NodeCanceledError()
-                if timeout_s and (time.monotonic() - start) > timeout_s:
+                if hard_timeout_s and (now - start) > hard_timeout_s and not hard_timeout_warned:
+                    hard_timeout_warned = True
+                    self._append_event(
+                        events_path,
+                        {
+                            "event": "node_hard_timeout_warning",
+                            "node_id": node.get("id"),
+                            "timeout_s": hard_timeout_s,
+                        },
+                    )
+                if inactivity_timeout_s and (now - last_progress_ts) > inactivity_timeout_s:
                     node_cancel.set()
-                    self._append_event(events_path, {"event": "node_timeout_pending", "node_id": node.get("id")})
+                    self._append_event(
+                        events_path,
+                        {
+                            "event": "node_inactivity_timeout",
+                            "node_id": node.get("id"),
+                            "timeout_s": inactivity_timeout_s,
+                        },
+                    )
                     raise _NodeTimeoutError()
                 continue
 
-    def _resolve_node_timeout(self, node: dict[str, Any]) -> int:
-        raw = node.get("timeout_s") or node.get("timeout_seconds") or self.node_timeout_s
-        if raw is None:
-            raw = os.environ.get("AMON_GRAPH_NODE_TIMEOUT") or 60
+    def _resolve_node_timeouts(self, node: dict[str, Any]) -> tuple[int, int]:
+        raw_inactivity = (
+            node.get("inactivity_timeout_s")
+            or node.get("timeout_s")
+            or node.get("timeout_seconds")
+            or self.node_timeout_s
+            or os.environ.get("AMON_GRAPH_NODE_INACTIVITY_TIMEOUT")
+            or 30
+        )
+        raw_hard = node.get("hard_timeout_s") or os.environ.get("AMON_GRAPH_NODE_HARD_TIMEOUT") or 300
         try:
-            timeout = int(raw)
+            inactivity_timeout = int(raw_inactivity)
         except (TypeError, ValueError):
-            timeout = 60
-        return max(timeout, 1)
+            inactivity_timeout = 30
+        try:
+            hard_timeout = int(raw_hard)
+        except (TypeError, ValueError):
+            hard_timeout = 300
+        return max(inactivity_timeout, 1), max(hard_timeout, 1)
+
+    def _resolve_node_timeout(self, node: dict[str, Any]) -> int:
+        _, hard_timeout = self._resolve_node_timeouts(node)
+        return hard_timeout
 
     def _refresh_cancel(self, cancel_path: Path | None = None) -> bool:
         if self.cancel_event.is_set():
@@ -793,6 +839,8 @@ class GraphRuntime:
             request_id=self.request_id,
             tool=str(payload.get("tool") or "") or None,
         )
+        if self.chat_id:
+            enriched.setdefault("chat_id", self.chat_id)
         append_jsonl(path, enriched)
 
     def _write_json(self, path: Path, payload: dict[str, Any]) -> None:

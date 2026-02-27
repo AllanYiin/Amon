@@ -97,6 +97,33 @@ class CoreStreamHandlerTests(unittest.TestCase):
             finally:
                 os.environ.pop("AMON_HOME", None)
 
+    def test_run_plan_execute_stream_uses_single_stream_when_planner_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("plan-exec-fallback")
+                project_path = Path(project.path)
+                core.set_config_value("amon.planner.enabled", False, project_path=project_path)
+                fake_result = SimpleNamespace(run_id="run-fallback", run_dir=project_path / ".amon" / "runs" / "run-fallback")
+
+                with patch.object(core, "run_single_stream", return_value=(fake_result, "fallback response")) as mock_single_stream:
+                    result, response = core.run_plan_execute_stream(
+                        "請完成任務",
+                        project_path=project_path,
+                        project_id=project.project_id,
+                        stream_handler=object(),
+                        run_id="run-from-ui",
+                        conversation_history=[{"role": "user", "content": "歷史"}],
+                    )
+
+                self.assertEqual(result.run_id, "run-fallback")
+                self.assertEqual(response, "fallback response")
+                self.assertEqual(mock_single_stream.call_args.kwargs.get("run_id"), "run-from-ui")
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
 
 if __name__ == "__main__":
     unittest.main()
