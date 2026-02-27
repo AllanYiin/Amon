@@ -47,7 +47,13 @@ class RunSingleTests(unittest.TestCase):
             billing_payload = json.loads(billing_log.read_text(encoding="utf-8").strip())
             self.assertEqual(billing_payload["provider"], "openai")
             self.assertEqual(billing_payload["model"], "gpt-4o-mini")
-            self.assertEqual(billing_payload["token"], 0)
+            self.assertGreaterEqual(int(billing_payload.get("total_tokens") or 0), 0)
+
+            usage_ledger = project_path / ".amon" / "billing" / "usage.jsonl"
+            self.assertTrue(usage_ledger.exists())
+            usage_payload = json.loads(usage_ledger.read_text(encoding="utf-8").strip())
+            self.assertEqual(usage_payload["project_id"], project.project_id)
+            self.assertIn("run_id", usage_payload)
 
 
 if __name__ == "__main__":

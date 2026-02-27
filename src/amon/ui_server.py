@@ -635,6 +635,9 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/v1/billing/summary":
             params = parse_qs(parsed.query)
             project_id = params.get("project_id", [""])[0].strip() or None
+            if not project_id:
+                self._send_json(400, {"message": "請提供 project_id"})
+                return
             try:
                 payload = self._build_billing_summary(project_id=project_id)
             except Exception as exc:  # noqa: BLE001
@@ -645,16 +648,22 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/v1/billing/series":
             params = parse_qs(parsed.query)
             project_id = params.get("project_id", [""])[0].strip() or None
+            if not project_id:
+                self._send_json(400, {"message": "請提供 project_id"})
+                return
             try:
-                payload = self._build_billing_summary(project_id=project_id)
+                payload = self._build_billing_series(project_id=project_id)
             except Exception as exc:  # noqa: BLE001
                 self._handle_error(exc, status=500)
                 return
-            self._send_json(200, {"series": payload.get("run_trend", [])})
+            self._send_json(200, {"series": payload})
             return
         if parsed.path == "/v1/billing/stream":
             params = parse_qs(parsed.query)
             project_id = params.get("project_id", [""])[0].strip() or None
+            if not project_id:
+                self._send_json(400, {"message": "請提供 project_id"})
+                return
             self._handle_billing_stream(project_id=project_id)
             return
         if parsed.path == "/v1/projects":
@@ -1914,15 +1923,26 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     continued_run_id = None
                     if _should_continue_chat_run(project_id=project_id, last_assistant_text=run_context.get("last_assistant_text"), user_message=message):
                         continued_run_id = str(run_context.get("run_id") or "").strip() or None
-                    active_run_id = continued_run_id or None
-                    result, response_text = self.core.run_single_stream(
-                        prompt_with_history,
-                        project_path=self.core.get_project_path(project_id),
-                        stream_handler=stream_handler,
-                        run_id=active_run_id,
-                        conversation_history=history,
-                    )
-                    active_run_id = result.run_id
+                    try:
+                        result, response_text = self.core.run_single_stream(
+                            prompt_with_history,
+                            project_path=self.core.get_project_path(project_id),
+                            stream_handler=stream_handler,
+                            run_id=continued_run_id,
+                            conversation_history=history,
+                            chat_id=chat_id,
+                        )
+                    except TypeError as exc:
+                        if "unexpected keyword argument" not in str(exc):
+                            raise
+                        result, response_text = self.core.run_single_stream(
+                            prompt_with_history,
+                            project_path=self.core.get_project_path(project_id),
+                            stream_handler=stream_handler,
+                            run_id=continued_run_id,
+                            conversation_history=history,
+                        )
+                    run_id = result.run_id
                 elif execution_mode == "self_critique":
                     active_run_id = uuid.uuid4().hex
                     send_event("notice", {"text": "Amon：偵測為專業文件撰寫，改用 self_critique 流程。"}, run_id=active_run_id)
@@ -2497,7 +2517,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         return records
 
     def _billing_amount(self, record: dict[str, Any]) -> float:
-        amount = record.get("cost", record.get("amount", record.get("usage", record.get("token", 0))))
+        amount = record.get("cost", record.get("cost_estimate", 0))
         try:
             parsed = float(amount)
         except (TypeError, ValueError):
@@ -2505,12 +2525,6 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         if parsed < 0:
             return 0.0
         return parsed
-
-    def _billing_bucket(self, record: dict[str, Any]) -> str:
-        mode_value = str(record.get("mode") or record.get("interaction") or record.get("channel") or "").lower()
-        if mode_value in {"automation", "auto", "daemon", "scheduled", "batch"}:
-            return "automation"
-        return "interactive"
 
     @staticmethod
     def _extract_date(text: str | None) -> date | None:
@@ -2532,17 +2546,47 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             return None
         return parsed
 
+    def _read_project_usage_records(self, *, project_id: str) -> list[dict[str, Any]]:
+        project_path = self.core.get_project_path(project_id)
+        usage_path = project_path / ".amon" / "billing" / "usage.jsonl"
+        records = self._read_jsonl_records(usage_path)
+        normalized: list[dict[str, Any]] = []
+        for item in records:
+            row = dict(item)
+            row.setdefault("project_id", project_id)
+            row.setdefault("provider", "unknown")
+            row.setdefault("model", "unknown")
+            row.setdefault("run_id", "unknown")
+            row.setdefault("node_id", "unknown")
+            row.setdefault("chat_id", None)
+            row.setdefault("ts", "")
+            try:
+                row["prompt_tokens"] = max(int(row.get("prompt_tokens") or 0), 0)
+                row["completion_tokens"] = max(int(row.get("completion_tokens") or 0), 0)
+                row["total_tokens"] = max(int(row.get("total_tokens") or 0), 0)
+            except (TypeError, ValueError):
+                row["prompt_tokens"] = 0
+                row["completion_tokens"] = 0
+                row["total_tokens"] = 0
+            row["cost"] = self._billing_amount(row)
+            normalized.append(row)
+        return normalized
+
     def _build_billing_summary(self, *, project_id: str | None) -> dict[str, Any]:
-        records = self._read_jsonl_records(self.core.data_dir / "logs" / "billing.log")
+        if not project_id:
+            raise ValueError("billing summary 需要 project_id")
+        records = self._read_project_usage_records(project_id=project_id)
         today = datetime.now().date()
+        month_start = today.replace(day=1)
         summary: dict[str, Any] = {
             "currency": "USD",
-            "today": {"cost": 0.0, "usage": 0.0, "records": 0},
-            "project_total": {"cost": 0.0, "usage": 0.0, "records": 0},
+            "today": {"cost": 0.0, "usage": 0.0, "tokens": 0, "calls": 0},
+            "month": {"cost": 0.0, "usage": 0.0, "tokens": 0, "calls": 0},
+            "project_total": {"cost": 0.0, "usage": 0.0, "tokens": 0, "calls": 0},
             "breakdown": {"provider": {}, "model": {}, "agent": {}, "node": {}},
             "mode_breakdown": {
-                "automation": {"cost": 0.0, "usage": 0.0, "records": 0},
-                "interactive": {"cost": 0.0, "usage": 0.0, "records": 0},
+                "automation": {"cost": 0.0, "usage": 0.0, "tokens": 0, "calls": 0},
+                "interactive": {"cost": 0.0, "usage": 0.0, "tokens": 0, "calls": 0},
             },
             "budgets": {
                 "daily_budget": None,
@@ -2553,11 +2597,11 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 "automation_usage": 0.0,
             },
             "exceeded_events": [],
-            "current_run": {"run_id": None, "cost": 0.0, "usage": 0.0, "records": 0},
+            "current_run": {"run_id": None, "cost": 0.0, "usage": 0.0, "tokens": 0, "calls": 0},
             "run_trend": [],
         }
 
-        config = self.core.load_config(self.core.get_project_path(project_id)) if project_id else self.core.load_config(None)
+        config = self.core.load_config(self.core.get_project_path(project_id))
         billing_cfg = config.get("billing", {}) if isinstance(config, dict) else {}
         summary["currency"] = str(billing_cfg.get("currency") or "USD")
         summary["budgets"]["daily_budget"] = self._safe_budget_value(billing_cfg.get("daily_budget"))
@@ -2566,60 +2610,66 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
 
         run_buckets: dict[str, dict[str, Any]] = {}
         for record in records:
-            record_project_id = str(record.get("project_id") or "").strip() or None
-            if project_id and record_project_id != project_id:
-                continue
-            amount = self._billing_amount(record)
+            record_cost = self._billing_amount(record)
+            record_tokens = int(record.get("total_tokens") or 0)
             record_date = self._extract_date(str(record.get("ts") or ""))
-            mode_bucket = self._billing_bucket(record)
+            mode_value = str(record.get("mode") or "interactive").lower()
+            mode_bucket = "automation" if mode_value in {"automation", "auto", "daemon", "scheduled", "batch"} else "interactive"
             run_id = str(record.get("run_id") or "unknown")
 
-            bucket = run_buckets.setdefault(run_id, {"run_id": run_id, "cost": 0.0, "usage": 0.0, "records": 0, "last_ts": ""})
-            bucket["cost"] += amount
-            bucket["usage"] += amount
-            bucket["records"] += 1
-            bucket["last_ts"] = max(str(bucket.get("last_ts") or ""), str(record.get("ts") or ""))
+            run_bucket = run_buckets.setdefault(run_id, {"run_id": run_id, "cost": 0.0, "usage": 0.0, "tokens": 0, "calls": 0, "last_ts": ""})
+            run_bucket["cost"] += record_cost
+            run_bucket["usage"] += record_tokens
+            run_bucket["tokens"] += record_tokens
+            run_bucket["calls"] += 1
+            run_bucket["last_ts"] = max(str(run_bucket.get("last_ts") or ""), str(record.get("ts") or ""))
 
-            summary["project_total"]["cost"] += amount
-            summary["project_total"]["usage"] += amount
-            summary["project_total"]["records"] += 1
-            summary["mode_breakdown"][mode_bucket]["cost"] += amount
-            summary["mode_breakdown"][mode_bucket]["usage"] += amount
-            summary["mode_breakdown"][mode_bucket]["records"] += 1
+            summary["project_total"]["cost"] += record_cost
+            summary["project_total"]["usage"] += record_tokens
+            summary["project_total"]["tokens"] += record_tokens
+            summary["project_total"]["calls"] += 1
+            summary["mode_breakdown"][mode_bucket]["cost"] += record_cost
+            summary["mode_breakdown"][mode_bucket]["usage"] += record_tokens
+            summary["mode_breakdown"][mode_bucket]["tokens"] += record_tokens
+            summary["mode_breakdown"][mode_bucket]["calls"] += 1
 
             if record_date == today:
-                summary["today"]["cost"] += amount
-                summary["today"]["usage"] += amount
-                summary["today"]["records"] += 1
+                summary["today"]["cost"] += record_cost
+                summary["today"]["usage"] += record_tokens
+                summary["today"]["tokens"] += record_tokens
+                summary["today"]["calls"] += 1
+                summary["budgets"]["daily_usage"] += record_cost
+            if record_date and record_date >= month_start:
+                summary["month"]["cost"] += record_cost
+                summary["month"]["usage"] += record_tokens
+                summary["month"]["tokens"] += record_tokens
+                summary["month"]["calls"] += 1
 
-            for key in ("provider", "model", "agent", "node"):
-                raw_value = record.get(f"{key}_id", record.get(key))
-                value = str(raw_value or "unknown")
-                bucket = summary["breakdown"][key].setdefault(value, {"cost": 0.0, "usage": 0.0, "records": 0})
-                bucket["cost"] += amount
-                bucket["usage"] += amount
-                bucket["records"] += 1
+            summary["budgets"]["project_usage"] += record_cost
+            if mode_bucket == "automation":
+                summary["budgets"]["automation_usage"] += record_cost
 
-        # Budgets使用全域/專案資料，不受 project filter 影響 daily_usage
-        all_records = self._read_jsonl_records(self.core.data_dir / "logs" / "billing.log")
-        for record in all_records:
-            amount = self._billing_amount(record)
-            record_date = self._extract_date(str(record.get("ts") or ""))
-            if record_date == today:
-                summary["budgets"]["daily_usage"] += amount
-            if project_id and str(record.get("project_id") or "").strip() == project_id:
-                summary["budgets"]["project_usage"] += amount
-            if self._billing_bucket(record) == "automation":
-                summary["budgets"]["automation_usage"] += amount
+            for key, value in {
+                "provider": str(record.get("provider") or "unknown"),
+                "model": str(record.get("model") or "unknown"),
+                "agent": str(record.get("agent") or "unknown"),
+                "node": str(record.get("node_id") or "unknown"),
+            }.items():
+                metric = summary["breakdown"][key].setdefault(value, {"cost": 0.0, "usage": 0.0, "tokens": 0, "calls": 0})
+                metric["cost"] += record_cost
+                metric["usage"] += record_tokens
+                metric["tokens"] += record_tokens
+                metric["calls"] += 1
 
         for event in self._read_jsonl_records(self.core.data_dir / "logs" / "amon.log"):
             if str(event.get("event") or "") != "budget_exceeded":
                 continue
-            if project_id and str(event.get("project_id") or "") != project_id:
+            if str(event.get("project_id") or "") != project_id:
                 continue
             summary["exceeded_events"].append(event)
         summary["exceeded_events"].sort(key=lambda item: str(item.get("ts") or ""), reverse=True)
         summary["exceeded_events"] = summary["exceeded_events"][:50]
+
         summary["run_trend"] = sorted(run_buckets.values(), key=lambda item: str(item.get("last_ts") or ""))[-20:]
         if summary["run_trend"]:
             latest = summary["run_trend"][-1]
@@ -2627,9 +2677,28 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 "run_id": latest.get("run_id"),
                 "cost": float(latest.get("cost") or 0.0),
                 "usage": float(latest.get("usage") or 0.0),
-                "records": int(latest.get("records") or 0),
+                "tokens": int(latest.get("tokens") or 0),
+                "calls": int(latest.get("calls") or 0),
             }
         return summary
+
+    def _build_billing_series(self, *, project_id: str | None) -> list[dict[str, Any]]:
+        if not project_id:
+            raise ValueError("billing series 需要 project_id")
+        records = self._read_project_usage_records(project_id=project_id)
+        by_day: dict[str, dict[str, Any]] = {}
+        for record in records:
+            date_key = str(record.get("ts") or "")[:10]
+            if len(date_key) != 10:
+                continue
+            bucket = by_day.setdefault(date_key, {"date": date_key, "cost": 0.0, "tokens": 0, "usage": 0.0, "calls": 0})
+            cost = self._billing_amount(record)
+            tokens = int(record.get("total_tokens") or 0)
+            bucket["cost"] += cost
+            bucket["tokens"] += tokens
+            bucket["usage"] += tokens
+            bucket["calls"] += 1
+        return [by_day[key] for key in sorted(by_day.keys())]
 
     def _handle_billing_stream(self, *, project_id: str | None) -> None:
         self.send_response(200)
@@ -2638,7 +2707,8 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         self.send_header("Connection", "keep-alive")
         self.end_headers()
 
-        billing_log = self.core.data_dir / "logs" / "billing.log"
+        project_path = self.core.get_project_path(project_id) if project_id else None
+        billing_log = project_path / ".amon" / "billing" / "usage.jsonl" if project_path else self.core.data_dir / "logs" / "billing.log"
         amon_log = self.core.data_dir / "logs" / "amon.log"
 
         def emit(event_type: str, payload: dict[str, Any]) -> None:
