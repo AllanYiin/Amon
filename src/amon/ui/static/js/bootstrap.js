@@ -1805,7 +1805,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
           elements.artifactsPreviewRefresh.onclick = null;
         }
 
-        elements.artifactsListDetails.open = !entrypoint;
+        elements.artifactsListDetails.open = false;
         if (!compactItems.length) {
           elements.artifactsListDetails.hidden = true;
           return;
@@ -1821,7 +1821,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
           title.textContent = artifact.name || artifact.path || "(未命名)";
           const meta = document.createElement("span");
           const parts = [formatFileSize(artifact.size)];
-          if (artifact.created_at) parts.push(artifact.created_at);
+          if (artifact.createdAt || artifact.created_at) parts.push(artifact.createdAt || artifact.created_at);
           meta.textContent = parts.join(" · ");
           header.append(title, meta);
           card.appendChild(header);
@@ -1837,12 +1837,12 @@ appStore.patch({ bootstrappedAt: Date.now() });
           openBtn.type = "button";
           openBtn.className = "secondary-btn small";
           openBtn.textContent = "開啟";
-          openBtn.addEventListener("click", () => window.open(artifact.url, "_blank", "noopener"));
+          openBtn.addEventListener("click", () => window.open(artifact.url || artifact.download_url, "_blank", "noopener"));
           const downloadBtn = document.createElement("button");
           downloadBtn.type = "button";
           downloadBtn.className = "secondary-btn small";
           downloadBtn.textContent = "下載";
-          downloadBtn.addEventListener("click", () => window.open(artifact.download_url, "_blank", "noopener"));
+          downloadBtn.addEventListener("click", () => window.open(artifact.download_url || artifact.url, "_blank", "noopener"));
           actions.append(openBtn, downloadBtn);
           card.appendChild(actions);
 
