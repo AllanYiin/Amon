@@ -1452,6 +1452,55 @@ class UIAsyncAPITests(unittest.TestCase):
                     server.server_close()
                 os.environ.pop("AMON_HOME", None)
 
+    def test_run_artifacts_api_supports_workspace_html_inline_preview(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("artifacts-workspace-html")
+                project_path = Path(project.path)
+                run_id = "run_art_html_001"
+                run_dir = project_path / ".amon" / "runs" / run_id
+                run_dir.mkdir(parents=True, exist_ok=True)
+                (project_path / "workspace").mkdir(parents=True, exist_ok=True)
+                html_path = project_path / "workspace" / "index.html"
+                html_path.write_text("<html><body><h1>preview ok</h1></body></html>", encoding="utf-8")
+                (run_dir / "events.jsonl").write_text(
+                    json.dumps({"event": "artifact_written", "artifact_path": "workspace/index.html"}, ensure_ascii=False) + "\n",
+                    encoding="utf-8",
+                )
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                conn.request("GET", f"/v1/runs/{run_id}/artifacts?project_id={quote(project.project_id)}")
+                response = conn.getresponse()
+                payload = json.loads(response.read().decode("utf-8"))
+                self.assertEqual(response.status, 200)
+                self.assertEqual(len(payload["artifacts"]), 1)
+                artifact = payload["artifacts"][0]
+                self.assertEqual(artifact["path"], "workspace/index.html")
+
+                conn.request("GET", artifact["download_url"])
+                rendered = conn.getresponse()
+                self.assertEqual(rendered.status, 200)
+                self.assertIn("inline", rendered.getheader("Content-Disposition", ""))
+                self.assertEqual(rendered.getheader("X-Frame-Options"), "SAMEORIGIN")
+                self.assertEqual(rendered.getheader("Content-Type"), "text/html; charset=utf-8")
+                self.assertIn("preview ok", rendered.read().decode("utf-8"))
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
     def test_run_artifacts_api_blocks_path_traversal(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"

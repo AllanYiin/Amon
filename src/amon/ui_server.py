@@ -532,7 +532,11 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 target = next((item for item in artifacts if item.get("id") == artifact_id or item.get("path") == artifact_id), None)
                 if not target:
                     raise FileNotFoundError("找不到 artifact")
-                body = self._resolve_allowed_project_path(Path(project_path), str(target["path"]), [Path(project_path) / "docs", Path(project_path) / "audits"]).read_bytes()
+                body = self._resolve_allowed_project_path(
+                    Path(project_path),
+                    str(target["path"]),
+                    [Path(project_path) / "docs", Path(project_path) / "audits", Path(project_path) / "workspace"],
+                ).read_bytes()
             except FileNotFoundError as exc:
                 self._handle_error(exc, status=404)
                 return
@@ -544,10 +548,15 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 return
             filename = str(target["name"])
             content_type = str(target.get("mime") or "application/octet-stream")
-            disposition = "inline" if inline else "attachment"
+            is_html = content_type.startswith("text/html") or filename.lower().endswith(".html")
+            if is_html:
+                content_type = "text/html; charset=utf-8"
+            disposition = "inline" if inline or is_html else "attachment"
             self.send_response(200)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Disposition", f'{disposition}; filename="{filename}"')
+            if is_html:
+                self.send_header("X-Frame-Options", "SAMEORIGIN")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -586,7 +595,11 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 target = next((item for item in artifacts if item.get("id") == artifact_id or item.get("path") == artifact_id), None)
                 if not target:
                     raise FileNotFoundError("找不到 artifact")
-                body = self._resolve_allowed_project_path(Path(project_path), str(target["path"]), [Path(project_path) / "docs", Path(project_path) / "audits"]).read_bytes()
+                body = self._resolve_allowed_project_path(
+                    Path(project_path),
+                    str(target["path"]),
+                    [Path(project_path) / "docs", Path(project_path) / "audits", Path(project_path) / "workspace"],
+                ).read_bytes()
             except FileNotFoundError as exc:
                 self._handle_error(exc, status=404)
                 return
@@ -598,10 +611,15 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 return
             filename = str(target["name"])
             content_type = str(target.get("mime") or "application/octet-stream")
-            disposition = "inline" if inline else "attachment"
+            is_html = content_type.startswith("text/html") or filename.lower().endswith(".html")
+            if is_html:
+                content_type = "text/html; charset=utf-8"
+            disposition = "inline" if inline or is_html else "attachment"
             self.send_response(200)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Disposition", f'{disposition}; filename="{filename}"')
+            if is_html:
+                self.send_header("X-Frame-Options", "SAMEORIGIN")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -2907,7 +2925,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         if not run_dir.exists() or not run_dir.is_dir():
             raise FileNotFoundError("找不到指定的 run")
 
-        allowed_dirs = [project_path / "docs", project_path / "audits"]
+        allowed_dirs = [project_path / "docs", project_path / "audits", project_path / "workspace"]
         candidates: dict[str, Path] = {}
 
         event_path = run_dir / "events.jsonl"
