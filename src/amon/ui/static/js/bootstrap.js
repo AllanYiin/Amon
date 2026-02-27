@@ -288,10 +288,26 @@ appStore.patch({ bootstrappedAt: Date.now() });
           elements.configProject.textContent = "尚未載入。";
           elements.configEffectiveSummary.textContent = "尚未載入。";
           elements.configTableBody.innerHTML = "";
+          if (elements.plannerEnabledStatus) elements.plannerEnabledStatus.textContent = "尚未載入。";
+          if (elements.plannerEnabledSource) elements.plannerEnabledSource.textContent = "來源：--";
+          if (elements.plannerToggleBtn) elements.plannerToggleBtn.disabled = true;
           return;
         }
         elements.configGlobal.textContent = JSON.stringify(payload.global_config || {}, null, 2);
         elements.configProject.textContent = JSON.stringify(payload.project_config || {}, null, 2);
+        const planner = payload.planner || {};
+        if (elements.plannerEnabledStatus) {
+          const plannerEnabled = Boolean(planner.enabled);
+          elements.plannerEnabledStatus.textContent = plannerEnabled ? "目前為啟用（plan_execute 預設走 planner）" : "目前為停用（plan_execute 會 fallback 到 single）";
+        }
+        if (elements.plannerEnabledSource) {
+          elements.plannerEnabledSource.textContent = `來源：${planner.source || "default"}`;
+        }
+        if (elements.plannerToggleBtn) {
+          const plannerEnabled = Boolean(planner.enabled);
+          elements.plannerToggleBtn.disabled = planner.toggle_allowed === false;
+          elements.plannerToggleBtn.textContent = plannerEnabled ? "停用 Planner" : "啟用 Planner";
+        }
 
         const keyword = (elements.configSearch.value || "").trim().toLowerCase();
         const rows = flattenConfigRows(payload.effective_config || {}, payload.sources || {});
@@ -315,6 +331,15 @@ appStore.patch({ bootstrappedAt: Date.now() });
         const payload = await services.admin.getConfigView(state.projectId);
         state.configView = payload;
         renderConfigTable();
+      }
+
+      async function togglePlannerEnabled() {
+        const planner = state.configView?.planner || {};
+        const nextEnabled = !Boolean(planner.enabled);
+        const response = await services.admin.setPlannerEnabled({ projectId: state.projectId || "", enabled: nextEnabled });
+        state.configView = response.config || state.configView;
+        renderConfigTable();
+        showToast(nextEnabled ? "Planner 已啟用。" : "Planner 已停用，plan_execute 會 fallback。", 8000, "info");
       }
 
       function formatBillMetric(cost, usage, currency) {
@@ -1970,6 +1995,9 @@ appStore.patch({ bootstrappedAt: Date.now() });
       elements.configRefresh.addEventListener("click", loadConfigPage);
       elements.configSearch.addEventListener("input", renderConfigTable);
       elements.configExport.addEventListener("click", exportEffectiveConfig);
+      elements.plannerToggleBtn?.addEventListener("click", () => {
+        void togglePlannerEnabled();
+      });
       elements.skillTriggerPreview.addEventListener("click", async () => {
         const skillName = elements.skillTriggerSelect.value;
         if (!skillName) {

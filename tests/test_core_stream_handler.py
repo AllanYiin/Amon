@@ -97,6 +97,30 @@ class CoreStreamHandlerTests(unittest.TestCase):
             finally:
                 os.environ.pop("AMON_HOME", None)
 
+    def test_run_plan_execute_stream_uses_planner_when_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("plan-exec-planner")
+                project_path = Path(project.path)
+                core.set_config_value("amon.planner.enabled", True, project_path=project_path)
+                fake_result = SimpleNamespace(run_id="run-plan", run_dir=project_path / ".amon" / "runs" / "run-plan")
+
+                with patch.object(core, "generate_plan_docs") as mock_generate, patch("amon.core.compile_plan_to_exec_graph", return_value={"nodes": [], "edges": [], "variables": {}}) as mock_compile, patch.object(core, "run_graph", return_value=fake_result), patch.object(core, "_load_graph_primary_output", return_value="plan-ok"):
+                    core.run_plan_execute_stream(
+                        "請完成任務",
+                        project_path=project_path,
+                        project_id=project.project_id,
+                        run_id="run-from-ui",
+                    )
+
+                self.assertTrue(mock_generate.called)
+                self.assertTrue(mock_compile.called)
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
     def test_run_plan_execute_stream_uses_single_stream_when_planner_disabled(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir
@@ -121,6 +145,9 @@ class CoreStreamHandlerTests(unittest.TestCase):
                 self.assertEqual(result.run_id, "run-fallback")
                 self.assertEqual(response, "fallback response")
                 self.assertEqual(mock_single_stream.call_args.kwargs.get("run_id"), "run-from-ui")
+                self.assertEqual(getattr(result, "execution_route", ""), "single_fallback")
+                self.assertFalse(getattr(result, "planner_enabled", True))
+                self.assertIn("fallback single", str(getattr(result, "fallback_reason", "")))
             finally:
                 os.environ.pop("AMON_HOME", None)
 

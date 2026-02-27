@@ -19,6 +19,19 @@ export function createAdminService({ api }) {
       const projectParam = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
       return api.request(`/billing/summary${projectParam}`);
     },
+    /** @param {{projectId?: string, enabled: boolean}} payload */
+    setPlannerEnabled({ projectId, enabled }) {
+      const scope = projectId ? "project" : "global";
+      return api.request("/config/set", {
+        method: "POST",
+        body: JSON.stringify({
+          key_path: "amon.planner.enabled",
+          value: Boolean(enabled),
+          scope,
+          project_id: projectId || "",
+        }),
+      });
+    },
     /** @param {URLSearchParams} query */
     getLogs(query) {
       return api.request(`/logs/query?${query.toString()}`);
