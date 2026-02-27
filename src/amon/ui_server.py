@@ -976,11 +976,15 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 return
             scope = str(payload.get("scope") or "project").strip().lower() or "project"
             project_id = str(payload.get("project_id") or "").strip()
+            chat_id = str(payload.get("chat_id") or "").strip()
             if scope not in {"project", "chat"}:
                 self._send_json(400, {"message": "scope 僅允許 project 或 chat"})
                 return
             if not project_id:
                 self._send_json(400, {"message": "請提供 project_id"})
+                return
+            if scope == "chat" and not chat_id:
+                self._send_json(400, {"message": "scope=chat 時請提供 chat_id"})
                 return
             try:
                 project_path = self.core.get_project_path(project_id)
@@ -988,7 +992,13 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     context_path = self._project_context_file(project_path)
                     if context_path.exists():
                         context_path.unlink()
-                self._send_json(200, {"status": "ok", "scope": scope})
+                elif scope == "chat":
+                    session_path = self._chat_session_file(project_path, chat_id)
+                    if session_path.exists():
+                        session_path.unlink()
+                self._send_json(200, {"status": "ok", "scope": scope, "chat_id": chat_id or None})
+            except ValueError as exc:
+                self._send_json(400, {"message": str(exc)})
             except Exception as exc:  # noqa: BLE001
                 self._handle_error(exc, status=500)
             return
@@ -1953,35 +1963,18 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     "event": "ui_chat_stream_error",
                     "message": str(exc),
                     "stack": traceback.format_exc(),
+                    "project_id": normalize_project_id(project_id),
+                    "chat_id": chat_id or None,
                 }
             )
             if chat_id and project_id:
                 append_event(chat_id, {"type": "error", "text": str(exc), "project_id": project_id})
-            send_event("error", {"message": str(exc)})
-            send_event("done", {"status": "failed", "chat_id": chat_id})
+            send_event("error", {"message": str(exc), "chat_id": chat_id, "project_id": project_id})
+            send_event("done", {"status": "failed", "chat_id": chat_id, "project_id": project_id})
 
     def _list_projects_for_ui(self, *, include_deleted: bool = False) -> list[dict[str, Any]]:
         records = self.core.list_projects(include_deleted=include_deleted)
-        merged: dict[str, dict[str, Any]] = {record.project_id: record.to_dict() for record in records}
-
-        projects_dir = self.core.projects_dir
-        if projects_dir.exists():
-            for child in projects_dir.iterdir():
-                if not child.is_dir():
-                    continue
-                project_id = child.name.strip()
-                if not project_id or project_id in merged:
-                    continue
-                merged[project_id] = {
-                    "project_id": project_id,
-                    "name": project_id,
-                    "path": str(child),
-                    "created_at": "",
-                    "updated_at": "",
-                    "status": "active",
-                }
-
-        projects = list(merged.values())
+        projects = [record.to_dict() for record in records]
         projects.sort(key=lambda item: item.get("project_id") or "")
         return projects
 
@@ -2175,6 +2168,13 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
     @staticmethod
     def _project_context_file(project_path: Path) -> Path:
         return project_path / ".amon" / "context" / "project_context.md"
+
+    @staticmethod
+    def _chat_session_file(project_path: Path, chat_id: str) -> Path:
+        normalized_chat_id = str(chat_id or "").strip()
+        if not normalized_chat_id or "/" in normalized_chat_id or "\\" in normalized_chat_id or ".." in normalized_chat_id:
+            raise ValueError("chat_id 格式不合法")
+        return project_path / "sessions" / "chat" / f"{normalized_chat_id}.jsonl"
 
     def _read_project_context(self, project_path: Path) -> str:
         context_path = self._project_context_file(project_path)

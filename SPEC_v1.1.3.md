@@ -1496,3 +1496,42 @@ Feature: MCP tool permission
 [3]: https://modelcontextprotocol.io/docs/sdk?utm_source=chatgpt.com "SDKs"
 [4]: https://claude.com/blog/cowork-research-preview?utm_source=chatgpt.com "Introducing Cowork"
 [5]: https://modelcontextprotocol.info/docs/concepts/tools/?utm_source=chatgpt.com "Tools"
+
+---
+
+## 補充規格（Phase 4）`POST /v1/context/clear`
+
+### Request Body
+
+```json
+{
+  "scope": "project | chat",
+  "project_id": "string",
+  "chat_id": "string | null"
+}
+```
+
+### 語意與限制
+
+- `scope = "project"`
+  - 維持既有行為：清除 project-level context（`project_context.md`）。
+  - `chat_id` 可省略。
+- `scope = "chat"`
+  - **必須提供 `chat_id`**。
+  - 若缺少 `chat_id`，回傳 `400`，避免誤刪整個 project context。
+  - 僅清除對應 `chat_id` 的聊天 session/context，不影響同 project 的其他 chat。
+
+### Response
+
+- `200 OK`
+
+```json
+{
+  "status": "ok",
+  "scope": "project | chat",
+  "chat_id": "string | null"
+}
+```
+
+- `400 Bad Request`
+  - scope 非法、缺少 `project_id`、或 `scope=chat` 缺少/非法 `chat_id`。
