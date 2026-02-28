@@ -93,6 +93,32 @@ export function createStreamingArtifactParser() {
 
       return events;
     },
+    finalize() {
+      const events = [];
+      if (!activeArtifact) {
+        pendingLine = "";
+        return events;
+      }
+
+      if (pendingLine) {
+        activeArtifact.content += pendingLine;
+        events.push({
+          type: "artifact_chunk",
+          filename: activeArtifact.filename,
+          appendedText: pendingLine,
+        });
+        pendingLine = "";
+      }
+
+      events.push({
+        type: "artifact_complete",
+        filename: activeArtifact.filename,
+        language: activeArtifact.language,
+        content: activeArtifact.content,
+      });
+      activeArtifact = null;
+      return events;
+    },
     reset() {
       pendingLine = "";
       activeArtifact = null;
