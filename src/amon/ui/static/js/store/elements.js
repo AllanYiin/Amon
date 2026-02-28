@@ -60,6 +60,7 @@ export function collectElements(doc = document) {
     thinkingSummary: doc.getElementById("thinking-summary"),
     thinkingDetail: doc.getElementById("thinking-detail"),
     artifactsOverview: doc.getElementById("artifacts-overview"),
+    artifactsInlineStreamingHint: doc.getElementById("artifacts-inline-streaming-hint"),
     artifactsInlinePreview: doc.getElementById("artifacts-inline-preview"),
     artifactsInlinePreviewTitle: doc.getElementById("artifacts-inline-preview-title"),
     artifactsInlinePreviewFrame: doc.getElementById("artifacts-inline-preview-frame"),
