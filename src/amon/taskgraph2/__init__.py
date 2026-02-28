@@ -1,5 +1,7 @@
 """TaskGraph 2.0 models and serializers."""
 
+from .llm import TaskGraphLLMClient, build_default_llm_client
+from .runtime import TaskGraphRunResult, TaskGraphRuntime
 from .schema import (
     TaskEdge,
     TaskGraph,
@@ -27,4 +29,8 @@ __all__ = [
     "validate_task_graph",
     "loads_task_graph",
     "dumps_task_graph",
+    "TaskGraphLLMClient",
+    "build_default_llm_client",
+    "TaskGraphRuntime",
+    "TaskGraphRunResult",
 ]
