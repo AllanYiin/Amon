@@ -2,14 +2,23 @@ function clearInlineRows(container) {
   container?.querySelectorAll('[data-inline-artifact-row="true"]').forEach((node) => node.remove());
 }
 
+const INLINE_PREVIEW_SANDBOX = "allow-scripts allow-forms allow-modals";
+
+function ensureInlinePreviewSandbox(frame) {
+  if (!frame) return;
+  frame.setAttribute("sandbox", INLINE_PREVIEW_SANDBOX);
+}
+
 function activateInlinePreview(elements, item) {
   const previewUrl = item?.previewUrl || item?.url;
   if (!elements?.artifactsInlinePreviewFrame || !previewUrl) return;
+  ensureInlinePreviewSandbox(elements.artifactsInlinePreviewFrame);
   elements.artifactsInlinePreview.hidden = false;
   elements.artifactsInlinePreviewTitle.textContent = item.filename || item.name || item.title || "inline artifact";
   elements.artifactsInlinePreviewFrame.src = previewUrl;
   elements.artifactsPreviewOpenTab.onclick = () => window.open(previewUrl, "_blank", "noopener");
   elements.artifactsPreviewRefresh.onclick = () => {
+    ensureInlinePreviewSandbox(elements.artifactsInlinePreviewFrame);
     elements.artifactsInlinePreviewFrame.src = previewUrl;
   };
 }
