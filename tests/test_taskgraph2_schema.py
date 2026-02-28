@@ -90,6 +90,21 @@ class TaskGraph2SchemaTests(unittest.TestCase):
         graph = self._valid_graph()
         self.assertEqual(dumps_task_graph(graph), dumps_task_graph(graph))
 
+    def test_tool_step_requires_tool_name(self) -> None:
+        graph = self._valid_graph()
+        graph.nodes[0].steps = [{"type": "tool", "args": {"q": "x"}}]
+
+        with self.assertRaisesRegex(ValueError, "tool_name"):
+            validate_task_graph(graph)
+
+    def test_loads_roundtrip_with_steps(self) -> None:
+        raw = """{"schema_version":"2.0","objective":"ok","session_defaults":{},"nodes":[{"id":"A","title":"A","kind":"tooling","description":"d","reads":[],"writes":{"echo":"text"},"llm":{},"tools":[],"steps":[{"type":"tool","tool_name":"test.echo","args":{"text":"hi"},"store_as":"echo"}],"output":{"type":"text","extract":"best_effort"},"guardrails":{"allow_interrupt":true,"require_human_approval":false,"boundaries":[]},"retry":{"max_attempts":1,"backoff_s":1.0,"jitter_s":0.0},"timeout":{"inactivity_s":60,"hard_s":120}}],"edges":[]}"""
+
+        graph = loads_task_graph(raw)
+        self.assertEqual(graph.nodes[0].steps[0]["tool_name"], "test.echo")
+        dumped = dumps_task_graph(graph)
+        self.assertIn('"steps"', dumped)
+
 
 if __name__ == "__main__":
     unittest.main()
