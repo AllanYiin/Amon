@@ -1210,6 +1210,54 @@ class UIAsyncAPITests(unittest.TestCase):
                     server.server_close()
                 os.environ.pop("AMON_HOME", None)
 
+    def test_config_set_api_supports_generic_json_value(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("config-set-generic")
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port)
+                conn.request(
+                    "POST",
+                    "/v1/config/set",
+                    body=json.dumps(
+                        {
+                            "scope": "project",
+                            "project_id": project.project_id,
+                            "key_path": "amon.ui.theme",
+                            "value": "light",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    headers={"Content-Type": "application/json"},
+                )
+                set_resp = conn.getresponse()
+                set_payload = json.loads(set_resp.read().decode("utf-8"))
+                self.assertEqual(set_resp.status, 200)
+                self.assertEqual(set_payload["updated"]["value"], "light")
+
+                conn.request("GET", f"/v1/config/view?project_id={quote(project.project_id)}")
+                view_resp = conn.getresponse()
+                view_payload = json.loads(view_resp.read().decode("utf-8"))
+                self.assertEqual(view_resp.status, 200)
+                self.assertEqual(view_payload["effective_config"]["amon"]["ui"]["theme"], "light")
+                self.assertEqual(view_payload["sources"]["amon"]["ui"]["theme"], "project")
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
     def test_chat_stream_plan_execute_reports_planner_route_and_fallback_warning(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"

@@ -1068,12 +1068,16 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 self._send_json(400, {"message": "payload 需為物件"})
                 return
             key_path = str(payload.get("key_path") or "").strip()
-            if key_path != "amon.planner.enabled":
-                self._send_json(400, {"message": "目前僅支援切換 amon.planner.enabled"})
+            if not key_path:
+                self._send_json(400, {"message": "請提供 key_path"})
+                return
+            segments = key_path.split(".")
+            if any(not segment.strip() for segment in segments):
+                self._send_json(400, {"message": "key_path 格式錯誤"})
                 return
             value = payload.get("value")
-            if not isinstance(value, bool):
-                self._send_json(400, {"message": "value 必須是布林值"})
+            if not isinstance(value, (str, int, float, bool, list, dict)) and value is not None:
+                self._send_json(400, {"message": "value 僅支援 JSON 型別"})
                 return
             scope = str(payload.get("scope") or "project").strip().lower() or "project"
             if scope not in {"global", "project"}:

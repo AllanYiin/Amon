@@ -332,7 +332,7 @@
             <header class="config-page__header">
               <div>
                 <h2>Config</h2>
-                <p class="subtitle">唯讀檢視 Global / Project / Effective 設定，並顯示 Effective 來源。</p>
+                <p class="subtitle">可直接編輯設定值，並檢視 Global / Project / Effective 設定來源。</p>
               </div>
               <button type="button" class="btn btn--secondary secondary-btn" id="config-export">匯出 Effective Config</button>
             </header>
@@ -350,6 +350,27 @@
               <p id="planner-enabled-status">尚未載入。</p>
               <p class="subtitle" id="planner-enabled-source">來源：--</p>
               <button type="button" class="btn btn--secondary secondary-btn" id="planner-toggle-btn">切換 Planner</button>
+            </article>
+
+            <article class="config-card card">
+              <h3>編輯設定</h3>
+              <div class="config-toolbar">
+                <label class="field-label">Key path
+                  <input type="text" id="config-edit-key" placeholder="例如：amon.ui.theme" />
+                </label>
+                <label class="field-label">Scope
+                  <select id="config-edit-scope">
+                    <option value="project">project</option>
+                    <option value="global">global</option>
+                  </select>
+                </label>
+              </div>
+              <label class="field-label">Value（JSON，可填字串、數字、布林、null、物件）
+                <textarea id="config-edit-value" rows="3" placeholder='例如："light" 或 true'></textarea>
+              </label>
+              <div class="toolbar-actions">
+                <button type="button" class="btn btn--secondary secondary-btn" id="config-edit-apply">儲存設定</button>
+              </div>
             </article>
 
             <div class="config-grid">
@@ -373,6 +394,7 @@
                       <th>Key path</th>
                       <th>Effective</th>
                       <th>Source</th>
+                      <th>Action</th>
                     </tr>
                   </thead>
                   <tbody id="config-table-body"></tbody>
