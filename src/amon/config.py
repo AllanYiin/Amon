@@ -92,6 +92,54 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 
+def resolve_system_prompt(config: Mapping[str, Any] | None) -> str:
+    """Resolve merged system prompt from canonical and legacy keys.
+
+    Canonical key is ``prompts.system``. Legacy keys ``agent.system_prompt`` and
+    ``chat.system_prompt`` are still accepted for backward compatibility.
+    """
+
+    if not isinstance(config, Mapping):
+        return ""
+    prompts = config.get("prompts") if isinstance(config.get("prompts"), Mapping) else {}
+    canonical = str((prompts or {}).get("system") or "").strip()
+    if canonical:
+        return canonical
+    agent = config.get("agent") if isinstance(config.get("agent"), Mapping) else {}
+    agent_value = str((agent or {}).get("system_prompt") or "").strip()
+    if agent_value:
+        return agent_value
+    chat = config.get("chat") if isinstance(config.get("chat"), Mapping) else {}
+    return str((chat or {}).get("system_prompt") or "").strip()
+
+
+def normalize_system_prompt_aliases(effective: dict[str, Any], sources: dict[str, Any]) -> None:
+    """Write merged prompt back to canonical ``prompts.system`` while preserving source."""
+
+    resolved = resolve_system_prompt(effective)
+    if not resolved:
+        return
+    prompts_cfg = effective.setdefault("prompts", {})
+    if not isinstance(prompts_cfg, dict):
+        prompts_cfg = {}
+        effective["prompts"] = prompts_cfg
+    prompts_sources = sources.setdefault("prompts", {})
+    if not isinstance(prompts_sources, dict):
+        prompts_sources = {}
+        sources["prompts"] = prompts_sources
+    if str(prompts_cfg.get("system") or "").strip():
+        return
+    prompts_cfg["system"] = resolved
+    for section, key in (("agent", "system_prompt"), ("chat", "system_prompt")):
+        section_sources = sources.get(section)
+        if isinstance(section_sources, Mapping):
+            source_value = section_sources.get(key)
+            if source_value:
+                prompts_sources["system"] = source_value
+                return
+    prompts_sources["system"] = "default"
+
+
 def deep_merge(base: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
     merged = deepcopy(base)
     for key, value in updates.items():
@@ -198,6 +246,8 @@ class ConfigLoader:
 
         if cli_overrides:
             _merge_with_sources(effective, sources, cli_overrides, "cli")
+
+        normalize_system_prompt_aliases(effective, sources)
 
         return ConfigResolution(effective=effective, sources=sources)
 
