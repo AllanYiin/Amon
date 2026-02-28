@@ -53,6 +53,11 @@ from .token_counter import count_non_dialogue_tokens, extract_dialogue_input_tok
 _CHAT_STREAM_INIT_LOCK = threading.Lock()
 _CHAT_STREAM_INIT_TTL_S = 300
 _CHAT_STREAM_INIT_STORE: dict[str, dict[str, Any]] = {}
+_CLIENT_DISCONNECT_ERRORS = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
+
+
+class ClientDisconnectedError(ConnectionAbortedError):
+    """Raised when an SSE client disconnects during stream writes."""
 
 
 def _create_chat_stream_token(*, message: str, project_id: str | None, chat_id: str | None) -> str:
@@ -355,7 +360,7 @@ def _is_duplicate_project_create(
 class AmonThreadingHTTPServer(ThreadingHTTPServer):
     def handle_error(self, request: Any, client_address: tuple[str, int]) -> None:
         exc_type, _, _ = sys.exc_info()
-        if exc_type and issubclass(exc_type, (BrokenPipeError, ConnectionResetError)):
+        if exc_type and issubclass(exc_type, _CLIENT_DISCONNECT_ERRORS):
             log_event(
                 {
                     "level": "INFO",
@@ -376,7 +381,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
     def handle(self) -> None:
         try:
             super().handle()
-        except (BrokenPipeError, ConnectionResetError):
+        except _CLIENT_DISCONNECT_ERRORS:
             self.close_connection = True
             log_event(
                 {
@@ -1800,12 +1805,15 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 request_id=request_id,
             )
             payload = json.dumps(payload_obj, ensure_ascii=False)
-            self.wfile.write(f"id: {event_seq}\n".encode("utf-8"))
-            self.wfile.write(f"event: {event}\n".encode("utf-8"))
-            for line in payload.splitlines() or [""]:
-                self.wfile.write(f"data: {line}\n".encode("utf-8"))
-            self.wfile.write(b"\n")
-            self.wfile.flush()
+            try:
+                self.wfile.write(f"id: {event_seq}\n".encode("utf-8"))
+                self.wfile.write(f"event: {event}\n".encode("utf-8"))
+                for line in payload.splitlines() or [""]:
+                    self.wfile.write(f"data: {line}\n".encode("utf-8"))
+                self.wfile.write(b"\n")
+                self.wfile.flush()
+            except _CLIENT_DISCONNECT_ERRORS as exc:
+                raise ClientDisconnectedError("chat stream client disconnected") from exc
 
         try:
             log_event(
@@ -2149,6 +2157,18 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 },
             )
             send_event("done", {"status": "unsupported", "chat_id": chat_id, "project_id": project_id})
+        except ClientDisconnectedError:
+            log_event(
+                {
+                    "level": "INFO",
+                    "event": "ui_client_disconnected",
+                    "client": self.client_address[0] if self.client_address else "unknown",
+                    "project_id": normalize_project_id(project_id),
+                    "chat_id": chat_id or None,
+                    "request_id": request_id,
+                }
+            )
+            return
         except Exception as exc:  # noqa: BLE001
             log_event(
                 {
@@ -2934,7 +2954,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         emit("budget_exceeded", item)
                     known_budget_count = len(budget_events)
                     emit("usage_updated", self._build_billing_summary(project_id=project_id))
-        except (BrokenPipeError, ConnectionResetError):
+        except _CLIENT_DISCONNECT_ERRORS:
             return
 
     def _read_jsonl_records(self, path: Path, *, source: str | None = None) -> list[dict[str, Any]]:
