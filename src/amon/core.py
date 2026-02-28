@@ -1656,6 +1656,43 @@ class AmonCore:
         result = runtime.run()
         return self._load_graph_primary_output(result.run_dir)
 
+    def run_taskgraph2(
+        self,
+        prompt: str,
+        *,
+        project_path: Path,
+        project_id: str | None = None,
+        model: str | None = None,
+        llm_client=None,
+        skill_names: list[str] | None = None,
+    ) -> str:
+        if not project_path:
+            raise ValueError("執行 taskgraph2 需要指定專案")
+
+        resolved_project_id = project_id or self.resolve_project_identity(project_path)[0]
+        available_tools = self.describe_available_tools(project_id=resolved_project_id)
+        available_skills = self._load_skills(
+            self._normalize_skill_names(skill_names),
+            project_path,
+            ignore_missing=True,
+        )
+        graph = generate_taskgraph2_with_llm(
+            prompt,
+            llm_client=llm_client,
+            model=model,
+            available_tools=available_tools,
+            available_skills=available_skills,
+        )
+
+        docs_dir = project_path / "docs"
+        docs_dir.mkdir(parents=True, exist_ok=True)
+        plan_path = docs_dir / "plan.json"
+        self._atomic_write_text(plan_path, dumps_task_graph(graph))
+
+        runtime = TaskGraphRuntime(project_path=project_path, graph=graph)
+        result = runtime.run()
+        return self._load_graph_primary_output(result.run_dir)
+
     def get_run_status(self, project_path: Path, run_id: str) -> dict[str, Any]:
         if not project_path:
             raise ValueError("查詢 run 狀態需要指定專案")
