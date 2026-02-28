@@ -2285,6 +2285,26 @@ body.is-resizing-context-panel {
   gap: 12px;
 }
 
+.tree-node {
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--c-surface-1) 92%, transparent);
+  display: grid;
+  gap: 10px;
+}
+
+.tree-node > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--c-text-strong);
+  user-select: none;
+}
+
+.tree-node--group {
+  margin-left: 12px;
+}
+
 .tool-card,
 .skill-card {
   border: 1px solid var(--c-border);

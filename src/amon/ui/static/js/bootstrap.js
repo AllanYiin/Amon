@@ -786,44 +786,85 @@ appStore.patch({ bootstrappedAt: Date.now() });
           elements.toolsList.innerHTML = '<p class="empty-context">尚未找到工具。</p>';
           return;
         }
+        const byNode = new Map();
         tools.forEach((tool) => {
-          const card = document.createElement("article");
-          card.className = "tool-card";
-          card.innerHTML = `
-            <header>
-              <div>
-                <strong>${escapeHtml(tool.name)}</strong>
-                <p>${escapeHtml(tool.type)} ｜ v${escapeHtml(String(tool.version || "unknown"))}</p>
-              </div>
-              <span class="risk-chip">risk: ${escapeHtml(String(tool.risk || "unknown"))}</span>
-            </header>
-            <p>allowed_paths：${escapeHtml((tool.allowed_paths || []).join(", ") || "workspace")}</p>
-            <p>預設策略：<strong>${escapeHtml(String(tool.policy_decision || "deny").toUpperCase())}</strong></p>
-            <p>策略說明：${escapeHtml(tool.policy_reason || "未命中 allow 規則，預設拒絕")}</p>
-            <p>最近使用：${escapeHtml(formatRecentUsage(tool.recent_usage))}</p>
-            <details><summary>inputs schema</summary>${renderSchema(tool.input_schema)}</details>
-            <details><summary>outputs schema</summary>${renderSchema(tool.output_schema)}</details>
-          `;
-          const actions = document.createElement("div");
-          actions.className = "tool-card__actions";
-          if (policyEditable) {
-            const enableButton = document.createElement("button");
-            enableButton.type = "button";
-            enableButton.className = "secondary-btn small";
-            enableButton.textContent = tool.enabled ? "Disable" : "Enable";
-            enableButton.addEventListener("click", () => queueToolPolicyPlan(tool.name, tool.enabled ? "disable" : "enable", Boolean(tool.require_confirm)));
-            actions.appendChild(enableButton);
-
-            const confirmButton = document.createElement("button");
-            confirmButton.type = "button";
-            confirmButton.className = "secondary-btn small";
-            confirmButton.textContent = `Require Confirm：${tool.require_confirm ? "ON" : "OFF"}`;
-            confirmButton.addEventListener("click", () => queueToolPolicyPlan(tool.name, "require_confirm", !tool.require_confirm));
-            actions.appendChild(confirmButton);
+          const nodeLabel = String(tool.type || "unknown");
+          const rawName = String(tool.name || "");
+          const parts = rawName.split(":");
+          let groupLabel = "default";
+          if (nodeLabel === "mcp" && parts.length > 1) {
+            groupLabel = parts[0] || "default";
+          } else if (parts.length > 1) {
+            groupLabel = parts[0] || "default";
           }
-          card.appendChild(actions);
-          elements.toolsList.appendChild(card);
+          if (!byNode.has(nodeLabel)) byNode.set(nodeLabel, new Map());
+          const groups = byNode.get(nodeLabel);
+          if (!groups.has(groupLabel)) groups.set(groupLabel, []);
+          groups.get(groupLabel).push(tool);
         });
+
+        Array.from(byNode.entries())
+          .sort(([a], [b]) => a.localeCompare(b))
+          .forEach(([nodeLabel, groupMap]) => {
+            const nodeItem = document.createElement("details");
+            nodeItem.className = "tree-node tree-node--root";
+            nodeItem.open = true;
+            const nodeSummary = document.createElement("summary");
+            nodeSummary.textContent = `${nodeLabel}（${groupMap.size}）`;
+            nodeItem.appendChild(nodeSummary);
+
+            Array.from(groupMap.entries())
+              .sort(([a], [b]) => a.localeCompare(b))
+              .forEach(([groupLabel, groupedTools]) => {
+                const groupItem = document.createElement("details");
+                groupItem.className = "tree-node tree-node--group";
+                groupItem.open = true;
+                const groupSummary = document.createElement("summary");
+                groupSummary.textContent = `${groupLabel}（${groupedTools.length}）`;
+                groupItem.appendChild(groupSummary);
+
+                groupedTools.forEach((tool) => {
+                  const card = document.createElement("article");
+                  card.className = "tool-card";
+                  card.innerHTML = `
+                    <header>
+                      <div>
+                        <strong>${escapeHtml(tool.name)}</strong>
+                        <p>${escapeHtml(tool.type)} ｜ v${escapeHtml(String(tool.version || "unknown"))}</p>
+                      </div>
+                      <span class="risk-chip">risk: ${escapeHtml(String(tool.risk || "unknown"))}</span>
+                    </header>
+                    <p>allowed_paths：${escapeHtml((tool.allowed_paths || []).join(", ") || "workspace")}</p>
+                    <p>預設策略：<strong>${escapeHtml(String(tool.policy_decision || "deny").toUpperCase())}</strong></p>
+                    <p>策略說明：${escapeHtml(tool.policy_reason || "未命中 allow 規則，預設拒絕")}</p>
+                    <p>最近使用：${escapeHtml(formatRecentUsage(tool.recent_usage))}</p>
+                    <details><summary>inputs schema</summary>${renderSchema(tool.input_schema)}</details>
+                    <details><summary>outputs schema</summary>${renderSchema(tool.output_schema)}</details>
+                  `;
+                  const actions = document.createElement("div");
+                  actions.className = "tool-card__actions";
+                  if (policyEditable) {
+                    const enableButton = document.createElement("button");
+                    enableButton.type = "button";
+                    enableButton.className = "secondary-btn small";
+                    enableButton.textContent = tool.enabled ? "Disable" : "Enable";
+                    enableButton.addEventListener("click", () => queueToolPolicyPlan(tool.name, tool.enabled ? "disable" : "enable", Boolean(tool.require_confirm)));
+                    actions.appendChild(enableButton);
+
+                    const confirmButton = document.createElement("button");
+                    confirmButton.type = "button";
+                    confirmButton.className = "secondary-btn small";
+                    confirmButton.textContent = `Require Confirm：${tool.require_confirm ? "ON" : "OFF"}`;
+                    confirmButton.addEventListener("click", () => queueToolPolicyPlan(tool.name, "require_confirm", !tool.require_confirm));
+                    actions.appendChild(confirmButton);
+                  }
+                  card.appendChild(actions);
+                  groupItem.appendChild(card);
+                });
+                nodeItem.appendChild(groupItem);
+              });
+            elements.toolsList.appendChild(nodeItem);
+          });
       }
 
       function renderSkillsList(skills = [], collisions = []) {
@@ -842,6 +883,12 @@ appStore.patch({ bootstrappedAt: Date.now() });
           return;
         }
         elements.skillTriggerSelect.innerHTML = "";
+        const rootItem = document.createElement("details");
+        rootItem.className = "tree-node tree-node--root";
+        rootItem.open = true;
+        const rootSummary = document.createElement("summary");
+        rootSummary.textContent = `skills（${skills.length}）`;
+        rootItem.appendChild(rootSummary);
         skills.forEach((skill) => {
           const card = document.createElement("article");
           card.className = "skill-card";
@@ -852,13 +899,14 @@ appStore.patch({ bootstrappedAt: Date.now() });
             <p class="skill-source">來源：${escapeHtml(skill.path || "")}</p>
             <pre>${escapeHtml(JSON.stringify({ name: frontmatter.name || skill.name, description: frontmatter.description || "" }, null, 2))}</pre>
           `;
-          elements.skillsList.appendChild(card);
+          rootItem.appendChild(card);
 
           const option = document.createElement("option");
           option.value = skill.name || "";
           option.textContent = `${skill.name || "(未命名)"}（${skill.source || "unknown"}）`;
           elements.skillTriggerSelect.appendChild(option);
         });
+        elements.skillsList.appendChild(rootItem);
       }
 
       function showToast(message, duration = 9000, type = "info") {
