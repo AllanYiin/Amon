@@ -1604,10 +1604,21 @@ class AmonCore:
             self.logger.error("讀取 graph 失敗：%s", exc, exc_info=True)
             raise
 
-        if not isinstance(graph_payload, dict):
-            raise ValueError("graph.json 內容需為 object")
-        if str(graph_payload.get("schema_version") or "") != "2.0":
-            raise ValueError("v1 graph 已停用，請提供 schema_version=2.0 的 TaskGraph")
+        if isinstance(graph_payload, dict) and str(graph_payload.get("schema_version") or "") == "2.0":
+            nodes_payload = graph_payload.get("nodes")
+            has_legacy_node_type = isinstance(nodes_payload, list) and any(
+                isinstance(node, dict) and "type" in node for node in nodes_payload
+            )
+            if not has_legacy_node_type:
+                task_graph = loads_task_graph(json.dumps(graph_payload, ensure_ascii=False))
+                if variables:
+                    task_graph.session_defaults.update(variables)
+                runtime_v2 = TaskGraphRuntime(
+                    project_path=project_path,
+                    graph=task_graph,
+                    run_id=run_id,
+                )
+                return runtime_v2.run()
 
         task_graph = loads_task_graph(json.dumps(graph_payload, ensure_ascii=False))
         if variables:
@@ -1741,6 +1752,10 @@ class AmonCore:
             "source_run_id": run_id,
             "created_at": self._now(),
             "variables_schema": template_schema,
+            "schema_version": resolved.get("schema_version"),
+            "objective": resolved.get("objective"),
+            "session_defaults": resolved.get("session_defaults", {}),
+            "metadata": resolved.get("metadata"),
             "nodes": resolved.get("nodes", []),
             "edges": resolved.get("edges", []),
             "variables": resolved.get("variables", {}),
@@ -1787,11 +1802,21 @@ class AmonCore:
         schema = self._load_template_schema(template_path, payload)
         variables = variables or {}
         variables = self._apply_schema_defaults(schema, variables)
-        graph = {
-            "nodes": payload.get("nodes", []),
-            "edges": payload.get("edges", []),
-            "variables": payload.get("variables", {}),
-        }
+        if str(payload.get("schema_version") or "") == "2.0":
+            graph = {
+                "schema_version": "2.0",
+                "objective": payload.get("objective") or "Template Graph",
+                "session_defaults": payload.get("session_defaults", {}),
+                "nodes": payload.get("nodes", []),
+                "edges": payload.get("edges", []),
+                "metadata": payload.get("metadata"),
+            }
+        else:
+            graph = {
+                "nodes": payload.get("nodes", []),
+                "edges": payload.get("edges", []),
+                "variables": payload.get("variables", {}),
+            }
         resolved_graph = self._resolve_template_values(graph, variables)
         template_dir = template_path.parent
         rendered_path = template_dir / "graph.rendered.json"
