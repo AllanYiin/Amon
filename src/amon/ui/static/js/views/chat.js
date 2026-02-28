@@ -305,9 +305,53 @@ export const CHAT_VIEW = {
               return;
             }
             if (eventType === "token") {
-              const tokenText = data.text || "";
-              messageRenderer.applyTokenChunk(tokenText);
-              handleArtifactEvents(artifactParser.feed(tokenText));
+              messageRenderer.applyTokenChunk(data.text || "");
+              const artifactEvents = artifactParser.feed(data.text || "");
+              artifactEvents.forEach((artifactEvent) => {
+                if (artifactEvent.type === "artifact_open") {
+                  appState.inlineArtifactStreamingHint = `偵測到 inline artifact 串流中：${artifactEvent.filename}`;
+                  renderInlineArtifactStreamingHint(elements, appState.inlineArtifactStreamingHint);
+                  return;
+                }
+                if (artifactEvent.type === "artifact_complete") {
+                  inlineFiles.set(artifactEvent.filename, {
+                    filename: artifactEvent.filename,
+                    language: artifactEvent.language,
+                    content: artifactEvent.content,
+                  });
+                  appState.inlineArtifactFiles = Object.fromEntries(inlineFiles.entries());
+                  const preview = buildPreviewForFiles(inlineFiles);
+                  if (activeInlinePreviewUrl && activeInlinePreviewUrl !== preview.url) {
+                    revokeInlinePreviewUrl(activeInlinePreviewUrl);
+                  }
+                  activeInlinePreviewUrl = preview.url;
+
+                  const nextInlineArtifacts = Array.from(inlineFiles.values()).map((file) => ({
+                    id: `inline:${file.filename}`,
+                    name: file.filename,
+                    mime: "text/html",
+                    url: preview.url,
+                    createdAt: new Date().toISOString(),
+                    source: "inline",
+                  }));
+                  appState.inlineArtifacts = nextInlineArtifacts;
+                  appState.artifactPreviewItem = {
+                    id: `inline:${artifactEvent.filename}`,
+                    name: artifactEvent.filename,
+                    mime: "text/html",
+                    url: preview.url,
+                    source: "inline",
+                  };
+                  appState.inlineArtifactStreamingHint = `已完成 inline artifact：${artifactEvent.filename}`;
+
+                  activateArtifactsTab();
+                  refreshInlineArtifactsUi();
+                  showInlineArtifactPreview(elements, {
+                    name: preview.title || artifactEvent.filename,
+                    url: preview.url,
+                  });
+                }
+              });
               return;
             }
             if (eventType === "notice") {
