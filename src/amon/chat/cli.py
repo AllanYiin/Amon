@@ -6,7 +6,6 @@ import json
 from typing import Callable
 
 from amon.chat.continuation import assemble_chat_turn
-from amon.chat.execution_mode import decide_execution_mode
 from amon.chat.project_bootstrap import bootstrap_project_if_needed
 from amon.chat.router import RouterResult, route_intent
 from amon.chat.session_store import (
@@ -23,6 +22,7 @@ def run_chat_repl(
     project_id: str | None,
     input_func: Callable[[str], str] = input,
     output_func: Callable[[str], None] = print,
+    engine: str = "taskgraph2",
 ) -> str:
     core.ensure_base_structure()
     chat_id: str | None = None
@@ -116,24 +116,13 @@ def run_chat_repl(
                     continue
                 output_func("Amon：")
                 prompt = turn_bundle.prompt_with_history if turn_bundle else message
-                execution_mode = decide_execution_mode(
-                    message,
+                if engine == "v1":
+                    output_func("[notice] v1 已停用，改以 taskgraph2 執行。")
+                response = core.run_taskgraph2(
+                    prompt,
+                    project_path=project_path,
                     project_id=project_id,
-                    context=turn_bundle.router_context if turn_bundle else None,
                 )
-                if execution_mode == "single":
-                    response = core.run_single(prompt, project_path=project_path)
-                elif execution_mode == "self_critique":
-                    response = core.run_self_critique(prompt, project_path=project_path)
-                elif execution_mode == "team":
-                    response = core.run_team(prompt, project_path=project_path)
-                else:
-                    output_func("[notice] plan_execute 會先產生計畫並編譯執行圖。")
-                    response = core.run_plan_execute(
-                        prompt,
-                        project_path=project_path,
-                        project_id=project_id,
-                    )
                 append_event(chat_id, {"type": "assistant", "text": response, "project_id": project_id})
                 continue
             output_func("目前尚未支援此類型的操作。")

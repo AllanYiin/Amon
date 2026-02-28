@@ -40,7 +40,10 @@ from .mcp_client import MCPClientError, MCPServerConfig, MCPStdioClient
 from .planning import compile_plan_to_exec_graph, dumps_plan, generate_plan_with_llm, render_todo_markdown
 from .models import ProviderError, build_provider, decode_reasoning_chunk
 from .project_registry import ProjectRegistry, load_project_config
-from .graph_runtime import GraphRuntime, GraphRunResult
+from .graph_runtime import GraphRunResult
+from .taskgraph2 import TaskGraphRuntime
+from .taskgraph2.planner_llm import generate_taskgraph2_with_llm
+from .taskgraph2.serialize import dumps_task_graph, loads_task_graph
 from .sandbox.service import run_sandbox_step
 from .tooling import (
     ToolingError,
@@ -1595,17 +1598,63 @@ class AmonCore:
     ) -> GraphRunResult:
         if not project_path:
             raise ValueError("執行 graph 需要指定專案")
-        runtime = GraphRuntime(
-            core=self,
+        try:
+            graph_payload = json.loads(graph_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.error("讀取 graph 失敗：%s", exc, exc_info=True)
+            raise
+
+        if not isinstance(graph_payload, dict):
+            raise ValueError("graph.json 內容需為 object")
+        if str(graph_payload.get("schema_version") or "") != "2.0":
+            raise ValueError("v1 graph 已停用，請提供 schema_version=2.0 的 TaskGraph")
+
+        task_graph = loads_task_graph(json.dumps(graph_payload, ensure_ascii=False))
+        if variables:
+            task_graph.session_defaults.update(variables)
+        runtime_v2 = TaskGraphRuntime(
             project_path=project_path,
-            graph_path=graph_path,
-            variables=variables,
-            stream_handler=stream_handler,
+            graph=task_graph,
             run_id=run_id,
-            request_id=request_id,
-            chat_id=chat_id,
         )
-        return runtime.run()
+        return runtime_v2.run()
+
+    def run_taskgraph2(
+        self,
+        prompt: str,
+        *,
+        project_path: Path,
+        project_id: str | None = None,
+        model: str | None = None,
+        llm_client=None,
+        skill_names: list[str] | None = None,
+    ) -> str:
+        if not project_path:
+            raise ValueError("執行 taskgraph2 需要指定專案")
+
+        resolved_project_id = project_id or self.resolve_project_identity(project_path)[0]
+        available_tools = self.describe_available_tools(project_id=resolved_project_id)
+        available_skills = self._load_skills(
+            self._normalize_skill_names(skill_names),
+            project_path,
+            ignore_missing=True,
+        )
+        graph = generate_taskgraph2_with_llm(
+            prompt,
+            llm_client=llm_client,
+            model=model,
+            available_tools=available_tools,
+            available_skills=available_skills,
+        )
+
+        docs_dir = project_path / "docs"
+        docs_dir.mkdir(parents=True, exist_ok=True)
+        plan_path = docs_dir / "plan.json"
+        self._atomic_write_text(plan_path, dumps_task_graph(graph))
+
+        runtime = TaskGraphRuntime(project_path=project_path, graph=graph)
+        result = runtime.run()
+        return self._load_graph_primary_output(result.run_dir)
 
     def get_run_status(self, project_path: Path, run_id: str) -> dict[str, Any]:
         if not project_path:
