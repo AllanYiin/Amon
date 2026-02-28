@@ -18,6 +18,7 @@ from amon.tooling.registry import ToolRegistry
 from amon.tooling.types import ToolCall, ToolResult
 
 from .llm import TaskGraphLLMClient, build_default_llm_client
+from .node_executor import NodeExecutor
 from .schema import TaskEdge, TaskGraph, TaskNode, validate_task_graph
 from .serialize import dumps_task_graph
 
@@ -55,6 +56,7 @@ class TaskGraphRuntime:
         self.cancel_event = cancel_event or threading.Event()
         self.registry = registry
         self.tool_dispatcher = tool_dispatcher
+        self._node_executor = NodeExecutor()
 
     def run(self) -> TaskGraphRunResult:
         validate_task_graph(self.graph)
@@ -215,9 +217,57 @@ class TaskGraphRuntime:
             return output_text, resolved
 
         messages = _build_messages(node, session)
-        future = executor.submit(_generate_text, llm_client, messages, node.llm.model)
-        hard_timeout = node.timeout.hard_s
+        output_text, extracted = self._node_executor.run_llm_with_retry(
+            generate_text=lambda retry_messages: self._generate_text_with_timeout(
+                llm_client=llm_client,
+                messages=retry_messages,
+                model=node.llm.model,
+                hard_timeout=node.timeout.hard_s,
+                cancel_path=cancel_path,
+                executor=executor,
+                node_id=node.id,
+            ),
+            base_messages=messages,
+            output_spec=node.output,
+            retry_spec=node.retry,
+            on_retry=lambda attempt, error: self._append_event(
+                events_path,
+                {
+                    "event": "node_retry",
+                    "node_id": node.id,
+                    "attempt": attempt,
+                    "error": error,
+                },
+            ),
+            on_warning=lambda payload: self._append_event(
+                events_path,
+                {
+                    "event": "numeric_anomaly_warning",
+                    "node_id": node.id,
+                    "path": payload.get("path"),
+                    "value": payload.get("value"),
+                    "reason": payload.get("reason"),
+                },
+            ),
+        )
+        rendered = output_text if node.output.type != "json" else json.dumps(extracted, ensure_ascii=False)
+        output_path = _default_output_path(node.id)
+        resolved = _resolve_output_path(project_path, output_path)
+        atomic_write_text(resolved, rendered, encoding="utf-8")
+        return rendered, resolved
 
+    def _generate_text_with_timeout(
+        self,
+        *,
+        llm_client: TaskGraphLLMClient,
+        messages: list[dict[str, str]],
+        model: str | None,
+        hard_timeout: int,
+        cancel_path: Path,
+        executor: ThreadPoolExecutor,
+        node_id: str,
+    ) -> str:
+        future = executor.submit(_generate_text, llm_client, messages, model)
         started = datetime.now().timestamp()
         while True:
             if self.cancel_event.is_set() or cancel_path.exists():
@@ -226,19 +276,11 @@ class TaskGraphRuntime:
             elapsed = datetime.now().timestamp() - started
             if elapsed > max(hard_timeout, 1):
                 future.cancel()
-                raise RuntimeError(f"node hard timeout：node_id={node.id}")
+                raise RuntimeError(f"node hard timeout：node_id={node_id}")
             try:
-                output_text = future.result(timeout=0.1)
-                break
+                return future.result(timeout=0.1)
             except FutureTimeoutError:
                 continue
-            except Exception:
-                raise
-
-        output_path = _default_output_path(node.id)
-        resolved = _resolve_output_path(project_path, output_path)
-        atomic_write_text(resolved, output_text, encoding="utf-8")
-        return output_text, resolved
 
     def _execute_tool_node(
         self,
