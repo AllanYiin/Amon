@@ -22,6 +22,7 @@ export function createInitialUiState(createUiEventStore) {
     billingStreamSource: null,
     contextPanelWidth: 320,
     runArtifacts: [],
+    // [{ id, name, url, mime, createdAt, source: "inline" }]
     inlineArtifacts: [],
     inlineArtifactFiles: {},
     inlineArtifactStreamingHint: "",
