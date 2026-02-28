@@ -264,6 +264,29 @@ appStore.patch({ bootstrappedAt: Date.now() });
         return JSON.stringify(value);
       }
 
+      function formatConfigEditorValue(value) {
+        return JSON.stringify(value);
+      }
+
+      function populateConfigEditor(keyPath, value, source = "project") {
+        if (!elements.configEditKey || !elements.configEditValue || !elements.configEditScope) return;
+        elements.configEditKey.value = keyPath || "";
+        elements.configEditValue.value = formatConfigEditorValue(value);
+        elements.configEditScope.value = source === "global" ? "global" : "project";
+      }
+
+      function parseConfigEditorValue(rawValue) {
+        const text = String(rawValue || "").trim();
+        if (!text) {
+          throw new Error("請輸入 Value（JSON 格式）。");
+        }
+        try {
+          return JSON.parse(text);
+        } catch (_error) {
+          throw new Error("Value 必須是合法 JSON，例如 \"light\"、true、123、null。");
+        }
+      }
+
       function flattenConfigRows(effective, sources, prefix = "") {
         if (!effective || typeof effective !== "object" || Array.isArray(effective)) {
           return [{ keyPath: prefix || "(root)", effective, source: sources || "default" }];
@@ -322,7 +345,14 @@ appStore.patch({ bootstrappedAt: Date.now() });
             <td><code>${escapeHtml(row.keyPath)}</code></td>
             <td><code>${escapeHtml(formatConfigCell(row.effective))}</code></td>
             <td><span class="config-source config-source--${sourceLabel}">${sourceLabel}</span></td>
+            <td><button type="button" class="btn btn--secondary secondary-btn" data-config-key="${escapeHtml(row.keyPath)}">編輯</button></td>
           `;
+          const editButton = tr.querySelector("button[data-config-key]");
+          if (editButton) {
+            editButton.addEventListener("click", () => {
+              populateConfigEditor(row.keyPath, row.effective, sourceLabel);
+            });
+          }
           elements.configTableBody.appendChild(tr);
         });
       }
@@ -331,6 +361,35 @@ appStore.patch({ bootstrappedAt: Date.now() });
         const payload = await services.admin.getConfigView(state.projectId);
         state.configView = payload;
         renderConfigTable();
+      }
+
+      async function applyConfigUpdate() {
+        const keyPath = String(elements.configEditKey?.value || "").trim();
+        if (!keyPath) {
+          showToast("請填寫 key path。", 8000, "warning");
+          return;
+        }
+        const scope = elements.configEditScope?.value === "global" ? "global" : "project";
+        if (scope === "project" && !state.projectId) {
+          showToast("目前尚未選擇專案，無法寫入 project scope。", 8000, "warning");
+          return;
+        }
+        let parsedValue;
+        try {
+          parsedValue = parseConfigEditorValue(elements.configEditValue?.value || "");
+        } catch (error) {
+          showToast(error.message || "Value 格式錯誤。", 10000, "warning");
+          return;
+        }
+        const response = await services.admin.setConfigValue({
+          projectId: scope === "project" ? (state.projectId || "") : "",
+          keyPath,
+          value: parsedValue,
+          scope,
+        });
+        state.configView = response.config || state.configView;
+        renderConfigTable();
+        showToast(`已更新 ${keyPath}（${scope}）。`, 8000, "info");
       }
 
       async function togglePlannerEnabled() {
@@ -2003,6 +2062,9 @@ appStore.patch({ bootstrappedAt: Date.now() });
       elements.configRefresh.addEventListener("click", loadConfigPage);
       elements.configSearch.addEventListener("input", renderConfigTable);
       elements.configExport.addEventListener("click", exportEffectiveConfig);
+      elements.configEditApply?.addEventListener("click", () => {
+        void applyConfigUpdate();
+      });
       elements.plannerToggleBtn?.addEventListener("click", () => {
         void togglePlannerEnabled();
       });

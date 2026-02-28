@@ -22,11 +22,20 @@ export function createAdminService({ api }) {
     /** @param {{projectId?: string, enabled: boolean}} payload */
     setPlannerEnabled({ projectId, enabled }) {
       const scope = projectId ? "project" : "global";
+      return this.setConfigValue({
+        projectId,
+        keyPath: "amon.planner.enabled",
+        value: Boolean(enabled),
+        scope,
+      });
+    },
+    /** @param {{projectId?: string, keyPath: string, value: unknown, scope: 'global'|'project'}} payload */
+    setConfigValue({ projectId, keyPath, value, scope }) {
       return api.request("/config/set", {
         method: "POST",
         body: JSON.stringify({
-          key_path: "amon.planner.enabled",
-          value: Boolean(enabled),
+          key_path: keyPath,
+          value,
           scope,
           project_id: projectId || "",
         }),
