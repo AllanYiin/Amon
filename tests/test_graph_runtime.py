@@ -5,6 +5,7 @@ import tempfile
 import threading
 import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -15,6 +16,43 @@ from amon.run.context import append_run_constraints
 
 
 class GraphRuntimeTests(unittest.TestCase):
+    def test_agent_task_stream_updates_inactivity_deadline(self) -> None:
+        class _StubCore:
+            def __init__(self) -> None:
+                self.logger = __import__("logging").getLogger("graph-runtime-test")
+
+            def run_agent_task(self, *_args, stream_handler=None, **_kwargs):
+                if stream_handler:
+                    for _ in range(4):
+                        stream_handler("token")
+                        time.sleep(0.35)
+                return "ok"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_path = Path(temp_dir)
+            graph_path = project_path / "graph.json"
+            graph_path.write_text(json.dumps({"nodes": [], "edges": []}, ensure_ascii=False), encoding="utf-8")
+            events_path = project_path / "events.jsonl"
+            runtime = GraphRuntime(core=_StubCore(), project_path=project_path, graph_path=graph_path)
+            runtime._inject_run_constraints = lambda prompt, _run_id: prompt  # type: ignore[method-assign]
+            node = {
+                "id": "agent",
+                "type": "agent_task",
+                "prompt": "hello",
+                "inactivity_timeout_s": 1,
+                "hard_timeout_s": 5,
+            }
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                result = runtime._execute_node_with_timeout(
+                    node,
+                    {},
+                    "run-stream",
+                    events_path=events_path,
+                    executor=executor,
+                )
+
+        self.assertEqual(result.get("content"), "ok")
+
     def test_graph_run_creates_state_and_outputs(self) -> None:
         if not os.getenv("OPENAI_API_KEY"):
             self.skipTest("需要設定 OPENAI_API_KEY 才能執行 LLM 測試")
