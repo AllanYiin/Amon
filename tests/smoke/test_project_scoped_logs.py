@@ -26,8 +26,8 @@ class ProjectScopedLogsSmokeTests(unittest.TestCase):
                 log_event({"event": "smoke_event", "project_id": project_id})
                 log_billing({"event": "billing_record", "project_id": project_id, "cost": 0.1, "usage": 12})
 
-                events_log = project_path / ".amon" / "logs" / "events.jsonl"
-                billing_log = project_path / ".amon" / "logs" / "billing.jsonl"
+                events_log = project_path / "logs" / "events.jsonl"
+                billing_log = project_path / "logs" / "billing.jsonl"
                 self.assertTrue(events_log.exists())
                 self.assertTrue(billing_log.exists())
 

@@ -11,7 +11,7 @@ from .project_registry import ProjectRegistry
 
 
 class ProjectLogStore:
-    """Resolve project id to path, then append logs under <project>/.amon/logs/."""
+    """Resolve project id to path, then append logs under <project>/logs/."""
 
     def __init__(self, *, data_dir: Path, registry: ProjectRegistry, logger: logging.Logger | None = None) -> None:
         self.data_dir = data_dir
@@ -29,7 +29,7 @@ class ProjectLogStore:
 
     def project_log_path(self, project_id: str, filename: str) -> Path:
         project_path = self.resolve_project_path(project_id)
-        return project_path / ".amon" / "logs" / filename
+        return project_path / "logs" / filename
 
     def resolve_project_path(self, project_id: str) -> Path:
         normalized = project_id.strip()

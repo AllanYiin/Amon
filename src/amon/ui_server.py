@@ -2682,7 +2682,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
 
     def _project_logs_path(self, project_id: str, filename: str) -> Path:
         project_path = self.core.get_project_path(project_id)
-        return project_path / ".amon" / "logs" / filename
+        return project_path / "logs" / filename
 
     def _read_project_run_events(self, *, project_id: str | None) -> list[dict[str, Any]]:
         records: list[dict[str, Any]] = []

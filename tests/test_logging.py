@@ -66,7 +66,7 @@ class LoggingTests(unittest.TestCase):
                 log_event({"event": "run.start", "project_id": project_id, "run_id": "run-1"})
                 log_billing({"event": "billing_record", "project_id": project_id, "run_id": "run-1", "cost": 0.2, "usage": 20})
 
-                project_logs_dir = project_path / ".amon" / "logs"
+                project_logs_dir = project_path / "logs"
                 self.assertTrue((project_logs_dir / "app.jsonl").exists())
                 self.assertTrue((project_logs_dir / "events.jsonl").exists())
                 self.assertTrue((project_logs_dir / "billing.jsonl").exists())
