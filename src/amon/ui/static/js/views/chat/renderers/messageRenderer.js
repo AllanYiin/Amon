@@ -131,6 +131,31 @@ export function createMessageRenderer({ timelineEl, renderMarkdown }) {
     timelineEl.scrollTop = timelineEl.scrollHeight;
   }
 
+  function getPendingBuffer() {
+    if (!state.pendingAssistantMessage) return "";
+    return state.pendingAssistantMessage.bubble.dataset.buffer || "";
+  }
+
+  function setArtifactBadge(label = "") {
+    if (!state.pendingAssistantMessage) return;
+
+    const normalizedLabel = String(label || "").trim();
+    const { bubble } = state.pendingAssistantMessage;
+    let badgeEl = bubble.querySelector(".chat-msg__artifact-badge");
+
+    if (!normalizedLabel) {
+      badgeEl?.remove();
+      return;
+    }
+
+    if (!badgeEl) {
+      badgeEl = document.createElement("div");
+      badgeEl.className = "chat-msg__artifact-badge";
+      bubble.appendChild(badgeEl);
+    }
+    badgeEl.textContent = normalizedLabel;
+  }
+
   function finalizeAssistantBubble() {
     if (state.pendingAssistantMessage) {
       state.pendingAssistantMessage.bubble.classList.remove("is-typing");
@@ -152,6 +177,8 @@ export function createMessageRenderer({ timelineEl, renderMarkdown }) {
     appendMessage,
     appendTimelineStatus,
     applyTokenChunk,
+    getPendingBuffer,
+    setArtifactBadge,
     finalizeAssistantBubble,
     reset,
   };
