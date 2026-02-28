@@ -17,6 +17,7 @@ class TaskNodeLLM:
     temperature: float | None = None
     max_tokens: int | None = None
     tool_choice: str | None = None
+    enable_tools: bool = False
 
 
 @dataclass
