@@ -40,7 +40,7 @@ from .mcp_client import MCPClientError, MCPServerConfig, MCPStdioClient
 from .planning import compile_plan_to_exec_graph, dumps_plan, generate_plan_with_llm, render_todo_markdown
 from .models import ProviderError, build_provider, decode_reasoning_chunk
 from .project_registry import ProjectRegistry, load_project_config
-from .graph_runtime import GraphRunResult
+from .graph_runtime import GraphRunResult, GraphRuntime
 from .taskgraph2 import TaskGraphRuntime
 from .taskgraph2.planner_llm import generate_taskgraph2_with_llm
 from .taskgraph2.serialize import dumps_task_graph, loads_task_graph
@@ -1620,15 +1620,17 @@ class AmonCore:
                 )
                 return runtime_v2.run()
 
-        task_graph = loads_task_graph(json.dumps(graph_payload, ensure_ascii=False))
-        if variables:
-            task_graph.session_defaults.update(variables)
-        runtime_v2 = TaskGraphRuntime(
+        runtime = GraphRuntime(
+            core=self,
             project_path=project_path,
-            graph=task_graph,
+            graph_path=graph_path,
+            variables=variables,
+            stream_handler=stream_handler,
             run_id=run_id,
+            request_id=request_id,
+            chat_id=chat_id,
         )
-        return runtime_v2.run()
+        return runtime.run()
 
     def run_taskgraph2(
         self,

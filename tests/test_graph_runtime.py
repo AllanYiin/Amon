@@ -117,6 +117,37 @@ class GraphRuntimeTests(unittest.TestCase):
                 self.assertEqual(item["run_id"], "run-correlation")
                 self.assertEqual(item["request_id"], "req-correlation")
 
+    def test_core_run_graph_uses_legacy_runtime_when_schema_version_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("Legacy Graph 專案")
+                project_path = Path(project.path)
+                graph = {
+                    "nodes": [
+                        {
+                            "id": "write",
+                            "type": "write_file",
+                            "path": "docs/legacy.txt",
+                            "content": "legacy",
+                        }
+                    ],
+                    "edges": [],
+                }
+                graph_path = project_path / "graph.json"
+                graph_path.write_text(json.dumps(graph, ensure_ascii=False), encoding="utf-8")
+
+                result = core.run_graph(project_path=project_path, graph_path=graph_path)
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+            output_path = project_path / "docs" / "legacy.txt"
+            self.assertTrue(output_path.exists())
+            self.assertEqual(output_path.read_text(encoding="utf-8"), "legacy")
+            self.assertEqual(result.state["status"], "completed")
+
     def test_graph_template_parametrize_and_run(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir
