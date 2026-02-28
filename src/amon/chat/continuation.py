@@ -5,11 +5,12 @@ from typing import Any, Callable
 
 from amon.chat.session_store import (
     build_prompt_with_history,
-    create_chat_session,
-    load_latest_chat_id,
+    ensure_chat_session,
+    chat_session_exists,
     load_latest_run_context,
     load_recent_dialogue,
 )
+from amon.logging import log_event
 
 
 @dataclass
@@ -20,9 +21,10 @@ class ChatTurnBundle:
     prompt_with_history: str
     router_context: dict[str, Any] | None
     short_continuation: bool
+    chat_id_source: str
 
 
-_SESSION_CREATOR = Callable[[str], str]
+_SESSION_ENSURER = Callable[[str, str | None], tuple[str, str]]
 
 
 def assemble_chat_turn(
@@ -30,11 +32,22 @@ def assemble_chat_turn(
     project_id: str,
     chat_id: str | None,
     message: str,
-    create_session: _SESSION_CREATOR = create_chat_session,
+    ensure_session: _SESSION_ENSURER = ensure_chat_session,
 ) -> ChatTurnBundle:
-    resolved_chat_id = (chat_id or "").strip()
-    if not resolved_chat_id:
-        resolved_chat_id = load_latest_chat_id(project_id) or create_session(project_id)
+    incoming_chat_id = (chat_id or "").strip()
+    resolved_chat_id, chat_id_source = ensure_session(project_id, incoming_chat_id or None)
+
+    if incoming_chat_id and incoming_chat_id != resolved_chat_id and not chat_session_exists(project_id, incoming_chat_id):
+        log_event(
+            {
+                "level": "WARNING",
+                "event": "chat_session_fallback",
+                "project_id": project_id,
+                "incoming_chat_id": incoming_chat_id,
+                "fallback_chat_id": resolved_chat_id,
+                "reason": "incoming_chat_id_not_found",
+            }
+        )
 
     history = load_recent_dialogue(project_id, resolved_chat_id)
     run_context = load_latest_run_context(project_id, resolved_chat_id)
@@ -49,6 +62,7 @@ def assemble_chat_turn(
         prompt_with_history=prompt_with_history,
         router_context=router_context,
         short_continuation=short_continuation,
+        chat_id_source=chat_id_source,
     )
 
 

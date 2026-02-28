@@ -32,7 +32,7 @@ from amon.chat.router_llm import should_continue_run_with_llm
 from amon.chat.router_types import RouterResult
 from amon.chat.session_store import (
     append_event,
-    create_chat_session,
+    ensure_chat_session,
 )
 from amon.commands.executor import CommandPlan, execute
 from amon.config import ConfigLoader
@@ -1253,15 +1253,17 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             if payload is None:
                 return
             project_id = str(payload.get("project_id", "")).strip()
+            incoming_chat_id = str(payload.get("chat_id", "")).strip() or None
             if not project_id:
                 self._send_json(400, {"message": "請提供 project_id"})
                 return
             try:
-                chat_id = create_chat_session(project_id)
+                chat_id, chat_id_source = ensure_chat_session(project_id, incoming_chat_id)
             except Exception as exc:  # noqa: BLE001
                 self._handle_error(exc, status=500)
                 return
-            self._send_json(201, {"chat_id": chat_id})
+            status = 200 if chat_id_source in {"incoming", "latest"} else 201
+            self._send_json(status, {"chat_id": chat_id, "chat_id_source": chat_id_source})
             return
         if parsed.path == "/v1/chat/plan/confirm":
             payload = self._read_json()
@@ -1862,10 +1864,22 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     send_event("error", {"message": "缺少 project_id"})
                     send_event("done", {"status": "project_required"})
                     return
+            incoming_chat_id = chat_id
             turn_bundle = assemble_chat_turn(project_id=project_id, chat_id=chat_id, message=message)
             chat_id = turn_bundle.chat_id
             history = turn_bundle.history
             run_context = turn_bundle.run_context
+            log_event(
+                {
+                    "level": "INFO",
+                    "event": "ui_chat_stream_context",
+                    "project_id": project_id,
+                    "incoming_chat_id": incoming_chat_id,
+                    "effective_chat_id": chat_id,
+                    "history_count": len(history),
+                    "chat_id_source": turn_bundle.chat_id_source,
+                }
+            )
             router_result = route_intent(
                 message,
                 project_id=project_id,
@@ -2099,6 +2113,8 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     "project_id": project_id,
                     "run_id": active_run_id,
                     "execution_mode": execution_mode,
+                    "history_count": len(history),
+                    "chat_id_source": turn_bundle.chat_id_source,
                 }
                 if execution_mode == "plan_execute":
                     route = getattr(plan_result, "execution_route", "planner")

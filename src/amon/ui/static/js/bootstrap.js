@@ -995,7 +995,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
           return;
         }
         const payload = await services.runs.getProjectHistory(state.projectId);
-        state.chatId = payload.chat_id || state.chatId;
+        state.chatId = payload.chat_id || null;
         const messages = Array.isArray(payload.messages) ? payload.messages : [];
         if (!messages.length) {
           appendTimelineStatus("目前尚無歷史對話。請直接輸入需求開始。");
@@ -1070,7 +1070,11 @@ appStore.patch({ bootstrappedAt: Date.now() });
       }
 
       function setProjectState(projectId) {
-        state.projectId = projectId || null;
+        const nextProjectId = projectId || null;
+        if (state.projectId !== nextProjectId) {
+          state.chatId = null;
+        }
+        state.projectId = nextProjectId;
         const layoutState = appStore.getState().layout || {};
         appStore.patch({
           layout: {
@@ -1287,7 +1291,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
         if (!state.projectId) return;
         const existingChatId = String(state.chatId || "").trim();
         if (existingChatId) return;
-        const payload = await services.runs.ensureChatSession(state.projectId);
+        const payload = await services.runs.ensureChatSession(state.projectId, existingChatId || null);
         state.chatId = payload.chat_id;
       }
 
