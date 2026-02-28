@@ -232,8 +232,10 @@ class TaskGraphRuntime:
             atomic_write_text(resolved, output_text, encoding="utf-8")
             return output_text, resolved
 
-        output_text, extracted = self._node_executor.run_llm_with_retry(
-            generate_text=lambda retry_messages: self._generate_text_with_timeout(
+        execution_result = self.node_executor.execute_llm_node(
+            node=node,
+            base_messages=messages,
+            invoke_llm=lambda retry_messages: self._generate_text_with_timeout(
                 llm_client=llm_client,
                 messages=retry_messages,
                 model=node.llm.model,
@@ -242,8 +244,6 @@ class TaskGraphRuntime:
                 executor=executor,
                 node_id=node.id,
             ),
-            base_messages=messages,
-            invoke_llm=invoke_llm,
             append_event=lambda payload: self._append_event(events_path, payload),
         )
         output_text = execution_result.raw_text
@@ -252,6 +252,32 @@ class TaskGraphRuntime:
         resolved = _resolve_output_path(project_path, output_path)
         atomic_write_text(resolved, output_text, encoding="utf-8")
         return output_text, resolved
+
+    def _generate_text_with_timeout(
+        self,
+        *,
+        llm_client: TaskGraphLLMClient,
+        messages: list[dict[str, str]],
+        model: str | None,
+        hard_timeout: int,
+        cancel_path: Path,
+        executor: ThreadPoolExecutor,
+        node_id: str,
+    ) -> str:
+        future = executor.submit(_generate_text, llm_client, messages, model)
+        started = time.monotonic()
+        while True:
+            if self.cancel_event.is_set() or cancel_path.exists():
+                future.cancel()
+                raise RuntimeError("run canceled")
+            elapsed = time.monotonic() - started
+            if elapsed > max(hard_timeout, 1):
+                future.cancel()
+                raise RuntimeError(f"node hard timeout：node_id={node_id}")
+            try:
+                return future.result(timeout=0.1)
+            except FutureTimeoutError:
+                continue
 
     def _execute_tool_node(
         self,
