@@ -3,13 +3,14 @@ function clearInlineRows(container) {
 }
 
 function activateInlinePreview(elements, item) {
-  if (!elements?.artifactsInlinePreviewFrame || !item?.url) return;
+  const previewUrl = item?.previewUrl || item?.url;
+  if (!elements?.artifactsInlinePreviewFrame || !previewUrl) return;
   elements.artifactsInlinePreview.hidden = false;
-  elements.artifactsInlinePreviewTitle.textContent = item.name || item.title || "inline artifact";
-  elements.artifactsInlinePreviewFrame.src = item.url;
-  elements.artifactsPreviewOpenTab.onclick = () => window.open(item.url, "_blank", "noopener");
+  elements.artifactsInlinePreviewTitle.textContent = item.filename || item.name || item.title || "inline artifact";
+  elements.artifactsInlinePreviewFrame.src = previewUrl;
+  elements.artifactsPreviewOpenTab.onclick = () => window.open(previewUrl, "_blank", "noopener");
   elements.artifactsPreviewRefresh.onclick = () => {
-    elements.artifactsInlinePreviewFrame.src = item.url;
+    elements.artifactsInlinePreviewFrame.src = previewUrl;
   };
 }
 
@@ -17,27 +18,32 @@ export function renderInlineArtifactsList(elements, inlineArtifacts = []) {
   if (!elements?.artifactsInspectorList) return;
   clearInlineRows(elements.artifactsInspectorList);
 
+  const hasInlineArtifacts = inlineArtifacts.length > 0;
+  if (elements.artifactsEmpty) {
+    elements.artifactsEmpty.hidden = hasInlineArtifacts;
+  }
+
   inlineArtifacts.forEach((artifact) => {
     const row = document.createElement("button");
     row.type = "button";
     row.className = "list-row list-row--clickable";
     row.dataset.inlineArtifactRow = "true";
-    row.textContent = `[inline] ${artifact.name || artifact.title || "artifact"}`;
+    row.textContent = `[inline] ${artifact.filename || artifact.name || artifact.title || "artifact"}`;
     row.addEventListener("click", () => activateInlinePreview(elements, artifact));
-    elements.artifactsInspectorList.prepend(row);
+    elements.artifactsInspectorList.append(row);
   });
 }
 
 export function renderInlineArtifactStreamingHint(elements, text = "") {
-  const host = elements?.artifactsInlineStreamingHint || elements?.artifactsOverview?.parentElement;
+  const host = elements?.artifactsOverview?.parentElement;
   if (!host) return;
 
   let hint = elements?.artifactsInlineStreamingHint || document.getElementById("artifacts-inline-streaming-hint");
   if (!hint) {
     hint = document.createElement("div");
     hint.id = "artifacts-inline-streaming-hint";
-    hint.className = "context-overview muted";
-    host.insertBefore(hint, elements?.artifactsInlinePreview || null);
+    hint.className = "muted";
+    host.insertBefore(hint, elements?.artifactsInlinePreview || elements?.artifactsListDetails || null);
   }
   hint.textContent = text || "";
   hint.hidden = !text;
