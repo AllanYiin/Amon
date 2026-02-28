@@ -19,8 +19,10 @@ from amon.tooling.types import ToolCall, ToolResult
 
 from .llm import TaskGraphLLMClient, build_default_llm_client
 from .node_executor import NodeExecutor
+from .openai_tool_client import OpenAIToolClient, build_default_openai_tool_client
 from .schema import TaskEdge, TaskGraph, TaskNode, validate_task_graph
 from .serialize import dumps_task_graph
+from .tool_loop import ToolLoopRunner
 
 _ALLOWED_OUTPUT_PREFIXES = ("docs/", "audits/")
 
@@ -48,6 +50,7 @@ class TaskGraphRuntime:
         cancel_event: threading.Event | None = None,
         registry: ToolRegistry | None = None,
         tool_dispatcher: Callable[[ToolCall], ToolResult] | None = None,
+        openai_tool_client: OpenAIToolClient | None = None,
     ) -> None:
         self.project_path = project_path
         self.graph = graph
@@ -56,6 +59,7 @@ class TaskGraphRuntime:
         self.cancel_event = cancel_event or threading.Event()
         self.registry = registry
         self.tool_dispatcher = tool_dispatcher
+        self.openai_tool_client = openai_tool_client
         self._node_executor = NodeExecutor()
 
     def run(self) -> TaskGraphRunResult:
@@ -209,6 +213,18 @@ class TaskGraphRuntime:
         run_id: str,
         events_path: Path,
     ) -> tuple[str, Path]:
+        if _uses_tool_loop_execution(node):
+            output_text = self._execute_tool_loop_node(
+                node=node,
+                messages=_build_messages(node, session),
+                run_id=run_id,
+                events_path=events_path,
+            )
+            output_path = _default_output_path(node.id)
+            resolved = _resolve_output_path(project_path, output_path)
+            atomic_write_text(resolved, output_text, encoding="utf-8")
+            return output_text, resolved
+
         if _uses_tool_execution(node):
             output_text = self._execute_tool_node(node=node, session=session, run_id=run_id, events_path=events_path)
             output_path = _default_output_path(node.id)
@@ -334,6 +350,37 @@ class TaskGraphRuntime:
 
         return "\n".join(part for part in outputs if part).strip()
 
+    def _execute_tool_loop_node(
+        self,
+        *,
+        node: TaskNode,
+        messages: list[dict[str, str]],
+        run_id: str,
+        events_path: Path,
+    ) -> str:
+        registry = self.registry
+        if registry is None:
+            raise _NodeExecutionFailed("tool loop requires registry")
+
+        tool_client = self.openai_tool_client
+        if tool_client is None:
+            tool_client = build_default_openai_tool_client(model=node.llm.model)
+
+        runner = ToolLoopRunner(client=tool_client, on_event=lambda payload: self._append_event(events_path, payload))
+        final_text, _trace = runner.run(
+            messages=messages,
+            tools=_build_openai_tools(node),
+            tool_choice=_build_tool_choice(node.llm.tool_choice),
+            max_turns=max(node.retry.max_attempts, 4),
+            registry=registry,
+            model=node.llm.model,
+            project_id=str(self.project_path),
+            run_id=run_id,
+            node_id=node.id,
+            caller="taskgraph2",
+        )
+        return final_text
+
     def _resolve_tool_dispatcher(self) -> Callable[[ToolCall], ToolResult]:
         if self.tool_dispatcher is not None:
             return self.tool_dispatcher
@@ -383,6 +430,37 @@ def _generate_text(llm_client: TaskGraphLLMClient, messages: list[dict[str, str]
 
 def _uses_tool_execution(node: TaskNode) -> bool:
     return bool(node.steps) or (node.kind == "tooling" and bool(node.tools))
+
+
+def _uses_tool_loop_execution(node: TaskNode) -> bool:
+    return bool(node.tools) and (node.llm.enable_tools or node.kind != "tooling")
+
+
+def _build_openai_tools(node: TaskNode) -> list[dict[str, Any]]:
+    payload: list[dict[str, Any]] = []
+    for tool in node.tools:
+        payload.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.when_to_use or "",
+                    "parameters": dict(tool.args_schema_hint or {"type": "object", "properties": {}}),
+                },
+            }
+        )
+    return payload
+
+
+def _build_tool_choice(raw_choice: str | None) -> str | dict[str, Any] | None:
+    if raw_choice is None:
+        return None
+    choice = raw_choice.strip()
+    if not choice:
+        return None
+    if choice == "auto":
+        return "auto"
+    return {"type": "function", "function": {"name": choice}}
 
 
 def _iter_tool_steps(node: TaskNode) -> list[dict[str, Any]]:
