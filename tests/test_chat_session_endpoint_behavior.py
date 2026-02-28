@@ -15,7 +15,7 @@ from http.server import ThreadingHTTPServer
 
 
 class ChatSessionEndpointBehaviorTests(unittest.TestCase):
-    def test_chat_sessions_endpoint_creates_new_id_each_call(self) -> None:
+    def test_chat_sessions_endpoint_ensures_existing_or_latest_chat_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = str(Path(temp_dir) / "data")
             server = None
@@ -34,22 +34,34 @@ class ChatSessionEndpointBehaviorTests(unittest.TestCase):
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
                 thread.start()
 
-                def create_session() -> str:
+                def ensure_session(chat_id: str | None = None) -> tuple[int, dict[str, str]]:
+                    body = {"project_id": project.project_id}
+                    if chat_id:
+                        body["chat_id"] = chat_id
                     conn = HTTPConnection("127.0.0.1", port, timeout=5)
                     conn.request(
                         "POST",
                         "/v1/chat/sessions",
-                        body=json.dumps({"project_id": project.project_id}),
+                        body=json.dumps(body),
                         headers={"Content-Type": "application/json"},
                     )
                     resp = conn.getresponse()
-                    self.assertEqual(resp.status, 201)
                     payload = json.loads(resp.read().decode("utf-8"))
-                    return payload["chat_id"]
+                    return resp.status, payload
 
-                first = create_session()
-                second = create_session()
-                self.assertNotEqual(first, second)
+                first_status, first_payload = ensure_session()
+                self.assertEqual(first_status, 201)
+                self.assertEqual(first_payload.get("chat_id_source"), "new")
+
+                second_status, second_payload = ensure_session()
+                self.assertEqual(second_status, 200)
+                self.assertEqual(second_payload.get("chat_id_source"), "latest")
+                self.assertEqual(second_payload["chat_id"], first_payload["chat_id"])
+
+                incoming_status, incoming_payload = ensure_session(first_payload["chat_id"])
+                self.assertEqual(incoming_status, 200)
+                self.assertEqual(incoming_payload.get("chat_id_source"), "incoming")
+                self.assertEqual(incoming_payload["chat_id"], first_payload["chat_id"])
             finally:
                 if server:
                     server.shutdown()

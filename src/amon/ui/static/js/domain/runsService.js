@@ -36,10 +36,12 @@ export function createRunsService({ api }) {
         body: JSON.stringify({ project_id: projectId, run_id: runId }),
       });
     },
-    async ensureChatSession(projectId) {
+    async ensureChatSession(projectId, chatId = null) {
+      const payload = { project_id: projectId };
+      if (chatId) payload.chat_id = chatId;
       return api.request("/chat/sessions", {
         method: "POST",
-        body: JSON.stringify({ project_id: projectId }),
+        body: JSON.stringify(payload),
       });
     },
     async getProjectHistory(projectId) {

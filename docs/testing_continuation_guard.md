@@ -8,7 +8,8 @@ python -m unittest \
   tests.test_chat_continuation_guard \
   tests.test_chat_continuation_flow \
   tests.test_ui_chat_stream_init \
-  tests.test_chat_session_store
+  tests.test_chat_session_store \
+  tests.test_chat_session_endpoint_behavior
 ```
 
 > CI workflow：`.github/workflows/chat-continuation-guard.yml`
@@ -24,3 +25,9 @@ python -m unittest \
    - 檔名：`tests/test_chat_continuation_*.py`
    - 方法名：`test_<行為>_<預期結果>`
 4. **提交前必跑**：執行本頁「本地執行」命令，確保可在離線/受限網路環境穩定重現。
+
+## 新增回歸覆蓋重點
+
+- `tests.test_chat_session_endpoint_behavior`：驗證 `/v1/chat/sessions` 為 ensure semantics（incoming/latest/new）。
+- `tests.test_chat_continuation_flow`：模擬 hydrate 後再次 ensure session，確認 chat_id 不被覆寫且第二輪 `history_count >= 2`。
+- `tests.test_chat_continuation_guard`：傳入不存在 chat_id 時會 fallback 並寫入 `chat_session_fallback` warning log。

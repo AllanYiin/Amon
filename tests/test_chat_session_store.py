@@ -14,6 +14,9 @@ from amon.chat.session_store import (
     append_event,
     build_prompt_with_history,
     create_chat_session,
+    ensure_chat_session,
+    chat_session_exists,
+    load_latest_chat_id,
     load_latest_run_context,
     load_recent_dialogue,
 )
@@ -116,6 +119,27 @@ class ChatSessionStoreTests(unittest.TestCase):
             try:
                 with self.assertRaises(ValueError):
                     create_chat_session("../escape")
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+
+    def test_ensure_chat_session_prefers_incoming_then_latest_then_new(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                project_id = "proj-ensure-session"
+                created_chat_id, created_source = ensure_chat_session(project_id)
+                self.assertEqual(created_source, "new")
+                self.assertTrue(chat_session_exists(project_id, created_chat_id))
+
+                ensured_chat_id, ensured_source = ensure_chat_session(project_id, created_chat_id)
+                self.assertEqual(ensured_source, "incoming")
+                self.assertEqual(ensured_chat_id, created_chat_id)
+
+                latest_chat_id, latest_source = ensure_chat_session(project_id, "missing-chat")
+                self.assertEqual(latest_source, "latest")
+                self.assertEqual(latest_chat_id, created_chat_id)
+                self.assertEqual(load_latest_chat_id(project_id), created_chat_id)
             finally:
                 os.environ.pop("AMON_HOME", None)
 

@@ -71,6 +71,20 @@ class ChatContinuationFlowTests(unittest.TestCase):
                     self.assertIsNotNone(first_done)
                     first_chat_id = first_done["chat_id"]
 
+                    # Simulate hydrate/reload path: UI ensures session again without passing chat_id.
+                    ensure_conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                    ensure_conn.request(
+                        "POST",
+                        "/v1/chat/sessions",
+                        body=json.dumps({"project_id": project.project_id}),
+                        headers={"Content-Type": "application/json"},
+                    )
+                    ensure_resp = ensure_conn.getresponse()
+                    self.assertEqual(ensure_resp.status, 200)
+                    ensure_payload = json.loads(ensure_resp.read().decode("utf-8"))
+                    self.assertEqual(ensure_payload.get("chat_id"), first_chat_id)
+                    self.assertEqual(ensure_payload.get("chat_id_source"), "latest")
+
                     conn2 = HTTPConnection("127.0.0.1", port, timeout=5)
                     conn2.request(
                         "GET",
@@ -81,6 +95,8 @@ class ChatContinuationFlowTests(unittest.TestCase):
                     second_done = _read_done_payload(resp2)
                     self.assertIsNotNone(second_done)
                     self.assertEqual(second_done["chat_id"], first_chat_id)
+                    self.assertEqual(second_done.get("chat_id_source"), "latest")
+                    self.assertGreaterEqual(int(second_done.get("history_count") or 0), 2)
 
                 self.assertEqual(run_calls[0][1], [])
                 self.assertEqual(

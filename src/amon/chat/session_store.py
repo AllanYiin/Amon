@@ -112,6 +112,30 @@ def load_latest_chat_id(project_id: str) -> str | None:
     latest = max(candidates, key=lambda item: item.stat().st_mtime)
     return latest.stem
 
+
+def chat_session_exists(project_id: str, chat_id: str) -> bool:
+    """Return True when the chat session file exists for the given project/chat pair."""
+    validate_project_id(project_id)
+    if not chat_id:
+        return False
+    validate_identifier(chat_id, "chat_id")
+    return _chat_session_path(project_id, chat_id).exists()
+
+
+def ensure_chat_session(project_id: str, chat_id: str | None = None) -> tuple[str, str]:
+    """Ensure a usable chat session and return (chat_id, source)."""
+    validate_project_id(project_id)
+    incoming_chat_id = (chat_id or "").strip()
+
+    if incoming_chat_id and chat_session_exists(project_id, incoming_chat_id):
+        return incoming_chat_id, "incoming"
+
+    latest_chat_id = load_latest_chat_id(project_id)
+    if latest_chat_id:
+        return latest_chat_id, "latest"
+
+    return create_chat_session(project_id), "new"
+
 def load_recent_dialogue(project_id: str, chat_id: str, limit: int = 12) -> list[dict[str, str]]:
     """Load recent user/assistant dialogue turns for contextual continuity."""
     if not chat_id:
