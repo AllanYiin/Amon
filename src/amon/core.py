@@ -1019,6 +1019,20 @@ class AmonCore:
     ) -> tuple[GraphRunResult, str]:
         config = self.load_config(project_path)
         planner_enabled = self._coerce_config_bool(config.get("amon", {}).get("planner", {}).get("enabled", True))
+        legacy_fallback_enabled = self._coerce_config_bool(os.getenv("AMON_PLAN_EXECUTE_LEGACY_SINGLE_FALLBACK", ""))
+        if not planner_enabled and (legacy_fallback_enabled or stream_handler is not None):
+            if legacy_fallback_enabled:
+                self.logger.info("planner flag 關閉且 legacy fallback 啟用，plan_execute 改走 single 相容路徑")
+            else:
+                self.logger.info("planner flag 關閉且為 stream 請求，plan_execute 改走 single_stream")
+            return self.run_single_stream(
+                prompt,
+                project_path=project_path,
+                model=model,
+                stream_handler=stream_handler,
+                run_id=run_id,
+                conversation_history=conversation_history,
+            )
         if not planner_enabled:
             project_identity = project_id or self.resolve_project_identity(project_path)[0]
             fallback_reason = "planner disabled -> fallback single"
