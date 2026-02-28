@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import uuid
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
@@ -18,6 +19,7 @@ from amon.tooling.registry import ToolRegistry
 from amon.tooling.types import ToolCall, ToolResult
 
 from .llm import TaskGraphLLMClient, build_default_llm_client
+from .node_executor import NodeExecutor
 from .schema import TaskEdge, TaskGraph, TaskNode, validate_task_graph
 from .serialize import dumps_task_graph
 
@@ -55,6 +57,7 @@ class TaskGraphRuntime:
         self.cancel_event = cancel_event or threading.Event()
         self.registry = registry
         self.tool_dispatcher = tool_dispatcher
+        self.node_executor = NodeExecutor(min_call_interval_s=0.0, sleep_func=time.sleep)
 
     def run(self) -> TaskGraphRunResult:
         validate_task_graph(self.graph)
@@ -215,25 +218,33 @@ class TaskGraphRuntime:
             return output_text, resolved
 
         messages = _build_messages(node, session)
-        future = executor.submit(_generate_text, llm_client, messages, node.llm.model)
-        hard_timeout = node.timeout.hard_s
 
-        started = datetime.now().timestamp()
-        while True:
-            if self.cancel_event.is_set() or cancel_path.exists():
-                future.cancel()
-                raise RuntimeError("run canceled")
-            elapsed = datetime.now().timestamp() - started
-            if elapsed > max(hard_timeout, 1):
-                future.cancel()
-                raise RuntimeError(f"node hard timeout：node_id={node.id}")
-            try:
-                output_text = future.result(timeout=0.1)
-                break
-            except FutureTimeoutError:
-                continue
-            except Exception:
-                raise
+        def invoke_llm(current_messages: list[dict[str, str]]) -> str:
+            future = executor.submit(_generate_text, llm_client, current_messages, node.llm.model)
+            hard_timeout = node.timeout.hard_s
+            started = datetime.now().timestamp()
+            while True:
+                if self.cancel_event.is_set() or cancel_path.exists():
+                    future.cancel()
+                    raise RuntimeError("run canceled")
+                elapsed = datetime.now().timestamp() - started
+                if elapsed > max(hard_timeout, 1):
+                    future.cancel()
+                    raise RuntimeError(f"node hard timeout：node_id={node.id}")
+                try:
+                    return future.result(timeout=0.1)
+                except FutureTimeoutError:
+                    continue
+                except Exception:
+                    raise
+
+        execution_result = self.node_executor.execute_llm_node(
+            node=node,
+            base_messages=messages,
+            invoke_llm=invoke_llm,
+            append_event=lambda payload: self._append_event(events_path, payload),
+        )
+        output_text = execution_result.raw_text
 
         output_path = _default_output_path(node.id)
         resolved = _resolve_output_path(project_path, output_path)
