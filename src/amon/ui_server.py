@@ -35,7 +35,7 @@ from amon.chat.session_store import (
     ensure_chat_session,
 )
 from amon.commands.executor import CommandPlan, execute
-from amon.config import ConfigLoader
+from amon.config import ConfigLoader, resolve_system_prompt
 from amon.daemon.queue import get_queue_depth
 from amon.events import emit_event
 from amon.jobs.runner import start_job
@@ -2269,12 +2269,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
 
         effective_config = config_payload.get("effective_config") or {}
         project_context_text = self._read_project_context(project_path)
-        system_prompt = (
-            (effective_config.get("agent") or {}).get("system_prompt")
-            or (effective_config.get("prompts") or {}).get("system")
-            or (effective_config.get("chat") or {}).get("system_prompt")
-            or ""
-        )
+        system_prompt = resolve_system_prompt(effective_config)
         chat_messages = chat_history.get("messages") or []
         tool_defs = tools_catalog.get("tools") or []
         skills = skills_catalog.get("skills") or []
