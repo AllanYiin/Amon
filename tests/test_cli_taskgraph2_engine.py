@@ -38,7 +38,7 @@ class CliTaskGraph2EngineTests(unittest.TestCase):
         self.assertEqual(chat_args.engine, "taskgraph2")
 
         default_args = parser.parse_args(["run", "任務", "--project", "p1"])
-        self.assertEqual(default_args.engine, "v1")
+        self.assertEqual(default_args.engine, "taskgraph2")
 
     def test_handle_run_taskgraph2_delegates_to_core(self) -> None:
         core = Mock()
@@ -62,6 +62,27 @@ class CliTaskGraph2EngineTests(unittest.TestCase):
             model="gpt-test",
             skill_names=["demo"],
         )
+
+
+    def test_handle_run_v1_option_is_forced_to_taskgraph2(self) -> None:
+        core = Mock()
+        core.get_project_path.return_value = Path("/tmp/project")
+        args = argparse.Namespace(
+            user_task="整理需求",
+            prompt=None,
+            project="project-1",
+            model=None,
+            mode="single",
+            skill=[],
+            engine="v1",
+        )
+
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            cli._handle_run(core, args)
+
+        self.assertIn("v1 已停用", stdout.getvalue())
+        core.run_taskgraph2.assert_called_once()
 
     def test_graph_run_schema_v2_uses_taskgraph_runtime_and_writes_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
