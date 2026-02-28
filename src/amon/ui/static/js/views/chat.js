@@ -303,8 +303,7 @@ export const CHAT_VIEW = {
             }
             if (eventType === "token") {
               messageRenderer.applyTokenChunk(data.text || "");
-              const tokenText = data.text || "";
-              applyInlineArtifactEvents(artifactParser.feed(tokenText));
+              handleArtifactEvents(artifactParser.feed(data.text || ""));
               return;
             }
             if (eventType === "notice") {
