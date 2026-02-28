@@ -3,7 +3,6 @@ import os
 import sys
 import tempfile
 import unittest
-import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -45,7 +44,7 @@ class InitTests(unittest.TestCase):
             bundled_skill = base_path / "skills" / "spec-to-tasks.skill"
             self.assertTrue(bundled_skill.exists())
 
-    def test_init_installs_missing_global_skills(self) -> None:
+    def test_init_installs_missing_global_skill_archives(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir
             try:
@@ -63,32 +62,26 @@ class InitTests(unittest.TestCase):
             index_path = base_path / "cache" / "skills" / "index.json"
             self.assertTrue(index_path.exists())
 
-    def test_init_installs_missing_global_skills(self) -> None:
+    def test_init_removes_duplicate_unpacked_skill_folders(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir
             try:
                 core = AmonCore()
+                duplicate_dir = core.skills_dir / "automation-scheduler"
+                duplicate_dir.mkdir(parents=True, exist_ok=True)
+                (duplicate_dir / "SKILL.md").write_text("# duplicated", encoding="utf-8")
                 core.initialize()
             finally:
                 os.environ.pop("AMON_HOME", None)
 
             base_path = Path(temp_dir)
-            source_dir = Path(__file__).resolve().parents[1] / "src" / "amon" / "resources" / "skills"
-            expected_skill_dirs = set()
-            for source_file in source_dir.glob("*.skill"):
-                with zipfile.ZipFile(source_file) as archive:
-                    for member in archive.namelist():
-                        if member.endswith("/SKILL.md"):
-                            expected_skill_dirs.add(Path(member).parent.name)
-
-            installed_skill_dirs = {path.name for path in (base_path / "skills").iterdir() if path.is_dir()}
-            self.assertTrue(expected_skill_dirs.issubset(installed_skill_dirs))
+            self.assertFalse((base_path / "skills" / "automation-scheduler").exists())
+            self.assertTrue((base_path / "skills" / "automation-scheduler.skill").exists())
 
             index_path = base_path / "cache" / "skills" / "index.json"
             self.assertTrue(index_path.exists())
             index_content = index_path.read_text(encoding="utf-8")
-            for skill_dir in expected_skill_dirs:
-                self.assertIn(f'/skills/{skill_dir}/SKILL.md', index_content)
+            self.assertIn("/skills/automation-scheduler.skill", index_content)
 
 
 if __name__ == "__main__":
