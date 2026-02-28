@@ -4,35 +4,38 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from amon.taskgraph2.node_executor import ExtractionError, extract_output
+from amon.taskgraph2.node_executor import OutputExtractionError, extract_output, validate_output
+from amon.taskgraph2.schema import TaskNodeOutput
 
 
 class TaskGraph2OutputExtractionTests(unittest.TestCase):
-    def test_extract_output_parses_json_full_text(self) -> None:
-        payload = extract_output('{"name":"amon","count":2}', "json")
-        self.assertEqual(payload["name"], "amon")
+    def test_extract_output_json_direct_load(self) -> None:
+        spec = TaskNodeOutput(type="json")
+        payload = extract_output('{"ok": true, "count": 2}', spec)
+        self.assertEqual(payload["ok"], True)
         self.assertEqual(payload["count"], 2)
 
-    def test_extract_output_best_effort_extracts_object_snippet(self) -> None:
-        text = "前言\n```json\n{\"ok\": true, \"items\": [1,2]}\n```\n結尾"
-        payload = extract_output(text, "json")
-        self.assertEqual(payload, {"ok": True, "items": [1, 2]})
+    def test_extract_output_json_best_effort_with_noise(self) -> None:
+        spec = TaskNodeOutput(type="json")
+        raw = "前言說明\n```json\n{\"name\":\"amon\"}\n```\n尾聲"
+        payload = extract_output(raw, spec)
+        self.assertEqual(payload, {"name": "amon"})
 
-    def test_extract_output_best_effort_extracts_array_snippet(self) -> None:
-        text = "answer: [1, 2, 3] done"
-        payload = extract_output(text, "json")
-        self.assertEqual(payload, [1, 2, 3])
+    def test_extract_output_json_failure_contains_diagnostic(self) -> None:
+        spec = TaskNodeOutput(type="json")
+        with self.assertRaisesRegex(OutputExtractionError, "len="):
+            extract_output("not-json", spec)
 
-    def test_extract_output_raises_diagnostic_error_when_failed(self) -> None:
-        with self.assertRaises(ExtractionError) as ctx:
-            extract_output("nothing parseable here", "json")
-        self.assertIn("length=", str(ctx.exception))
-        self.assertIn("object_start=", str(ctx.exception))
-        self.assertIn("array_start=", str(ctx.exception))
+    def test_validate_output_required_keys_and_types(self) -> None:
+        spec = TaskNodeOutput(type="json", schema={"required_keys": {"title": "string", "score": "number"}})
+        validate_output({"title": "A", "score": 3.14}, spec)
 
-    def test_extract_output_keeps_non_json_type_text(self) -> None:
-        text = "plain markdown"
-        self.assertEqual(extract_output(text, "md"), text)
+    def test_validate_output_raises_on_missing_or_wrong_type(self) -> None:
+        spec = TaskNodeOutput(type="json", schema={"required_keys": {"title": "string", "ok": "boolean"}})
+        with self.assertRaisesRegex(Exception, "missing required key"):
+            validate_output({"title": "A"}, spec)
+        with self.assertRaisesRegex(Exception, "expected boolean"):
+            validate_output({"title": "A", "ok": "yes"}, spec)
 
 
 if __name__ == "__main__":

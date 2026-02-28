@@ -1,114 +1,129 @@
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from amon.taskgraph2.node_executor import NodeExecutor, ValidationError, validate_output
-from amon.taskgraph2.schema import TaskNodeOutput, TaskNodeRetry
-
-import tempfile
-
+from amon.taskgraph2.node_executor import NodeExecutor
 from amon.taskgraph2.runtime import TaskGraphRuntime
-from amon.taskgraph2.schema import TaskGraph, TaskNode
+from amon.taskgraph2.schema import TaskGraph, TaskNode, TaskNodeOutput, TaskNodeRetry
 
 
-class _FakeLLMClient:
-    def __init__(self, outputs):
-        self.outputs = list(outputs)
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.sleeps: list[float] = []
 
-    def generate_stream(self, messages, model=None):  # noqa: ANN001
-        output = self.outputs.pop(0)
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+class FakeLLMClient:
+    def __init__(self, outputs: list[str]) -> None:
+        self._outputs = list(outputs)
+        self.calls: list[list[dict[str, str]]] = []
+
+    def generate_stream(self, messages: list[dict[str, str]], model=None):  # noqa: ANN001
+        self.calls.append(messages)
+        output = self._outputs.pop(0)
         for token in output.split(" "):
             if token:
                 yield token + " "
 
 
-class TaskGraph2RetryAndValidationTests(unittest.TestCase):
-    def test_validate_output_checks_required_keys_and_types(self) -> None:
-        spec = TaskNodeOutput(
-            type="json",
-            schema={"required_keys": ["name", "score"], "types": {"name": "string", "score": "number"}},
+class TaskGraph2RetryValidationTests(unittest.TestCase):
+    def test_node_executor_retry_injects_repair_error_and_backoff(self) -> None:
+        clock = FakeClock()
+        executor = NodeExecutor(sleep_func=clock.sleep, monotonic_func=clock.monotonic, min_call_interval_s=0.0)
+        node = TaskNode(
+            id="R1",
+            title="retry",
+            kind="task",
+            description="d",
+            output=TaskNodeOutput(type="json", schema={"required_keys": {"ok": "boolean"}}),
+            retry=TaskNodeRetry(max_attempts=2, backoff_s=0.5),
         )
-        validate_output({"name": "amon", "score": 0.9}, spec)
-        with self.assertRaises(ValidationError):
-            validate_output({"name": "amon"}, spec)
-        with self.assertRaises(ValidationError):
-            validate_output({"name": "amon", "score": "oops"}, spec)
+        captured_messages: list[list[dict[str, str]]] = []
+        events: list[dict[str, object]] = []
 
-    def test_node_executor_retry_with_repair_error_and_backoff(self) -> None:
-        sleep_calls: list[float] = []
-        calls: list[list[dict[str, str]]] = []
-        outputs = iter(["not-json", '{"name":"ok"}'])
+        responses = iter(["{\"ok\": \"bad\"}", '{"ok": true}'])
 
-        executor = NodeExecutor(sleep_func=lambda s: sleep_calls.append(s), min_call_interval_s=0)
+        def invoke(messages: list[dict[str, str]]) -> str:
+            captured_messages.append(messages)
+            return next(responses)
 
-        def generate(messages):
-            calls.append(messages)
-            return next(outputs)
-
-        retries: list[tuple[int, str]] = []
-        raw, extracted = executor.run_llm_with_retry(
-            generate_text=generate,
-            base_messages=[{"role": "user", "content": "請回 JSON"}],
-            output_spec=TaskNodeOutput(type="json", schema={"required_keys": ["name"]}),
-            retry_spec=TaskNodeRetry(max_attempts=2, backoff_s=0.25),
-            on_retry=lambda attempt, error: retries.append((attempt, error)),
+        result = executor.execute_llm_node(
+            node=node,
+            base_messages=[{"role": "user", "content": "請輸出 json"}],
+            invoke_llm=invoke,
+            append_event=events.append,
         )
 
-        self.assertEqual(json.loads(raw), {"name": "ok"})
-        self.assertEqual(extracted, {"name": "ok"})
-        self.assertEqual(retries[0][0], 1)
-        self.assertEqual(sleep_calls, [0.25])
-        self.assertEqual(len(calls), 2)
-        self.assertIn("[repair_error]", calls[1][-1]["content"])
+        self.assertEqual(result.extracted_output, {"ok": True})
+        self.assertEqual(clock.sleeps, [0.5])
+        retry_event = [item for item in events if item["event"] == "node_retry"][0]
+        self.assertEqual(retry_event["attempt"], 1)
+        self.assertIn("expected boolean", str(retry_event["repair_error"]))
+        self.assertIn("[repair_error]", captured_messages[1][-1]["content"])
 
-    def test_node_executor_emits_numeric_anomaly_warning(self) -> None:
-        warnings: list[dict[str, str]] = []
-        executor = NodeExecutor()
+    def test_node_executor_rate_limit_waits_between_calls(self) -> None:
+        clock = FakeClock()
+        executor = NodeExecutor(sleep_func=clock.sleep, monotonic_func=clock.monotonic, min_call_interval_s=0.2)
+        node = TaskNode(id="R2", title="rate", kind="task", description="d", output=TaskNodeOutput(type="text"))
+        events: list[dict[str, object]] = []
 
-        executor.run_llm_with_retry(
-            generate_text=lambda _: '{"x": 1e309, "y": [1, 2, 1e20]}',
-            base_messages=[{"role": "user", "content": "json"}],
-            output_spec=TaskNodeOutput(type="json"),
-            retry_spec=TaskNodeRetry(max_attempts=1),
-            on_warning=lambda payload: warnings.append(payload),
+        executor.execute_llm_node(
+            node=node,
+            base_messages=[{"role": "user", "content": "x"}],
+            invoke_llm=lambda _messages: "ok",
+            append_event=events.append,
+        )
+        executor.execute_llm_node(
+            node=node,
+            base_messages=[{"role": "user", "content": "x"}],
+            invoke_llm=lambda _messages: "ok",
+            append_event=events.append,
         )
 
-        self.assertTrue(any(item.get("path") == "$.x" for item in warnings))
-        self.assertTrue(any(item.get("path") == "$.y[2]" for item in warnings))
+        self.assertEqual(clock.sleeps, [0.2])
 
-
-    def test_runtime_records_node_retry_event(self) -> None:
+    def test_runtime_emits_retry_and_numeric_warning_events(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
+            project_path = Path(tmp)
             graph = TaskGraph(
                 schema_version="2.0",
-                objective="retry",
+                objective="retry+warning",
                 nodes=[
                     TaskNode(
                         id="N1",
                         title="json",
                         kind="task",
-                        description="return json",
+                        description="輸出 json",
                         writes={"result": "json"},
-                        output=TaskNodeOutput(type="json", schema={"required_keys": ["ok"]}),
-                        retry=TaskNodeRetry(max_attempts=2, backoff_s=0.01),
+                        output=TaskNodeOutput(type="json", schema={"required_keys": {"ok": "boolean"}}),
+                        retry=TaskNodeRetry(max_attempts=2, backoff_s=0.1),
                     )
                 ],
                 edges=[],
             )
-            fake = _FakeLLMClient(["oops", '{"ok": true}'])
-            runtime = TaskGraphRuntime(project_path=Path(tmp), graph=graph, llm_client=fake, run_id="retry_case")
+            fake_llm = FakeLLMClient(['{"ok":"no"}', '{"ok": true, "huge": 1e20}'])
+            runtime = TaskGraphRuntime(project_path=project_path, graph=graph, llm_client=fake_llm, run_id="run_tg2_retry")
             result = runtime.run()
-            self.assertEqual(result.state["status"], "completed")
 
+            self.assertEqual(result.state["status"], "completed")
             events = [
                 json.loads(line)
                 for line in (result.run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
                 if line.strip()
             ]
             self.assertIn("node_retry", [item["event"] for item in events])
+            self.assertIn("numeric_anomaly_warning", [item["event"] for item in events])
 
 
 if __name__ == "__main__":
