@@ -26,13 +26,6 @@ function parseFenceDescriptor(descriptor = "") {
     return { language, filename };
   }
 
-  const byFilenameOnly = text.match(/^filename\s*=\s*(.+)$/i);
-  if (byFilenameOnly) {
-    const filename = stripQuotes(byFilenameOnly[1]);
-    if (!filename) return null;
-    return { language: "", filename };
-  }
-
   return null;
 }
 
@@ -40,8 +33,8 @@ export function createStreamingArtifactParser() {
   let pendingLine = "";
   let activeArtifact = null;
 
-  const processLine = (line, hasNewline, events) => {
-    const normalized = String(line || "");
+  const processLine = (line, events) => {
+    const normalized = String(line || "").replace(/\r$/, "");
 
     if (!activeArtifact) {
       const fenceMatch = normalized.match(/^\s*```(.*)$/);
@@ -53,7 +46,7 @@ export function createStreamingArtifactParser() {
       activeArtifact = {
         filename: descriptor.filename,
         language: descriptor.language,
-        rawFenceLine: normalized.trim(),
+        rawFenceLine: normalized,
         content: "",
       };
       events.push({
@@ -76,8 +69,7 @@ export function createStreamingArtifactParser() {
       return;
     }
 
-    const chunk = hasNewline ? `${normalized}\n` : normalized;
-    if (!chunk) return;
+    const chunk = `${normalized}\n`;
     activeArtifact.content += chunk;
     events.push({
       type: "artifact_chunk",
@@ -94,7 +86,7 @@ export function createStreamingArtifactParser() {
       let newlineIndex = pendingLine.indexOf("\n");
       while (newlineIndex >= 0) {
         const line = pendingLine.slice(0, newlineIndex);
-        processLine(line, true, events);
+        processLine(line, events);
         pendingLine = pendingLine.slice(newlineIndex + 1);
         newlineIndex = pendingLine.indexOf("\n");
       }
