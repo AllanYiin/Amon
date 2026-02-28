@@ -18,9 +18,11 @@ from amon.tooling.registry import ToolRegistry
 from amon.tooling.types import ToolCall, ToolResult
 
 from .llm import TaskGraphLLMClient, build_default_llm_client
+from .openai_tool_client import OpenAIToolClient
 from .node_executor import NodeExecutor
 from .schema import TaskEdge, TaskGraph, TaskNode, validate_task_graph
 from .serialize import dumps_task_graph
+from .tool_loop import ToolLoopError, ToolLoopRunner
 
 _ALLOWED_OUTPUT_PREFIXES = ("docs/", "audits/")
 
@@ -217,6 +219,18 @@ class TaskGraphRuntime:
             return output_text, resolved
 
         messages = _build_messages(node, session)
+        if _uses_llm_tool_loop(node):
+            output_text = self._execute_llm_tool_loop(
+                node=node,
+                messages=messages,
+                run_id=run_id,
+                events_path=events_path,
+            )
+            output_path = _default_output_path(node.id)
+            resolved = _resolve_output_path(project_path, output_path)
+            atomic_write_text(resolved, output_text, encoding="utf-8")
+            return output_text, resolved
+
         output_text, extracted = self._node_executor.run_llm_with_retry(
             generate_text=lambda retry_messages: self._generate_text_with_timeout(
                 llm_client=llm_client,
@@ -334,6 +348,44 @@ class TaskGraphRuntime:
 
         return "\n".join(part for part in outputs if part).strip()
 
+    def _execute_llm_tool_loop(
+        self,
+        *,
+        node: TaskNode,
+        messages: list[dict[str, str]],
+        run_id: str,
+        events_path: Path,
+    ) -> str:
+        model = str(node.llm.model or "").strip()
+        if not model:
+            raise _NodeExecutionFailed("llm tool loop requires node.llm.model")
+
+        base_url = _resolve_non_empty_env("OPENAI_BASE_URL")
+        api_key = _resolve_non_empty_env("OPENAI_API_KEY")
+        client = OpenAIToolClient(base_url=base_url, api_key=api_key)
+        runner = ToolLoopRunner(
+            client=client,
+            model=model,
+            emit_event=lambda payload: self._append_event(events_path, payload),
+        )
+        if self.registry is None:
+            raise _NodeExecutionFailed("tool registry is not configured")
+        try:
+            result = runner.run(
+                messages=messages,
+                tools=node.tools,
+                tool_choice=_resolve_tool_choice(node),
+                max_turns=max(node.retry.max_attempts, 2),
+                registry=self.registry,
+                caller="taskgraph2",
+                project_id=str(self.project_path),
+                run_id=run_id,
+                node_id=node.id,
+            )
+            return result.final_text
+        except ToolLoopError as exc:
+            raise _NodeExecutionFailed(str(exc)) from exc
+
     def _resolve_tool_dispatcher(self) -> Callable[[ToolCall], ToolResult]:
         if self.tool_dispatcher is not None:
             return self.tool_dispatcher
@@ -379,6 +431,39 @@ def _build_messages(node: TaskNode, session: dict[str, Any]) -> list[dict[str, s
 
 def _generate_text(llm_client: TaskGraphLLMClient, messages: list[dict[str, str]], model: str | None) -> str:
     return "".join(str(token) for token in llm_client.generate_stream(messages, model=model))
+
+
+def _resolve_non_empty_env(name: str) -> str:
+    from os import getenv
+
+    value = str(getenv(name) or "").strip()
+    if not value:
+        raise _NodeExecutionFailed(f"missing required env: {name}")
+    return value
+
+
+def _resolve_tool_choice(node: TaskNode) -> str | dict[str, Any] | None:
+    raw = node.llm.tool_choice
+    if raw is None:
+        return "auto"
+    choice = raw.strip()
+    if not choice:
+        return "auto"
+    if choice == "auto":
+        return "auto"
+    if choice.startswith("{"):
+        try:
+            parsed = json.loads(choice)
+        except json.JSONDecodeError as exc:
+            raise _NodeExecutionFailed(f"invalid llm.tool_choice JSON: {exc}") from exc
+        if not isinstance(parsed, dict):
+            raise _NodeExecutionFailed("llm.tool_choice JSON must be an object")
+        return parsed
+    return {"type": "function", "function": {"name": choice}}
+
+
+def _uses_llm_tool_loop(node: TaskNode) -> bool:
+    return bool(node.tools) and bool(node.llm.enable_tools)
 
 
 def _uses_tool_execution(node: TaskNode) -> bool:

@@ -111,6 +111,7 @@ def loads_task_graph(text: str) -> TaskGraph:
                     temperature=_to_optional_float(llm_raw.get("temperature")),
                     max_tokens=_to_optional_int(llm_raw.get("max_tokens")),
                     tool_choice=_to_optional_str(llm_raw.get("tool_choice")),
+                    enable_tools=bool(llm_raw.get("enable_tools", False)),
                 ),
                 tools=tools,
                 steps=steps,
