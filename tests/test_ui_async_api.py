@@ -1355,7 +1355,7 @@ class UIAsyncAPITests(unittest.TestCase):
                     encoding="utf-8",
                 )
 
-                project_logs_dir = project_path / ".amon" / "logs"
+                project_logs_dir = project_path / "logs"
                 project_logs_dir.mkdir(parents=True, exist_ok=True)
                 (project_logs_dir / "app.jsonl").write_text(
                     json.dumps({"ts": "2026-01-02T00:00:00+00:00", "level": "ERROR", "component": "runner", "project_id": project.project_id, "run_id": "run-001"}, ensure_ascii=False)

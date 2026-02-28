@@ -29,7 +29,7 @@ class ProjectLogStoreTests(unittest.TestCase):
             store = ProjectLogStore(data_dir=data_dir, registry=registry)
 
             self.assertTrue(store.append_event({"event": "run.start", "project_id": project_id, "run_id": "run-01"}))
-            payload = json.loads((project_path / ".amon" / "logs" / "events.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+            payload = json.loads((project_path / "logs" / "events.jsonl").read_text(encoding="utf-8").splitlines()[-1])
             self.assertEqual(payload["project_id"], project_id)
             self.assertEqual(payload["run_id"], "run-01")
 
@@ -60,7 +60,7 @@ class ProjectLogStoreTests(unittest.TestCase):
             finally:
                 os.environ.pop("AMON_HOME", None)
 
-            records = [json.loads(line) for line in (project_path / ".amon" / "logs" / "events.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+            records = [json.loads(line) for line in (project_path / "logs" / "events.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
             by_event = {record.get("event"): record for record in records}
             self.assertEqual(by_event["run.start"]["project_id"], project_id)
             self.assertEqual(by_event["run.start"]["run_id"], "run-c1")
