@@ -253,8 +253,7 @@ export const CHAT_VIEW = {
             }
             if (eventType === "token") {
               messageRenderer.applyTokenChunk(data.text || "");
-              const tokenText = data.text || "";
-              const artifactEvents = artifactParser.feed(tokenText);
+              const artifactEvents = artifactParser.feed(data.text || "");
               artifactEvents.forEach((artifactEvent) => {
                 if (artifactEvent.type === "artifact_open") {
                   appState.inlineArtifactStreamingHint = `偵測到 inline artifact 串流中：${artifactEvent.filename}`;
