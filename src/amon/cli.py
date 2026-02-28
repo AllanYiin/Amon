@@ -100,7 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--prompt", help="輸入提示（相容舊版）")
     run_parser.add_argument("--project", required=True, help="指定專案 ID")
     run_parser.add_argument("--model", help="指定模型")
-    run_parser.add_argument("--engine", choices=["v1", "taskgraph2"], default="v1", help="執行引擎（預設 v1）")
+    run_parser.add_argument("--engine", choices=["v1", "taskgraph2"], default="taskgraph2", help="執行引擎（已全面改為 taskgraph2）")
     run_parser.add_argument("--mode", default="single", help="指定模式（single/self_critique/team）")
     run_parser.add_argument("--skill", action="append", default=[], help="指定技能名稱（可重複）")
 
@@ -218,7 +218,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     chat_parser = subparsers.add_parser("chat", help="互動式 Chat")
     chat_parser.add_argument("--project", help="指定專案 ID")
-    chat_parser.add_argument("--engine", choices=["v1", "taskgraph2"], default="v1", help="執行引擎（預設 v1）")
+    chat_parser.add_argument("--engine", choices=["v1", "taskgraph2"], default="taskgraph2", help="執行引擎（已全面改為 taskgraph2）")
     chat_sub = chat_parser.add_subparsers(dest="chat_command")
     chat_attach = chat_sub.add_parser("attach", help="將附件落地到 chat inbox")
     chat_attach.add_argument("--project", required=True, help="指定專案 ID")
@@ -491,27 +491,17 @@ def _handle_run(core: AmonCore, args: argparse.Namespace) -> None:
     if not user_task:
         raise ValueError("請提供任務內容")
     project_path = core.get_project_path(args.project) if args.project else None
-    if args.engine == "taskgraph2":
-        if not project_path:
-            raise ValueError("taskgraph2 需要指定 --project")
-        core.run_taskgraph2(
-            user_task,
-            project_path=project_path,
-            project_id=args.project,
-            model=args.model,
-            skill_names=args.skill,
-        )
-        return
-    if args.mode == "single":
-        core.run_single(user_task, project_path=project_path, model=args.model, skill_names=args.skill)
-        return
-    if args.mode == "self_critique":
-        core.run_self_critique(user_task, project_path=project_path, model=args.model, skill_names=args.skill)
-        return
-    if args.mode == "team":
-        core.run_team(user_task, project_path=project_path, model=args.model, skill_names=args.skill)
-        return
-    raise ValueError(f"目前僅支援 single/self_critique/team 模式（收到：{args.mode}）")
+    if not project_path:
+        raise ValueError("taskgraph2 需要指定 --project")
+    if args.engine == "v1":
+        print("[notice] v1 已停用，改以 taskgraph2 執行。")
+    core.run_taskgraph2(
+        user_task,
+        project_path=project_path,
+        project_id=args.project,
+        model=args.model,
+        skill_names=args.skill,
+    )
 
 
 def _handle_skills(core: AmonCore, args: argparse.Namespace) -> None:
