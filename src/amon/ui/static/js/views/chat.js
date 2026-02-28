@@ -1,6 +1,9 @@
 import { createMessageRenderer } from "./chat/renderers/messageRenderer.js";
 import { createTimelineRenderer } from "./chat/renderers/timelineRenderer.js";
 import { createInputBar } from "./chat/renderers/inputBar.js";
+import { createStreamingArtifactParser } from "./chat/renderers/streamingArtifactParser.js";
+import { buildPreviewForFiles, revoke as revokeInlinePreviewUrl } from "./chat/renderers/inlineArtifactPreview.js";
+import { renderInlineArtifactsList, renderInlineArtifactStreamingHint, showInlineArtifactPreview } from "../layout/inlineArtifactsBinder.js";
 import { logViewInitDebug } from "../utils/debug.js";
 
 const { EventStreamClient } = window.AmonUIEventStream || {};
@@ -52,11 +55,38 @@ export const CHAT_VIEW = {
     let streamAbortController = null;
     let streamCompleted = false;
     let receivedSoftWarning = false;
+    const artifactParser = createStreamingArtifactParser();
+    const inlineFiles = new Map();
+    let activeInlinePreviewUrl = null;
 
     const setStreaming = (active) => {
       appState.streaming = active;
       elements.streamProgress.hidden = !active;
       inputBar.setDisabled(false);
+    };
+
+    const activateArtifactsTab = () => {
+      const layoutState = store.getState().layout || {};
+      const inspectorState = layoutState.inspector || {};
+      store.patch({
+        layout: {
+          ...layoutState,
+          inspector: {
+            ...inspectorState,
+            activeTab: "artifacts",
+            collapsed: false,
+          },
+        },
+      });
+    };
+
+    const refreshInlineArtifactsUi = () => {
+      renderInlineArtifactsList(elements, appState.inlineArtifacts || []);
+      renderInlineArtifactStreamingHint(elements, appState.inlineArtifactStreamingHint || "");
+      if ((appState.inlineArtifacts || []).length > 0) {
+        elements.artifactsEmpty.hidden = true;
+        elements.artifactsListDetails.hidden = false;
+      }
     };
 
     const updateDaemonStatus = (status, transport) => {
@@ -113,6 +143,8 @@ export const CHAT_VIEW = {
       streamAbortController = null;
       appState.streamClient?.stop?.();
       appState.streamClient = null;
+      appState.inlineArtifactStreamingHint = "";
+      renderInlineArtifactStreamingHint(elements, "");
       setStreaming(false);
       messageRenderer.finalizeAssistantBubble();
     };
@@ -122,6 +154,12 @@ export const CHAT_VIEW = {
       streamCompleted = false;
       receivedSoftWarning = false;
       streamAbortController = new AbortController();
+      artifactParser.reset();
+      inlineFiles.clear();
+      appState.inlineArtifacts = [];
+      appState.inlineArtifactFiles = {};
+      appState.inlineArtifactStreamingHint = "";
+      refreshInlineArtifactsUi();
       ctx.chatDeps.resetPlanCard();
 
       const finalMessage = `${message}${buildAttachmentSummary(attachments)}`;
@@ -215,6 +253,53 @@ export const CHAT_VIEW = {
             }
             if (eventType === "token") {
               messageRenderer.applyTokenChunk(data.text || "");
+              const tokenText = data.text || "";
+              const artifactEvents = artifactParser.feed(tokenText);
+              artifactEvents.forEach((artifactEvent) => {
+                if (artifactEvent.type === "artifact_open") {
+                  appState.inlineArtifactStreamingHint = `偵測到 inline artifact 串流中：${artifactEvent.filename}`;
+                  renderInlineArtifactStreamingHint(elements, appState.inlineArtifactStreamingHint);
+                  return;
+                }
+                if (artifactEvent.type === "artifact_complete") {
+                  inlineFiles.set(artifactEvent.filename, {
+                    filename: artifactEvent.filename,
+                    language: artifactEvent.language,
+                    content: artifactEvent.content,
+                  });
+                  appState.inlineArtifactFiles = Object.fromEntries(inlineFiles.entries());
+                  const preview = buildPreviewForFiles(inlineFiles);
+                  if (activeInlinePreviewUrl && activeInlinePreviewUrl !== preview.url) {
+                    revokeInlinePreviewUrl(activeInlinePreviewUrl);
+                  }
+                  activeInlinePreviewUrl = preview.url;
+
+                  const nextInlineArtifacts = Array.from(inlineFiles.values()).map((file) => ({
+                    id: `inline:${file.filename}`,
+                    name: file.filename,
+                    mime: "text/html",
+                    url: preview.url,
+                    createdAt: new Date().toISOString(),
+                    source: "inline",
+                  }));
+                  appState.inlineArtifacts = nextInlineArtifacts;
+                  appState.artifactPreviewItem = {
+                    id: `inline:${artifactEvent.filename}`,
+                    name: artifactEvent.filename,
+                    mime: "text/html",
+                    url: preview.url,
+                    source: "inline",
+                  };
+                  appState.inlineArtifactStreamingHint = `已完成 inline artifact：${artifactEvent.filename}`;
+
+                  activateArtifactsTab();
+                  refreshInlineArtifactsUi();
+                  showInlineArtifactPreview(elements, {
+                    name: preview.title || artifactEvent.filename,
+                    url: preview.url,
+                  });
+                }
+              });
               return;
             }
             if (eventType === "notice") {
@@ -234,12 +319,14 @@ export const CHAT_VIEW = {
               return;
             }
             if (eventType === "error") {
+              artifactParser.feed("\n");
               ctx.chatDeps.updateThinking({ status: "error", brief: data.message || "流程失敗" });
               ui.toast?.show(data.message || "串流失敗", { type: "danger", duration: 9000 });
               stopStream();
               return;
             }
             if (eventType === "done") {
+              artifactParser.feed("\n");
               streamCompleted = true;
               await ctx.chatDeps.applySessionFromEvent(data);
               const doneStatus = data.status || "ok";
@@ -277,6 +364,10 @@ export const CHAT_VIEW = {
     this.__chatCleanup = () => {
       unbindInput?.();
       stopStream();
+      if (activeInlinePreviewUrl) {
+        revokeInlinePreviewUrl(activeInlinePreviewUrl);
+        activeInlinePreviewUrl = null;
+      }
     };
     this.__chatStartStream = startStream;
     this.__chatStopStream = stopStream;
