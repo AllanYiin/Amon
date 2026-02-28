@@ -206,10 +206,8 @@ export const CHAT_VIEW = {
       streamAbortController = new AbortController();
       artifactParser.reset();
       inlineFiles.clear();
-      appState.inlineArtifacts = [];
-      appState.inlineArtifactFiles = {};
       appState.inlineArtifactStreamingHint = "";
-      refreshInlineArtifactsUi();
+      renderInlineArtifactStreamingHint(elements, "");
       ctx.chatDeps.resetPlanCard();
 
       const finalMessage = `${message}${buildAttachmentSummary(attachments)}`;
