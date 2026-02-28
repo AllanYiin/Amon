@@ -325,7 +325,7 @@ class GraphRuntime:
                     project_path=self.project_path,
                     model=node_vars.get("model") or node.get("model"),
                     mode=node_vars.get("mode", "single"),
-                    stream_handler=self.stream_handler,
+                    stream_handler=stream_handler or self.stream_handler,
                     skill_names=node_vars.get("skill_names"),
                     conversation_history=node_vars.get("conversation_history"),
                     run_id=run_id,
@@ -340,7 +340,7 @@ class GraphRuntime:
                     project_path=self.project_path,
                     model=node_vars.get("model") or node.get("model"),
                     mode=node_vars.get("mode", "single"),
-                    stream_handler=self.stream_handler,
+                    stream_handler=stream_handler or self.stream_handler,
                     skill_names=node_vars.get("skill_names"),
                     conversation_history=node_vars.get("conversation_history"),
                 )
@@ -686,10 +686,12 @@ class GraphRuntime:
         node_cancel = threading.Event()
         start = time.monotonic()
         last_progress_ts = start
+        saw_progress = False
         hard_timeout_warned = False
 
         def wrapped_stream_handler(token: str) -> None:
-            nonlocal last_progress_ts
+            nonlocal last_progress_ts, saw_progress
+            saw_progress = True
             last_progress_ts = time.monotonic()
             if self.stream_handler:
                 self.stream_handler(token)
@@ -727,7 +729,7 @@ class GraphRuntime:
                             "timeout_s": hard_timeout_s,
                         },
                     )
-                if inactivity_timeout_s and (now - last_progress_ts) > inactivity_timeout_s:
+                if inactivity_timeout_s and saw_progress and (now - last_progress_ts) > inactivity_timeout_s:
                     node_cancel.set()
                     self._append_event(
                         events_path,
