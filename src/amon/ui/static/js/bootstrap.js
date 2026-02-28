@@ -1913,6 +1913,13 @@ appStore.patch({ bootstrappedAt: Date.now() });
         }
       }
 
+      const INLINE_PREVIEW_SANDBOX = "allow-scripts allow-forms allow-modals";
+
+      function ensureInlinePreviewSandbox() {
+        if (!elements.artifactsInlinePreviewFrame) return;
+        elements.artifactsInlinePreviewFrame.setAttribute("sandbox", INLINE_PREVIEW_SANDBOX);
+      }
+
       function renderArtifactsInspector(artifacts = []) {
         elements.artifactsInspectorList.innerHTML = "";
         const entrypoint = pickArtifactsEntrypoint(artifacts);
@@ -1937,9 +1944,11 @@ appStore.patch({ bootstrappedAt: Date.now() });
         if (entrypoint) {
           elements.artifactsInlinePreview.hidden = false;
           elements.artifactsInlinePreviewTitle.textContent = entrypoint.path || entrypoint.name || "workspace/index.html";
+          ensureInlinePreviewSandbox();
           elements.artifactsInlinePreviewFrame.src = withPreviewRefreshToken(entrypoint.url || "");
           elements.artifactsPreviewOpenTab.onclick = () => window.open(entrypoint.url, "_blank", "noopener");
           elements.artifactsPreviewRefresh.onclick = () => {
+            ensureInlinePreviewSandbox();
             elements.artifactsInlinePreviewFrame.src = withPreviewRefreshToken(entrypoint.url || "");
           };
         } else {
