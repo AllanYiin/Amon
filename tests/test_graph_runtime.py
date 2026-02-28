@@ -127,6 +127,7 @@ class GraphRuntimeTests(unittest.TestCase):
                 project_path = Path(project.path)
 
                 graph = {
+                    "schema_version": "2.0",
                     "variables": {},
                     "nodes": [
                         {
@@ -333,6 +334,7 @@ class GraphRuntimeTests(unittest.TestCase):
                 )
 
                 slow_graph = {
+                    "schema_version": "2.0",
                     "nodes": [
                         {
                             "id": "slow",
@@ -345,6 +347,7 @@ class GraphRuntimeTests(unittest.TestCase):
                     "edges": [],
                 }
                 fast_graph = {
+                    "schema_version": "2.0",
                     "nodes": [
                         {
                             "id": "fast",
