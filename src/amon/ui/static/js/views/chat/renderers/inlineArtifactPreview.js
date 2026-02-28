@@ -9,6 +9,28 @@ function scriptSafeText(text = "") {
   return String(text || "").replaceAll("</script", "<\\/script");
 }
 
+function createHtmlUrl(html = "") {
+  const safeHtml = String(html || "");
+  try {
+    if (typeof Blob !== "undefined" && typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
+      const blob = new Blob([safeHtml], { type: "text/html;charset=utf-8" });
+      return URL.createObjectURL(blob);
+    }
+  } catch (error) {
+    console.warn("inline_artifact_blob_url_failed", error);
+  }
+
+  try {
+    if (typeof btoa === "function") {
+      return `data:text/html;charset=utf-8;base64,${btoa(unescape(encodeURIComponent(safeHtml)))}`;
+    }
+  } catch (error) {
+    console.warn("inline_artifact_data_url_base64_failed", error);
+  }
+
+  return `data:text/html;charset=utf-8,${encodeURIComponent(safeHtml)}`;
+}
+
 function pickHtmlEntry(files = new Map()) {
   const htmlFiles = Array.from(files.values()).filter((item) => /\.html?$/i.test(item.filename || ""));
   if (!htmlFiles.length) return null;
@@ -57,10 +79,9 @@ export function buildPreviewForFiles(files = new Map()) {
   const htmlEntry = pickHtmlEntry(files);
   if (htmlEntry) {
     const html = injectCssAndJs(htmlEntry, files);
-    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
     return {
       kind: "url",
-      url: URL.createObjectURL(blob),
+      url: createHtmlUrl(html),
       title: htmlEntry.filename,
     };
   }
@@ -70,10 +91,9 @@ export function buildPreviewForFiles(files = new Map()) {
     .join("\n\n");
 
   const shell = `<!doctype html><html><head><meta charset="utf-8"><title>Inline Artifact Preview</title></head><body><pre>${escapeHtml(fallbackBody || "尚無可預覽內容")}</pre></body></html>`;
-  const blob = new Blob([shell], { type: "text/html;charset=utf-8" });
   return {
     kind: "url",
-    url: URL.createObjectURL(blob),
+    url: createHtmlUrl(shell),
     title: "inline-artifact-preview.html",
   };
 }
