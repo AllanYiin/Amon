@@ -60,6 +60,12 @@ def loads_task_graph(text: str) -> TaskGraph:
         if not isinstance(tools_raw, list):
             raise ValueError("node.tools 必須是 list")
         tools = [_to_tool(item) for item in tools_raw]
+        steps_raw = raw.get("steps")
+        if steps_raw is None:
+            steps_raw = []
+        if not isinstance(steps_raw, list):
+            raise ValueError("node.steps 必須是 list")
+        steps = [_to_step(item) for item in steps_raw]
         output_raw = raw.get("output")
         if output_raw is None:
             output_raw = {}
@@ -107,6 +113,7 @@ def loads_task_graph(text: str) -> TaskGraph:
                     tool_choice=_to_optional_str(llm_raw.get("tool_choice")),
                 ),
                 tools=tools,
+                steps=steps,
                 output=TaskNodeOutput(
                     type=str(output_raw.get("type") or "text"),
                     extract=str(output_raw.get("extract") or "best_effort"),
@@ -172,6 +179,12 @@ def _to_tool(item: Any) -> TaskNodeTool:
         required=bool(item.get("required", False)),
         args_schema_hint=dict(args_schema_hint) if isinstance(args_schema_hint, dict) else None,
     )
+
+
+def _to_step(item: Any) -> dict[str, Any]:
+    if not isinstance(item, dict):
+        raise ValueError("node.steps 項目必須是 object")
+    return dict(item)
 
 
 def _strip_code_fences(text: str) -> str:

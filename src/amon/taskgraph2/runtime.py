@@ -10,10 +10,12 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from amon.fs.atomic import append_jsonl, atomic_write_text
 from amon.sandbox.path_rules import validate_relative_path
+from amon.tooling.registry import ToolRegistry
+from amon.tooling.types import ToolCall, ToolResult
 
 from .llm import TaskGraphLLMClient, build_default_llm_client
 from .schema import TaskEdge, TaskGraph, TaskNode, validate_task_graph
@@ -29,6 +31,11 @@ class TaskGraphRunResult:
     state: dict[str, Any]
 
 
+@dataclass
+class _NodeExecutionFailed(Exception):
+    message: str
+
+
 class TaskGraphRuntime:
     def __init__(
         self,
@@ -38,12 +45,16 @@ class TaskGraphRuntime:
         llm_client: TaskGraphLLMClient | None = None,
         run_id: str | None = None,
         cancel_event: threading.Event | None = None,
+        registry: ToolRegistry | None = None,
+        tool_dispatcher: Callable[[ToolCall], ToolResult] | None = None,
     ) -> None:
         self.project_path = project_path
         self.graph = graph
         self.llm_client = llm_client
         self.run_id = run_id
         self.cancel_event = cancel_event or threading.Event()
+        self.registry = registry
+        self.tool_dispatcher = tool_dispatcher
 
     def run(self) -> TaskGraphRunResult:
         validate_task_graph(self.graph)
@@ -109,7 +120,18 @@ class TaskGraphRuntime:
                         project_path=self.project_path,
                         cancel_path=cancel_path,
                         executor=executor,
+                        run_id=run_id,
+                        events_path=events_path,
                     )
+                except _NodeExecutionFailed as exc:
+                    node_state["status"] = "failed"
+                    node_state["ended_at"] = _now_iso()
+                    node_state["error"] = exc.message
+                    state["status"] = "failed"
+                    state["ended_at"] = _now_iso()
+                    state["error"] = exc.message
+                    self._append_event(events_path, {"event": "run_failed", "run_id": run_id, "error": exc.message})
+                    break
                 except RuntimeError as exc:
                     if str(exc) == "run canceled":
                         node_state["status"] = "canceled"
@@ -136,7 +158,8 @@ class TaskGraphRuntime:
                     raise
 
                 for key in node.writes:
-                    state["session"][key] = output_text
+                    if key not in state["session"]:
+                        state["session"][key] = output_text
                 state["variables"] = dict(state["session"])
 
                 node_state["status"] = "completed"
@@ -181,7 +204,16 @@ class TaskGraphRuntime:
         project_path: Path,
         cancel_path: Path,
         executor: ThreadPoolExecutor,
+        run_id: str,
+        events_path: Path,
     ) -> tuple[str, Path]:
+        if _uses_tool_execution(node):
+            output_text = self._execute_tool_node(node=node, session=session, run_id=run_id, events_path=events_path)
+            output_path = _default_output_path(node.id)
+            resolved = _resolve_output_path(project_path, output_path)
+            atomic_write_text(resolved, output_text, encoding="utf-8")
+            return output_text, resolved
+
         messages = _build_messages(node, session)
         future = executor.submit(_generate_text, llm_client, messages, node.llm.model)
         hard_timeout = node.timeout.hard_s
@@ -207,6 +239,65 @@ class TaskGraphRuntime:
         resolved = _resolve_output_path(project_path, output_path)
         atomic_write_text(resolved, output_text, encoding="utf-8")
         return output_text, resolved
+
+    def _execute_tool_node(
+        self,
+        *,
+        node: TaskNode,
+        session: dict[str, Any],
+        run_id: str,
+        events_path: Path,
+    ) -> str:
+        dispatcher = self._resolve_tool_dispatcher()
+        outputs: list[str] = []
+        for step in _iter_tool_steps(node):
+            call = ToolCall(
+                tool=str(step.get("tool_name") or ""),
+                args=dict(step.get("args") or {}),
+                caller="taskgraph2",
+                project_id=str(self.project_path),
+                run_id=run_id,
+                node_id=node.id,
+            )
+            self._append_event(
+                events_path,
+                {
+                    "event": "tool_request",
+                    "node_id": node.id,
+                    "tool": call.tool,
+                    "args": call.args,
+                    "meta": {"is_error": False, "status": "requested"},
+                },
+            )
+            result = dispatcher(call)
+            status = str(result.meta.get("status") or "ok")
+            self._append_event(
+                events_path,
+                {
+                    "event": "tool_result",
+                    "node_id": node.id,
+                    "tool": call.tool,
+                    "result": result.content,
+                    "meta": {"is_error": bool(result.is_error), "status": status},
+                },
+            )
+            if result.is_error:
+                raise _NodeExecutionFailed(f"tool step failed: {call.tool}: {result.as_text() or status}")
+
+            text = result.as_text()
+            outputs.append(text)
+            key = _resolve_store_key(node=node, step=step)
+            if key:
+                session[key] = text
+
+        return "\n".join(part for part in outputs if part).strip()
+
+    def _resolve_tool_dispatcher(self) -> Callable[[ToolCall], ToolResult]:
+        if self.tool_dispatcher is not None:
+            return self.tool_dispatcher
+        if self.registry is not None:
+            return lambda call: self.registry.call(call, require_approval=False)
+        raise _NodeExecutionFailed("tool dispatcher is not configured")
 
     def _append_event(self, path: Path, payload: dict[str, Any]) -> None:
         event_payload = dict(payload)
@@ -246,6 +337,39 @@ def _build_messages(node: TaskNode, session: dict[str, Any]) -> list[dict[str, s
 
 def _generate_text(llm_client: TaskGraphLLMClient, messages: list[dict[str, str]], model: str | None) -> str:
     return "".join(str(token) for token in llm_client.generate_stream(messages, model=model))
+
+
+def _uses_tool_execution(node: TaskNode) -> bool:
+    return bool(node.steps) or (node.kind == "tooling" and bool(node.tools))
+
+
+def _iter_tool_steps(node: TaskNode) -> list[dict[str, Any]]:
+    if node.steps:
+        return [item for item in node.steps if str(item.get("type") or "") == "tool"]
+    if node.kind != "tooling":
+        return []
+    steps: list[dict[str, Any]] = []
+    for tool in node.tools:
+        steps.append(
+            {
+                "type": "tool",
+                "tool_name": tool.name,
+                "args": dict(tool.args_schema_hint or {}),
+            }
+        )
+    return steps
+
+
+def _resolve_store_key(*, node: TaskNode, step: dict[str, Any]) -> str | None:
+    store_as = step.get("store_as")
+    if isinstance(store_as, str) and store_as.strip():
+        return store_as.strip()
+    tool_name = str(step.get("tool_name") or "")
+    if tool_name in node.writes:
+        return tool_name
+    if len(node.writes) == 1:
+        return next(iter(node.writes))
+    return None
 
 
 def _default_output_path(node_id: str) -> str:

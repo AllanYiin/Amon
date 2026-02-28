@@ -65,6 +65,7 @@ class TaskNode:
     writes: dict[str, str] = field(default_factory=dict)
     llm: TaskNodeLLM = field(default_factory=TaskNodeLLM)
     tools: list[TaskNodeTool] = field(default_factory=list)
+    steps: list[dict[str, Any]] = field(default_factory=list)
     output: TaskNodeOutput = field(default_factory=TaskNodeOutput)
     guardrails: TaskNodeGuardrails = field(default_factory=TaskNodeGuardrails)
     retry: TaskNodeRetry = field(default_factory=TaskNodeRetry)
@@ -134,6 +135,24 @@ def _validate_node(node: TaskNode) -> None:
         not isinstance(key, str) or not isinstance(value, str) for key, value in node.writes.items()
     ):
         raise ValueError(f"node.writes 必須是 dict[str,str]：node_id={node.id}")
+    if not isinstance(node.steps, list):
+        raise ValueError(f"node.steps 必須是 list：node_id={node.id}")
+    for index, step in enumerate(node.steps):
+        if not isinstance(step, dict):
+            raise ValueError(f"node.steps[{index}] 必須是 object：node_id={node.id}")
+        step_type = str(step.get("type") or "").strip()
+        if step_type not in {"tool", "llm"}:
+            raise ValueError(f"node.steps[{index}].type 不合法：node_id={node.id}")
+        if step_type == "tool":
+            tool_name = step.get("tool_name")
+            if not isinstance(tool_name, str) or not tool_name.strip():
+                raise ValueError(f"node.steps[{index}].tool_name 必須是非空字串：node_id={node.id}")
+            args = step.get("args")
+            if args is not None and not isinstance(args, dict):
+                raise ValueError(f"node.steps[{index}].args 必須是 object：node_id={node.id}")
+            store_as = step.get("store_as")
+            if store_as is not None and not isinstance(store_as, str):
+                raise ValueError(f"node.steps[{index}].store_as 必須是字串：node_id={node.id}")
 
     if node.output.type not in _ALLOWED_OUTPUT_TYPES:
         raise ValueError(
