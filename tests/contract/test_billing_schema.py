@@ -12,6 +12,17 @@ from amon.ui_server import AmonUIHandler
 
 
 class BillingSchemaContractTests(unittest.TestCase):
+    def test_estimate_llm_tokens_uses_token_counter_without_name_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            core = AmonCore(data_dir=Path(temp_dir))
+            prompt_tokens, completion_tokens = core._estimate_llm_tokens(
+                "請整理本週待辦", "好的，已整理完成。", config={}
+            )
+            self.assertIsInstance(prompt_tokens, int)
+            self.assertIsInstance(completion_tokens, int)
+            self.assertGreaterEqual(prompt_tokens, 0)
+            self.assertGreaterEqual(completion_tokens, 0)
+
     def test_billing_summary_and_series_schema(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir

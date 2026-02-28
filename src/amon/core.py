@@ -57,6 +57,7 @@ from .tooling.native import compute_tool_sha256, parse_native_manifest, scan_nat
 from .tooling.builtin import build_registry
 from .tooling.types import ToolCall
 from .skills import build_system_prefix_injection
+from .token_counter import count_non_dialogue_tokens
 from .core_tool_templates import (
     render_native_tool_readme,
     render_native_tool_template,
