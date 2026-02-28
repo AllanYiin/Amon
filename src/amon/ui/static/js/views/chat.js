@@ -89,6 +89,56 @@ export const CHAT_VIEW = {
       }
     };
 
+    const applyInlineArtifactEvents = (artifactEvents = []) => {
+      artifactEvents.forEach((artifactEvent) => {
+        if (artifactEvent.type === "artifact_open") {
+          appState.inlineArtifactStreamingHint = `偵測到 inline artifact 串流中：${artifactEvent.filename}`;
+          renderInlineArtifactStreamingHint(elements, appState.inlineArtifactStreamingHint);
+          return;
+        }
+        if (artifactEvent.type !== "artifact_complete") {
+          return;
+        }
+
+        inlineFiles.set(artifactEvent.filename, {
+          filename: artifactEvent.filename,
+          language: artifactEvent.language,
+          content: artifactEvent.content,
+        });
+        appState.inlineArtifactFiles = Object.fromEntries(inlineFiles.entries());
+        const preview = buildPreviewForFiles(inlineFiles);
+        if (activeInlinePreviewUrl && activeInlinePreviewUrl !== preview.url) {
+          revokeInlinePreviewUrl(activeInlinePreviewUrl);
+        }
+        activeInlinePreviewUrl = preview.url;
+
+        const nextInlineArtifacts = Array.from(inlineFiles.values()).map((file) => ({
+          id: `inline:${file.filename}`,
+          name: file.filename,
+          mime: "text/html",
+          url: preview.url,
+          createdAt: new Date().toISOString(),
+          source: "inline",
+        }));
+        appState.inlineArtifacts = nextInlineArtifacts;
+        appState.artifactPreviewItem = {
+          id: `inline:${artifactEvent.filename}`,
+          name: artifactEvent.filename,
+          mime: "text/html",
+          url: preview.url,
+          source: "inline",
+        };
+        appState.inlineArtifactStreamingHint = `已完成 inline artifact：${artifactEvent.filename}`;
+
+        activateArtifactsTab();
+        refreshInlineArtifactsUi();
+        showInlineArtifactPreview(elements, {
+          name: preview.title || artifactEvent.filename,
+          url: preview.url,
+        });
+      });
+    };
+
     const updateDaemonStatus = (status, transport) => {
       const layoutState = store.getState().layout || {};
       if (status === "connected") {
@@ -254,52 +304,7 @@ export const CHAT_VIEW = {
             if (eventType === "token") {
               messageRenderer.applyTokenChunk(data.text || "");
               const tokenText = data.text || "";
-              const artifactEvents = artifactParser.feed(tokenText);
-              artifactEvents.forEach((artifactEvent) => {
-                if (artifactEvent.type === "artifact_open") {
-                  appState.inlineArtifactStreamingHint = `偵測到 inline artifact 串流中：${artifactEvent.filename}`;
-                  renderInlineArtifactStreamingHint(elements, appState.inlineArtifactStreamingHint);
-                  return;
-                }
-                if (artifactEvent.type === "artifact_complete") {
-                  inlineFiles.set(artifactEvent.filename, {
-                    filename: artifactEvent.filename,
-                    language: artifactEvent.language,
-                    content: artifactEvent.content,
-                  });
-                  appState.inlineArtifactFiles = Object.fromEntries(inlineFiles.entries());
-                  const preview = buildPreviewForFiles(inlineFiles);
-                  if (activeInlinePreviewUrl && activeInlinePreviewUrl !== preview.url) {
-                    revokeInlinePreviewUrl(activeInlinePreviewUrl);
-                  }
-                  activeInlinePreviewUrl = preview.url;
-
-                  const nextInlineArtifacts = Array.from(inlineFiles.values()).map((file) => ({
-                    id: `inline:${file.filename}`,
-                    name: file.filename,
-                    mime: "text/html",
-                    url: preview.url,
-                    createdAt: new Date().toISOString(),
-                    source: "inline",
-                  }));
-                  appState.inlineArtifacts = nextInlineArtifacts;
-                  appState.artifactPreviewItem = {
-                    id: `inline:${artifactEvent.filename}`,
-                    name: artifactEvent.filename,
-                    mime: "text/html",
-                    url: preview.url,
-                    source: "inline",
-                  };
-                  appState.inlineArtifactStreamingHint = `已完成 inline artifact：${artifactEvent.filename}`;
-
-                  activateArtifactsTab();
-                  refreshInlineArtifactsUi();
-                  showInlineArtifactPreview(elements, {
-                    name: preview.title || artifactEvent.filename,
-                    url: preview.url,
-                  });
-                }
-              });
+              applyInlineArtifactEvents(artifactParser.feed(tokenText));
               return;
             }
             if (eventType === "notice") {
@@ -320,6 +325,7 @@ export const CHAT_VIEW = {
             }
             if (eventType === "error") {
               artifactParser.feed("\n");
+              applyInlineArtifactEvents(artifactParser.finalize());
               ctx.chatDeps.updateThinking({ status: "error", brief: data.message || "流程失敗" });
               ui.toast?.show(data.message || "串流失敗", { type: "danger", duration: 9000 });
               stopStream();
@@ -327,6 +333,7 @@ export const CHAT_VIEW = {
             }
             if (eventType === "done") {
               artifactParser.feed("\n");
+              applyInlineArtifactEvents(artifactParser.finalize());
               streamCompleted = true;
               await ctx.chatDeps.applySessionFromEvent(data);
               const doneStatus = data.status || "ok";
