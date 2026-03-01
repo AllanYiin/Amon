@@ -10,12 +10,51 @@
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/lib/highlight.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
+    <script src="static/vendor/svg-pan-zoom/svg-pan-zoom.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-    <script type="module">
-      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
-      mermaid.initialize({ startOnLoad: false, theme: "neutral" });
-      window.__mermaid = mermaid;
+    <script>
+      (function ensureSvgPanZoom() {
+        if (window.svgPanZoom) {
+          return;
+        }
+        var fallback = document.createElement("script");
+        fallback.src = "https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js";
+        fallback.onload = function () {
+          if (!window.svgPanZoom) {
+            console.error("[ui] svg-pan-zoom fallback loaded but window.svgPanZoom is still unavailable.");
+          }
+        };
+        fallback.onerror = function () {
+          console.error("[ui] Failed to load svg-pan-zoom from local vendor and CDN fallback.");
+        };
+        document.head.appendChild(fallback);
+      })();
+    </script>
+    <script src="static/vendor/mermaid/mermaid.min.js"></script>
+    <script>
+      (function initMermaid() {
+        var localMermaid = window.mermaid;
+        if (localMermaid) {
+          localMermaid.initialize({ startOnLoad: false, theme: "neutral" });
+          window.__mermaid = localMermaid;
+          return;
+        }
+
+        var fallback = document.createElement("script");
+        fallback.src = "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js";
+        fallback.onload = function () {
+          if (!window.mermaid) {
+            console.error("[ui] Mermaid fallback loaded but window.mermaid is still unavailable.");
+            return;
+          }
+          window.mermaid.initialize({ startOnLoad: false, theme: "neutral" });
+          window.__mermaid = window.mermaid;
+        };
+        fallback.onerror = function () {
+          console.error("[ui] Failed to load Mermaid from local vendor and CDN fallback.");
+        };
+        document.head.appendChild(fallback);
+      })();
     </script>
   </head>
   <body>

@@ -105,6 +105,33 @@
 2. 用較寬鬆 selector 驗證（如 `#graph-preview g`、`[id^="flowchart-"]` 等）確認節點是否存在但 class 改名。
 3. 比對目前版本與既有測試／實作假設是否一致。
 
+
+## 本地 vendor 驗證（離線可用）
+
+1. 開啟 DevTools → Network，勾選 `Disable cache` 後重新整理頁面。
+2. 在過濾器輸入 `jsdelivr`。
+3. 預期：**不應看到** `mermaid` 與 `svg-pan-zoom` 對 `cdn.jsdelivr.net` 的請求。
+   - 若有 CDN 請求，代表本地 vendor 載入失敗，應回到 Console 檢查 `console.error` 訊息。
+4. 在 Console 驗證：
+   ```js
+   window.__mermaid
+   window.svgPanZoom
+   document.querySelector('#graph-preview svg')
+   ```
+5. 預期：
+   - `window.__mermaid` 為 object。
+   - `window.svgPanZoom` 為 function。
+   - `#graph-preview svg` 回傳 `SVGSVGElement`。
+
+## Vendor 檔案來源與版本
+
+- `src/amon/ui/static/vendor/mermaid/mermaid.min.js`
+  - 來源：`npm pack mermaid@10.9.1` 後取 `dist/mermaid.min.js`
+  - 版本：`10.9.1`
+- `src/amon/ui/static/vendor/svg-pan-zoom/svg-pan-zoom.min.js`
+  - 來源：原本 UI 使用的本地 vendor（對應既有 CDN 版本 `3.6.1`）
+  - 版本：`3.6.1`
+
 ## `index.html` 以 CDN 載入 Mermaid / svg-pan-zoom 的風險與修正方向
 
 目前狀態：`src/amon/ui/index.html` 直接從 CDN 載入 Mermaid（ESM）與 `svg-pan-zoom`（UMD）。
