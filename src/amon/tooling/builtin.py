@@ -26,13 +26,14 @@ def build_registry(workspace_root: Path) -> ToolRegistry:
                 "filesystem.grep",
                 "filesystem.glob",
                 "memory.search",
+                "web.fetch",
+                "web.search",
+                "web.better_search",
             ),
             ask=(
                 "filesystem.write",
                 "filesystem.move",
                 "filesystem.copy",
-                "web.fetch",
-                "web.search",
                 "sandbox.run",
             ),
             deny=(

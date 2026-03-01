@@ -361,6 +361,22 @@
             </article>
 
             <article class="config-card card">
+              <h3>Web Search 與 API Key 設定</h3>
+              <p class="subtitle">僅儲存環境變數名稱與搜尋偏好，不會把 API Key 明文寫進設定檔。</p>
+              <div class="config-toolbar">
+                <label class="field-label">SERPAPI Key 環境變數名稱
+                  <input type="text" id="config-serpapi-key-env" placeholder="例如：SERPAPI_KEY" />
+                </label>
+                <label class="field-label">搜尋提供者優先序（以逗號分隔）
+                  <input type="text" id="config-search-priority" placeholder="例如：serpapi,google,bing" />
+                </label>
+              </div>
+              <div class="toolbar-actions">
+                <button type="button" class="btn btn--secondary secondary-btn" id="config-web-search-apply">儲存 Web Search 設定</button>
+              </div>
+            </article>
+
+            <article class="config-card card">
               <h3>編輯設定</h3>
               <div class="config-toolbar">
                 <label class="field-label">Key path

@@ -94,18 +94,12 @@ class ToolPolicyTests(unittest.TestCase):
 
 
 class BuiltinRegistryTests(unittest.TestCase):
-    def test_web_tools_require_approval_by_default_policy(self) -> None:
+    def test_web_tools_allowed_by_default_policy(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             registry = build_builtin_registry(Path(tmpdir))
-            fetch_result = registry.call(
-                ToolCall(
-                    tool="web.fetch",
-                    args={"url": "https://example.com"},
-                    caller="tester",
-                ),
-                require_approval=True,
-            )
-            self.assertEqual(fetch_result.meta.get("status"), "approval_required")
+            self.assertEqual(registry.policy.decide(ToolCall(tool="web.fetch", args={}, caller="tester")), "allow")
+            self.assertEqual(registry.policy.decide(ToolCall(tool="web.search", args={}, caller="tester")), "allow")
+            self.assertEqual(registry.policy.decide(ToolCall(tool="web.better_search", args={}, caller="tester")), "allow")
 
     def test_process_exec_denied_by_default_policy(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -125,7 +119,7 @@ class RuntimeRegistryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             registry = build_runtime_registry(Path(tmpdir), base_dirs=[])
             self.assertEqual(registry.policy.decide(ToolCall(tool="filesystem.read", args={}, caller="tester")), "allow")
-            self.assertEqual(registry.policy.decide(ToolCall(tool="web.fetch", args={}, caller="tester")), "ask")
+            self.assertEqual(registry.policy.decide(ToolCall(tool="web.fetch", args={}, caller="tester")), "allow")
             self.assertEqual(registry.policy.decide(ToolCall(tool="process.exec", args={"command": "pwd"}, caller="tester")), "deny")
             self.assertEqual(registry.policy.decide(ToolCall(tool="terminal.exec", args={"command": "pwd"}, caller="tester")), "deny")
             self.assertEqual(registry.policy.decide(ToolCall(tool="terminal.session.start", args={}, caller="tester")), "deny")
