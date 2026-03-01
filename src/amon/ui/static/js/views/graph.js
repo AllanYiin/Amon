@@ -292,9 +292,10 @@ export const GRAPH_VIEW = {
     function bindMermaidNodeClick() {
       local.svgNodeGroups = new Map();
       const svgRoot = previewEl.querySelector("svg");
-      if (!svgRoot || !local.viewModel) return;
+      if (!svgRoot || !local.viewModel) return { groupCount: 0, boundCount: 0 };
       const labelMap = buildLabelToNodeIds(local.viewModel);
       const groups = svgRoot.querySelectorAll("g.node");
+      let boundCount = 0;
       groups.forEach((group) => {
         const nodeId = resolveNodeIdFromSvgGroup(group, local.viewModel, labelMap);
         if (!nodeId) return;
@@ -326,8 +327,46 @@ export const GRAPH_VIEW = {
           event.preventDefault();
           void selectNode(nodeId);
         });
+        boundCount += 1;
       });
       updateSelectedState();
+      return { groupCount: groups.length, boundCount };
+    }
+
+    function renderGraphPreviewNotice({
+      message,
+      detail = "",
+      refreshable = false,
+      level = "empty",
+      keepSvg = false,
+    }) {
+      const noticeEl = document.createElement("p");
+      noticeEl.className = `graph-empty-state graph-empty-state--${level}`;
+      const messageEl = document.createElement("span");
+      messageEl.textContent = message;
+      noticeEl.appendChild(messageEl);
+      if (detail) {
+        const detailEl = document.createElement("small");
+        detailEl.textContent = detail;
+        noticeEl.appendChild(detailEl);
+      }
+      if (refreshable) {
+        const buttonEl = document.createElement("button");
+        buttonEl.type = "button";
+        buttonEl.className = "btn btn-sm";
+        buttonEl.dataset.graphAction = "reload";
+        buttonEl.textContent = "重新整理頁面";
+        buttonEl.addEventListener("click", () => {
+          window.location.reload();
+        });
+        noticeEl.appendChild(buttonEl);
+      }
+      if (keepSvg) {
+        previewEl.insertAdjacentElement("afterbegin", noticeEl);
+      } else {
+        previewEl.innerHTML = "";
+        previewEl.appendChild(noticeEl);
+      }
     }
 
     function updateGraphNodeStatusDom(viewModel) {
@@ -410,16 +449,65 @@ export const GRAPH_VIEW = {
       local.panZoom?.destroy?.();
       local.panZoom = null;
 
-      if (viewModel.graphMermaid && window.__mermaid) {
-        const { svg } = await window.__mermaid.render(`graph-preview-${Date.now()}`, viewModel.graphMermaid);
-        previewEl.innerHTML = svg;
-        const svgEl = previewEl.querySelector("svg");
-        if (svgEl && window.svgPanZoom) {
-          local.panZoom = window.svgPanZoom(svgEl, { controlIconsEnabled: true, fit: true, center: true });
-        }
-        bindMermaidNodeClick();
+      const graphMermaid = String(viewModel.graphMermaid || "").trim();
+      if (!graphMermaid) {
+        renderGraphPreviewNotice({
+          message: "此 Run 尚無流程圖資料",
+          detail: "請先查看下方 graph-code 區塊是否有內容。",
+        });
+      } else if (!window.__mermaid || typeof window.__mermaid.render !== "function") {
+        logUiDebug("graph.mermaid-missing", {
+          run_id: local.runId,
+          has_graph_mermaid: true,
+          mermaid_type: typeof window.__mermaid,
+        });
+        console.error("[graph] Mermaid library not loaded.", { run_id: local.runId });
+        renderGraphPreviewNotice({
+          message: "Mermaid 未載入（可能離線或資源被擋）",
+          detail: "請嘗試重新整理頁面後再試一次。",
+          refreshable: true,
+          level: "warning",
+        });
       } else {
-        previewEl.innerHTML = '<p class="graph-empty-state">此 Run 尚無流程圖資料。</p>';
+        try {
+          const { svg } = await window.__mermaid.render(`graph-preview-${Date.now()}`, graphMermaid);
+          previewEl.innerHTML = svg;
+          const svgEl = previewEl.querySelector("svg");
+          if (svgEl && window.svgPanZoom) {
+            local.panZoom = window.svgPanZoom(svgEl, { controlIconsEnabled: true, fit: true, center: true });
+          }
+          const { groupCount, boundCount } = bindMermaidNodeClick();
+          if (groupCount === 0 || boundCount === 0) {
+            logUiDebug("graph.mermaid-node-structure-unexpected", {
+              run_id: local.runId,
+              group_count: groupCount,
+              bound_count: boundCount,
+            });
+            console.error("[graph] Mermaid SVG rendered but no recognizable nodes.", {
+              run_id: local.runId,
+              group_count: groupCount,
+              bound_count: boundCount,
+            });
+            renderGraphPreviewNotice({
+              message: "流程圖已渲染但無法識別節點",
+              detail: "可能是 Mermaid 版本差異，請比對 g.node 結構。",
+              level: "warning",
+              keepSvg: true,
+            });
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error || "unknown error");
+          logUiDebug("graph.mermaid-render-failed", {
+            run_id: local.runId,
+            error_message: errorMessage,
+          });
+          console.error("[graph] Mermaid render failed.", { run_id: local.runId, error_message: errorMessage });
+          renderGraphPreviewNotice({
+            message: "流程圖渲染失敗",
+            detail: `錯誤摘要：${errorMessage}`,
+            level: "danger",
+          });
+        }
       }
       updateSelectedState();
     }
