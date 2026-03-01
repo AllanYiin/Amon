@@ -90,6 +90,9 @@ export const CHAT_VIEW = {
       }
     };
 
+    // 聊天頁預設維持右側收合，僅在偵測到具檔名 inline artifact 時展開
+    activateArtifactsTab({ collapsed: true });
+
     const applyInlineArtifactEvents = (artifactEvents = []) => {
       artifactEvents.forEach((artifactEvent) => {
         if (artifactEvent.type === "artifact_open") {
