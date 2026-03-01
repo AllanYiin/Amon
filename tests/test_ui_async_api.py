@@ -232,19 +232,27 @@ class UIAsyncAPITests(unittest.TestCase):
                 core.initialize()
                 project = core.create_project("stream-contract")
 
-                def fake_run_single_stream(
+                def fake_run_plan_execute_stream(
                     prompt,
                     project_path,
+                    project_id=None,
                     model=None,
+                    llm_client=None,
+                    available_tools=None,
+                    available_skills=None,
                     stream_handler=None,
-                    skill_names=None,
                     run_id=None,
+                    chat_id=None,
                     conversation_history=None,
+                    request_id=None,
                 ):
                     if stream_handler:
                         stream_handler("tok-A")
                         stream_handler("tok-B")
-                    return SimpleNamespace(run_id=run_id or "run-contract-001"), "final-contract"
+                    return (
+                        SimpleNamespace(run_id=run_id or "run-contract-001", execution_route="planner", planner_enabled=True),
+                        "final-contract",
+                    )
 
                 handler = partial(
                     AmonUIHandler,
@@ -258,8 +266,8 @@ class UIAsyncAPITests(unittest.TestCase):
 
                 with patch("amon.ui_server.decide_execution_mode", return_value="single"), patch.object(
                     core,
-                    "run_single_stream",
-                    side_effect=fake_run_single_stream,
+                    "run_plan_execute_stream",
+                    side_effect=fake_run_plan_execute_stream,
                 ):
                     conn = HTTPConnection("127.0.0.1", port, timeout=5)
                     conn.request(
@@ -308,7 +316,7 @@ class UIAsyncAPITests(unittest.TestCase):
                     server.server_close()
                 os.environ.pop("AMON_HOME", None)
 
-    def test_chat_followup_reuses_previous_run_id_when_assistant_asked_question(self) -> None:
+    def test_chat_followup_preserves_history_when_assistant_asked_question(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"
             os.environ["AMON_HOME"] = str(data_dir)
@@ -322,14 +330,19 @@ class UIAsyncAPITests(unittest.TestCase):
                 observed_histories: list[list[dict[str, str]] | None] = []
                 call_count = 0
 
-                def fake_run_single_stream(
+                def fake_run_plan_execute_stream(
                     prompt,
                     project_path,
+                    project_id=None,
                     model=None,
+                    llm_client=None,
+                    available_tools=None,
+                    available_skills=None,
                     stream_handler=None,
-                    skill_names=None,
                     run_id=None,
+                    chat_id=None,
                     conversation_history=None,
+                    request_id=None,
                 ):
                     nonlocal call_count
                     call_count += 1
@@ -339,7 +352,10 @@ class UIAsyncAPITests(unittest.TestCase):
                         stream_handler("token")
                     response = "好的，請問你要先做前端還是後端？" if call_count == 1 else "了解，我會接續上一段任務繼續完成。"
                     resolved_run_id = run_id or "run-followup-001"
-                    return SimpleNamespace(run_id=resolved_run_id), response
+                    return (
+                        SimpleNamespace(run_id=resolved_run_id, execution_route="planner", planner_enabled=True),
+                        response,
+                    )
 
                 handler = partial(
                     AmonUIHandler,
@@ -355,8 +371,8 @@ class UIAsyncAPITests(unittest.TestCase):
                     "amon.ui_server.should_continue_run_with_llm", return_value=True
                 ), patch.object(
                     core,
-                    "run_single_stream",
-                    side_effect=fake_run_single_stream,
+                    "run_plan_execute_stream",
+                    side_effect=fake_run_plan_execute_stream,
                 ):
                     conn = HTTPConnection("127.0.0.1", port, timeout=5)
                     conn.request(
@@ -380,7 +396,8 @@ class UIAsyncAPITests(unittest.TestCase):
 
                     self.assertIsNotNone(done_payload_1)
                     chat_id = done_payload_1["chat_id"]
-                    self.assertEqual(done_payload_1["run_id"], "run-followup-001")
+                    first_run_id = done_payload_1["run_id"]
+                    self.assertTrue(first_run_id)
 
                     conn = HTTPConnection("127.0.0.1", port, timeout=5)
                     conn.request(
@@ -403,9 +420,13 @@ class UIAsyncAPITests(unittest.TestCase):
                             break
 
                     self.assertIsNotNone(done_payload_2)
-                    self.assertEqual(done_payload_2["run_id"], "run-followup-001")
+                    second_run_id = done_payload_2["run_id"]
+                    self.assertTrue(second_run_id)
+                    self.assertNotEqual(second_run_id, first_run_id)
 
-                self.assertEqual(observed_run_ids, [None, "run-followup-001"])
+                self.assertEqual(len(observed_run_ids), 2)
+                self.assertTrue(observed_run_ids[0])
+                self.assertTrue(observed_run_ids[1])
                 self.assertEqual(observed_histories[0], [])
                 self.assertEqual(
                     observed_histories[1],
@@ -420,7 +441,7 @@ class UIAsyncAPITests(unittest.TestCase):
                     server.server_close()
                 os.environ.pop("AMON_HOME", None)
 
-    def test_chat_followup_reuses_previous_run_id_without_question_mark(self) -> None:
+    def test_chat_followup_preserves_history_without_question_mark(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"
             os.environ["AMON_HOME"] = str(data_dir)
@@ -433,14 +454,19 @@ class UIAsyncAPITests(unittest.TestCase):
                 observed_run_ids: list[str | None] = []
                 call_count = 0
 
-                def fake_run_single_stream(
+                def fake_run_plan_execute_stream(
                     prompt,
                     project_path,
+                    project_id=None,
                     model=None,
+                    llm_client=None,
+                    available_tools=None,
+                    available_skills=None,
                     stream_handler=None,
-                    skill_names=None,
                     run_id=None,
+                    chat_id=None,
                     conversation_history=None,
+                    request_id=None,
                 ):
                     nonlocal call_count
                     call_count += 1
@@ -449,7 +475,10 @@ class UIAsyncAPITests(unittest.TestCase):
                         stream_handler("token")
                     response = "請提供你要優先處理的範圍，例如前端或後端" if call_count == 1 else "收到，我會直接延續同一個任務 run。"
                     resolved_run_id = run_id or "run-followup-guard-001"
-                    return SimpleNamespace(run_id=resolved_run_id), response
+                    return (
+                        SimpleNamespace(run_id=resolved_run_id, execution_route="planner", planner_enabled=True),
+                        response,
+                    )
 
                 handler = partial(
                     AmonUIHandler,
@@ -465,8 +494,8 @@ class UIAsyncAPITests(unittest.TestCase):
                     "amon.ui_server.should_continue_run_with_llm", return_value=True
                 ), patch.object(
                     core,
-                    "run_single_stream",
-                    side_effect=fake_run_single_stream,
+                    "run_plan_execute_stream",
+                    side_effect=fake_run_plan_execute_stream,
                 ):
                     conn = HTTPConnection("127.0.0.1", port, timeout=5)
                     conn.request(
@@ -490,7 +519,8 @@ class UIAsyncAPITests(unittest.TestCase):
 
                     self.assertIsNotNone(done_payload_1)
                     chat_id = done_payload_1["chat_id"]
-                    self.assertEqual(done_payload_1["run_id"], "run-followup-guard-001")
+                    first_run_id = done_payload_1["run_id"]
+                    self.assertTrue(first_run_id)
 
                     conn = HTTPConnection("127.0.0.1", port, timeout=5)
                     conn.request(
@@ -513,9 +543,13 @@ class UIAsyncAPITests(unittest.TestCase):
                             break
 
                     self.assertIsNotNone(done_payload_2)
-                    self.assertEqual(done_payload_2["run_id"], "run-followup-guard-001")
+                    second_run_id = done_payload_2["run_id"]
+                    self.assertTrue(second_run_id)
+                    self.assertNotEqual(second_run_id, first_run_id)
 
-                self.assertEqual(observed_run_ids, [None, "run-followup-guard-001"])
+                self.assertEqual(len(observed_run_ids), 2)
+                self.assertTrue(observed_run_ids[0])
+                self.assertTrue(observed_run_ids[1])
             finally:
                 if server:
                     server.shutdown()
@@ -532,7 +566,7 @@ class UIAsyncAPITests(unittest.TestCase):
                 core.initialize()
                 project = core.create_project("chat-timeout-warning")
 
-                def fake_run_single_stream(*_args, **_kwargs):
+                def fake_run_plan_execute_stream(*_args, **_kwargs):
                     raise RuntimeError("node inactivity timeout")
 
                 handler = partial(
@@ -547,8 +581,8 @@ class UIAsyncAPITests(unittest.TestCase):
 
                 with patch("amon.ui_server.decide_execution_mode", return_value="single"), patch.object(
                     core,
-                    "run_single_stream",
-                    side_effect=fake_run_single_stream,
+                    "run_plan_execute_stream",
+                    side_effect=fake_run_plan_execute_stream,
                 ):
                     conn = HTTPConnection("127.0.0.1", port, timeout=5)
                     conn.request(

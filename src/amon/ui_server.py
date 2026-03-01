@@ -2004,7 +2004,8 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             if router_result.type == "chat_response":
                 send_event("notice", {"text": "Amon：正在分析需求並進入執行流程。"})
                 execution_mode = decide_execution_mode(message, project_id=project_id, context=turn_bundle.router_context)
-                if execution_mode == "single":
+                coerced_from_single = execution_mode == "single"
+                if coerced_from_single:
                     log_event(
                         {
                             "level": "INFO",
@@ -2052,32 +2053,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
 
                 response_text = ""
                 plan_result = None
-                if execution_mode == "single":
-                    continued_run_id = None
-                    if _should_continue_chat_run(project_id=project_id, last_assistant_text=run_context.get("last_assistant_text"), user_message=message):
-                        continued_run_id = str(run_context.get("run_id") or "").strip() or None
-                    try:
-                        result, response_text = self.core.run_single_stream(
-                            prompt_with_history,
-                            project_path=self.core.get_project_path(project_id),
-                            stream_handler=stream_handler,
-                            run_id=continued_run_id,
-                            conversation_history=history,
-                            chat_id=chat_id,
-                            request_id=request_id,
-                        )
-                    except TypeError as exc:
-                        if "unexpected keyword argument" not in str(exc):
-                            raise
-                        result, response_text = self.core.run_single_stream(
-                            prompt_with_history,
-                            project_path=self.core.get_project_path(project_id),
-                            stream_handler=stream_handler,
-                            run_id=continued_run_id,
-                            conversation_history=history,
-                        )
-                    active_run_id = result.run_id
-                elif execution_mode == "self_critique":
+                if execution_mode == "self_critique":
                     active_run_id = uuid.uuid4().hex
                     send_event("notice", {"text": "Amon：偵測為專業文件撰寫，改用 self_critique 流程。"}, run_id=active_run_id)
                     response_text = self.core.run_self_critique(
