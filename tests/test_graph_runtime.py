@@ -11,11 +11,27 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from amon.core import AmonCore
-from amon.graph_runtime import GraphRuntime
+from amon.graph_runtime import GraphRuntime, _is_client_disconnect_error
 from amon.run.context import append_run_constraints
 
 
+
+
+class _ClientDisconnectedError(ConnectionAbortedError):
+    """Test stub for ui client disconnect propagation."""
+
+
 class GraphRuntimeTests(unittest.TestCase):
+    def test_detects_nested_client_disconnect_error(self) -> None:
+        exc = RuntimeError("wrapper")
+        exc.__cause__ = _ClientDisconnectedError("chat stream client disconnected")
+
+        self.assertTrue(_is_client_disconnect_error(exc))
+
+    def test_non_disconnect_error_is_not_treated_as_disconnect(self) -> None:
+        self.assertFalse(_is_client_disconnect_error(RuntimeError("boom")))
+
+
     def test_agent_task_stream_updates_inactivity_deadline(self) -> None:
         class _StubCore:
             def __init__(self) -> None:

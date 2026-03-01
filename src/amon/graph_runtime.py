@@ -24,6 +24,23 @@ from .run.context import get_effective_constraints
 from .sandbox.service import run_sandbox_step
 
 
+_CLIENT_DISCONNECT_ERRORS = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
+
+
+def _is_client_disconnect_error(exc: BaseException) -> bool:
+    current: BaseException | None = exc
+    visited: set[int] = set()
+    while current is not None and id(current) not in visited:
+        visited.add(id(current))
+        if isinstance(current, _CLIENT_DISCONNECT_ERRORS):
+            return True
+        message = str(current).lower()
+        if "client disconnected" in message:
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
 @dataclass
 class GraphRunResult:
     run_id: str
@@ -172,7 +189,10 @@ class GraphRuntime:
                     self._append_event(events_path, {"event": "node_timeout", "node_id": node_id})
                     raise RuntimeError("node timeout")
                 except Exception as exc:  # noqa: BLE001
-                    self.logger.error("Graph node 執行失敗：%s", exc, exc_info=True)
+                    if _is_client_disconnect_error(exc):
+                        self.logger.info("Graph node 因 client disconnected 中止：%s", exc)
+                    else:
+                        self.logger.error("Graph node 執行失敗：%s", exc, exc_info=True)
                     state["nodes"][node_id]["status"] = "failed"
                     state["nodes"][node_id]["ended_at"] = self._now_iso()
                     state["nodes"][node_id]["error"] = str(exc)
@@ -249,7 +269,10 @@ class GraphRuntime:
                 state["ended_at"] = self._now_iso()
                 state["error"] = str(exc)
                 self._append_event(events_path, {"event": "run_failed", "run_id": run_id, "error": str(exc)})
-                self.logger.error("Graph 執行失敗：%s", exc, exc_info=True)
+                if _is_client_disconnect_error(exc):
+                    self.logger.info("Graph 因 client disconnected 中止：%s", exc)
+                else:
+                    self.logger.error("Graph 執行失敗：%s", exc, exc_info=True)
                 raise
         finally:
             executor.shutdown(wait=True)
