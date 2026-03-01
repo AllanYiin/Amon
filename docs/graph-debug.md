@@ -1,6 +1,13 @@
 # Graph Debug 手動驗收與排查指南
 
-> 目的：提供 Graph 頁面（Mermaid + svg-pan-zoom）的手動驗收流程、常見失敗排查方式，以及 `index.html` 目前使用 CDN 載入的風險與修正方向。
+> 目的：提供 Graph 頁面（Mermaid + svg-pan-zoom）的手動驗收流程、常見失敗排查方式，以及本地 vendor 載入策略的驗證方式。
+
+## 本地 vendor 版本與來源
+
+- `src/amon/ui/static/vendor/mermaid/mermaid.esm.min.mjs`
+  - 來源：npm `mermaid@10.9.1` 套件 tarball（`package/dist/mermaid.esm.min.mjs`）。
+- `src/amon/ui/static/vendor/svg-pan-zoom/svg-pan-zoom.min.js`
+  - 來源：repo 既有 vendor（對應 `svg-pan-zoom@3.6.1`，與 fallback 版本一致）。
 
 ## 手動驗收步驟（至少 8 步）
 
@@ -54,6 +61,13 @@
    - 嘗試滾輪縮放與拖曳平移後，再點擊節點。
    - 預期：縮放/平移正常，節點仍可點擊並開啟 drawer。
 
+10. **確認 Network 不再依賴 jsdelivr（本地 vendor 驗證）**
+    - DevTools → Network，清空紀錄後重新整理頁面。
+    - 在 Filter 輸入：`jsdelivr`。
+    - 預期：
+      - 正常情況下，**不會**出現 `mermaid` / `svg-pan-zoom` 的 `cdn.jsdelivr.net` 請求。
+      - 僅在本地 vendor 檔案遺失或載入失敗時，才會看到 Mermaid CDN fallback 請求。
+
 ## 常見失敗排查
 
 ### 1) CDN 被擋或離線，導致 `window.__mermaid` 不存在
@@ -106,9 +120,11 @@
 - 讓節點選擇器更具相容性（避免只綁 `g.node` 單一 class 假設）。
 - 升版 Mermaid 時同步更新回歸測試。
 
-## `index.html` 使用 CDN 載入 Mermaid / svg-pan-zoom 的風險點與預期修正方向
+## `index.html` 載入策略（本地優先、CDN fallback）
 
-> 目前 `src/amon/ui/index.html` 透過 CDN 載入 Mermaid 與 svg-pan-zoom。
+> 目前 `src/amon/ui/index.html` 採用本地 vendor 優先載入：
+> - svg-pan-zoom：先載入本地 `static/vendor/svg-pan-zoom/svg-pan-zoom.min.js`，缺失時才 fallback CDN。
+> - Mermaid：先 dynamic import 本地 `static/vendor/mermaid/mermaid.esm.min.mjs`，失敗才 fallback CDN。
 
 ### 風險點
 
