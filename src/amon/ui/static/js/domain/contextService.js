@@ -1,10 +1,16 @@
 export function createContextService({ api }) {
   return {
-    async getContext(projectId) {
-      return api.request(`/projects/${encodeURIComponent(projectId)}/context`);
+    async getContext(projectId, chatId = "") {
+      const query = String(chatId || "").trim()
+        ? `?chat_id=${encodeURIComponent(String(chatId).trim())}`
+        : "";
+      return api.request(`/projects/${encodeURIComponent(projectId)}/context${query}`);
     },
-    async getContextStats(projectId) {
-      return api.request(`/projects/${encodeURIComponent(projectId)}/context/stats`);
+    async getContextStats(projectId, chatId = "") {
+      const query = String(chatId || "").trim()
+        ? `?chat_id=${encodeURIComponent(String(chatId).trim())}`
+        : "";
+      return api.request(`/projects/${encodeURIComponent(projectId)}/context/stats${query}`);
     },
     async saveContext(projectId, contextText) {
       return api.request(`/projects/${encodeURIComponent(projectId)}/context`, {

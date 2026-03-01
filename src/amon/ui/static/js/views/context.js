@@ -48,13 +48,13 @@ function updateDraftMeta(rootEl, text) {
   meta.textContent = text;
 }
 
-async function refreshContextStats(ctx, rootEl, projectId) {
+async function refreshContextStats(ctx, rootEl, projectId, chatId = "") {
   if (!projectId) {
     setDashboardUnavailable(rootEl);
     return null;
   }
   try {
-    const statsPayload = await ctx.services.context.getContextStats(projectId);
+    const statsPayload = await ctx.services.context.getContextStats(projectId, chatId);
     renderContextStats(rootEl, statsPayload);
     return statsPayload;
   } catch (error) {
@@ -197,7 +197,7 @@ async function clearDraft(ctx, rootEl, editor, scope) {
     if (scope === "project") {
       setDashboardUnavailable(rootEl);
     } else {
-      const statsPayload = await refreshContextStats(ctx, rootEl, getProjectId(ctx));
+      const statsPayload = await refreshContextStats(ctx, rootEl, getProjectId(ctx), getChatId(ctx));
       dispatchContext(ctx, { stats: statsPayload });
     }
   } catch (error) {
@@ -314,8 +314,8 @@ export const CONTEXT_VIEW = {
     }
     try {
       const [payload, statsPayload] = await Promise.all([
-        ctx.services.context.getContext(projectId),
-        refreshContextStats(ctx, ctx.rootEl, projectId),
+        ctx.services.context.getContext(projectId, getChatId(ctx)),
+        refreshContextStats(ctx, ctx.rootEl, projectId, getChatId(ctx)),
       ]);
       const contextText = payload?.context || payload?.memory || "";
       if (editor) editor.value = contextText;
