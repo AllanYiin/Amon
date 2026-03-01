@@ -169,5 +169,35 @@ class TaskGraph2Planner2Tests(unittest.TestCase):
         self.assertIn("repair_error", llm.calls[-1][1]["content"])
 
 
+    def test_planner2_injects_todo_bootstrap_when_missing(self) -> None:
+        graph_without_todo = json.dumps(
+            {
+                "schema_version": "2.0",
+                "objective": "做一件事",
+                "session_defaults": {},
+                "nodes": [
+                    {
+                        "id": "N1",
+                        "title": "執行",
+                        "kind": "task",
+                        "description": "完成任務",
+                        "output": {"type": "text", "extract": "best_effort"},
+                    }
+                ],
+                "edges": [],
+            },
+            ensure_ascii=False,
+        )
+        llm = FakeLLMClient([graph_without_todo, graph_without_todo, graph_without_todo])
+
+        graph = generate_taskgraph2_with_llm("請開始", llm_client=llm)
+
+        todo_nodes = [node for node in graph.nodes if "todo_markdown" in node.writes]
+        self.assertTrue(todo_nodes)
+        todo_node = todo_nodes[0]
+        self.assertEqual(todo_node.writes.get("todo_markdown"), "docs/TODO.md")
+        self.assertIn("todo_markdown", graph.nodes[1].reads)
+        self.assertTrue(any(edge.from_node == todo_node.id and edge.to_node == "N1" for edge in graph.edges))
+
 if __name__ == "__main__":
     unittest.main()
