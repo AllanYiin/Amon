@@ -1825,7 +1825,10 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     "chat_id": chat_id or None,
                 }
             )
-            send_event("notice", {"text": "Amon：已收到你的需求，正在判斷意圖與專案。"})
+            sent_initial_notice = False
+            if not chat_id:
+                send_event("notice", {"text": "Amon：已收到你的需求，正在判斷意圖與專案。"})
+                sent_initial_notice = True
             if project_id is None:
                 inferred_project_id = resolve_project_id_from_message(self.core, message)
                 if inferred_project_id:
@@ -1881,7 +1884,10 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             turn_bundle = assemble_chat_turn(project_id=project_id, chat_id=chat_id, message=message)
             chat_id = turn_bundle.chat_id
             history = turn_bundle.history
+            should_emit_bootstrap_notices = not history
             run_context = turn_bundle.run_context
+            if should_emit_bootstrap_notices and not sent_initial_notice:
+                send_event("notice", {"text": "Amon：已收到你的需求，正在判斷意圖與專案。"})
             log_event(
                 {
                     "level": "INFO",
@@ -2002,7 +2008,8 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 send_event("done", {"status": "ok", "chat_id": chat_id, "project_id": project_id})
                 return
             if router_result.type == "chat_response":
-                send_event("notice", {"text": "Amon：正在分析需求並進入執行流程。"})
+                if should_emit_bootstrap_notices:
+                    send_event("notice", {"text": "Amon：正在分析需求並進入執行流程。"})
                 execution_mode = decide_execution_mode(message, project_id=project_id, context=turn_bundle.router_context)
                 coerced_from_single = execution_mode == "single"
                 if coerced_from_single:
@@ -2077,7 +2084,8 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     )
                 else:
                     active_run_id = uuid.uuid4().hex
-                    send_event("notice", {"text": "Amon：已路由到 plan_execute，將先產生計畫並編譯執行圖。"}, run_id=active_run_id)
+                    if should_emit_bootstrap_notices:
+                        send_event("notice", {"text": "Amon：已路由到 plan_execute，將先產生計畫並編譯執行圖。"}, run_id=active_run_id)
                     plan_result, response_text = self.core.run_plan_execute_stream(
                         prompt_with_history,
                         project_path=self.core.get_project_path(project_id),
