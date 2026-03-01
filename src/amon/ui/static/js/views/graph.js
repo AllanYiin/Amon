@@ -1,6 +1,7 @@
 import { logUiDebug, logViewInitDebug } from "../utils/debug.js";
 import { buildGraphRuntimeViewModel, getGraphStatusClassList } from "../domain/graphRuntimeAdapter.js";
 import { copyText } from "../utils/clipboard.js";
+import { buildExportableSvg, downloadTextFile } from "../utils/download.js";
 
 function getProjectId(ctx) {
   return ctx.store?.getState?.()?.layout?.projectId || "";
@@ -676,26 +677,18 @@ export const GRAPH_VIEW = {
         ctx.ui.toast?.show("尚未完成渲染", { type: "warning", duration: 12000 });
         return;
       }
-      const rawSvg = String(svgEl.outerHTML || "").trim();
-      if (!rawSvg) {
+      const svgContent = buildExportableSvg(svgEl);
+      if (!svgContent) {
         ctx.ui.toast?.show("尚未完成渲染", { type: "warning", duration: 12000 });
         return;
       }
-      const normalizedSvg = rawSvg.includes("xmlns=")
-        ? rawSvg
-        : rawSvg.replace("<svg", '<svg xmlns="http://www.w3.org/2000/svg"');
-      const svgContent = `${normalizedSvg}\n`;
-      const blob = new Blob([svgContent], { type: "image/svg+xml;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
       const runId = String(local.runId || "").trim();
       const fallback = new Date().toISOString().replace(/[:.]/g, "-");
-      anchor.href = url;
-      anchor.download = `graph-${runId || fallback}.svg`;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(url);
+      const ok = downloadTextFile(`graph-${runId || fallback}.svg`, svgContent, "image/svg+xml;charset=utf-8");
+      if (!ok) {
+        ctx.ui.toast?.show("SVG 匯出失敗，請稍後再試", { type: "danger", duration: 12000 });
+        return;
+      }
       ctx.ui.toast?.show("SVG 匯出完成", { type: "success" });
     };
 
