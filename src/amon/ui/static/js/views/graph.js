@@ -1,5 +1,6 @@
 import { logUiDebug, logViewInitDebug } from "../utils/debug.js";
 import { buildGraphRuntimeViewModel, getGraphStatusClassList } from "../domain/graphRuntimeAdapter.js";
+import { copyText } from "../utils/clipboard.js";
 
 function getProjectId(ctx) {
   return ctx.store?.getState?.()?.layout?.projectId || "";
@@ -34,6 +35,8 @@ export const GRAPH_VIEW = {
     const runMetaEl = rootEl.querySelector("#graph-run-meta");
     const runSelectEl = rootEl.querySelector("#graph-run-select");
     const refreshEl = rootEl.querySelector("#graph-history-refresh");
+    const copyMermaidEl = rootEl.querySelector("#graph-copy-mermaid");
+    const exportSvgEl = rootEl.querySelector("#graph-export-svg");
     const copyRunIdEl = ctx.elements?.copyRunId;
     const drawerEl = ctx.elements?.graphNodeDrawer;
     const drawerCloseEl = ctx.elements?.graphNodeClose;
@@ -642,9 +645,53 @@ export const GRAPH_VIEW = {
       closeGraphNodeDrawer();
     };
 
+    const onCopyMermaid = async () => {
+      const mermaidCode = String(codeEl?.textContent || "").trim();
+      if (!mermaidCode) {
+        ctx.ui.toast?.show("無 Mermaid 內容", { type: "warning", duration: 12000 });
+        return;
+      }
+      await copyText(mermaidCode, {
+        toast: (message, options) => ctx.ui.toast?.show(message, options),
+        successMessage: "Mermaid 已複製到剪貼簿",
+        errorMessage: "複製 Mermaid 失敗，請手動複製",
+      });
+    };
+
+    const onExportSvg = () => {
+      const svgEl = previewEl?.querySelector("svg");
+      if (!(svgEl instanceof SVGElement)) {
+        ctx.ui.toast?.show("尚未完成渲染", { type: "warning", duration: 12000 });
+        return;
+      }
+      const rawSvg = String(svgEl.outerHTML || "").trim();
+      if (!rawSvg) {
+        ctx.ui.toast?.show("尚未完成渲染", { type: "warning", duration: 12000 });
+        return;
+      }
+      const normalizedSvg = rawSvg.includes("xmlns=")
+        ? rawSvg
+        : rawSvg.replace("<svg", '<svg xmlns="http://www.w3.org/2000/svg"');
+      const svgContent = `${normalizedSvg}\n`;
+      const blob = new Blob([svgContent], { type: "image/svg+xml;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      const runId = String(local.runId || "").trim();
+      const fallback = new Date().toISOString().replace(/[:.]/g, "-");
+      anchor.href = url;
+      anchor.download = `graph-${runId || fallback}.svg`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      ctx.ui.toast?.show("SVG 匯出完成", { type: "success" });
+    };
+
     listEl.addEventListener("click", onListClick);
     runSelectEl?.addEventListener("change", onRunChange);
     refreshEl?.addEventListener("click", () => void load());
+    copyMermaidEl?.addEventListener("click", onCopyMermaid);
+    exportSvgEl?.addEventListener("click", onExportSvg);
     drawerCloseEl?.addEventListener("click", onDrawerClose);
     document.addEventListener("keydown", onDocumentKeyDown);
     document.addEventListener("click", onDocumentClick);
@@ -655,6 +702,8 @@ export const GRAPH_VIEW = {
       listEl.removeEventListener("click", onListClick);
       runSelectEl?.removeEventListener("change", onRunChange);
       drawerCloseEl?.removeEventListener("click", onDrawerClose);
+      copyMermaidEl?.removeEventListener("click", onCopyMermaid);
+      exportSvgEl?.removeEventListener("click", onExportSvg);
       document.removeEventListener("keydown", onDocumentKeyDown);
       document.removeEventListener("click", onDocumentClick);
       unsubscribeGraphLiveUpdates();
