@@ -177,6 +177,83 @@ class UIAsyncAPITests(unittest.TestCase):
                 os.environ.pop("AMON_HOME", None)
 
 
+    def test_chat_stream_follow_up_turn_suppresses_bootstrap_notices(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("follow-up-notice")
+
+                handler = partial(
+                    AmonUIHandler,
+                    directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"),
+                    core=core,
+                )
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                def collect_stream(query: str) -> tuple[list[str], dict[str, object] | None]:
+                    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                    conn.request("GET", query)
+                    response = conn.getresponse()
+                    self.assertEqual(response.status, 200)
+                    event_type = ""
+                    notices: list[str] = []
+                    done_payload = None
+                    for _ in range(240):
+                        raw_line = response.fp.readline()
+                        if not raw_line:
+                            break
+                        decoded = raw_line.decode("utf-8", errors="ignore").strip()
+                        if decoded.startswith("event: "):
+                            event_type = decoded.split(":", 1)[1].strip()
+                        elif decoded.startswith("data: "):
+                            payload = json.loads(decoded.split(": ", 1)[1])
+                            if event_type == "notice":
+                                notices.append(str(payload.get("text") or ""))
+                            elif event_type == "done":
+                                done_payload = payload
+                                break
+                    return notices, done_payload
+
+                with patch("amon.ui_server.decide_execution_mode", return_value="single"), patch.object(
+                    core,
+                    "run_plan_execute_stream",
+                    return_value=(SimpleNamespace(run_id="run-follow-up", execution_route="planner", planner_enabled=True), "done"),
+                ):
+                    first_notices, first_done = collect_stream(
+                        f"/v1/chat/stream?project_id={quote(project.project_id)}&message={quote('第一輪需求')}"
+                    )
+                    self.assertIsNotNone(first_done)
+                    returned_chat_id = first_done.get("chat_id")
+                    self.assertTrue(returned_chat_id)
+
+                    second_notices, second_done = collect_stream(
+                        f"/v1/chat/stream?project_id={quote(project.project_id)}&chat_id={quote(str(returned_chat_id))}&message={quote('延續上一輪')}"
+                    )
+                    self.assertIsNotNone(second_done)
+
+                first_joined = "\n".join(first_notices)
+                self.assertIn("已收到你的需求", first_joined)
+                self.assertIn("正在分析需求並進入執行流程", first_joined)
+                self.assertIn("已路由到 plan_execute", first_joined)
+
+                second_joined = "\n".join(second_notices)
+                self.assertNotIn("已收到你的需求", second_joined)
+                self.assertNotIn("正在分析需求並進入執行流程", second_joined)
+                self.assertNotIn("已路由到 plan_execute", second_joined)
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
+
     def test_chat_stream_payload_contains_request_id_and_virtual_project_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"
