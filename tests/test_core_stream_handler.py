@@ -13,6 +13,47 @@ from amon.core import AmonCore
 
 
 class CoreStreamHandlerTests(unittest.TestCase):
+    def test_run_agent_task_logs_single_events_for_non_graph_call(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("single-event")
+                project_path = Path(project.path)
+                provider = SimpleNamespace(generate_stream=lambda messages, model=None: iter(["ok"]))
+
+                with patch("amon.core.build_provider", return_value=provider), patch("amon.core.log_event") as mock_log_event:
+                    response = core.run_agent_task("測試訊息", project_path=project_path)
+
+                self.assertEqual(response, "ok")
+                events = [call.args[0].get("event") for call in mock_log_event.call_args_list]
+                self.assertIn("run_single_start", events)
+                self.assertIn("run_single_complete", events)
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+    def test_run_agent_task_logs_agent_task_events_for_graph_node(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("agent-task-event")
+                project_path = Path(project.path)
+                provider = SimpleNamespace(generate_stream=lambda messages, model=None: iter(["ok"]))
+
+                with patch("amon.core.build_provider", return_value=provider), patch("amon.core.log_event") as mock_log_event:
+                    response = core.run_agent_task("測試訊息", project_path=project_path, node_id="node-1")
+
+                self.assertEqual(response, "ok")
+                events = [call.args[0].get("event") for call in mock_log_event.call_args_list]
+                self.assertIn("run_agent_task_start", events)
+                self.assertIn("run_agent_task_complete", events)
+                self.assertNotIn("run_single_start", events)
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
     def test_run_single_stream_forwards_conversation_history_to_graph_variables(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir

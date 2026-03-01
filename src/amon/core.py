@@ -581,10 +581,12 @@ class AmonCore:
         response_text = ""
         session_id = uuid.uuid4().hex
         session_path = self._prepare_session_path(project_path, session_id)
+        start_event = "run_agent_task_start" if node_id else "run_single_start"
+        complete_event = "run_agent_task_complete" if node_id else "run_single_complete"
         log_event(
             {
                 "level": "INFO",
-                "event": "run_single_start",
+                "event": start_event,
                 "provider": provider_name,
                 "model": provider_model,
                 "session_id": session_id,
@@ -652,7 +654,7 @@ class AmonCore:
         log_event(
             {
                 "level": "INFO",
-                "event": "run_single_complete",
+                "event": complete_event,
                 "provider": provider_name,
                 "model": provider_model,
                 "session_id": session_id,
