@@ -46,6 +46,29 @@ class ChatSessionStoreTests(unittest.TestCase):
             )
         )
 
+    def test_assistant_reasoning_does_not_emit_chat_session_event_log(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                project_id = "proj-log-001b"
+                chat_id = create_chat_session(project_id)
+                with patch("amon.chat.session_store.log_event") as mock_log_event:
+                    append_event(
+                        chat_id,
+                        {"type": "assistant_reasoning", "text": "思考中", "project_id": project_id},
+                    )
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+        self.assertIn("assistant_reasoning", NOISY_EVENT_TYPES)
+        self.assertFalse(
+            any(
+                isinstance(call.args[0], dict)
+                and call.args[0].get("event") == "chat_session_event"
+                for call in mock_log_event.call_args_list
+            )
+        )
+
     def test_user_event_still_emits_chat_session_event_log(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir
@@ -65,6 +88,38 @@ class ChatSessionStoreTests(unittest.TestCase):
                 for call in mock_log_event.call_args_list
             )
         )
+
+    def test_chat_session_event_log_contains_non_sensitive_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                project_id = "proj-log-003"
+                chat_id = create_chat_session(project_id)
+                with patch("amon.chat.session_store.log_event") as mock_log_event:
+                    append_event(
+                        chat_id,
+                        {
+                            "type": "command_result",
+                            "text": json.dumps({"status": "confirm_required", "token": "secret-value"}, ensure_ascii=False),
+                            "project_id": project_id,
+                            "command": "projects_create",
+                        },
+                    )
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+        chat_logs = [
+            call.args[0]
+            for call in mock_log_event.call_args_list
+            if isinstance(call.args[0], dict) and call.args[0].get("event") == "chat_session_event"
+        ]
+        self.assertEqual(len(chat_logs), 1)
+        payload = chat_logs[0]
+        self.assertEqual(payload.get("summary"), "command_result:confirm_required")
+        self.assertEqual(payload.get("command"), "projects_create")
+        expected_chars = len(json.dumps({"status": "confirm_required", "token": "secret-value"}, ensure_ascii=False).strip())
+        self.assertEqual(payload.get("text_chars"), expected_chars)
+        self.assertNotIn("text", payload)
 
     def test_create_chat_session_and_append_user_event(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -16,7 +16,7 @@ from amon.config import read_yaml
 from amon.fs.safety import validate_identifier, validate_project_id
 
 
-NOISY_EVENT_TYPES = {"assistant_chunk"}
+NOISY_EVENT_TYPES = {"assistant_chunk", "assistant_reasoning"}
 MAX_HISTORY_CHARS = 3200
 MAX_USER_TURN_CHARS = 420
 MAX_ASSISTANT_TURN_CHARS = 240
@@ -84,6 +84,7 @@ def append_event(chat_id: str, event: dict[str, Any]) -> None:
         raise
 
     if payload.get("type") not in NOISY_EVENT_TYPES:
+        log_details = _build_chat_session_log_details(payload)
         log_event(
             {
                 "event": "chat_session_event",
@@ -91,8 +92,48 @@ def append_event(chat_id: str, event: dict[str, Any]) -> None:
                 "session_id": chat_id,
                 "type": payload.get("type"),
                 "run_id": payload.get("run_id"),
+                **log_details,
             }
         )
+
+
+def _build_chat_session_log_details(payload: dict[str, Any]) -> dict[str, Any]:
+    event_type = str(payload.get("type") or "")
+    details: dict[str, Any] = {}
+
+    text = payload.get("text")
+    if isinstance(text, str):
+        details["text_chars"] = len(text.strip())
+
+    if event_type == "router" and isinstance(text, str):
+        details["summary"] = f"router:{text.strip() or 'unknown'}"
+    elif event_type == "plan_created" and isinstance(text, str):
+        details["summary"] = f"plan:{text.strip() or 'unknown'}"
+    elif event_type == "command_result" and isinstance(text, str):
+        details["summary"] = _summarize_command_result(text)
+    elif event_type:
+        details["summary"] = event_type
+
+    command = payload.get("command")
+    if isinstance(command, str) and command.strip():
+        details["command"] = command.strip()
+
+    return details
+
+
+def _summarize_command_result(raw_text: str) -> str:
+    trimmed = raw_text.strip()
+    if not trimmed:
+        return "command_result:empty"
+    try:
+        parsed = json.loads(trimmed)
+    except json.JSONDecodeError:
+        return "command_result:non_json"
+
+    if not isinstance(parsed, dict):
+        return "command_result:json"
+    status = str(parsed.get("status") or "unknown")
+    return f"command_result:{status}"
 
 
 
