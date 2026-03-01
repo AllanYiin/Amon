@@ -100,6 +100,7 @@ class UIShellSmokeTests(unittest.TestCase):
         self.assertIn('const hasStoredCollapse = readStorage(storageKeys.contextCollapsed);', inspector_js)
         self.assertIn('const collapsed = hasStoredCollapse == null ? true : hasStoredCollapse === "1";', inspector_js)
         self.assertIn('activateArtifactsTab({ collapsed: true });', chat_js)
+        self.assertIn('// 聊天頁預設維持右側收合，僅在偵測到具檔名 inline artifact 時展開', chat_js)
         self.assertIn('if (artifactEvent.type === "artifact_open") {', chat_js)
         self.assertIn('activateArtifactsTab({ collapsed: false });', chat_js)
 
