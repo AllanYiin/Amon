@@ -80,7 +80,8 @@ export function createInspectorLayout({ elements, store, storage, storageKeys })
   }
 
   function mount() {
-    const collapsed = readStorage(storageKeys.contextCollapsed) === "1";
+    const hasStoredCollapse = readStorage(storageKeys.contextCollapsed);
+    const collapsed = hasStoredCollapse == null ? true : hasStoredCollapse === "1";
     const storedWidth = Number(readStorage(storageKeys.contextWidth));
     const width = Number.isFinite(storedWidth) && storedWidth > 0 ? storedWidth : 320;
     updateInspector({ collapsed, width, activeTab: "artifacts" });
