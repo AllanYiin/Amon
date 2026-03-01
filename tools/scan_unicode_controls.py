@@ -66,6 +66,11 @@ SKIP_EXTENSIONS = {
     ".exe",
 }
 
+SKIP_SUFFIXES = {
+    ".min.js",
+    ".min.css",
+}
+
 
 @dataclass
 class Finding:
@@ -89,6 +94,8 @@ def iter_text_files(root: Path, exclude: set[str]) -> Iterable[Path]:
         if any(part in exclude for part in path.parts):
             continue
         if path.suffix.lower() in SKIP_EXTENSIONS:
+            continue
+        if any(path.name.endswith(suffix) for suffix in SKIP_SUFFIXES):
             continue
         yield path
 
