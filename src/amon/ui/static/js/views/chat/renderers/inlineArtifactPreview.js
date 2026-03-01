@@ -31,9 +31,13 @@ function createHtmlUrl(html = "") {
   return `data:text/html;charset=utf-8,${encodeURIComponent(safeHtml)}`;
 }
 
-function pickHtmlEntry(files = new Map()) {
+function pickHtmlEntry(files = new Map(), preferredFilename = "") {
   const htmlFiles = Array.from(files.values()).filter((item) => /\.html?$/i.test(item.filename || ""));
   if (!htmlFiles.length) return null;
+  if (preferredFilename) {
+    const preferred = htmlFiles.find((item) => String(item.filename || "") === preferredFilename);
+    if (preferred) return preferred;
+  }
   return htmlFiles.find((item) => String(item.filename || "").toLowerCase() === "index.html") || htmlFiles[0];
 }
 
@@ -75,8 +79,8 @@ function injectCssAndJs(htmlEntry, filesMap) {
   return html;
 }
 
-export function buildPreviewForFiles(files = new Map()) {
-  const htmlEntry = pickHtmlEntry(files);
+export function buildPreviewForFiles(files = new Map(), options = {}) {
+  const htmlEntry = pickHtmlEntry(files, options.preferredFilename || "");
   if (htmlEntry) {
     const html = injectCssAndJs(htmlEntry, files);
     return {

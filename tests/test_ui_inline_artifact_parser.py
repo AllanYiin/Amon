@@ -51,7 +51,7 @@ class UIInlineArtifactParserTests(unittest.TestCase):
         )
         self._run_node(script)
 
-    def test_artifact_completes_on_stream_end_without_closing_fence(self) -> None:
+    def test_unclosed_artifact_does_not_complete_on_finalize(self) -> None:
         script = textwrap.dedent(
             """
             (async () => {
@@ -66,16 +66,10 @@ class UIInlineArtifactParserTests(unittest.TestCase):
               parser.feed('  return <main>Hi</main>;\\n');
               parser.feed('}');
 
-              const events = parser.finalize();
+              const events = parser.finalizeClosedArtifacts();
               const complete = events.find((item) => item.type === 'artifact_complete');
-              if (!complete) {
-                throw new Error('artifact_complete event missing on finalize');
-              }
-              if (complete.filename !== 'App.tsx') {
-                throw new Error(`unexpected filename ${complete.filename}`);
-              }
-              if (!complete.content.includes('return <main>Hi</main>;')) {
-                throw new Error(`unexpected content: ${complete.content}`);
+              if (complete) {
+                throw new Error('artifact_complete should not be emitted without closing fence');
               }
             })().catch((error) => {
               console.error(error);

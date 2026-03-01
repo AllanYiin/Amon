@@ -57,6 +57,7 @@ export const CHAT_VIEW = {
     let receivedSoftWarning = false;
     const artifactParser = createStreamingArtifactParser();
     const inlineFiles = new Map();
+    const inlinePreviewUrls = new Map();
     let activeInlinePreviewUrl = null;
 
     const setStreaming = (active) => {
@@ -81,7 +82,7 @@ export const CHAT_VIEW = {
     };
 
     const refreshInlineArtifactsUi = () => {
-      renderInlineArtifactsList(elements, appState.inlineArtifacts || []);
+      renderInlineArtifactsList(elements, appState.inlineArtifacts || [], onSelectInlineArtifact);
       renderInlineArtifactStreamingHint(elements, appState.inlineArtifactStreamingHint || "");
       if ((appState.inlineArtifacts || []).length > 0) {
         elements.artifactsEmpty.hidden = true;
@@ -106,26 +107,39 @@ export const CHAT_VIEW = {
           content: artifactEvent.content,
         });
         appState.inlineArtifactFiles = Object.fromEntries(inlineFiles.entries());
-        const preview = buildPreviewForFiles(inlineFiles);
-        if (activeInlinePreviewUrl && activeInlinePreviewUrl !== preview.url) {
-          revokeInlinePreviewUrl(activeInlinePreviewUrl);
-        }
-        activeInlinePreviewUrl = preview.url;
 
+        for (const [filename, previousUrl] of inlinePreviewUrls.entries()) {
+          const preview = buildPreviewForFiles(inlineFiles, { preferredFilename: filename });
+          inlinePreviewUrls.set(filename, preview.url);
+          if (previousUrl && previousUrl !== preview.url) {
+            revokeInlinePreviewUrl(previousUrl);
+          }
+        }
+
+        for (const file of inlineFiles.values()) {
+          if (inlinePreviewUrls.has(file.filename)) continue;
+          const preview = buildPreviewForFiles(inlineFiles, { preferredFilename: file.filename });
+          inlinePreviewUrls.set(file.filename, preview.url);
+        }
+
+        const selectedUrl = inlinePreviewUrls.get(artifactEvent.filename) || "";
+        activeInlinePreviewUrl = selectedUrl;
         const nextInlineArtifacts = Array.from(inlineFiles.values()).map((file) => ({
           id: `inline:${file.filename}`,
+          filename: file.filename,
           name: file.filename,
           mime: "text/html",
-          url: preview.url,
+          url: inlinePreviewUrls.get(file.filename) || "",
           createdAt: new Date().toISOString(),
           source: "inline",
         }));
+
         appState.inlineArtifacts = nextInlineArtifacts;
         appState.artifactPreviewItem = {
           id: `inline:${artifactEvent.filename}`,
           name: artifactEvent.filename,
           mime: "text/html",
-          url: preview.url,
+          url: selectedUrl,
           source: "inline",
         };
         appState.inlineArtifactStreamingHint = `已完成 inline artifact：${artifactEvent.filename}`;
@@ -133,9 +147,26 @@ export const CHAT_VIEW = {
         activateArtifactsTab();
         refreshInlineArtifactsUi();
         showInlineArtifactPreview(elements, {
-          name: preview.title || artifactEvent.filename,
-          url: preview.url,
+          name: artifactEvent.filename,
+          url: selectedUrl,
         });
+      });
+    };
+
+
+    const onSelectInlineArtifact = (artifactItem) => {
+      if (!artifactItem?.url) return;
+      activeInlinePreviewUrl = artifactItem.url;
+      appState.artifactPreviewItem = {
+        id: artifactItem.id || `inline:${artifactItem.filename || artifactItem.name || "artifact"}`,
+        name: artifactItem.filename || artifactItem.name || "inline artifact",
+        mime: artifactItem.mime || "text/html",
+        url: artifactItem.url,
+        source: "inline",
+      };
+      showInlineArtifactPreview(elements, {
+        name: artifactItem.filename || artifactItem.name,
+        url: artifactItem.url,
       });
     };
 
@@ -206,6 +237,10 @@ export const CHAT_VIEW = {
       streamAbortController = new AbortController();
       artifactParser.reset();
       inlineFiles.clear();
+      inlinePreviewUrls.forEach((url) => revokeInlinePreviewUrl(url));
+      inlinePreviewUrls.clear();
+      appState.inlineArtifacts = [];
+      appState.inlineArtifactFiles = {};
       appState.inlineArtifactStreamingHint = "";
       renderInlineArtifactStreamingHint(elements, "");
       ctx.chatDeps.resetPlanCard();
@@ -301,7 +336,7 @@ export const CHAT_VIEW = {
             }
             if (eventType === "token") {
               messageRenderer.applyTokenChunk(data.text || "");
-              handleArtifactEvents(artifactParser.feed(data.text || ""));
+              applyInlineArtifactEvents(artifactParser.feed(data.text || ""));
               return;
             }
             if (eventType === "notice") {
@@ -322,7 +357,7 @@ export const CHAT_VIEW = {
             }
             if (eventType === "error") {
               artifactParser.feed("\n");
-              applyInlineArtifactEvents(artifactParser.finalize());
+              applyInlineArtifactEvents(artifactParser.finalizeClosedArtifacts());
               ctx.chatDeps.updateThinking({ status: "error", brief: data.message || "流程失敗" });
               ui.toast?.show(data.message || "串流失敗", { type: "danger", duration: 9000 });
               stopStream();
@@ -330,7 +365,7 @@ export const CHAT_VIEW = {
             }
             if (eventType === "done") {
               artifactParser.feed("\n");
-              applyInlineArtifactEvents(artifactParser.finalize());
+              applyInlineArtifactEvents(artifactParser.finalizeClosedArtifacts());
               streamCompleted = true;
               await ctx.chatDeps.applySessionFromEvent(data);
               const doneStatus = data.status || "ok";
@@ -368,10 +403,9 @@ export const CHAT_VIEW = {
     this.__chatCleanup = () => {
       unbindInput?.();
       stopStream();
-      if (activeInlinePreviewUrl) {
-        revokeInlinePreviewUrl(activeInlinePreviewUrl);
-        activeInlinePreviewUrl = null;
-      }
+      inlinePreviewUrls.forEach((url) => revokeInlinePreviewUrl(url));
+      inlinePreviewUrls.clear();
+      activeInlinePreviewUrl = null;
     };
     this.__chatStartStream = startStream;
     this.__chatStopStream = stopStream;

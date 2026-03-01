@@ -23,7 +23,7 @@ function activateInlinePreview(elements, item) {
   };
 }
 
-export function renderInlineArtifactsList(elements, inlineArtifacts = []) {
+export function renderInlineArtifactsList(elements, inlineArtifacts = [], onSelect = null) {
   if (!elements?.artifactsInspectorList) return;
   clearInlineRows(elements.artifactsInspectorList);
 
@@ -38,7 +38,13 @@ export function renderInlineArtifactsList(elements, inlineArtifacts = []) {
     row.className = "list-row list-row--clickable";
     row.dataset.inlineArtifactRow = "true";
     row.textContent = `[inline] ${artifact.filename || artifact.name || artifact.title || "artifact"}`;
-    row.addEventListener("click", () => activateInlinePreview(elements, artifact));
+    row.addEventListener("click", () => {
+      if (typeof onSelect === "function") {
+        onSelect(artifact);
+        return;
+      }
+      activateInlinePreview(elements, artifact);
+    });
     elements.artifactsInspectorList.append(row);
   });
 }

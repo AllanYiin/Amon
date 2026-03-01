@@ -151,39 +151,7 @@
             <div class="context-resizer" id="context-resizer" role="separator" aria-label="調整右側面板寬度" aria-orientation="vertical"></div>
 
             <aside class="context-panel" id="context-panel">
-          <h2>Thinking / Artifacts</h2>
-          <div class="inspector-tabs segmented" role="tablist" aria-label="Inspector 切換" data-i18n-attr="aria-label:a11y.inspector.tablist">
-            <button
-              type="button"
-              class="segmented__item inspector-tabs__button"
-              id="inspector-tab-thinking"
-              role="tab"
-              aria-controls="inspector-thinking"
-              aria-selected="true"
-              tabindex="0"
-              data-inspector-tab="thinking"
-            >Thinking</button>
-            <button
-              type="button"
-              class="segmented__item inspector-tabs__button"
-              id="inspector-tab-artifacts"
-              role="tab"
-              aria-controls="inspector-artifacts"
-              aria-selected="false"
-              tabindex="-1"
-              data-inspector-tab="artifacts"
-            >Artifacts</button>
-            <button
-              type="button"
-              class="segmented__item inspector-tabs__button"
-              id="inspector-tab-execution"
-              role="tab"
-              aria-controls="inspector-execution"
-              aria-selected="false"
-              tabindex="-1"
-              data-inspector-tab="execution"
-            >Execution</button>
-          </div>
+          <h2>Artifacts 預覽</h2>
           <div class="context-shell" id="context-shell" hidden>
             <article class="context-shell-card card card--kpi">
               <p class="context-shell-card__label">Memory</p>
@@ -204,7 +172,7 @@
           </div>
           <div class="context-project" id="context-project" hidden>目前專案：未選擇</div>
           <p id="context-overview" class="context-overview" hidden>請先在上方選擇專案，右側內容會自動同步。</p>
-          <section class="context-section" id="inspector-thinking">
+          <section class="context-section" id="inspector-thinking" hidden>
             <h3>Thinking Inspector</h3>
             <section class="thinking-panel" id="thinking-panel">
               <div class="thinking-panel__header">
@@ -234,7 +202,7 @@
               <div id="execution-accordion" class="execution-accordion"></div>
             </section>
           </section>
-          <section class="context-section" id="inspector-artifacts" hidden>
+          <section class="context-section" id="inspector-artifacts">
             <h3>Artifacts Inspector</h3>
             <p class="context-overview" id="artifacts-overview">這裡僅顯示流程產生的檔案；對話紀錄請使用下方「下載對話紀錄」。</p>
             <div id="artifacts-inline-streaming-hint" class="context-overview muted" hidden></div>
