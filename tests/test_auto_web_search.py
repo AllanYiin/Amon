@@ -10,7 +10,7 @@ from amon.tooling.types import ToolResult
 
 class _FakeRegistry:
     def __init__(self) -> None:
-        self.policy = ToolPolicy(allow=("filesystem.read",), ask=("web.search", "web.fetch"), deny=())
+        self.policy = ToolPolicy(allow=("filesystem.read",), ask=(), deny=())
         self.last_call = None
 
     def call(self, call):

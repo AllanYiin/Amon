@@ -61,6 +61,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "project_dir_rel": "tools",
         "allowed_paths": ["workspace"],
     },
+    "web": {
+        "serpapi_key_env": "SERPAPI_KEY",
+        "search_provider_priority": ["serpapi", "google", "bing"],
+        "max_results_limit": 10,
+    },
     "mcp": {
         "servers": {},
         "allowed_tools": [],

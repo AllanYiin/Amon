@@ -18,14 +18,15 @@ LOW_RISK_ALLOW_TOOLS = (
     "filesystem.grep",
     "filesystem.glob",
     "memory.search",
+    "web.fetch",
+    "web.search",
+    "web.better_search",
 )
 
 MEDIUM_RISK_ASK_TOOLS = (
     "filesystem.write",
     "filesystem.move",
     "filesystem.copy",
-    "web.fetch",
-    "web.search",
     "sandbox.run",
 )
 
