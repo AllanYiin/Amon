@@ -11,6 +11,7 @@
     <script src="static/vendor/marked/marked.min.js"></script>
     <script src="static/vendor/highlight.js/highlight.min.js"></script>
     <script src="static/vendor/svg-pan-zoom/svg-pan-zoom.min.js"></script>
+    <script src="static/vendor/mermaid/mermaid.min.js"></script>
     <script src="static/vendor/chart.js/chart.umd.min.js"></script>
     <script>
       (function ensureSvgPanZoom() {
@@ -30,32 +31,32 @@
         document.head.appendChild(fallback);
       })();
     </script>
-    <script type="module">
-      (async function initMermaid() {
-        try {
-          const localModule = await import("./static/vendor/mermaid/mermaid.esm.min.mjs");
-          const localMermaid = localModule?.default ?? localModule?.mermaid;
-          if (!localMermaid) {
-            throw new Error("Local Mermaid module loaded but export was empty.");
+    <script>
+      (function initMermaid() {
+        function configureMermaid(candidate) {
+          if (!candidate || typeof candidate.initialize !== "function") {
+            return false;
           }
-          localMermaid.initialize({ startOnLoad: false, theme: "neutral" });
-          window.__mermaid = localMermaid;
-          return;
-        } catch (localError) {
-          console.error("[ui] Failed to load local Mermaid vendor bundle.", localError);
+          candidate.initialize({ startOnLoad: false, theme: "neutral" });
+          window.__mermaid = candidate;
+          return true;
         }
 
-        try {
-          const fallbackModule = await import("https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.esm.min.mjs");
-          const fallbackMermaid = fallbackModule?.default ?? fallbackModule?.mermaid;
-          if (!fallbackMermaid) {
-            throw new Error("CDN Mermaid module loaded but export was empty.");
-          }
-          fallbackMermaid.initialize({ startOnLoad: false, theme: "neutral" });
-          window.__mermaid = fallbackMermaid;
-        } catch (fallbackError) {
-          console.error("[ui] Failed to load Mermaid from local vendor and CDN fallback.", fallbackError);
+        if (configureMermaid(window.mermaid)) {
+          return;
         }
+
+        var fallback = document.createElement("script");
+        fallback.src = "https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js";
+        fallback.onload = function () {
+          if (!configureMermaid(window.mermaid)) {
+            console.error("[ui] Mermaid fallback loaded but window.mermaid is still unavailable.");
+          }
+        };
+        fallback.onerror = function () {
+          console.error("[ui] Failed to load Mermaid from local vendor and CDN fallback.");
+        };
+        document.head.appendChild(fallback);
       })();
     </script>
   </head>
