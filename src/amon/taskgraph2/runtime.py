@@ -72,13 +72,14 @@ class TaskGraphRuntime:
         resolved_path = run_dir / "graph.resolved.json"
         cancel_path = run_dir / "cancel.json"
 
+        session_defaults = {**dict(self.graph.session_defaults), "run_id": run_id}
         state: dict[str, Any] = {
             "run_id": run_id,
             "status": "running",
             "started_at": _now_iso(),
             "ended_at": None,
-            "variables": dict(self.graph.session_defaults),
-            "session": dict(self.graph.session_defaults),
+            "variables": dict(session_defaults),
+            "session": dict(session_defaults),
             "nodes": {},
         }
 

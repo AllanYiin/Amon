@@ -196,8 +196,16 @@ class TaskGraph2Planner2Tests(unittest.TestCase):
         self.assertTrue(todo_nodes)
         todo_node = todo_nodes[0]
         self.assertEqual(todo_node.writes.get("todo_markdown"), "docs/TODO.md")
-        self.assertIn("todo_markdown", graph.nodes[1].reads)
-        self.assertTrue(any(edge.from_node == todo_node.id and edge.to_node == "N1" for edge in graph.edges))
+
+        review_nodes = [node for node in graph.nodes if "todo_task_nodes_review" in node.writes]
+        self.assertTrue(review_nodes)
+        review_node = review_nodes[0]
+        self.assertIn("todo_markdown", review_node.reads)
+
+        target_node = next(node for node in graph.nodes if node.id == "N1")
+        self.assertIn("todo_task_nodes_review", target_node.reads)
+        self.assertTrue(any(edge.from_node == todo_node.id and edge.to_node == review_node.id for edge in graph.edges))
+        self.assertTrue(any(edge.from_node == review_node.id and edge.to_node == "N1" for edge in graph.edges))
 
 if __name__ == "__main__":
     unittest.main()

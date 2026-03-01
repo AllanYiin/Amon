@@ -2485,49 +2485,8 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 "recent_events": [],
             }
 
-        latest = max(run_dirs, key=lambda path: path.stat().st_mtime)
-        run_id = latest.name
-
-        graph = fallback_graph
-        resolved_path = latest / "graph.resolved.json"
-        if resolved_path.exists():
-            try:
-                graph = json.loads(resolved_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                graph = fallback_graph
-
-        state_payload: dict[str, Any] = {}
-        state_path = latest / "state.json"
-        if state_path.exists():
-            try:
-                state_payload = json.loads(state_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                state_payload = {}
-
-        events: list[dict[str, Any]] = []
-        events_path = latest / "events.jsonl"
-        if events_path.exists():
-            try:
-                for line in events_path.read_text(encoding="utf-8").splitlines():
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        payload = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if isinstance(payload, dict):
-                        events.append(payload)
-            except OSError:
-                events = []
-
-        return {
-            "run_id": run_id,
-            "run_status": state_payload.get("status", "unknown"),
-            "graph": graph,
-            "node_states": state_payload.get("nodes", {}),
-            "recent_events": events[-100:],
-        }
+        latest = max(run_dirs, key=self._run_sort_key)
+        return self._load_run_bundle_from_dir(latest, fallback_graph=fallback_graph)
 
     def _load_run_bundle(self, run_id: str, project_id: str | None = None) -> dict[str, Any]:
         project_path = self.core.get_project_path(project_id) if project_id else self._resolve_project_path_from_run_id(run_id)
@@ -2536,6 +2495,10 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             raise FileNotFoundError("找不到 run")
 
         fallback_graph = self._load_latest_graph(project_path)
+        return self._load_run_bundle_from_dir(run_dir, fallback_graph=fallback_graph)
+
+    def _load_run_bundle_from_dir(self, run_dir: Path, *, fallback_graph: dict[str, Any]) -> dict[str, Any]:
+        run_id = run_dir.name
         graph = fallback_graph
         resolved_path = run_dir / "graph.resolved.json"
         if resolved_path.exists():
@@ -2552,30 +2515,69 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             except (OSError, json.JSONDecodeError):
                 state_payload = {}
 
-        events: list[dict[str, Any]] = []
-        events_path = run_dir / "events.jsonl"
-        if events_path.exists():
-            try:
-                for raw in events_path.read_text(encoding="utf-8").splitlines():
-                    line = raw.strip()
-                    if not line:
-                        continue
-                    try:
-                        payload = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if isinstance(payload, dict):
-                        events.append(payload)
-            except OSError:
-                events = []
-
+        events = self._read_run_events(run_dir)
+        inferred_status = self._infer_run_status(state_payload=state_payload, events=events)
         return {
             "run_id": run_id,
-            "run_status": state_payload.get("status", "unknown"),
+            "run_status": inferred_status,
             "graph": graph,
             "node_states": state_payload.get("nodes", {}),
             "recent_events": events[-100:],
         }
+
+    def _read_run_events(self, run_dir: Path) -> list[dict[str, Any]]:
+        events: list[dict[str, Any]] = []
+        events_path = run_dir / "events.jsonl"
+        if not events_path.exists():
+            return events
+        try:
+            for raw in events_path.read_text(encoding="utf-8").splitlines():
+                line = raw.strip()
+                if not line:
+                    continue
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(payload, dict):
+                    events.append(payload)
+        except OSError:
+            return []
+        return events
+
+    def _infer_run_status(self, *, state_payload: dict[str, Any], events: list[dict[str, Any]]) -> str:
+        status = str(state_payload.get("status") or "").strip().lower()
+        if status:
+            return status
+        event_names = [str(event.get("event") or "").strip().lower() for event in events]
+        if "run_failed" in event_names:
+            return "failed"
+        if "run_canceled" in event_names:
+            return "canceled"
+        if "run_complete" in event_names:
+            return "completed"
+        if "run_start" in event_names:
+            return "running"
+        return "unknown"
+
+    def _run_sort_key(self, run_dir: Path) -> tuple[int, float, str]:
+        events_path = run_dir / "events.jsonl"
+        state_path = run_dir / "state.json"
+        candidates = [run_dir.stat().st_mtime]
+        if events_path.exists():
+            candidates.append(events_path.stat().st_mtime)
+        state_payload: dict[str, Any] = {}
+        if state_path.exists():
+            candidates.append(state_path.stat().st_mtime)
+            try:
+                state_payload = json.loads(state_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                state_payload = {}
+        latest_ts = max(candidates)
+        events = self._read_run_events(run_dir)
+        status = self._infer_run_status(state_payload=state_payload, events=events)
+        priority = 1 if status == "running" else 0
+        return (priority, latest_ts, run_dir.name)
 
     def _list_runs_for_ui(self, project_id: str | None = None) -> list[dict[str, Any]]:
         if project_id:
@@ -2593,6 +2595,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 if not run_dir.is_dir():
                     continue
                 run_id = run_dir.name
+                events = self._read_run_events(run_dir)
                 state_payload: dict[str, Any] = {}
                 state_path = run_dir / "state.json"
                 if state_path.exists():
@@ -2600,18 +2603,27 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         state_payload = json.loads(state_path.read_text(encoding="utf-8"))
                     except (OSError, json.JSONDecodeError):
                         state_payload = {}
+                status = self._infer_run_status(state_payload=state_payload, events=events)
+                events_path = run_dir / "events.jsonl"
+                timestamps = [run_dir.stat().st_mtime]
+                if events_path.exists():
+                    timestamps.append(events_path.stat().st_mtime)
+                if state_path.exists():
+                    timestamps.append(state_path.stat().st_mtime)
+                latest_ts = max(timestamps)
+                iso = datetime.fromtimestamp(latest_ts, tz=timezone.utc).isoformat()
                 runs.append(
                     {
                         "id": run_id,
                         "run_id": run_id,
                         "project_id": pid,
-                        "status": state_payload.get("status", "unknown"),
-                        "created_at": datetime.fromtimestamp(run_dir.stat().st_mtime, tz=timezone.utc).isoformat(),
-                        "updated_at": datetime.fromtimestamp(run_dir.stat().st_mtime, tz=timezone.utc).isoformat(),
+                        "status": status,
+                        "created_at": iso,
+                        "updated_at": iso,
                     }
                 )
 
-        runs.sort(key=lambda item: item.get("updated_at", ""), reverse=True)
+        runs.sort(key=lambda item: (1 if item.get("status") == "running" else 0, item.get("updated_at", "")), reverse=True)
         return runs
 
     def _query_logs(self, params: dict[str, list[str]], *, include_paging: bool = True) -> dict[str, Any]:
@@ -3316,13 +3328,22 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             node_id = str(node.get("id", ""))
             safe_id = to_safe_mermaid_id(node_id)
             id_map[node_id] = safe_id
-            lines.append(f"  {safe_id}[\"{escape_mermaid_label(node_id)}\"]")
+            title = str(node.get("title") or node.get("name") or node_id).strip()
+            description = str(node.get("description") or "").strip().replace("\n", " ")
+            short_description = description[:32] + ("…" if len(description) > 32 else "") if description else ""
+            label = title if not short_description else f"{title}\n{short_description}"
+            lines.append(f"  {safe_id}[\"{escape_mermaid_label(label)}\"]")
+
         for edge in edges:
-            source = id_map.get(str(edge.get("from", "")), "")
-            target = id_map.get(str(edge.get("to", "")), "")
+            source_id = str(edge.get("from") or edge.get("from_node") or "")
+            target_id = str(edge.get("to") or edge.get("to_node") or "")
+            source = id_map.get(source_id, "")
+            target = id_map.get(target_id, "")
             if source and target:
                 lines.append(f"  {source} --> {target}")
+
         return "\n".join(lines)
+
 
 
 def serve_ui(port: int = 8000, data_dir: Path | None = None) -> None:
