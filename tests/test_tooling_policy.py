@@ -2,11 +2,12 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from amon.core import AmonCore
 from amon.tooling.builtin import build_registry as build_builtin_registry
 from amon.tooling.runtime import build_registry as build_runtime_registry
-from amon.tooling.policy import ToolPolicy, WorkspaceGuard
+from amon.tooling.policy import ToolPolicy, WorkspaceGuard, _normalize_path_text
 from amon.tooling.registry import ToolRegistry
 from amon.tooling.types import ToolCall, ToolResult, ToolSpec
 
@@ -94,18 +95,12 @@ class ToolPolicyTests(unittest.TestCase):
 
 
 class BuiltinRegistryTests(unittest.TestCase):
-    def test_web_tools_require_approval_by_default_policy(self) -> None:
+    def test_web_tools_allowed_by_default_policy(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             registry = build_builtin_registry(Path(tmpdir))
-            fetch_result = registry.call(
-                ToolCall(
-                    tool="web.fetch",
-                    args={"url": "https://example.com"},
-                    caller="tester",
-                ),
-                require_approval=True,
-            )
-            self.assertEqual(fetch_result.meta.get("status"), "approval_required")
+            self.assertEqual(registry.policy.decide(ToolCall(tool="web.fetch", args={}, caller="tester")), "allow")
+            self.assertEqual(registry.policy.decide(ToolCall(tool="web.search", args={}, caller="tester")), "allow")
+            self.assertEqual(registry.policy.decide(ToolCall(tool="web.better_search", args={}, caller="tester")), "allow")
 
     def test_process_exec_denied_by_default_policy(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -125,11 +120,28 @@ class RuntimeRegistryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             registry = build_runtime_registry(Path(tmpdir), base_dirs=[])
             self.assertEqual(registry.policy.decide(ToolCall(tool="filesystem.read", args={}, caller="tester")), "allow")
-            self.assertEqual(registry.policy.decide(ToolCall(tool="web.fetch", args={}, caller="tester")), "ask")
+            self.assertEqual(registry.policy.decide(ToolCall(tool="web.fetch", args={}, caller="tester")), "allow")
             self.assertEqual(registry.policy.decide(ToolCall(tool="process.exec", args={"command": "pwd"}, caller="tester")), "deny")
             self.assertEqual(registry.policy.decide(ToolCall(tool="terminal.exec", args={"command": "pwd"}, caller="tester")), "deny")
             self.assertEqual(registry.policy.decide(ToolCall(tool="terminal.session.start", args={}, caller="tester")), "deny")
             self.assertEqual(registry.policy.decide(ToolCall(tool="terminal.session.exec", args={"session_id": "s", "command": "pwd"}, caller="tester")), "deny")
+
+
+class WorkspacePathNormalizationTests(unittest.TestCase):
+    def test_normalize_strips_windows_long_path_prefix(self) -> None:
+        raw = r"\\?\C:\PycharmProjects\Amon"
+        with patch("amon.tooling.policy.os.path.abspath", side_effect=lambda value: value):
+            self.assertEqual(
+                _normalize_path_text(raw),
+                os.path.normcase(os.path.normpath(r"C:\PycharmProjects\Amon")),
+            )
+
+    def test_normalize_strips_windows_unc_long_path_prefix(self) -> None:
+        raw = r"\\?\UNC\server\share\Amon"
+        with patch("amon.tooling.policy.os.path.abspath", side_effect=lambda value: value):
+            normalized = _normalize_path_text(raw)
+        self.assertFalse(normalized.startswith("\\?\\"))
+        self.assertIn(r"server\share\Amon", normalized)
 
 
 class WorkspaceGuardTests(unittest.TestCase):
@@ -148,6 +160,18 @@ class WorkspaceGuardTests(unittest.TestCase):
             denied.write_text("SECRET=1", encoding="utf-8")
             with self.assertRaises(ValueError):
                 guard.assert_in_workspace(denied)
+
+    def test_workspace_boundary_is_case_insensitive_when_platform_normalizes_case(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "Root"
+            target = root / "Sub" / "file.txt"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("ok", encoding="utf-8")
+            guard = WorkspaceGuard(workspace_root=Path(str(root).lower()))
+
+            with patch("amon.tooling.policy.os.path.normcase", side_effect=lambda value: value.lower()):
+                resolved = guard.assert_in_workspace(target)
+            self.assertEqual(resolved, target.resolve())
 
 
 class ToolRegistryTests(unittest.TestCase):

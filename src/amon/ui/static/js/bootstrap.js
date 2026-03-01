@@ -331,6 +331,16 @@ appStore.patch({ bootstrappedAt: Date.now() });
           elements.plannerToggleBtn.disabled = planner.toggle_allowed === false;
           elements.plannerToggleBtn.textContent = plannerEnabled ? "停用 Planner" : "啟用 Planner";
         }
+        const webConfig = payload.effective_config?.web || {};
+        if (elements.configSerpapiKeyEnv) {
+          elements.configSerpapiKeyEnv.value = String(webConfig.serpapi_key_env || "SERPAPI_KEY");
+        }
+        if (elements.configSearchPriority) {
+          const priority = Array.isArray(webConfig.search_provider_priority)
+            ? webConfig.search_provider_priority
+            : ["serpapi", "google", "bing"];
+          elements.configSearchPriority.value = priority.join(",");
+        }
 
         const keyword = (elements.configSearch.value || "").trim().toLowerCase();
         const rows = flattenConfigRows(payload.effective_config || {}, payload.sources || {});
@@ -390,6 +400,40 @@ appStore.patch({ bootstrappedAt: Date.now() });
         state.configView = response.config || state.configView;
         renderConfigTable();
         showToast(`已更新 ${keyPath}（${scope}）。`, 8000, "info");
+      }
+
+      async function applyWebSearchConfig() {
+        const serpapiEnv = String(elements.configSerpapiKeyEnv?.value || "").trim() || "SERPAPI_KEY";
+        const priorityRaw = String(elements.configSearchPriority?.value || "").trim();
+        const providerPriority = (priorityRaw || "serpapi,google,bing")
+          .split(",")
+          .map((item) => item.trim().toLowerCase())
+          .filter((item, idx, arr) => item && ["serpapi", "google", "bing"].includes(item) && arr.indexOf(item) === idx);
+        if (!providerPriority.length) {
+          showToast("搜尋提供者優先序至少要包含 serpapi/google/bing 其中之一。", 10000, "warning");
+          return;
+        }
+        if (!state.projectId) {
+          showToast("目前尚未選擇專案，無法寫入 project scope。", 8000, "warning");
+          return;
+        }
+        const updates = [
+          { keyPath: "web.serpapi_key_env", value: serpapiEnv },
+          { keyPath: "web.search_provider_priority", value: providerPriority },
+        ];
+        let latestConfig = state.configView;
+        for (const update of updates) {
+          const response = await services.admin.setConfigValue({
+            projectId: state.projectId,
+            keyPath: update.keyPath,
+            value: update.value,
+            scope: "project",
+          });
+          latestConfig = response.config || latestConfig;
+        }
+        state.configView = latestConfig;
+        renderConfigTable();
+        showToast("已更新 Web Search 偏好設定。", 8000, "info");
       }
 
       async function togglePlannerEnabled() {
@@ -2128,6 +2172,9 @@ appStore.patch({ bootstrappedAt: Date.now() });
       });
       elements.plannerToggleBtn?.addEventListener("click", () => {
         void togglePlannerEnabled();
+      });
+      elements.configWebSearchApply?.addEventListener("click", () => {
+        void applyWebSearchConfig();
       });
       elements.skillTriggerPreview.addEventListener("click", async () => {
         const skillName = elements.skillTriggerSelect.value;

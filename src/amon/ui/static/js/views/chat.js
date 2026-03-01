@@ -290,7 +290,8 @@ export const CHAT_VIEW = {
 
       appState.streamClient = new EventStreamClient({
         preferSSE: true,
-        maxReconnectAttempts: 0,
+        // Allow short transient SSE hiccups to recover before showing a fatal toast.
+        maxReconnectAttempts: 3,
         sseUrlBuilder: (params, lastEventId) => {
           const query = new URLSearchParams();
           if (params.stream_token) {

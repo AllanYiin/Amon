@@ -85,6 +85,7 @@ class UIShellSmokeTests(unittest.TestCase):
         self.assertIn("createTimelineRenderer", chat_js)
         self.assertIn("createInputBar", chat_js)
         self.assertIn("appState.streamClient.start({", chat_js)
+        self.assertIn("maxReconnectAttempts: 3", chat_js)
         self.assertIn('messageRenderer.applyTokenChunk(data.text || "")', chat_js)
         self.assertIn("applySessionFromEvent(data)", chat_js)
         self.assertIn("dataset.buffer", message_renderer_js)
