@@ -2003,6 +2003,18 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             if router_result.type == "chat_response":
                 send_event("notice", {"text": "Amon：正在分析需求並進入執行流程。"})
                 execution_mode = decide_execution_mode(message, project_id=project_id, context=turn_bundle.router_context)
+                if execution_mode == "single":
+                    log_event(
+                        {
+                            "level": "INFO",
+                            "event": "execution_mode_coerced",
+                            "project_id": project_id,
+                            "from_mode": "single",
+                            "to_mode": "plan_execute",
+                            "reason": "task graph v2 requires plan_execute route",
+                        }
+                    )
+                    execution_mode = "plan_execute"
                 prompt_with_history = turn_bundle.prompt_with_history
 
                 streamed_token_count = 0

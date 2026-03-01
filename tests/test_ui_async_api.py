@@ -1258,7 +1258,7 @@ class UIAsyncAPITests(unittest.TestCase):
                     server.server_close()
                 os.environ.pop("AMON_HOME", None)
 
-    def test_chat_stream_plan_execute_reports_planner_route_and_fallback_warning(self) -> None:
+    def test_chat_stream_plan_execute_reports_planner_route(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"
             os.environ["AMON_HOME"] = str(data_dir)
@@ -1280,10 +1280,8 @@ class UIAsyncAPITests(unittest.TestCase):
 
                 fallback_result = SimpleNamespace(
                     run_id="run-plan-fallback",
-                    execution_route="single_fallback",
-                    planner_enabled=False,
-                    fallback_reason="planner disabled -> fallback single",
-                    fallback_hint="請將 amon.planner.enabled 設為 true（可在設定頁切換）",
+                    execution_route="planner",
+                    planner_enabled=True,
                 )
 
                 with patch("amon.ui_server.decide_execution_mode", return_value="plan_execute"), patch.object(
@@ -1301,7 +1299,6 @@ class UIAsyncAPITests(unittest.TestCase):
 
                     event_type = ""
                     noticed_plan = False
-                    warning_payload = None
                     done_payload = None
                     for _ in range(220):
                         raw_line = resp.fp.readline()
@@ -1314,25 +1311,79 @@ class UIAsyncAPITests(unittest.TestCase):
                             payload = json.loads(decoded.split(": ", 1)[1])
                             if event_type == "notice" and "plan_execute" in str(payload.get("text") or ""):
                                 noticed_plan = True
-                            elif event_type == "warning" and payload.get("kind") == "planner_disabled_fallback":
-                                warning_payload = payload
                             elif event_type == "done":
                                 done_payload = payload
                                 break
 
                 self.assertTrue(noticed_plan)
-                self.assertIsNotNone(warning_payload)
                 self.assertIsNotNone(done_payload)
                 self.assertEqual(done_payload.get("execution_mode"), "plan_execute")
-                self.assertEqual(done_payload.get("execution_route"), "single_fallback")
-                self.assertFalse(done_payload.get("planner_enabled"))
-                self.assertIn("fallback_reason", done_payload)
-                self.assertIn("fallback_hint", done_payload)
+                self.assertEqual(done_payload.get("execution_route"), "planner")
+                self.assertTrue(done_payload.get("planner_enabled"))
             finally:
                 if server:
                     server.shutdown()
                     server.server_close()
                 os.environ.pop("AMON_HOME", None)
+
+
+    def test_chat_stream_coerces_single_to_plan_execute(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("single-coerce-test")
+
+                handler = partial(
+                    AmonUIHandler,
+                    directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"),
+                    core=core,
+                )
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                plan_result = SimpleNamespace(run_id="run-plan", execution_route="planner", planner_enabled=True)
+
+                with patch("amon.ui_server.decide_execution_mode", return_value="single"), patch.object(
+                    core,
+                    "run_plan_execute_stream",
+                    return_value=(plan_result, "plan-response"),
+                ), patch.object(core, "run_single_stream") as mock_single_stream:
+                    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                    conn.request(
+                        "GET",
+                        f"/v1/chat/stream?project_id={quote(project.project_id)}&message={quote('做一個功能')}"
+                    )
+                    resp = conn.getresponse()
+                    self.assertEqual(resp.status, 200)
+
+                    done_payload = None
+                    event_type = ""
+                    for _ in range(220):
+                        raw_line = resp.fp.readline()
+                        if not raw_line:
+                            break
+                        decoded = raw_line.decode("utf-8", errors="ignore").strip()
+                        if decoded.startswith("event: "):
+                            event_type = decoded.split(":", 1)[1].strip()
+                        elif decoded.startswith("data: ") and event_type == "done":
+                            done_payload = json.loads(decoded.split(": ", 1)[1])
+                            break
+
+                self.assertFalse(mock_single_stream.called)
+                self.assertIsNotNone(done_payload)
+                self.assertEqual(done_payload.get("execution_mode"), "plan_execute")
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
 
 
 

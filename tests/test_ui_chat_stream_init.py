@@ -29,19 +29,24 @@ class UIChatStreamInitTests(unittest.TestCase):
                 project = core.create_project("stream-init")
                 long_message = "長訊息" * 1200
 
-                def fake_run_single_stream(
+                def fake_run_plan_execute_stream(
                     prompt,
                     project_path,
+                    project_id=None,
                     model=None,
+                    llm_client=None,
+                    available_tools=None,
+                    available_skills=None,
                     stream_handler=None,
-                    skill_names=None,
                     run_id=None,
+                    chat_id=None,
                     conversation_history=None,
+                    request_id=None,
                 ):
                     captured_prompts.append(prompt)
                     if stream_handler:
                         stream_handler("ok")
-                    return SimpleNamespace(run_id="run-stream-init"), "完成"
+                    return SimpleNamespace(run_id="run-stream-init", execution_route="planner", planner_enabled=True), "完成"
 
                 handler = partial(
                     AmonUIHandler,
@@ -66,8 +71,8 @@ class UIChatStreamInitTests(unittest.TestCase):
 
                 with patch("amon.ui_server.decide_execution_mode", return_value="single"), patch.object(
                     core,
-                    "run_single_stream",
-                    side_effect=fake_run_single_stream,
+                    "run_plan_execute_stream",
+                    side_effect=fake_run_plan_execute_stream,
                 ):
                     conn = HTTPConnection("127.0.0.1", port, timeout=5)
                     conn.request(
