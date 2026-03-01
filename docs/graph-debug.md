@@ -70,6 +70,17 @@
 
 ## 常見失敗排查
 
+### 分支對照（Graph 頁 UI 訊息）
+
+| 分支 | 觸發條件 | UI 文案 | 建議排查 |
+| --- | --- | --- | --- |
+| A | `graph_mermaid` 為空或缺失 | `此 Run 尚無流程圖資料` + `請先查看下方 graph-code 區塊是否有內容。` | 確認該 Run 是否真的有產生 graph payload；比對 graph-code 與後端回傳欄位。 |
+| B | `graph_mermaid` 有值，但 `window.__mermaid` 不存在/不可 render | `Mermaid 未載入（可能離線或資源被擋）` + `請嘗試重新整理頁面後再試一次。` | 檢查 CDN/網路阻擋、Console 與 Network 錯誤，並先重新整理。 |
+| C | `window.__mermaid.render(...)` throw error | `流程圖渲染失敗` + `錯誤摘要：<error.message>` | 驗證 mermaid 文法，從 Console 追蹤 parser/render error。 |
+| D | SVG 渲染成功但找不到 `g.node` 或無法綁定節點 | `流程圖已渲染但無法識別節點` + `可能是 Mermaid 版本差異，請比對 g.node 結構。` | 檢查 SVG 結構與 class 命名，確認 Mermaid 版本與 selector 相容性。 |
+
+> 設計重點：即使進入 B/C/D，Node 清單與 Node drawer 仍可操作，使用者可以先從清單點擊節點查看 detail。
+
 ### 1) CDN 被擋或離線，導致 `window.__mermaid` 不存在
 
 **症狀**
@@ -85,6 +96,7 @@
 **建議處置**
 - 驗收環境先將 `cdn.jsdelivr.net` 納入白名單。
 - 以同網段其他機器交叉確認是否為網路策略問題。
+- Graph UI 會顯示「Mermaid 未載入（可能離線或資源被擋）」並提供重新整理按鈕。
 
 ### 2) Mermaid `render` 丟錯（如何抓錯誤）
 
@@ -105,6 +117,14 @@
    ```
 4. 檢查輸入的 mermaid 文法（例如未閉合、錯誤箭頭語法、特殊字元未處理）。
 
+**快速重現（DoD 建議）**
+- 可在測試 payload 中提供非法語法：
+  ```text
+  flowchart TD
+  A-->
+  ```
+- 預期 Graph UI 顯示「流程圖渲染失敗」與錯誤摘要。
+
 ### 3) SVG 有出現但沒有 `g.node`（Mermaid 版本差異）
 
 **症狀**
@@ -119,6 +139,7 @@
 **處置方向**
 - 讓節點選擇器更具相容性（避免只綁 `g.node` 單一 class 假設）。
 - 升版 Mermaid 時同步更新回歸測試。
+- Graph UI 會保留已渲染 SVG，並在上方顯示「流程圖已渲染但無法識別節點」警示。
 
 ## `index.html` 載入策略（本地優先、CDN fallback）
 

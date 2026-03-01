@@ -372,6 +372,11 @@ export const GRAPH_VIEW = {
       }
     }
 
+    function summarizeRenderError(error) {
+      const rawMessage = error instanceof Error ? error.message : String(error || "unknown error");
+      return rawMessage.length > 220 ? `${rawMessage.slice(0, 220)}…` : rawMessage;
+    }
+
     function updateGraphNodeStatusDom(viewModel) {
       const nodesById = new Map((viewModel?.nodes || []).map((node) => [node.id, node]));
       listEl.querySelectorAll("[data-node-id]").forEach((buttonEl) => {
@@ -453,13 +458,16 @@ export const GRAPH_VIEW = {
       local.panZoom = null;
 
       const graphMermaid = String(viewModel.graphMermaid || "").trim();
+      // A) graph_mermaid 為空/缺失
       if (!graphMermaid) {
         renderGraphPreviewNotice({
           message: "此 Run 尚無流程圖資料",
           detail: "請先查看下方 graph-code 區塊是否有內容。",
         });
+      // B) graph_mermaid 有值，但 Mermaid library 未載入
       } else if (!window.__mermaid || typeof window.__mermaid.render !== "function") {
         logUiDebug("graph.mermaid-missing", {
+          scenario: "B",
           run_id: local.runId,
           has_graph_mermaid: true,
           mermaid_type: typeof window.__mermaid,
@@ -473,6 +481,7 @@ export const GRAPH_VIEW = {
         });
       } else {
         try {
+          // C) Mermaid render throw error
           const { svg } = await window.__mermaid.render(`graph-preview-${Date.now()}`, graphMermaid);
           previewEl.innerHTML = svg;
           const svgEl = previewEl.querySelector("svg");
@@ -480,8 +489,10 @@ export const GRAPH_VIEW = {
             local.panZoom = window.svgPanZoom(svgEl, { controlIconsEnabled: true, fit: true, center: true });
           }
           const { groupCount, boundCount } = bindMermaidNodeClick();
+          // D) 渲染成功但找不到可識別節點
           if (groupCount === 0 || boundCount === 0) {
             logUiDebug("graph.mermaid-node-structure-unexpected", {
+              scenario: "D",
               run_id: local.runId,
               group_count: groupCount,
               bound_count: boundCount,
@@ -499,8 +510,9 @@ export const GRAPH_VIEW = {
             });
           }
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error || "unknown error");
+          const errorMessage = summarizeRenderError(error);
           logUiDebug("graph.mermaid-render-failed", {
+            scenario: "C",
             run_id: local.runId,
             error_message: errorMessage,
           });
