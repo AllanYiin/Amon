@@ -66,7 +66,7 @@ export const CHAT_VIEW = {
       inputBar.setDisabled(false);
     };
 
-    const activateArtifactsTab = () => {
+    const activateArtifactsTab = ({ collapsed = false } = {}) => {
       const layoutState = store.getState().layout || {};
       const inspectorState = layoutState.inspector || {};
       store.patch({
@@ -75,7 +75,7 @@ export const CHAT_VIEW = {
           inspector: {
             ...inspectorState,
             activeTab: "artifacts",
-            collapsed: false,
+            collapsed,
           },
         },
       });
@@ -94,6 +94,7 @@ export const CHAT_VIEW = {
       artifactEvents.forEach((artifactEvent) => {
         if (artifactEvent.type === "artifact_open") {
           appState.inlineArtifactStreamingHint = `偵測到 inline artifact 串流中：${artifactEvent.filename}`;
+          activateArtifactsTab({ collapsed: false });
           renderInlineArtifactStreamingHint(elements, appState.inlineArtifactStreamingHint);
           return;
         }
@@ -144,7 +145,7 @@ export const CHAT_VIEW = {
         };
         appState.inlineArtifactStreamingHint = `已完成 inline artifact：${artifactEvent.filename}`;
 
-        activateArtifactsTab();
+        activateArtifactsTab({ collapsed: false });
         refreshInlineArtifactsUi();
         showInlineArtifactPreview(elements, {
           name: artifactEvent.filename,
@@ -242,6 +243,7 @@ export const CHAT_VIEW = {
       appState.inlineArtifacts = [];
       appState.inlineArtifactFiles = {};
       appState.inlineArtifactStreamingHint = "";
+      activateArtifactsTab({ collapsed: true });
       renderInlineArtifactStreamingHint(elements, "");
       ctx.chatDeps.resetPlanCard();
 
