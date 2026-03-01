@@ -39,6 +39,7 @@ from amon.config import ConfigLoader, resolve_system_prompt
 from amon.daemon.queue import get_queue_depth
 from amon.events import emit_event
 from amon.jobs.runner import start_job
+from amon.artifacts.store import ingest_artifacts
 from amon.observability import ensure_correlation_fields, normalize_project_id
 from amon.tooling.audit import default_audit_log_path
 from amon.tooling.types import ToolCall
@@ -2018,6 +2019,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 prompt_with_history = turn_bundle.prompt_with_history
 
                 streamed_token_count = 0
+                streamed_text_buffer: list[str] = []
                 active_run_id: str | None = None
 
                 def stream_handler(token: str) -> None:
@@ -2036,6 +2038,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         )
                         return
                     streamed_token_count += 1
+                    streamed_text_buffer.append(token)
                     send_event("token", {"text": token}, run_id=active_run_id)
                     append_event(
                         chat_id,
@@ -2130,6 +2133,29 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     "project_id": project_id,
                     "run_id": active_run_id or None,
                 }
+                streamed_response_text = "".join(streamed_text_buffer)
+                artifact_ingest_summary = None
+                if streamed_response_text and project_id:
+                    try:
+                        artifact_ingest_summary = ingest_artifacts(
+                            response_text=streamed_response_text,
+                            project_path=self.core.get_project_path(project_id),
+                            source={
+                                "run_id": active_run_id or "",
+                                "node_id": "chat_stream",
+                                "output_path": "",
+                            },
+                        )
+                    except Exception as ingest_error:  # noqa: BLE001
+                        log_event(
+                            {
+                                "level": "WARNING",
+                                "event": "ui_chat_stream_artifact_ingest_failed",
+                                "message": str(ingest_error),
+                                "project_id": normalize_project_id(project_id),
+                                "chat_id": chat_id or None,
+                            }
+                        )
                 append_event(chat_id, assistant_payload)
                 done_payload: dict[str, Any] = {
                     "status": "ok",
@@ -2144,6 +2170,9 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     route = getattr(plan_result, "execution_route", "planner")
                     done_payload["execution_route"] = route
                     done_payload["planner_enabled"] = bool(getattr(plan_result, "planner_enabled", True))
+                    phase_metrics = getattr(plan_result, "phase_metrics", None)
+                    if isinstance(phase_metrics, dict) and phase_metrics:
+                        done_payload["phase_metrics"] = phase_metrics
                     if route == "single_fallback":
                         done_payload["fallback_reason"] = str(getattr(plan_result, "fallback_reason", "planner disabled -> fallback single"))
                         done_payload["fallback_hint"] = str(getattr(plan_result, "fallback_hint", "請將 amon.planner.enabled 設為 true（可在設定頁切換）"))
@@ -2158,6 +2187,13 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         done_payload["artifacts"] = []
                 if streamed_token_count == 0 and response_text:
                     done_payload["final_text"] = response_text
+                if isinstance(artifact_ingest_summary, dict):
+                    done_payload["stream_ingest"] = {
+                        "total": int(artifact_ingest_summary.get("total", 0)),
+                        "created": int(artifact_ingest_summary.get("created", 0)),
+                        "updated": int(artifact_ingest_summary.get("updated", 0)),
+                        "errors": int(artifact_ingest_summary.get("errors", 0)),
+                    }
                 send_event("done", done_payload, run_id=active_run_id)
                 return
             send_event(

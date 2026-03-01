@@ -38,7 +38,7 @@ from .logging import log_billing, log_event
 from .logging_utils import setup_logger
 from .mcp_client import MCPClientError, MCPServerConfig, MCPStdioClient
 from .planning import compile_plan_to_exec_graph, dumps_plan, generate_plan_with_llm, render_todo_markdown
-from .models import ProviderError, build_provider, decode_reasoning_chunk
+from .models import ProviderError, build_provider, decode_reasoning_chunk, encode_reasoning_chunk
 from .project_registry import ProjectRegistry, load_project_config
 from .graph_runtime import GraphRunResult, GraphRuntime
 from .taskgraph2 import TaskGraphRuntime
@@ -1017,6 +1017,31 @@ class AmonCore:
         conversation_history: list[dict[str, str]] | None = None,
         request_id: str | None = None,
     ) -> tuple[GraphRunResult, str]:
+        def _emit_planning_progress(text: str) -> None:
+            if not callable(stream_handler):
+                return
+            stream_handler(encode_reasoning_chunk(text))
+
+        def _run_with_heartbeat(step_name: str, action, *, interval_s: float = 3.0):
+            if not callable(stream_handler):
+                return action()
+
+            done_event = threading.Event()
+            started_at = time.monotonic()
+
+            def _heartbeat() -> None:
+                while not done_event.wait(interval_s):
+                    elapsed_s = int(time.monotonic() - started_at)
+                    _emit_planning_progress(f"{step_name}，已等待 {elapsed_s} 秒…")
+
+            worker = threading.Thread(target=_heartbeat, daemon=True)
+            worker.start()
+            try:
+                return action()
+            finally:
+                done_event.set()
+                worker.join(timeout=0.2)
+
         config = self.load_config(project_path)
         planner_enabled = self._coerce_config_bool(config.get("amon", {}).get("planner", {}).get("enabled", True))
         if not planner_enabled:
@@ -1041,16 +1066,28 @@ class AmonCore:
                 }
             )
 
-        plan = self.generate_plan_docs(
-            prompt,
-            project_path=project_path,
-            project_id=project_id or project_path.name,
-            llm_client=llm_client,
-            model=model,
-            available_tools=available_tools,
-            available_skills=available_skills,
+        phase_metrics: dict[str, int] = {}
+
+        _emit_planning_progress("正在產生任務計畫…")
+        phase_started_at = time.monotonic()
+        plan = _run_with_heartbeat(
+            "任務計畫產生中",
+            lambda: self.generate_plan_docs(
+                prompt,
+                project_path=project_path,
+                project_id=project_id or project_path.name,
+                llm_client=llm_client,
+                model=model,
+                available_tools=available_tools,
+                available_skills=available_skills,
+            ),
         )
+        phase_metrics["plan_generation_ms"] = int((time.monotonic() - phase_started_at) * 1000)
+
+        _emit_planning_progress("任務計畫已產生，正在編譯執行圖…")
+        phase_started_at = time.monotonic()
         exec_graph = compile_plan_to_exec_graph(plan)
+        phase_metrics["compile_graph_ms"] = int((time.monotonic() - phase_started_at) * 1000)
         emit_event(
             {
                 "type": "plan_compiled",
@@ -1070,14 +1107,23 @@ class AmonCore:
             exec_graph.get("variables", {}),
             mode="plan_execute",
         )
-        result = self.run_graph(
-            project_path=project_path,
-            graph_path=graph_path,
-            stream_handler=stream_handler,
-            run_id=run_id,
-            chat_id=chat_id,
-            request_id=request_id,
+        _emit_planning_progress("執行圖編譯完成，開始執行任務…")
+        phase_started_at = time.monotonic()
+        result = _run_with_heartbeat(
+            "任務執行中",
+            lambda: self.run_graph(
+                project_path=project_path,
+                graph_path=graph_path,
+                stream_handler=stream_handler,
+                run_id=run_id,
+                chat_id=chat_id,
+                request_id=request_id,
+            ),
         )
+        phase_metrics["run_graph_ms"] = int((time.monotonic() - phase_started_at) * 1000)
+        _emit_planning_progress("任務已執行完成，正在整理結果…")
+        phase_metrics["total_ms"] = sum(phase_metrics.values())
+        setattr(result, "phase_metrics", phase_metrics)
         setattr(result, "execution_route", "planner")
         setattr(result, "planner_enabled", True)
         return result, self._load_graph_primary_output(result.run_dir)
