@@ -91,6 +91,18 @@ class UIShellSmokeTests(unittest.TestCase):
         self.assertIn("applyExecutionEvent", timeline_renderer_js)
         self.assertIn("renderAttachmentPreview", input_bar_js)
 
+
+    def test_artifact_panel_defaults_collapsed_and_expands_for_inline_named_blocks(self) -> None:
+        inspector_js = Path("src/amon/ui/static/js/layout/inspector.js").read_text(encoding="utf-8")
+        chat_js = Path("src/amon/ui/static/js/views/chat.js").read_text(encoding="utf-8")
+
+        self.assertIn('const hasStoredCollapse = readStorage(storageKeys.contextCollapsed);', inspector_js)
+        self.assertIn('const collapsed = hasStoredCollapse == null ? true : hasStoredCollapse === "1";', inspector_js)
+        self.assertIn('activateArtifactsTab({ collapsed: true });', chat_js)
+        self.assertIn('// 聊天頁預設維持右側收合，僅在偵測到具檔名 inline artifact 時展開', chat_js)
+        self.assertIn('if (artifactEvent.type === "artifact_open") {', chat_js)
+        self.assertIn('activateArtifactsTab({ collapsed: false });', chat_js)
+
     def test_styles_force_hidden_attribute_to_behave_like_tabs(self) -> None:
         css = Path("src/amon/ui/styles.css").read_text(encoding="utf-8")
         self.assertIn("[hidden]", css)
