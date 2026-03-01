@@ -15,20 +15,9 @@
     <script src="static/vendor/chart.js/chart.umd.min.js"></script>
     <script>
       (function ensureSvgPanZoom() {
-        if (window.svgPanZoom) {
-          return;
+        if (!window.svgPanZoom) {
+          console.error("[ui] svg-pan-zoom local vendor script is unavailable.");
         }
-        var fallback = document.createElement("script");
-        fallback.src = "https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js";
-        fallback.onload = function () {
-          if (!window.svgPanZoom) {
-            console.error("[ui] svg-pan-zoom fallback loaded but window.svgPanZoom is still unavailable.");
-          }
-        };
-        fallback.onerror = function () {
-          console.error("[ui] Failed to load svg-pan-zoom from local vendor and CDN fallback.");
-        };
-        document.head.appendChild(fallback);
       })();
     </script>
     <script>
@@ -46,17 +35,7 @@
           return;
         }
 
-        var fallback = document.createElement("script");
-        fallback.src = "https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js";
-        fallback.onload = function () {
-          if (!configureMermaid(window.mermaid)) {
-            console.error("[ui] Mermaid fallback loaded but window.mermaid is still unavailable.");
-          }
-        };
-        fallback.onerror = function () {
-          console.error("[ui] Failed to load Mermaid from local vendor and CDN fallback.");
-        };
-        document.head.appendChild(fallback);
+        console.error("[ui] Mermaid local vendor script is unavailable.");
       })();
     </script>
   </head>

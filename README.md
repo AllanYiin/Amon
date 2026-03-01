@@ -168,7 +168,7 @@ print("hello")
 ## 測試
 
 ```bash
-# Smoke tests（index.html vendor 依賴與 Graph Mermaid 缺失分支）
+# Smoke tests（index.html 不得回退 jsdelivr + Graph Mermaid 缺失分支）
 python -m unittest tests.test_ui_graph_frontend_smoke
 ```
 
