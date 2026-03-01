@@ -1282,6 +1282,7 @@ class UIAsyncAPITests(unittest.TestCase):
                     run_id="run-plan-fallback",
                     execution_route="planner",
                     planner_enabled=True,
+                    phase_metrics={"plan_generation_ms": 11, "compile_graph_ms": 7, "run_graph_ms": 29, "total_ms": 47},
                 )
 
                 with patch("amon.ui_server.decide_execution_mode", return_value="plan_execute"), patch.object(
@@ -1320,6 +1321,84 @@ class UIAsyncAPITests(unittest.TestCase):
                 self.assertEqual(done_payload.get("execution_mode"), "plan_execute")
                 self.assertEqual(done_payload.get("execution_route"), "planner")
                 self.assertTrue(done_payload.get("planner_enabled"))
+                self.assertEqual(done_payload.get("phase_metrics", {}).get("total_ms"), 47)
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
+    def test_chat_stream_ingests_streamed_filename_artifact_to_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("stream-ingest-artifact")
+
+                handler = partial(
+                    AmonUIHandler,
+                    directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"),
+                    core=core,
+                )
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                def fake_plan_execute_stream(
+                    prompt,
+                    project_path,
+                    project_id=None,
+                    model=None,
+                    llm_client=None,
+                    available_tools=None,
+                    available_skills=None,
+                    stream_handler=None,
+                    run_id=None,
+                    chat_id=None,
+                    conversation_history=None,
+                    request_id=None,
+                ):
+                    if stream_handler:
+                        stream_handler("```html filename=workspace/index.html\n")
+                        stream_handler("<html><body>stream save</body></html>\n")
+                        stream_handler("```\n")
+                    return SimpleNamespace(run_id="run-stream-art", execution_route="planner", planner_enabled=True), "完成"
+
+                with patch("amon.ui_server.decide_execution_mode", return_value="plan_execute"), patch.object(
+                    core,
+                    "run_plan_execute_stream",
+                    side_effect=fake_plan_execute_stream,
+                ):
+                    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                    conn.request(
+                        "GET",
+                        f"/v1/chat/stream?project_id={quote(project.project_id)}&message={quote('建立html檔案')}"
+                    )
+                    resp = conn.getresponse()
+                    self.assertEqual(resp.status, 200)
+
+                    done_payload = None
+                    event_type = ""
+                    for _ in range(220):
+                        raw_line = resp.fp.readline()
+                        if not raw_line:
+                            break
+                        decoded = raw_line.decode("utf-8", errors="ignore").strip()
+                        if decoded.startswith("event: "):
+                            event_type = decoded.split(":", 1)[1].strip()
+                        elif decoded.startswith("data: ") and event_type == "done":
+                            done_payload = json.loads(decoded.split(": ", 1)[1])
+                            break
+
+                self.assertIsNotNone(done_payload)
+                self.assertEqual(done_payload.get("stream_ingest", {}).get("created"), 1)
+                saved_path = Path(project.path) / "workspace" / "index.html"
+                self.assertTrue(saved_path.exists())
+                self.assertIn("stream save", saved_path.read_text(encoding="utf-8"))
             finally:
                 if server:
                     server.shutdown()

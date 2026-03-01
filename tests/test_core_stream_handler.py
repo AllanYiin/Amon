@@ -10,6 +10,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from amon.core import AmonCore
+from amon.models import decode_reasoning_chunk
 
 
 class CoreStreamHandlerTests(unittest.TestCase):
@@ -152,6 +153,40 @@ class CoreStreamHandlerTests(unittest.TestCase):
                 self.assertTrue(mock_compile.called)
                 self.assertEqual(getattr(result, "execution_route", ""), "planner")
                 self.assertTrue(getattr(result, "planner_enabled", False))
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+    def test_run_plan_execute_stream_emits_planning_progress_reasoning_chunks(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("plan-exec-progress")
+                project_path = Path(project.path)
+                fake_result = SimpleNamespace(run_id="run-plan", run_dir=project_path / ".amon" / "runs" / "run-plan")
+                streamed_tokens: list[str] = []
+
+                with patch.object(core, "generate_plan_docs") as mock_generate, patch(
+                    "amon.core.compile_plan_to_exec_graph", return_value={"nodes": [], "edges": [], "variables": {}}
+                ) as mock_compile, patch.object(core, "run_graph", return_value=fake_result), patch.object(
+                    core, "_load_graph_primary_output", return_value="plan response"
+                ):
+                    core.run_plan_execute_stream(
+                        "請完成任務",
+                        project_path=project_path,
+                        project_id=project.project_id,
+                        stream_handler=streamed_tokens.append,
+                    )
+
+                self.assertTrue(mock_generate.called)
+                self.assertTrue(mock_compile.called)
+                reasoning_chunks = [decode_reasoning_chunk(token)[1] for token in streamed_tokens if decode_reasoning_chunk(token)[0]]
+                self.assertGreaterEqual(len(reasoning_chunks), 4)
+                self.assertIn("正在產生任務計畫…", reasoning_chunks)
+                self.assertIn("任務計畫已產生，正在編譯執行圖…", reasoning_chunks)
+                self.assertIn("執行圖編譯完成，開始執行任務…", reasoning_chunks)
+                self.assertIn("任務已執行完成，正在整理結果…", reasoning_chunks)
             finally:
                 os.environ.pop("AMON_HOME", None)
 
