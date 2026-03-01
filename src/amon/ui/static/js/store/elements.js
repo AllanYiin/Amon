@@ -42,6 +42,7 @@ export function collectElements(doc = document) {
     inspectorTabList: doc.querySelector(".inspector-tabs"),
     inspectorTabButtons: doc.querySelectorAll("[data-inspector-tab]"),
     streamProgress: doc.getElementById("stream-progress"),
+    chatStreamStatus: doc.getElementById("chat-stream-status"),
     chatLayout: doc.getElementById("chat-layout"),
     contextPage: doc.getElementById("context-page"),
     graphPage: doc.getElementById("graph-page"),
