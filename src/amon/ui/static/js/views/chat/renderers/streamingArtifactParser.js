@@ -93,30 +93,18 @@ export function createStreamingArtifactParser() {
 
       return events;
     },
-    finalize() {
+    finalizeClosedArtifacts() {
       const events = [];
-      if (!activeArtifact) {
-        pendingLine = "";
-        return events;
-      }
-
-      if (pendingLine) {
+      if (!pendingLine) return events;
+      if (activeArtifact) {
         activeArtifact.content += pendingLine;
         events.push({
           type: "artifact_chunk",
           filename: activeArtifact.filename,
           appendedText: pendingLine,
         });
-        pendingLine = "";
       }
-
-      events.push({
-        type: "artifact_complete",
-        filename: activeArtifact.filename,
-        language: activeArtifact.language,
-        content: activeArtifact.content,
-      });
-      activeArtifact = null;
+      pendingLine = "";
       return events;
     },
     reset() {

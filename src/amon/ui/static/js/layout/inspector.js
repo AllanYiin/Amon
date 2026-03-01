@@ -1,7 +1,7 @@
 import { createSplitPane } from "./splitPane.js";
 import { t } from "../i18n.js";
 
-const INSPECTOR_TAB_IDS = ["thinking", "artifacts", "execution"];
+const INSPECTOR_TAB_IDS = ["artifacts", "execution", "thinking"];
 
 export function createInspectorLayout({ elements, store, storage, storageKeys }) {
   const { readStorage, writeStorage } = storage;
@@ -14,7 +14,7 @@ export function createInspectorLayout({ elements, store, storage, storageKeys })
   }
 
   function normalizeActiveTab(tab) {
-    return INSPECTOR_TAB_IDS.includes(tab) ? tab : "thinking";
+    return INSPECTOR_TAB_IDS.includes(tab) ? tab : "artifacts";
   }
 
   function applyInspectorTabs(activeTab) {
@@ -83,7 +83,7 @@ export function createInspectorLayout({ elements, store, storage, storageKeys })
     const collapsed = readStorage(storageKeys.contextCollapsed) === "1";
     const storedWidth = Number(readStorage(storageKeys.contextWidth));
     const width = Number.isFinite(storedWidth) && storedWidth > 0 ? storedWidth : 320;
-    updateInspector({ collapsed, width, activeTab: "thinking" });
+    updateInspector({ collapsed, width, activeTab: "artifacts" });
 
     const unsubscribe = store.subscribe(render);
     render(store.getState());
