@@ -91,6 +91,39 @@ class TaskGraph2RuntimeBasicTests(unittest.TestCase):
             self.assertIn("[session:topic]", fake_llm.calls[0][-1]["content"])
             self.assertIn("[session:draft]", fake_llm.calls[1][-1]["content"])
 
+
+    def test_runtime_persists_named_artifact_under_allowed_prefix(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_path = Path(tmp)
+            graph = TaskGraph(
+                schema_version="2.0",
+                objective="寫入 TODO",
+                session_defaults={},
+                nodes=[
+                    TaskNode(
+                        id="N_TODO",
+                        title="todo",
+                        kind="task",
+                        description="產生 todo",
+                        writes={"todo_markdown": "docs/TODO.md"},
+                    )
+                ],
+                edges=[],
+            )
+            fake_llm = FakeLLMClient(["專案經理：\n- [ ] 任務A"])
+
+            runtime = TaskGraphRuntime(
+                project_path=project_path,
+                graph=graph,
+                llm_client=fake_llm,
+                run_id="run_tg2_todo",
+            )
+            runtime.run()
+
+            todo_path = project_path / "docs" / "TODO.md"
+            self.assertTrue(todo_path.exists())
+            self.assertIn("任務A", todo_path.read_text(encoding="utf-8"))
+
     def test_runtime_executes_allowed_tool_and_stores_session_value(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_path = Path(tmp)

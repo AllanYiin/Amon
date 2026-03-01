@@ -21,7 +21,6 @@ class TeamWorkflowContractTests(unittest.TestCase):
         self.assertIn("專案經理：", nodes["pm_todo"]["prompt"])
         self.assertIn("pm_log_bootstrap", nodes)
         self.assertEqual(nodes["pm_log_bootstrap"]["output_path"], "docs/ProjectManager.md")
-
         task_map = nodes["tasks_map"]
         sub_nodes = {node["id"]: node for node in task_map["subgraph"]["nodes"]}
         self.assertIn("role_factory_request", sub_nodes)

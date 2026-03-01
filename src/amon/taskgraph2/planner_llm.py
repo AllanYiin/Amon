@@ -7,7 +7,7 @@ import logging
 from typing import Any
 
 from .llm import TaskGraphLLMClient, build_default_llm_client
-from .schema import TaskGraph, validate_task_graph
+from .schema import TaskEdge, TaskGraph, TaskNode, TaskNodeOutput, validate_task_graph
 from .serialize import loads_task_graph
 
 logger = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ def generate_taskgraph2_with_llm(
     final_raw = _tool_librarian_pass(client, model, advisor_raw=advisor_raw, available_tools=tools)
 
     try:
-        return _parse_and_validate(final_raw)
+        graph = _parse_and_validate(final_raw)
     except ValueError as exc:
         repaired_raw = _repair_pass(
             client,
@@ -50,7 +50,53 @@ def generate_taskgraph2_with_llm(
             available_tools=tools,
             available_skills=skills,
         )
-        return _parse_and_validate(repaired_raw)
+        graph = _parse_and_validate(repaired_raw)
+
+    return _ensure_todo_bootstrap_contract(graph)
+
+
+def _ensure_todo_bootstrap_contract(graph: TaskGraph) -> TaskGraph:
+    """Ensure TaskGraph2 starts from TODO generation and downstream nodes can depend on it."""
+    todo_node = next((node for node in graph.nodes if "todo_markdown" in node.writes), None)
+    if todo_node is None:
+        existing_ids = {node.id for node in graph.nodes}
+        todo_id = "N_TODO"
+        suffix = 1
+        while todo_id in existing_ids:
+            suffix += 1
+            todo_id = f"N_TODO_{suffix}"
+        todo_node = TaskNode(
+            id=todo_id,
+            title="產生 TODO 清單",
+            kind="task",
+            description=(
+                "你是專案經理。請先輸出 TODO list，拆解任務並標記初始狀態都為 [ ]。"
+                "請使用繁體中文 markdown，第一行必須是『專案經理：』。"
+            ),
+            role="專案經理",
+            writes={"todo_markdown": "docs/TODO.md"},
+            output=TaskNodeOutput(type="md", extract="best_effort"),
+        )
+        graph.nodes.insert(0, todo_node)
+
+    outgoing = {edge.to_node for edge in graph.edges if edge.from_node == todo_node.id}
+    incoming_count = {node.id: 0 for node in graph.nodes}
+    for edge in graph.edges:
+        incoming_count[edge.to_node] = incoming_count.get(edge.to_node, 0) + 1
+
+    for node in graph.nodes:
+        if node.id == todo_node.id:
+            continue
+        if incoming_count.get(node.id, 0) == 0 and node.id not in outgoing:
+            graph.edges.append(TaskEdge(from_node=todo_node.id, to_node=node.id))
+        if node.id != todo_node.id and "todo_markdown" not in node.reads:
+            if incoming_count.get(node.id, 0) == 0 or any(
+                edge.from_node == todo_node.id and edge.to_node == node.id for edge in graph.edges
+            ):
+                node.reads.append("todo_markdown")
+
+    validate_task_graph(graph)
+    return graph
 
 
 def _planner_pass(
@@ -209,6 +255,8 @@ def _planner_system_prompt() -> str:
         "你是 Planner2。"
         "你只能輸出符合 TaskGraph 2.0 schema 的單一 JSON object，不得輸出 markdown/code fence/說明。"
         "務必使用 schema_version=2.0，並讓圖為 DAG。"
+        "必須先有一個 TODO bootstrap 節點，寫入 writes.todo_markdown='docs/TODO.md'。"
+        "其餘執行節點必須在執行圖上依賴該 TODO 節點，且可透過 reads 讀取 todo_markdown。"
     )
 
 

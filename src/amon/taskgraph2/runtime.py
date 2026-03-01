@@ -162,9 +162,14 @@ class TaskGraphRuntime:
                     self._append_event(events_path, {"event": "run_failed", "run_id": run_id, "error": str(exc)})
                     raise
 
-                for key in node.writes:
+                for key, artifact_path in node.writes.items():
                     if key not in state["session"]:
                         state["session"][key] = output_text
+                    _persist_named_artifact(
+                        project_path=self.project_path,
+                        artifact_path=artifact_path,
+                        content=output_text,
+                    )
                 state["variables"] = dict(state["session"])
 
                 node_state["status"] = "completed"
@@ -386,6 +391,16 @@ class TaskGraphRuntime:
             self.cancel_event.set()
             return True
         return False
+
+
+def _persist_named_artifact(*, project_path: Path, artifact_path: str, content: str) -> None:
+    path = str(artifact_path or "").strip()
+    if not path or not path.startswith(_ALLOWED_OUTPUT_PREFIXES):
+        return
+    validate_relative_path(path)
+    resolved = project_path / path
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(resolved, content, encoding="utf-8")
 
 
 def _build_graph(nodes: list[TaskNode], edges: list[TaskEdge]) -> tuple[dict[str, list[TaskEdge]], dict[str, int]]:
