@@ -27,6 +27,8 @@ DEFAULT_ALLOW = (
     "filesystem.grep",
     "memory.get",
     "memory.search",
+    "artifacts.write_text",
+    "artifacts.write_file",
 )
 DEFAULT_ASK = (
     "filesystem.write",
@@ -44,8 +46,6 @@ DEFAULT_ASK = (
     "memory.delete",
     "web.fetch",
     "web.search",
-    "artifacts.write_text",
-    "artifacts.write_file",
     "audit.export",
 )
 DEFAULT_DENY: tuple[str, ...] = ()

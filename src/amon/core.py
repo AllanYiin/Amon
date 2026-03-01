@@ -1021,43 +1021,25 @@ class AmonCore:
         planner_enabled = self._coerce_config_bool(config.get("amon", {}).get("planner", {}).get("enabled", True))
         if not planner_enabled:
             project_identity = project_id or self.resolve_project_identity(project_path)[0]
-            fallback_reason = "planner disabled -> fallback single"
-            hint = "請將 amon.planner.enabled 設為 true（可在設定頁切換）"
-            self.logger.warning("%s（project_id=%s）", fallback_reason, project_identity)
+            self.logger.warning("planner 設定為 disabled，但 task graph v2 已強制啟用（project_id=%s）", project_identity)
             log_event(
                 {
                     "level": "WARNING",
-                    "event": "plan_execute_fallback_single",
+                    "event": "plan_execute_force_enable_planner",
                     "project_id": project_identity,
-                    "reason": fallback_reason,
-                    "hint": hint,
+                    "reason": "planner disabled in config but ignored by task graph v2",
                 }
             )
             emit_event(
                 {
-                    "type": "plan_execute_fallback",
+                    "type": "plan_execute_force_enable_planner",
                     "scope": "planning",
                     "project_id": project_identity,
                     "actor": "system",
-                    "payload": {"reason": fallback_reason, "hint": hint},
+                    "payload": {"reason": "planner disabled in config but ignored by task graph v2"},
                     "risk": "low",
                 }
             )
-            result, response = self.run_single_stream(
-                prompt,
-                project_path=project_path,
-                model=model,
-                stream_handler=stream_handler,
-                run_id=run_id,
-                conversation_history=conversation_history,
-                chat_id=chat_id,
-                request_id=request_id,
-            )
-            setattr(result, "execution_route", "single_fallback")
-            setattr(result, "planner_enabled", False)
-            setattr(result, "fallback_reason", fallback_reason)
-            setattr(result, "fallback_hint", hint)
-            return result, response
 
         plan = self.generate_plan_docs(
             prompt,
@@ -1096,6 +1078,8 @@ class AmonCore:
             chat_id=chat_id,
             request_id=request_id,
         )
+        setattr(result, "execution_route", "planner")
+        setattr(result, "planner_enabled", True)
         return result, self._load_graph_primary_output(result.run_dir)
 
     def run_plan_execute(
@@ -1113,7 +1097,7 @@ class AmonCore:
         config = self.load_config(project_path)
         planner_enabled = self._coerce_config_bool(config.get("amon", {}).get("planner", {}).get("enabled", True))
         if not planner_enabled:
-            self.logger.warning("planner disabled -> fallback single（非串流 plan_execute）")
+            self.logger.warning("planner 設定為 disabled，但 plan_execute 仍會強制走 task graph v2")
 
         _, response = self.run_plan_execute_stream(
             prompt,

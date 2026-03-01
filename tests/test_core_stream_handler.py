@@ -121,7 +121,7 @@ class CoreStreamHandlerTests(unittest.TestCase):
             finally:
                 os.environ.pop("AMON_HOME", None)
 
-    def test_run_plan_execute_stream_uses_single_stream_when_planner_disabled(self) -> None:
+    def test_run_plan_execute_stream_ignores_disabled_and_keeps_planner_route(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir
             try:
@@ -130,9 +130,13 @@ class CoreStreamHandlerTests(unittest.TestCase):
                 project = core.create_project("plan-exec-fallback")
                 project_path = Path(project.path)
                 core.set_config_value("amon.planner.enabled", False, project_path=project_path)
-                fake_result = SimpleNamespace(run_id="run-fallback", run_dir=project_path / ".amon" / "runs" / "run-fallback")
+                fake_result = SimpleNamespace(run_id="run-plan", run_dir=project_path / ".amon" / "runs" / "run-plan")
 
-                with patch.object(core, "run_single_stream", return_value=(fake_result, "fallback response")) as mock_single_stream:
+                with patch.object(core, "generate_plan_docs") as mock_generate, patch(
+                    "amon.core.compile_plan_to_exec_graph", return_value={"nodes": [], "edges": [], "variables": {}}
+                ) as mock_compile, patch.object(core, "run_graph", return_value=fake_result), patch.object(
+                    core, "_load_graph_primary_output", return_value="plan response"
+                ):
                     result, response = core.run_plan_execute_stream(
                         "請完成任務",
                         project_path=project_path,
@@ -142,12 +146,12 @@ class CoreStreamHandlerTests(unittest.TestCase):
                         conversation_history=[{"role": "user", "content": "歷史"}],
                     )
 
-                self.assertEqual(result.run_id, "run-fallback")
-                self.assertEqual(response, "fallback response")
-                self.assertEqual(mock_single_stream.call_args.kwargs.get("run_id"), "run-from-ui")
-                self.assertEqual(getattr(result, "execution_route", ""), "single_fallback")
-                self.assertFalse(getattr(result, "planner_enabled", True))
-                self.assertIn("fallback single", str(getattr(result, "fallback_reason", "")))
+                self.assertEqual(result.run_id, "run-plan")
+                self.assertEqual(response, "plan response")
+                self.assertTrue(mock_generate.called)
+                self.assertTrue(mock_compile.called)
+                self.assertEqual(getattr(result, "execution_route", ""), "planner")
+                self.assertTrue(getattr(result, "planner_enabled", False))
             finally:
                 os.environ.pop("AMON_HOME", None)
 

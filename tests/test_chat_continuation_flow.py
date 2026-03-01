@@ -31,14 +31,19 @@ class ChatContinuationFlowTests(unittest.TestCase):
                 run_calls: list[tuple[str | None, list[dict[str, str]] | None]] = []
                 call_count = 0
 
-                def fake_run_single_stream(
+                def fake_run_plan_execute_stream(
                     prompt,
                     project_path,
+                    project_id=None,
                     model=None,
+                    llm_client=None,
+                    available_tools=None,
+                    available_skills=None,
                     stream_handler=None,
-                    skill_names=None,
                     run_id=None,
+                    chat_id=None,
                     conversation_history=None,
+                    request_id=None,
                 ):
                     nonlocal call_count
                     call_count += 1
@@ -46,7 +51,7 @@ class ChatContinuationFlowTests(unittest.TestCase):
                     if stream_handler:
                         stream_handler("tok")
                     reply = "先選前端或後端" if call_count == 1 else "收到，延續剛剛的任務。"
-                    return SimpleNamespace(run_id=run_id or "run-keep"), reply
+                    return SimpleNamespace(run_id=run_id or "run-keep", execution_route="planner", planner_enabled=True), reply
 
                 handler = partial(
                     AmonUIHandler,
@@ -59,7 +64,7 @@ class ChatContinuationFlowTests(unittest.TestCase):
 
                 with patch("amon.ui_server.decide_execution_mode", return_value="single"), patch(
                     "amon.ui_server.should_continue_run_with_llm", return_value=True
-                ), patch.object(core, "run_single_stream", side_effect=fake_run_single_stream):
+                ), patch.object(core, "run_plan_execute_stream", side_effect=fake_run_plan_execute_stream):
                     conn1 = HTTPConnection("127.0.0.1", port, timeout=5)
                     conn1.request(
                         "GET",
