@@ -165,6 +165,13 @@ print("hello")
 * 新增 Hooks/Schedules/Jobs 與 daemon 常駐服務，支援事件觸發、排程與背景工作。
 * 新增檔案安全操作、專案匯出、系統診斷與內建評測指令。
 
+## 測試
+
+```bash
+# Smoke tests（index.html vendor 依賴與 Graph Mermaid 缺失分支）
+python -m unittest tests.test_ui_graph_frontend_smoke
+```
+
 ## 外部 Sandbox Runner 整合（shared runner）
 
 詳細維運文件請見：`docs/sandbox_runner.md`（包含 threat model、限制清單、rootless 建議路徑、docker-compose 風險與錯誤排除）。
