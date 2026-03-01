@@ -9,17 +9,13 @@ from pathlib import Path
 
 
 class IndexHtmlVendorSmokeTests(unittest.TestCase):
-    def test_mermaid_and_svg_pan_zoom_prefer_local_vendor_assets(self) -> None:
+    def test_mermaid_and_svg_pan_zoom_use_local_vendor_assets_without_jsdelivr(self) -> None:
         index_html = Path("src/amon/ui/index.html").read_text(encoding="utf-8")
 
         self.assertIn('src="static/vendor/mermaid/mermaid.min.js"', index_html)
         self.assertIn('src="static/vendor/svg-pan-zoom/svg-pan-zoom.min.js"', index_html)
-
-        local_mermaid_pos = index_html.find('src="static/vendor/mermaid/mermaid.min.js"')
-        fallback_mermaid_pos = index_html.find("cdn.jsdelivr.net/npm/mermaid")
-        self.assertNotEqual(local_mermaid_pos, -1)
-        self.assertNotEqual(fallback_mermaid_pos, -1)
-        self.assertLess(local_mermaid_pos, fallback_mermaid_pos)
+        self.assertNotIn("cdn.jsdelivr.net/npm/mermaid", index_html)
+        self.assertNotIn("cdn.jsdelivr.net/npm/svg-pan-zoom", index_html)
 
 
 @unittest.skipIf(shutil.which("node") is None, "node is required for graph frontend smoke tests")
