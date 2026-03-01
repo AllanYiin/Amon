@@ -110,7 +110,7 @@
 
 1. 開啟 DevTools → Network，勾選 `Disable cache` 後重新整理頁面。
 2. 在過濾器輸入 `jsdelivr`。
-3. 預期：**不應看到** `mermaid` 與 `svg-pan-zoom` 對 `cdn.jsdelivr.net` 的請求。
+3. 預期：**不應看到** `mermaid`、`svg-pan-zoom`、`dompurify`、`marked`、`highlight.js`、`chart.js` 對 `cdn.jsdelivr.net` 的請求。
    - 若有 CDN 請求，代表本地 vendor 載入失敗，應回到 Console 檢查 `console.error` 訊息。
 4. 在 Console 驗證：
    ```js
@@ -131,6 +131,21 @@
 - `src/amon/ui/static/vendor/svg-pan-zoom/svg-pan-zoom.min.js`
   - 來源：原本 UI 使用的本地 vendor（對應既有 CDN 版本 `3.6.1`）
   - 版本：`3.6.1`
+- `src/amon/ui/static/vendor/dompurify/purify.min.js`
+  - 來源：`npm pack dompurify@3.1.6` 後取 `dist/purify.min.js`
+  - 版本：`3.1.6`
+- `src/amon/ui/static/vendor/marked/marked.min.js`
+  - 來源：`npm pack marked@12.0.2` 後取 `marked.min.js`
+  - 版本：`12.0.2`
+- `src/amon/ui/static/vendor/highlight.js/highlight.min.js`
+  - 來源：`npm pack @highlightjs/cdn-assets@11.10.0` 後取 `highlight.min.js`
+  - 版本：`11.10.0`
+- `src/amon/ui/static/vendor/highlight.js/github.min.css`
+  - 來源：`npm pack @highlightjs/cdn-assets@11.10.0` 後取 `styles/github.min.css`
+  - 版本：`11.10.0`
+- `src/amon/ui/static/vendor/chart.js/chart.umd.min.js`
+  - 來源：`npm pack chart.js@4.4.3` 後取 `dist/chart.umd.js`（以本地檔名 `chart.umd.min.js` 使用）
+  - 版本：`4.4.3`
 
 ## `index.html` 以 CDN 載入 Mermaid / svg-pan-zoom 的風險與修正方向
 
