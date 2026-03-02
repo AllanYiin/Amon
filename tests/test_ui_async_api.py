@@ -892,6 +892,82 @@ class UIAsyncAPITests(unittest.TestCase):
                 os.environ.pop("AMON_HOME", None)
 
 
+
+    def test_project_context_prefers_chat_run_id_when_chat_id_provided(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("context-chat-run-test")
+                project_path = Path(project.path)
+
+                chat_dir = project_path / "sessions" / "chat"
+                chat_dir.mkdir(parents=True, exist_ok=True)
+                (chat_dir / "chat-older.jsonl").write_text(
+                    "\n".join(
+                        [
+                            json.dumps({"type": "user", "text": "先前需求", "run_id": "run-old"}, ensure_ascii=False),
+                            json.dumps({"type": "assistant", "text": "處理完成", "run_id": "run-old"}, ensure_ascii=False),
+                        ]
+                    ),
+                    encoding="utf-8",
+                )
+
+                run_old = project_path / ".amon" / "runs" / "run-old"
+                run_old.mkdir(parents=True, exist_ok=True)
+                (run_old / "events.jsonl").write_text(
+                    json.dumps({"event": "run_complete", "run_id": "run-old"}, ensure_ascii=False) + "\n",
+                    encoding="utf-8",
+                )
+                (run_old / "graph.resolved.json").write_text(
+                    json.dumps({"nodes": [{"id": "OLD"}], "edges": []}, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+
+                run_new = project_path / ".amon" / "runs" / "run-new"
+                run_new.mkdir(parents=True, exist_ok=True)
+                (run_new / "events.jsonl").write_text(
+                    json.dumps({"event": "run_complete", "run_id": "run-new"}, ensure_ascii=False) + "\n",
+                    encoding="utf-8",
+                )
+                (run_new / "graph.resolved.json").write_text(
+                    json.dumps({"nodes": [{"id": "NEW"}], "edges": []}, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+                os.utime(run_new, None)
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port)
+                encoded_project = quote(project.project_id)
+                conn.request("GET", f"/v1/projects/{encoded_project}/context")
+                latest_response = conn.getresponse()
+                latest_payload = json.loads(latest_response.read().decode("utf-8"))
+
+                conn.request("GET", f"/v1/projects/{encoded_project}/context?chat_id=chat-older")
+                scoped_response = conn.getresponse()
+                scoped_payload = json.loads(scoped_response.read().decode("utf-8"))
+
+                self.assertEqual(latest_response.status, 200)
+                self.assertEqual(scoped_response.status, 200)
+                self.assertEqual(scoped_payload.get("run_id"), "run-old")
+                self.assertNotEqual(latest_payload.get("run_id"), "")
+                self.assertEqual(scoped_payload.get("chat_id"), "chat-older")
+                self.assertEqual(scoped_payload.get("graph", {}).get("nodes", [])[0].get("id"), "OLD")
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
+
     def test_project_chat_history_prefers_latest_non_empty_session(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"
@@ -944,6 +1020,64 @@ class UIAsyncAPITests(unittest.TestCase):
                 os.environ.pop("AMON_HOME", None)
 
 
+
+
+    def test_project_chat_history_writes_and_invalidates_message_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("chat-history-cache-test")
+                project_path = Path(project.path)
+                sessions_dir = project_path / "sessions" / "chat"
+                sessions_dir.mkdir(parents=True, exist_ok=True)
+
+                session_path = sessions_dir / "chat-cache.jsonl"
+                session_path.write_text(
+                    "\n".join(
+                        [
+                            json.dumps({"type": "user", "text": "第一句", "ts": "2026-01-01T10:00:00Z"}, ensure_ascii=False),
+                            json.dumps({"type": "assistant", "text": "第一句回覆", "ts": "2026-01-01T10:00:01Z"}, ensure_ascii=False),
+                        ]
+                    ),
+                    encoding="utf-8",
+                )
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port)
+                encoded_project = quote(project.project_id)
+
+                conn.request("GET", f"/v1/projects/{encoded_project}/chat-history?chat_id=chat-cache")
+                first_response = conn.getresponse()
+                first_payload = json.loads(first_response.read().decode("utf-8"))
+                self.assertEqual(first_response.status, 200)
+                self.assertEqual(len(first_payload.get("messages", [])), 2)
+
+                cache_path = project_path / ".amon" / "context" / "chat_messages" / "chat-cache.json"
+                self.assertTrue(cache_path.exists())
+
+                with session_path.open("a", encoding="utf-8") as handle:
+                    handle.write("\n" + json.dumps({"type": "user", "text": "第二句", "ts": "2026-01-01T10:00:02Z"}, ensure_ascii=False))
+
+                conn.request("GET", f"/v1/projects/{encoded_project}/chat-history?chat_id=chat-cache")
+                second_response = conn.getresponse()
+                second_payload = json.loads(second_response.read().decode("utf-8"))
+                self.assertEqual(second_response.status, 200)
+                self.assertEqual(len(second_payload.get("messages", [])), 3)
+                self.assertEqual(second_payload["messages"][-1]["text"], "第二句")
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
 
 
     def test_project_context_stats_reads_persisted_project_context(self) -> None:

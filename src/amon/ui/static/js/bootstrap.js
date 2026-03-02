@@ -1451,7 +1451,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
           showToast("請先選擇專案。");
           return;
         }
-        const payload = await services.context.getContext(state.projectId);
+        const payload = await services.context.getContext(state.projectId, state.chatId || "");
         state.graph = payload.graph || { nodes: [], edges: [] };
         state.graphRunId = payload.run_id || null;
         state.graphNodeStates = payload.node_states || {};

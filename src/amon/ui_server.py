@@ -33,6 +33,7 @@ from amon.chat.router_types import RouterResult
 from amon.chat.session_store import (
     append_event,
     ensure_chat_session,
+    load_latest_run_context,
 )
 from amon.commands.executor import CommandPlan, execute
 from amon.config import ConfigLoader, resolve_system_prompt
@@ -795,8 +796,10 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             if not project_id:
                 self._send_json(400, {"message": "無效的 project_id"})
                 return
+            params = parse_qs(parsed.query)
+            chat_id = params.get("chat_id", [""])[0].strip() or None
             try:
-                payload = self._build_project_chat_history(project_id)
+                payload = self._build_project_chat_history(project_id, chat_id=chat_id)
             except Exception as exc:  # noqa: BLE001
                 self._handle_error(exc, status=500)
                 return
@@ -807,8 +810,10 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             if not project_id:
                 self._send_json(400, {"message": "無效的 project_id"})
                 return
+            params = parse_qs(parsed.query)
+            chat_id = params.get("chat_id", [""])[0].strip() or None
             try:
-                context = self._build_project_context(project_id)
+                context = self._build_project_context(project_id, chat_id=chat_id)
             except Exception as exc:  # noqa: BLE001
                 self._handle_error(exc, status=500)
                 return
@@ -2249,9 +2254,55 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         if not session_files:
             return {"project_id": project_id, "chat_id": None, "messages": []}
 
-        def _read_session_messages(path: Path) -> list[dict[str, Any]]:
-            parsed_messages: list[dict[str, Any]] = []
-            for raw_line in path.read_text(encoding="utf-8").splitlines():
+        selected_session: Path | None = None
+        if chat_id:
+            normalized_chat_id = str(chat_id).strip()
+            candidate = sessions_dir / f"{normalized_chat_id}.jsonl"
+            if candidate.exists() and candidate.is_file():
+                selected_session = candidate
+        if selected_session is None:
+            selected_session = max(session_files, key=lambda path: path.stat().st_mtime)
+        selected_messages = self._read_chat_session_messages(project_path, selected_session)
+
+        if not selected_messages:
+            for session_file in sorted(session_files, key=lambda path: path.stat().st_mtime, reverse=True):
+                fallback_messages = self._read_chat_session_messages(project_path, session_file)
+                if fallback_messages:
+                    selected_session = session_file
+                    selected_messages = fallback_messages
+                    break
+
+        return {"project_id": project_id, "chat_id": selected_session.stem, "messages": selected_messages[-60:]}
+
+    def _chat_messages_cache_path(self, project_path: Path, chat_id: str) -> Path:
+        safe_chat_id = re.sub(r"[^0-9A-Za-z_-]", "_", str(chat_id or "")).strip("_") or "default"
+        return project_path / ".amon" / "context" / "chat_messages" / f"{safe_chat_id}.json"
+
+    def _read_chat_session_messages(self, project_path: Path, session_path: Path) -> list[dict[str, Any]]:
+        try:
+            session_stat = session_path.stat()
+        except OSError:
+            return []
+        cache_path = self._chat_messages_cache_path(project_path, session_path.stem)
+        try:
+            if cache_path.exists():
+                cached = json.loads(cache_path.read_text(encoding="utf-8"))
+                if isinstance(cached, dict):
+                    cache_mtime_ns = int(cached.get("source_mtime_ns") or 0)
+                    cache_size = int(cached.get("source_size") or -1)
+                    cache_messages = cached.get("messages")
+                    if (
+                        cache_mtime_ns == int(session_stat.st_mtime_ns)
+                        and cache_size == int(session_stat.st_size)
+                        and isinstance(cache_messages, list)
+                    ):
+                        return [item for item in cache_messages if isinstance(item, dict)]
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            self.logger.warning("讀取 chat messages cache 失敗：%s", exc)
+
+        parsed_messages: list[dict[str, Any]] = []
+        try:
+            for raw_line in session_path.read_text(encoding="utf-8").splitlines():
                 line = raw_line.strip()
                 if not line:
                     continue
@@ -2270,31 +2321,34 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         "ts": str(payload.get("ts") or "").strip(),
                     }
                 )
-            return parsed_messages
+        except OSError as exc:
+            self.logger.warning("讀取 chat session 失敗：%s", exc)
+            return []
 
-        selected_session: Path | None = None
-        if chat_id:
-            normalized_chat_id = str(chat_id).strip()
-            candidate = sessions_dir / f"{normalized_chat_id}.jsonl"
-            if candidate.exists() and candidate.is_file():
-                selected_session = candidate
-        if selected_session is None:
-            selected_session = max(session_files, key=lambda path: path.stat().st_mtime)
-        selected_messages = _read_session_messages(selected_session)
+        cache_payload = {
+            "source_mtime_ns": int(session_stat.st_mtime_ns),
+            "source_size": int(session_stat.st_size),
+            "messages": parsed_messages,
+        }
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(json.dumps(cache_payload, ensure_ascii=False), encoding="utf-8")
+        except OSError as exc:
+            self.logger.warning("寫入 chat messages cache 失敗：%s", exc)
+        return parsed_messages
 
-        if not selected_messages:
-            for session_file in sorted(session_files, key=lambda path: path.stat().st_mtime, reverse=True):
-                fallback_messages = _read_session_messages(session_file)
-                if fallback_messages:
-                    selected_session = session_file
-                    selected_messages = fallback_messages
-                    break
-
-        return {"project_id": project_id, "chat_id": selected_session.stem, "messages": selected_messages[-60:]}
-
-    def _build_project_context(self, project_id: str) -> dict[str, Any]:
+    def _build_project_context(self, project_id: str, chat_id: str | None = None) -> dict[str, Any]:
         project_path = self.core.get_project_path(project_id)
         run_bundle = self._load_latest_run_bundle(project_path)
+        selected_chat_id = str(chat_id or "").strip() or None
+        if selected_chat_id:
+            run_context = load_latest_run_context(project_id, selected_chat_id)
+            run_id = str(run_context.get("run_id") or "").strip()
+            if run_id:
+                try:
+                    run_bundle = self._load_run_bundle(run_id=run_id, project_id=project_id)
+                except (FileNotFoundError, ValueError, OSError):
+                    pass
         graph = run_bundle["graph"]
         docs = self._build_docs_catalog(project_id=project_id, project_path=project_path)
         project_context_text = self._read_project_context(project_path)
@@ -2307,6 +2361,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             "recent_events": run_bundle["recent_events"],
             "docs": docs,
             "context": project_context_text,
+            "chat_id": selected_chat_id,
         }
 
 
