@@ -173,6 +173,13 @@ class WorkspaceGuardTests(unittest.TestCase):
                 resolved = guard.assert_in_workspace(target)
             self.assertEqual(resolved, target.resolve())
 
+    def test_workspace_path_trailing_newline_is_sanitized(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            guard = WorkspaceGuard(workspace_root=root)
+            resolved = guard.assert_in_workspace(f"{root}\n")
+            self.assertEqual(resolved, root.resolve())
+
 
 class ToolRegistryTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -214,6 +221,31 @@ class ToolRegistryTests(unittest.TestCase):
         result = registry.call(ToolCall(tool="filesystem.read", args={}, caller="tester"))
         self.assertFalse(result.is_error)
         self.assertEqual(result.as_text(), "ok")
+
+    def test_workspace_guard_normalizes_path_arg_before_handler(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            seen: dict[str, str] = {}
+
+            def _handler(call: ToolCall) -> ToolResult:
+                seen["path"] = str(call.args.get("path"))
+                return ToolResult(content=[{"type": "text", "text": "ok"}])
+
+            registry = ToolRegistry(
+                policy=ToolPolicy(allow=("filesystem.*",)),
+                workspace_guard=WorkspaceGuard(workspace_root=root),
+            )
+            registry.register(self.spec, _handler)
+            result = registry.call(
+                ToolCall(
+                    tool="filesystem.read",
+                    args={"path": f"{root}\n"},
+                    caller="tester",
+                )
+            )
+
+            self.assertFalse(result.is_error)
+            self.assertEqual(seen["path"], str(root.resolve()))
 
     def test_workspace_guard_blocks_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

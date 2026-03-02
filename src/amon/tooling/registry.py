@@ -119,11 +119,13 @@ class ToolRegistry:
             for key in ("path", "root"):
                 value = call.args.get(key)
                 if isinstance(value, str):
-                    self.workspace_guard.assert_in_workspace(value)
+                    resolved = self.workspace_guard.assert_in_workspace(value)
+                    call.args[key] = str(resolved)
         if call.tool in {"process.exec", "terminal.exec", "terminal.session.start"}:
             cwd = call.args.get("cwd")
             if isinstance(cwd, str):
-                self.workspace_guard.assert_in_workspace(cwd)
+                resolved = self.workspace_guard.assert_in_workspace(cwd)
+                call.args["cwd"] = str(resolved)
 
 
 def _resolve_source(spec: ToolSpec | None) -> str:
