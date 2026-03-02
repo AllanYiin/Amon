@@ -1831,7 +1831,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 }
             )
             sent_initial_notice = False
-            if not chat_id:
+            if project_id is None and not chat_id:
                 send_event("notice", {"text": "Amon：已收到你的需求，正在判斷意圖與專案。"})
                 sent_initial_notice = True
             if project_id is None:
@@ -1889,7 +1889,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             turn_bundle = assemble_chat_turn(project_id=project_id, chat_id=chat_id, message=message)
             chat_id = turn_bundle.chat_id
             history = turn_bundle.history
-            should_emit_bootstrap_notices = not history
+            should_emit_bootstrap_notices = turn_bundle.chat_id_source == "new"
             run_context = turn_bundle.run_context
             if should_emit_bootstrap_notices and not sent_initial_notice:
                 send_event("notice", {"text": "Amon：已收到你的需求，正在判斷意圖與專案。"})

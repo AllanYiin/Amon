@@ -254,6 +254,75 @@ class UIAsyncAPITests(unittest.TestCase):
                 os.environ.pop("AMON_HOME", None)
 
 
+    def test_chat_stream_follow_up_without_chat_id_suppresses_bootstrap_notices(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("follow-up-notice-no-chatid")
+
+                handler = partial(
+                    AmonUIHandler,
+                    directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"),
+                    core=core,
+                )
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                def collect_notices(message: str) -> list[str]:
+                    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                    conn.request(
+                        "GET",
+                        f"/v1/chat/stream?project_id={quote(project.project_id)}&message={quote(message)}",
+                    )
+                    response = conn.getresponse()
+                    self.assertEqual(response.status, 200)
+                    event_type = ""
+                    notices: list[str] = []
+                    for _ in range(240):
+                        raw_line = response.fp.readline()
+                        if not raw_line:
+                            break
+                        decoded = raw_line.decode("utf-8", errors="ignore").strip()
+                        if decoded.startswith("event: "):
+                            event_type = decoded.split(":", 1)[1].strip()
+                        elif decoded.startswith("data: "):
+                            payload = json.loads(decoded.split(": ", 1)[1])
+                            if event_type == "notice":
+                                notices.append(str(payload.get("text") or ""))
+                            elif event_type == "done":
+                                break
+                    return notices
+
+                with patch("amon.ui_server.decide_execution_mode", return_value="single"), patch.object(
+                    core,
+                    "run_plan_execute_stream",
+                    return_value=(SimpleNamespace(run_id="run-follow-up-no-chatid", execution_route="planner", planner_enabled=True), "done"),
+                ):
+                    first_notices = collect_notices("第一輪需求")
+                    second_notices = collect_notices("第二輪延續但不帶 chat_id")
+
+                first_joined = "\n".join(first_notices)
+                self.assertIn("已收到你的需求", first_joined)
+                self.assertIn("正在分析需求並進入執行流程", first_joined)
+                self.assertIn("已路由到 plan_execute", first_joined)
+
+                second_joined = "\n".join(second_notices)
+                self.assertNotIn("已收到你的需求", second_joined)
+                self.assertNotIn("正在分析需求並進入執行流程", second_joined)
+                self.assertNotIn("已路由到 plan_execute", second_joined)
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
+
     def test_chat_stream_payload_contains_request_id_and_virtual_project_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"
