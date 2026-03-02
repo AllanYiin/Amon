@@ -60,13 +60,24 @@ export const CHAT_VIEW = {
     const inlinePreviewUrls = new Map();
     let activeInlinePreviewUrl = null;
 
+    const setStreamStatus = (text = "") => {
+      if (!elements.chatStreamStatus) return;
+      elements.chatStreamStatus.textContent = String(text || "").trim() || "處理中…";
+    };
+
     const setStreaming = (active) => {
       appState.streaming = active;
       elements.streamProgress.hidden = !active;
+      if (elements.chatStreamStatus) {
+        elements.chatStreamStatus.hidden = !active;
+      }
+      if (!active) {
+        setStreamStatus("");
+      }
       inputBar.setDisabled(false);
     };
 
-    const activateArtifactsTab = () => {
+    const activateArtifactsTab = ({ collapsed = false } = {}) => {
       const layoutState = store.getState().layout || {};
       const inspectorState = layoutState.inspector || {};
       store.patch({
@@ -75,7 +86,7 @@ export const CHAT_VIEW = {
           inspector: {
             ...inspectorState,
             activeTab: "artifacts",
-            collapsed: false,
+            collapsed,
           },
         },
       });
@@ -90,10 +101,14 @@ export const CHAT_VIEW = {
       }
     };
 
+    // 聊天頁預設維持右側收合，僅在偵測到具檔名 inline artifact 時展開
+    activateArtifactsTab({ collapsed: true });
+
     const applyInlineArtifactEvents = (artifactEvents = []) => {
       artifactEvents.forEach((artifactEvent) => {
         if (artifactEvent.type === "artifact_open") {
           appState.inlineArtifactStreamingHint = `偵測到 inline artifact 串流中：${artifactEvent.filename}`;
+          activateArtifactsTab({ collapsed: false });
           renderInlineArtifactStreamingHint(elements, appState.inlineArtifactStreamingHint);
           return;
         }
@@ -144,7 +159,7 @@ export const CHAT_VIEW = {
         };
         appState.inlineArtifactStreamingHint = `已完成 inline artifact：${artifactEvent.filename}`;
 
-        activateArtifactsTab();
+        activateArtifactsTab({ collapsed: false });
         refreshInlineArtifactsUi();
         showInlineArtifactPreview(elements, {
           name: artifactEvent.filename,
@@ -242,12 +257,14 @@ export const CHAT_VIEW = {
       appState.inlineArtifacts = [];
       appState.inlineArtifactFiles = {};
       appState.inlineArtifactStreamingHint = "";
+      activateArtifactsTab({ collapsed: true });
       renderInlineArtifactStreamingHint(elements, "");
       ctx.chatDeps.resetPlanCard();
 
       const finalMessage = `${message}${buildAttachmentSummary(attachments)}`;
       messageRenderer.appendMessage("user", finalMessage);
       messageRenderer.appendTimelineStatus("訊息已送出，等待事件回傳中...");
+      setStreamStatus("已送出任務，正在等待規劃器回應…");
       ctx.chatDeps.updateThinking({ status: "processing", brief: "需求已送出，等待 reasoning 摘要" });
       timelineRenderer.updateExecutionStep("thinking", { title: "Thinking", status: "running", details: "訊息已送出，等待模型分析" });
       timelineRenderer.updateExecutionStep("planning", { title: "Planning", status: "pending", details: "尚未開始規劃" });
@@ -285,7 +302,8 @@ export const CHAT_VIEW = {
 
       appState.streamClient = new EventStreamClient({
         preferSSE: true,
-        maxReconnectAttempts: 0,
+        // Allow short transient SSE hiccups to recover before showing a fatal toast.
+        maxReconnectAttempts: 3,
         sseUrlBuilder: (params, lastEventId) => {
           const query = new URLSearchParams();
           if (params.stream_token) {
@@ -323,6 +341,10 @@ export const CHAT_VIEW = {
             }
             timelineRenderer.applyExecutionEvent(eventType, data);
             if (eventType === "reasoning") {
+              const reasoningText = String(data.text || "").trim();
+              if (reasoningText) {
+                setStreamStatus(reasoningText);
+              }
               ctx.chatDeps.updateThinking({ status: "reasoning", brief: "收到 reasoning 摘要", verbose: data.text || "" });
               return;
             }
@@ -341,6 +363,7 @@ export const CHAT_VIEW = {
             }
             if (eventType === "notice") {
               if (data.text) {
+                setStreamStatus(String(data.text).replace(/^Amon：/, "").trim());
                 messageRenderer.appendMessage("agent", data.text);
               }
               return;
@@ -375,6 +398,11 @@ export const CHAT_VIEW = {
               }
               if (data.final_text) {
                 messageRenderer.appendMessage("agent", data.final_text);
+              }
+              const phaseMetrics = data.phase_metrics || {};
+              const totalMs = Number(phaseMetrics.total_ms || 0);
+              if (totalMs > 0) {
+                messageRenderer.appendTimelineStatus(`規劃與執行耗時約 ${(totalMs / 1000).toFixed(1)} 秒。`);
               }
               ctx.chatDeps.updateThinking({ status: doneStatus === "ok" ? "done" : doneStatus, brief: doneStatus === "ok" ? "流程已完成" : `流程結束：${doneStatus}` });
               stopStream();

@@ -32,6 +32,22 @@ class GraphMermaidRenderTests(unittest.TestCase):
         self.assertIn("  task_1 --> task_1_2", mermaid)
         self.assertIn("  task_1_2 --> task_1_3", mermaid)
 
+
+    def test_graph_to_mermaid_supports_taskgraph2_edge_keys_and_title_description_label(self) -> None:
+        graph = {
+            "nodes": [
+                {"id": "N1", "title": "產生 TODO", "description": "每個項目短說明都要中文"},
+                {"id": "N2", "title": "審核 TODO"},
+            ],
+            "edges": [{"from_node": "N1", "to_node": "N2"}],
+        }
+
+        mermaid = self.handler._graph_to_mermaid(graph)
+
+        self.assertIn('  N1["產生 TODO\\n每個項目短說明都要中文"]', mermaid)
+        self.assertIn('  N2["審核 TODO"]', mermaid)
+        self.assertIn("  N1 --> N2", mermaid)
+
     def test_graph_to_mermaid_escapes_labels_and_ignores_unknown_edge_nodes(self) -> None:
         graph = {
             "nodes": [{"id": '"quote"\\node\nline'}],

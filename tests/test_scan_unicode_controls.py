@@ -31,6 +31,20 @@ class ScanUnicodeControlsTests(unittest.TestCase):
             self.assertEqual(len(findings), 1)
             self.assertEqual(findings[0].codepoint, "U+200B")
 
+    def test_iter_text_files_skips_static_vendor_prefix(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            vendor_file = root / "src" / "amon" / "ui" / "static" / "vendor" / "bundle.js"
+            app_file = root / "src" / "amon" / "ui" / "static" / "app.js"
+            vendor_file.parent.mkdir(parents=True, exist_ok=True)
+            app_file.parent.mkdir(parents=True, exist_ok=True)
+            vendor_file.write_text("console.log('vendor');", encoding="utf-8")
+            app_file.write_text("console.log('app');", encoding="utf-8")
+
+            paths = list(iter_text_files(root, exclude=set()))
+
+            self.assertEqual(paths, [app_file])
+
 
 if __name__ == "__main__":
     unittest.main()

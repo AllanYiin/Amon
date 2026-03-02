@@ -79,7 +79,8 @@ def _ensure_todo_bootstrap_contract(graph: TaskGraph) -> TaskGraph:
         )
         graph.nodes.insert(0, todo_node)
 
-    outgoing = {edge.to_node for edge in graph.edges if edge.from_node == todo_node.id}
+    review_node = _ensure_todo_review_node(graph, todo_node.id)
+    outgoing = {edge.to_node for edge in graph.edges if edge.from_node == review_node.id}
     incoming_count = {node.id: 0 for node in graph.nodes}
     for edge in graph.edges:
         incoming_count[edge.to_node] = incoming_count.get(edge.to_node, 0) + 1
@@ -88,15 +89,49 @@ def _ensure_todo_bootstrap_contract(graph: TaskGraph) -> TaskGraph:
         if node.id == todo_node.id:
             continue
         if incoming_count.get(node.id, 0) == 0 and node.id not in outgoing:
-            graph.edges.append(TaskEdge(from_node=todo_node.id, to_node=node.id))
-        if node.id != todo_node.id and "todo_markdown" not in node.reads:
+            graph.edges.append(TaskEdge(from_node=review_node.id, to_node=node.id))
+        if node.id not in {todo_node.id, review_node.id} and "todo_task_nodes_review" not in node.reads:
             if incoming_count.get(node.id, 0) == 0 or any(
-                edge.from_node == todo_node.id and edge.to_node == node.id for edge in graph.edges
+                edge.from_node == review_node.id and edge.to_node == node.id for edge in graph.edges
             ):
-                node.reads.append("todo_markdown")
+                node.reads.append("todo_task_nodes_review")
 
     validate_task_graph(graph)
     return graph
+
+
+def _ensure_todo_review_node(graph: TaskGraph, todo_node_id: str) -> TaskNode:
+    review_node = next((node for node in graph.nodes if "todo_task_nodes_review" in node.writes), None)
+    if review_node is None:
+        existing_ids = {node.id for node in graph.nodes}
+        review_id = "N_TODO_REVIEW"
+        suffix = 1
+        while review_id in existing_ids:
+            suffix += 1
+            review_id = f"N_TODO_REVIEW_{suffix}"
+        review_node = TaskNode(
+            id=review_id,
+            title="審核 TODO 並展開任務節點",
+            kind="task",
+            description=(
+                "請先審核 docs/TODO.md 的每個待辦項目是否完整，再為每個項目產生可執行任務節點內容。"
+                "每個項目請保留一段『中文短說明』，且輸出必須是 JSON array。"
+            ),
+            role="流程設計師",
+            reads=["todo_markdown"],
+            writes={"todo_task_nodes_review": "docs/TODO.nodes.review.json"},
+            output=TaskNodeOutput(type="json", extract="best_effort"),
+        )
+        insert_index = next((idx + 1 for idx, node in enumerate(graph.nodes) if node.id == todo_node_id), 0)
+        graph.nodes.insert(insert_index, review_node)
+
+    if "todo_markdown" not in review_node.reads:
+        review_node.reads.append("todo_markdown")
+
+    if not any(edge.from_node == todo_node_id and edge.to_node == review_node.id for edge in graph.edges):
+        graph.edges.append(TaskEdge(from_node=todo_node_id, to_node=review_node.id))
+
+    return review_node
 
 
 def _planner_pass(
@@ -256,7 +291,9 @@ def _planner_system_prompt() -> str:
         "你只能輸出符合 TaskGraph 2.0 schema 的單一 JSON object，不得輸出 markdown/code fence/說明。"
         "務必使用 schema_version=2.0，並讓圖為 DAG。"
         "必須先有一個 TODO bootstrap 節點，寫入 writes.todo_markdown='docs/TODO.md'。"
-        "其餘執行節點必須在執行圖上依賴該 TODO 節點，且可透過 reads 讀取 todo_markdown。"
+        "TODO 清單內每個項目的短說明必須使用繁體中文。"
+        "在 TODO 節點後必須有一個 review 節點，讀取 todo_markdown 並產生 writes.todo_task_nodes_review。"
+        "其餘執行節點必須依賴 review 節點，且可透過 reads 讀取 todo_task_nodes_review。"
     )
 
 

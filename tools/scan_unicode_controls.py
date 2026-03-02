@@ -71,6 +71,10 @@ SKIP_SUFFIXES = {
     ".min.css",
 }
 
+SKIP_RELATIVE_PREFIXES = {
+    ("src", "amon", "ui", "static", "vendor"),
+}
+
 
 @dataclass
 class Finding:
@@ -92,6 +96,9 @@ def iter_text_files(root: Path, exclude: set[str]) -> Iterable[Path]:
                 continue
             continue
         if any(part in exclude for part in path.parts):
+            continue
+        rel_path = path.relative_to(root)
+        if any(rel_path.parts[: len(prefix)] == prefix for prefix in SKIP_RELATIVE_PREFIXES):
             continue
         if path.suffix.lower() in SKIP_EXTENSIONS:
             continue

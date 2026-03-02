@@ -15,7 +15,7 @@ from amon.sandbox.service import run_sandbox_step
 from .builtins.process import register_process_tools
 from .builtins.sandbox import register_sandbox_tools
 from .builtins.terminal import build_sandbox_terminal_executor, register_terminal_tools
-from .builtins.web import WebPolicy, register_web_tools
+from .builtins.web import WebPolicy, WebSearchOptions, register_web_tools
 from .policy import ToolPolicy, WorkspaceGuard
 from .registry import ToolRegistry
 
@@ -29,6 +29,9 @@ DEFAULT_ALLOW = (
     "memory.search",
     "artifacts.write_text",
     "artifacts.write_file",
+    "web.fetch",
+    "web.search",
+    "web.better_search",
 )
 DEFAULT_ASK = (
     "filesystem.write",
@@ -44,8 +47,6 @@ DEFAULT_ASK = (
     "process.kill",
     "memory.put",
     "memory.delete",
-    "web.fetch",
-    "web.search",
     "audit.export",
 )
 DEFAULT_DENY: tuple[str, ...] = ()
@@ -91,6 +92,11 @@ def build_default_registry(workspace_root: Path, config: dict[str, Any] | None =
         policy=WebPolicy(
             allowlist=tuple(config.get("web_allowlist", ())),
             denylist=tuple(config.get("web_denylist", ())),
+        ),
+        options=WebSearchOptions(
+            serpapi_api_key_env=str(config.get("web", {}).get("serpapi_key_env", "SERPAPI_KEY")),
+            provider_priority=tuple(config.get("web", {}).get("search_provider_priority", ("serpapi", "google", "bing"))),
+            max_results_limit=int(config.get("web", {}).get("max_results_limit", 10)),
         ),
     )
     memory_dir = config.get("memory_dir")

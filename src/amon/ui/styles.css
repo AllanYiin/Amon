@@ -1707,6 +1707,13 @@ body.is-resizing-context-panel {
   animation: progress-move 1.2s ease-in-out infinite;
 }
 
+.stream-status {
+  margin: -4px 2px 0;
+  font-size: 12px;
+  color: var(--c-text-muted);
+  min-height: 18px;
+}
+
 @keyframes progress-move {
   0% {
     transform: translateX(-100%);

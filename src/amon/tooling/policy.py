@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from fnmatch import fnmatch
 from pathlib import Path
@@ -67,7 +68,13 @@ class WorkspaceGuard:
         root = self.workspace_root.expanduser().resolve()
         if not _is_relative_to(resolved, root):
             raise ValueError(f"Path is outside workspace: {resolved}")
-        relative = resolved.relative_to(root).as_posix()
+        try:
+            relative = resolved.relative_to(root).as_posix()
+        except ValueError:
+            relative = os.path.relpath(
+                _normalize_path_text(resolved),
+                _normalize_path_text(root),
+            ).replace("\\", "/")
         for pattern in self.deny_path_globs:
             if fnmatch(relative, pattern) or fnmatch(resolved.as_posix(), pattern):
                 raise ValueError(f"Path is denied by policy: {resolved}")
@@ -91,8 +98,17 @@ def _matches_pattern(call: ToolCall, pattern: str) -> bool:
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:
+    path_text = _normalize_path_text(path)
+    root_text = _normalize_path_text(root)
     try:
-        path.relative_to(root)
-        return True
+        return os.path.commonpath([path_text, root_text]) == root_text
     except ValueError:
         return False
+
+def _normalize_path_text(path: str | Path) -> str:
+    text = os.path.abspath(str(path))
+    if text.startswith("\\\\?\\UNC\\"):
+        text = "\\" + text[8:]
+    elif text.startswith("\\\\?\\"):
+        text = text[4:]
+    return os.path.normcase(os.path.normpath(text))

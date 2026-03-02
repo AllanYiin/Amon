@@ -11,49 +11,31 @@
     <script src="static/vendor/marked/marked.min.js"></script>
     <script src="static/vendor/highlight.js/highlight.min.js"></script>
     <script src="static/vendor/svg-pan-zoom/svg-pan-zoom.min.js"></script>
+    <script src="static/vendor/mermaid/mermaid.min.js"></script>
     <script src="static/vendor/chart.js/chart.umd.min.js"></script>
     <script>
       (function ensureSvgPanZoom() {
-        if (window.svgPanZoom) {
-          return;
+        if (!window.svgPanZoom) {
+          console.error("[ui] svg-pan-zoom local vendor script is unavailable.");
         }
-        var fallback = document.createElement("script");
-        fallback.src = "https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js";
-        fallback.onload = function () {
-          if (!window.svgPanZoom) {
-            console.error("[ui] svg-pan-zoom fallback loaded but window.svgPanZoom is still unavailable.");
-          }
-        };
-        fallback.onerror = function () {
-          console.error("[ui] Failed to load svg-pan-zoom from local vendor and CDN fallback.");
-        };
-        document.head.appendChild(fallback);
       })();
     </script>
-    <script src="static/vendor/mermaid/mermaid.min.js"></script>
     <script>
       (function initMermaid() {
-        var localMermaid = window.mermaid;
-        if (localMermaid) {
-          localMermaid.initialize({ startOnLoad: false, theme: "neutral" });
-          window.__mermaid = localMermaid;
+        function configureMermaid(candidate) {
+          if (!candidate || typeof candidate.initialize !== "function") {
+            return false;
+          }
+          candidate.initialize({ startOnLoad: false, theme: "neutral" });
+          window.__mermaid = candidate;
+          return true;
+        }
+
+        if (configureMermaid(window.mermaid)) {
           return;
         }
 
-        var fallback = document.createElement("script");
-        fallback.src = "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js";
-        fallback.onload = function () {
-          if (!window.mermaid) {
-            console.error("[ui] Mermaid fallback loaded but window.mermaid is still unavailable.");
-            return;
-          }
-          window.mermaid.initialize({ startOnLoad: false, theme: "neutral" });
-          window.__mermaid = window.mermaid;
-        };
-        fallback.onerror = function () {
-          console.error("[ui] Failed to load Mermaid from local vendor and CDN fallback.");
-        };
-        document.head.appendChild(fallback);
+        console.error("[ui] Mermaid local vendor script is unavailable.");
       })();
     </script>
   </head>
@@ -109,6 +91,7 @@
           <div class="progress-bar" id="stream-progress" aria-hidden="true">
             <span></span>
           </div>
+          <p class="stream-status" id="chat-stream-status" aria-live="polite" hidden>正在等待任務開始…</p>
 
           <section id="plan-card" class="plan-card" hidden>
             <div class="plan-card__header">
@@ -358,6 +341,22 @@
               <p id="planner-enabled-status">尚未載入。</p>
               <p class="subtitle" id="planner-enabled-source">來源：--</p>
               <button type="button" class="btn btn--secondary secondary-btn" id="planner-toggle-btn">切換 Planner</button>
+            </article>
+
+            <article class="config-card card">
+              <h3>Web Search 與 API Key 設定</h3>
+              <p class="subtitle">僅儲存環境變數名稱與搜尋偏好，不會把 API Key 明文寫進設定檔。</p>
+              <div class="config-toolbar">
+                <label class="field-label">SERPAPI Key 環境變數名稱
+                  <input type="text" id="config-serpapi-key-env" placeholder="例如：SERPAPI_KEY" />
+                </label>
+                <label class="field-label">搜尋提供者優先序（以逗號分隔）
+                  <input type="text" id="config-search-priority" placeholder="例如：serpapi,google,bing" />
+                </label>
+              </div>
+              <div class="toolbar-actions">
+                <button type="button" class="btn btn--secondary secondary-btn" id="config-web-search-apply">儲存 Web Search 設定</button>
+              </div>
             </article>
 
             <article class="config-card card">

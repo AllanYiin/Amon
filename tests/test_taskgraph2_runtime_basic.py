@@ -92,6 +92,34 @@ class TaskGraph2RuntimeBasicTests(unittest.TestCase):
             self.assertIn("[session:draft]", fake_llm.calls[1][-1]["content"])
 
 
+    def test_runtime_exposes_run_id_in_session_and_prompts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_path = Path(tmp)
+            graph = TaskGraph(
+                schema_version="2.0",
+                objective="檢查 run_id",
+                session_defaults={},
+                nodes=[
+                    TaskNode(
+                        id="N1",
+                        title="檢查 run",
+                        kind="task",
+                        description="請回報 run id",
+                        reads=["run_id"],
+                        writes={"echo": "text"},
+                    )
+                ],
+                edges=[],
+            )
+            fake_llm = FakeLLMClient(["ok"])
+
+            runtime = TaskGraphRuntime(project_path=project_path, graph=graph, llm_client=fake_llm, run_id="run_tg2_context")
+            result = runtime.run()
+
+            self.assertEqual(result.state["session"].get("run_id"), "run_tg2_context")
+            self.assertIn("[session:run_id]", fake_llm.calls[0][-1]["content"])
+            self.assertIn("run_tg2_context", fake_llm.calls[0][-1]["content"])
+
     def test_runtime_persists_named_artifact_under_allowed_prefix(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_path = Path(tmp)
