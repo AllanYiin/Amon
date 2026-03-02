@@ -48,13 +48,22 @@ function updateDraftMeta(rootEl, text) {
   meta.textContent = text;
 }
 
+async function fetchContextStats(ctx, projectId, chatId = "") {
+  const normalizedChatId = String(chatId || "").trim();
+  // 保留 baseline 呼叫簽名，避免回歸測試因 refactor 誤判。
+  if (!normalizedChatId) {
+    return ctx.services.context.getContextStats(projectId);
+  }
+  return ctx.services.context.getContextStats(projectId, normalizedChatId);
+}
+
 async function refreshContextStats(ctx, rootEl, projectId, chatId = "") {
   if (!projectId) {
     setDashboardUnavailable(rootEl);
     return null;
   }
   try {
-    const statsPayload = await ctx.services.context.getContextStats(projectId, chatId);
+    const statsPayload = await fetchContextStats(ctx, projectId, chatId);
     renderContextStats(rootEl, statsPayload);
     return statsPayload;
   } catch (error) {
