@@ -70,6 +70,13 @@ def handle_web_fetch(call: ToolCall, *, policy: WebPolicy) -> ToolResult:
             is_error=True,
             meta={"status": "invalid_args"},
         )
+    parsed_url = parse.urlparse(url)
+    if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+        return ToolResult(
+            content=[{"type": "text", "text": "url 參數必須是有效的 http/https 網址。"}],
+            is_error=True,
+            meta={"status": "invalid_args"},
+        )
     if not policy.is_allowed(url):
         return ToolResult(
             content=[{"type": "text", "text": "網址不在允許清單內。"}],
@@ -86,13 +93,13 @@ def handle_web_fetch(call: ToolCall, *, policy: WebPolicy) -> ToolResult:
         )
     timeout = float(call.args.get("timeout", 10))
     max_bytes = int(call.args.get("max_bytes", 200_000))
-    req = request.Request(url=url, method=method)
-    if isinstance(headers, dict):
-        for key, value in headers.items():
-            if value is None:
-                continue
-            req.add_header(str(key), str(value))
     try:
+        req = request.Request(url=url, method=method)
+        if isinstance(headers, dict):
+            for key, value in headers.items():
+                if value is None:
+                    continue
+                req.add_header(str(key), str(value))
         with request.urlopen(req, timeout=timeout) as resp:
             data = resp.read(max_bytes + 1)
             truncated = len(data) > max_bytes
