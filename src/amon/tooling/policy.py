@@ -64,7 +64,7 @@ class WorkspaceGuard:
     deny_path_globs: tuple[str, ...] = field(default_factory=lambda: _DEFAULT_DENY_GLOBS)
 
     def assert_in_workspace(self, path: str | Path) -> Path:
-        resolved = Path(path).expanduser().resolve()
+        resolved = Path(_sanitize_user_path(path)).expanduser().resolve()
         root = self.workspace_root.expanduser().resolve()
         if not _is_relative_to(resolved, root):
             raise ValueError(f"Path is outside workspace: {resolved}")
@@ -112,3 +112,9 @@ def _normalize_path_text(path: str | Path) -> str:
     elif text.startswith("\\\\?\\"):
         text = text[4:]
     return os.path.normcase(os.path.normpath(text))
+
+
+def _sanitize_user_path(path: str | Path) -> str | Path:
+    if isinstance(path, str):
+        return path.rstrip("\r\n\t")
+    return path
