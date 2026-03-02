@@ -287,6 +287,28 @@ appStore.patch({ bootstrappedAt: Date.now() });
         }
       }
 
+      function normalizeUiTheme(rawTheme) {
+        return String(rawTheme || "").toLowerCase() === "dark" ? "dark" : "light";
+      }
+
+      function normalizeUiFontSize(rawFontSize) {
+        const normalized = String(rawFontSize || "").toLowerCase();
+        return ["sm", "md", "lg"].includes(normalized) ? normalized : "md";
+      }
+
+      function applyUiPreferencesFromConfig(effectiveConfig = {}) {
+        const uiConfig = effectiveConfig && typeof effectiveConfig === "object" ? effectiveConfig.ui || {} : {};
+        const rootEl = document.documentElement;
+        rootEl.dataset.theme = normalizeUiTheme(uiConfig.theme);
+        rootEl.dataset.fontSize = normalizeUiFontSize(uiConfig.font_size);
+      }
+
+      async function refreshUiPreferences(projectId = state.projectId) {
+        const payload = await services.admin.getConfigView(projectId || "");
+        state.configView = payload;
+        applyUiPreferencesFromConfig(payload?.effective_config || {});
+      }
+
       function flattenConfigRows(effective, sources, prefix = "") {
         if (!effective || typeof effective !== "object" || Array.isArray(effective)) {
           return [{ keyPath: prefix || "(root)", effective, source: sources || "default" }];
@@ -370,6 +392,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
       async function loadConfigPage() {
         const payload = await services.admin.getConfigView(state.projectId);
         state.configView = payload;
+        applyUiPreferencesFromConfig(payload?.effective_config || {});
         renderConfigTable();
       }
 
@@ -398,6 +421,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
           scope,
         });
         state.configView = response.config || state.configView;
+        applyUiPreferencesFromConfig(state.configView?.effective_config || {});
         renderConfigTable();
         showToast(`已更新 ${keyPath}（${scope}）。`, 8000, "info");
       }
@@ -432,6 +456,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
           latestConfig = response.config || latestConfig;
         }
         state.configView = latestConfig;
+        applyUiPreferencesFromConfig(state.configView?.effective_config || {});
         renderConfigTable();
         showToast("已更新 Web Search 偏好設定。", 8000, "info");
       }
@@ -441,6 +466,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
         const nextEnabled = !Boolean(planner.enabled);
         const response = await services.admin.setPlannerEnabled({ projectId: state.projectId || "", enabled: nextEnabled });
         state.configView = response.config || state.configView;
+        applyUiPreferencesFromConfig(state.configView?.effective_config || {});
         renderConfigTable();
         showToast(nextEnabled ? "Planner 已啟用。" : "Planner 已停用，plan_execute 會 fallback。", 8000, "info");
       }
@@ -2241,6 +2267,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
       elements.projectSelect.addEventListener("change", async (event) => {
         const selectedProject = event.target.value;
         setProjectState(selectedProject);
+        await refreshUiPreferences(state.projectId);
         await hydrateSelectedProject();
         await loadShellViewDependencies(state.shellView);
       });
@@ -2279,6 +2306,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
         try {
           await loadProjects();
           setProjectState(state.projectId);
+          await refreshUiPreferences(state.projectId);
           updateThinking({ status: "idle", brief: "待命中；送出訊息後會顯示 Thinking、Plan 與工具事件" });
           await hydrateSelectedProject();
           const routeKey = resolveRouteFromHash();

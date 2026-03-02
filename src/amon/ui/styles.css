@@ -31,6 +31,7 @@
   --font-size-md: 13px;
   --font-size-lg: 14px;
   --font-size-xl: 18px;
+  --chat-font-size: 13px;
 
   --sidebar-width: 220px;
   --sidebar-width-collapsed: 64px;
@@ -51,10 +52,8 @@
   --mix-brand-700: #123b69;
 }
 
-/* B. Dark theme tokens (default) */
-:root,
-html[data-theme="dark"],
-html:not([data-theme]) {
+/* B. Dark theme tokens */
+html[data-theme="dark"] {
   color-scheme: dark;
 
   --c-bg: #0b1220;
@@ -112,8 +111,10 @@ html:not([data-theme]) {
   --logs-error-border: color-mix(in srgb, var(--c-danger) 42%, var(--c-border));
 }
 
-/* C. Light theme tokens */
-html[data-theme="light"] {
+/* C. Light theme tokens (default) */
+:root,
+html[data-theme="light"],
+html:not([data-theme]) {
   color-scheme: light;
 
   --c-bg: #f8fafc;
@@ -185,6 +186,19 @@ html:not([data-theme]) {
   --color-warning: var(--c-warning);
   --color-danger: var(--c-danger);
   --color-neutral: var(--c-text-muted);
+}
+
+html[data-font-size="sm"] {
+  --chat-font-size: 12px;
+}
+
+html[data-font-size="md"],
+html:not([data-font-size]) {
+  --chat-font-size: 13px;
+}
+
+html[data-font-size="lg"] {
+  --chat-font-size: 14px;
 }
 
 * {
@@ -1025,7 +1039,7 @@ body {
 .chat-msg__bubble {
   border-radius: 14px;
   padding: 12px 14px;
-  font-size: 12px;
+  font-size: var(--chat-font-size);
   line-height: 1.55;
   width: 100%;
   border: 1px solid transparent;

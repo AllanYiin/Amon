@@ -25,7 +25,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "tools": {
             "unified_dispatch": False,
         },
-        "ui": {"theme": "light", "streaming": True},
+        "ui": {"theme": "light", "font_size": "md", "streaming": True},
     },
     "paths": {
         "skills_dir": "~/.amon/skills",
