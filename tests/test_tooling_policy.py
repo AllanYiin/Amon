@@ -173,6 +173,13 @@ class WorkspaceGuardTests(unittest.TestCase):
                 resolved = guard.assert_in_workspace(target)
             self.assertEqual(resolved, target.resolve())
 
+    def test_workspace_path_trailing_newline_is_sanitized(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            guard = WorkspaceGuard(workspace_root=root)
+            resolved = guard.assert_in_workspace(f"{root}\n")
+            self.assertEqual(resolved, root.resolve())
+
 
 class ToolRegistryTests(unittest.TestCase):
     def setUp(self) -> None:
