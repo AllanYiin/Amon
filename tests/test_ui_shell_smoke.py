@@ -109,6 +109,22 @@ class UIShellSmokeTests(unittest.TestCase):
         self.assertIn("[hidden]", css)
         self.assertIn("display: none !important", css)
 
+    def test_ui_defaults_to_light_theme_and_medium_font_size(self) -> None:
+        html = Path("src/amon/ui/index.html").read_text(encoding="utf-8")
+        css = Path("src/amon/ui/styles.css").read_text(encoding="utf-8")
+        bootstrap_js = Path("src/amon/ui/static/js/bootstrap.js").read_text(encoding="utf-8")
+
+        self.assertIn('<html lang="zh-Hant" data-theme="light" data-font-size="md">', html)
+        self.assertIn('html[data-theme="dark"]', css)
+        self.assertIn('html[data-theme="light"]', css)
+        self.assertIn('html[data-font-size="sm"]', css)
+        self.assertIn('html[data-font-size="md"]', css)
+        self.assertIn('html[data-font-size="lg"]', css)
+        self.assertIn('--chat-font-size: 13px;', css)
+        self.assertIn('font-size: var(--chat-font-size);', css)
+        self.assertIn('function applyUiPreferencesFromConfig(effectiveConfig = {})', bootstrap_js)
+        self.assertIn('rootEl.dataset.fontSize = normalizeUiFontSize(uiConfig.font_size);', bootstrap_js)
+
     def test_artifact_preview_modal_body_is_scrollable(self) -> None:
         css = Path("src/amon/ui/styles.css").read_text(encoding="utf-8")
         self.assertIn(".artifact-preview-modal__panel", css)
