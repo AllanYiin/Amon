@@ -7,7 +7,7 @@ import logging
 import os
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -44,6 +44,7 @@ class _JobHandle:
     data_dir: Path
     event_emitter: EventEmitter
     last_event_id: str | None
+    state_lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 _JOB_REGISTRY: dict[str, _JobHandle] = {}
@@ -284,7 +285,8 @@ def _emit_job_event(emitter: EventEmitter, job_id: str, event_type: str, payload
     event_id = datetime.now().astimezone().strftime("%Y%m%d%H%M%S%f")
     handle = _JOB_REGISTRY.get(job_id)
     if handle:
-        handle.last_event_id = event_id
+        with handle.state_lock:
+            handle.last_event_id = event_id
         _write_state(handle)
     event_id = emitter(
         {
@@ -298,20 +300,22 @@ def _emit_job_event(emitter: EventEmitter, job_id: str, event_type: str, payload
     )
     handle = _JOB_REGISTRY.get(job_id)
     if handle:
-        handle.last_event_id = event_id
+        with handle.state_lock:
+            handle.last_event_id = event_id
         _write_state(handle)
 
 
 def _write_state(handle: _JobHandle) -> None:
     state_dir = handle.data_dir / "jobs" / "state"
     state_dir.mkdir(parents=True, exist_ok=True)
-    state = {
-        "job_id": handle.job_id,
-        "status": handle.status,
-        "last_heartbeat_ts": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "last_error": handle.last_error,
-        "last_event_id": handle.last_event_id,
-    }
+    with handle.state_lock:
+        state = {
+            "job_id": handle.job_id,
+            "status": handle.status,
+            "last_heartbeat_ts": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "last_error": handle.last_error,
+            "last_event_id": handle.last_event_id,
+        }
     state_path = state_dir / f"{handle.job_id}.json"
     try:
         atomic_write_text(state_path, json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
