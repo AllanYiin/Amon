@@ -65,7 +65,7 @@ amon tools mcp-list --refresh
 # 呼叫 MCP tool
 amon tools mcp-call local-tools:echo --args '{"text":"hello"}'
 
-# 工具管理（legacy/native/builtin）
+# 工具管理（native/builtin）
 amon tools list
 amon tools list --builtin
 amon tools forge --project <project_id> --name "市場摘要" --spec "讀取資料並生成摘要"
@@ -101,10 +101,14 @@ amon eval --suite basic
 # 系統診斷
 amon doctor
 
-# Graph 執行與模板
-amon graph run --project <project_id> --graph ./graph.json
+# Graph 執行與模板（僅支援 taskgraph.v3）
+amon graph run --project <project_id> --graph ./graph.v3.json
 amon graph template create --project <project_id> --run <run_id>
 amon graph template parametrize --template <template_id> --path "$.nodes[0].prompt" --var_name topic
+
+# （歷史相容）舊格式轉換為 v3
+amon graph migrate --source legacy --input ./graph.legacy.json --output ./graph.v3.json
+amon graph migrate --source v2 --input ./graph.v2.json --output ./graph.v3.json
 
 # Hooks / Schedules / Jobs
 amon hooks list
@@ -160,7 +164,7 @@ print("hello")
 
 ## 功能更新摘要
 
-* 新增工具管理：支援 legacy 工具、toolforge 原生工具與內建工具的列出、呼叫與測試。
+* 新增工具管理：支援 toolforge 原生工具與內建工具的列出、呼叫與測試。
 * 新增 Graph 執行與模板化能力，可用於重複任務與參數化流程。
 * 新增 Hooks/Schedules/Jobs 與 daemon 常駐服務，支援事件觸發、排程與背景工作。
 * 新增檔案安全操作、專案匯出、系統診斷與內建評測指令。

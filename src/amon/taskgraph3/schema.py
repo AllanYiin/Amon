@@ -80,6 +80,7 @@ class BaseNode:
 class TaskNode(BaseNode):
     node_type: str = "TASK"
     execution: str = "SINGLE"
+    execution_config: dict[str, Any] | None = None
     output_contract: OutputContract = field(default_factory=OutputContract)
     policy: Policy = field(default_factory=Policy)
     guardrails: dict[str, Any] | None = None
@@ -171,6 +172,8 @@ def _validate_node(node: BaseNode) -> None:
     if isinstance(node, TaskNode):
         if node.execution not in _EXECUTION_TYPES:
             raise ValueError(f"task.execution 不合法：node_id={node.id}, execution={node.execution}")
+        if node.execution_config is not None and not isinstance(node.execution_config, dict):
+            raise ValueError(f"task.execution_config 必須是 object：node_id={node.id}")
         for port in node.output_contract.ports:
             _validate_output_port(node.id, port)
 

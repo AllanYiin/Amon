@@ -10,6 +10,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Block removed module names
+        run: |
+          ! rg -n "amon\.taskgraph2|amon\.graph_runtime" src tests docs .github/workflows
       - name: Run anti-legacy graph scan
         run: scripts/anti_legacy_graph.sh
 

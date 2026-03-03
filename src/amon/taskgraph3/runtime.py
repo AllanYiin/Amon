@@ -1,11 +1,13 @@
-"""TaskGraph v3 SINGLE runtime with built-in cross-cutting capabilities."""
+"""TaskGraph v3 runtime with deterministic cross-cutting capabilities."""
 
 from __future__ import annotations
 
 import json
+import threading
 import time
 import uuid
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -27,7 +29,7 @@ class TaskGraph3RunResult:
 
 
 class TaskGraph3Runtime:
-    """Deterministic v3 runtime for SINGLE execution graphs."""
+    """Deterministic v3 runtime for SINGLE/PARALLEL_MAP/RECURSIVE task execution."""
 
     def __init__(
         self,
@@ -46,6 +48,7 @@ class TaskGraph3Runtime:
         self._sleep = sleep_func or time.sleep
         self._bucket_state: dict[str, dict[str, float]] = {}
         self._stream_state: dict[str, dict[str, float]] = {}
+        self._rate_lock = threading.Lock()
 
     def run(self, node_runner: Callable[[TaskNode, dict[str, Any]], str]) -> TaskGraph3RunResult:
         run_id = self.run_id or uuid.uuid4().hex
@@ -79,7 +82,14 @@ class TaskGraph3Runtime:
             },
         }
 
-        self._write_json(resolved_path, {"version": self.graph.version, "nodes": [self._node_to_dict(n) for n in self.graph.nodes], "edges": [self._edge_to_dict(e) for e in self.graph.edges]})
+        self._write_json(
+            resolved_path,
+            {
+                "version": self.graph.version,
+                "nodes": [self._node_to_dict(n) for n in self.graph.nodes],
+                "edges": [self._edge_to_dict(e) for e in self.graph.edges],
+            },
+        )
         self._emit_event(events_path, {"event": "run_start", "run_id": run_id}, stream_limit=None)
 
         while ready:
@@ -90,12 +100,15 @@ class TaskGraph3Runtime:
 
             node_state = state["nodes"][node_id]
             node_state["status"] = "RUNNING"
-            self._emit_event(events_path, {"event": "node_status", "node_id": node_id, "status": "RUNNING"}, stream_limit=node.policy.stream_limit)
+            self._emit_event(
+                events_path,
+                {"event": "node_status", "node_id": node_id, "status": "RUNNING"},
+                stream_limit=node.policy.stream_limit,
+            )
 
             try:
-                self._acquire_rate_limit(node.id, node.policy.rate_limit)
                 started = self._time()
-                raw_output = node_runner(node, state)
+                raw_output = self._execute_node_by_mode(node, state, node_runner)
                 node_state["attempt_logs"].append(f"attempt=1 output_len={len(raw_output)}")
                 extracted = self._extract_ports(node, raw_output)
                 self._validate_output_contract(node, extracted)
@@ -106,14 +119,22 @@ class TaskGraph3Runtime:
                 state["metrics"]["counters"]["nodes_succeeded"] += 1
                 node_state["status"] = "SUCCEEDED"
                 node_state["output"] = {"raw": raw_output, "ports": extracted}
-                self._emit_event(events_path, {"event": "node_status", "node_id": node_id, "status": "SUCCEEDED", "latency_ms": latency_ms}, stream_limit=node.policy.stream_limit)
+                self._emit_event(
+                    events_path,
+                    {"event": "node_status", "node_id": node_id, "status": "SUCCEEDED", "latency_ms": latency_ms},
+                    stream_limit=node.policy.stream_limit,
+                )
             except Exception as exc:  # noqa: BLE001
                 self._flush_stream(events_path, node.id)
                 state["metrics"]["counters"]["nodes_failed"] += 1
                 node_state["status"] = "FAILED"
                 node_state["error"] = str(exc)
                 node_state["attempt_logs"].append(f"attempt=1 failed={exc}")
-                self._emit_event(events_path, {"event": "node_status", "node_id": node_id, "status": "FAILED", "error": str(exc)}, stream_limit=node.policy.stream_limit)
+                self._emit_event(
+                    events_path,
+                    {"event": "node_status", "node_id": node_id, "status": "FAILED", "error": str(exc)},
+                    stream_limit=node.policy.stream_limit,
+                )
                 state["status"] = "failed"
                 break
 
@@ -126,9 +147,89 @@ class TaskGraph3Runtime:
         if state["status"] == "running":
             state["status"] = "completed"
 
-        self._emit_event(events_path, {"event": "run_end", "run_id": run_id, "status": state["status"]}, stream_limit=None)
+        self._emit_event(
+            events_path,
+            {"event": "run_end", "run_id": run_id, "status": state["status"]},
+            stream_limit=None,
+        )
         self._write_json(state_path, state)
         return TaskGraph3RunResult(run_id=run_id, run_dir=run_dir, state=state)
+
+    def _execute_node_by_mode(
+        self,
+        node: TaskNode,
+        state: dict[str, Any],
+        node_runner: Callable[[TaskNode, dict[str, Any]], str],
+    ) -> str:
+        mode = node.execution
+        if mode == "PARALLEL_MAP":
+            return self._run_parallel_map(node, state, node_runner)
+        if mode == "RECURSIVE":
+            return self._run_recursive(node, state, node_runner)
+        self._acquire_rate_limit(node.id, node.policy.rate_limit)
+        return node_runner(node, state)
+
+    def _run_parallel_map(
+        self,
+        node: TaskNode,
+        state: dict[str, Any],
+        node_runner: Callable[[TaskNode, dict[str, Any]], str],
+    ) -> str:
+        config = node.execution_config or {}
+        items = config.get("items") if isinstance(config.get("items"), list) else []
+        max_concurrency = int(config.get("maxConcurrency") or 1)
+        if max_concurrency <= 0:
+            raise ValueError(f"node={node.id} maxConcurrency must be > 0")
+
+        results: dict[int, str] = {}
+
+        def _worker(index: int, item: Any) -> tuple[int, str]:
+            ctx = dict(state)
+            ctx["map_item"] = item
+            ctx["map_index"] = index
+            self._acquire_rate_limit(node.id, node.policy.rate_limit)
+            return index, node_runner(node, ctx)
+
+        with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
+            futures = [executor.submit(_worker, idx, item) for idx, item in enumerate(items)]
+            for future in as_completed(futures):
+                idx, output = future.result()
+                results[idx] = output
+
+        ordered = [results[idx] for idx in range(len(items))]
+        return json.dumps(ordered, ensure_ascii=False)
+
+    def _run_recursive(
+        self,
+        node: TaskNode,
+        state: dict[str, Any],
+        node_runner: Callable[[TaskNode, dict[str, Any]], str],
+    ) -> str:
+        config = node.execution_config or {}
+        max_iters = int(config.get("maxIters") or 1)
+        if max_iters <= 0:
+            raise ValueError(f"node={node.id} maxIters must be > 0")
+        stop_condition = config.get("stopCondition") if isinstance(config.get("stopCondition"), dict) else {}
+
+        latest = ""
+        for iteration in range(max_iters):
+            ctx = dict(state)
+            ctx["recursive_iter"] = iteration
+            self._acquire_rate_limit(node.id, node.policy.rate_limit)
+            latest = node_runner(node, ctx)
+            if self._is_recursive_stop(latest, stop_condition):
+                break
+        return latest
+
+    def _is_recursive_stop(self, raw_output: str, stop_condition: dict[str, Any]) -> bool:
+        if not stop_condition:
+            return False
+        if "contains" in stop_condition:
+            token = str(stop_condition.get("contains") or "")
+            return token != "" and token in raw_output
+        if "equals" in stop_condition:
+            return raw_output == str(stop_condition.get("equals"))
+        return False
 
     def _compile_control_graph(self, edges: list[GraphEdge]) -> tuple[dict[str, list[str]], dict[str, int]]:
         adjacency: dict[str, list[str]] = {node.id: [] for node in self.graph.nodes}
@@ -143,19 +244,20 @@ class TaskGraph3Runtime:
     def _acquire_rate_limit(self, node_id: str, rate_limit: int | None) -> None:
         if not rate_limit or rate_limit <= 0:
             return
-        rate = float(rate_limit)
-        bucket = self._bucket_state.setdefault(node_id, {"tokens": rate, "last_refill": self._time()})
-        now = self._time()
-        elapsed = max(0.0, now - bucket["last_refill"])
-        bucket["tokens"] = min(rate, bucket["tokens"] + elapsed * rate)
-        bucket["last_refill"] = now
-        if bucket["tokens"] >= 1.0:
-            bucket["tokens"] -= 1.0
-            return
-        wait_s = (1.0 - bucket["tokens"]) / rate
-        self._sleep(wait_s)
-        bucket["tokens"] = 0.0
-        bucket["last_refill"] = self._time()
+        with self._rate_lock:
+            rate = float(rate_limit)
+            bucket = self._bucket_state.setdefault(node_id, {"tokens": rate, "last_refill": self._time()})
+            now = self._time()
+            elapsed = max(0.0, now - bucket["last_refill"])
+            bucket["tokens"] = min(rate, bucket["tokens"] + elapsed * rate)
+            bucket["last_refill"] = now
+            if bucket["tokens"] >= 1.0:
+                bucket["tokens"] -= 1.0
+                return
+            wait_s = (1.0 - bucket["tokens"]) / rate
+            self._sleep(wait_s)
+            bucket["tokens"] = 0.0
+            bucket["last_refill"] = self._time()
 
     def _emit_event(self, events_path: Path, payload: dict[str, Any], *, stream_limit: int | None) -> None:
         node_id = str(payload.get("node_id") or "")
@@ -252,6 +354,8 @@ class TaskGraph3Runtime:
     def _node_to_dict(self, node: Any) -> dict[str, Any]:
         payload = {"id": node.id, "node_type": node.node_type, "title": node.title}
         if isinstance(node, TaskNode):
+            payload["execution"] = node.execution
+            payload["executionConfig"] = node.execution_config or {}
             payload["policy"] = {"rateLimit": node.policy.rate_limit, "streamLimit": node.policy.stream_limit}
             payload["outputContract"] = {
                 "ports": [
