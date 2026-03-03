@@ -84,7 +84,7 @@ class CliTaskGraph2EngineTests(unittest.TestCase):
         self.assertIn("v1 已停用", stdout.getvalue())
         core.run_taskgraph2.assert_called_once()
 
-    def test_graph_run_schema_v2_uses_taskgraph_runtime_and_writes_artifacts(self) -> None:
+    def test_graph_run_schema_v2_fails_with_migration_message(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir
             try:
@@ -92,30 +92,7 @@ class CliTaskGraph2EngineTests(unittest.TestCase):
                 project = core.create_project("測試專案")
                 project_path = core.get_project_path(project.project_id)
                 graph_path = project_path / "graph-v2.json"
-                graph_payload = {
-                    "schema_version": "2.0",
-                    "objective": "最小整合測試",
-                    "session_defaults": {"topic": "integration"},
-                    "nodes": [
-                        {
-                            "id": "N1",
-                            "title": "step1",
-                            "kind": "task",
-                            "description": "第一步",
-                            "reads": ["topic"],
-                            "writes": {"draft": "text"},
-                        },
-                        {
-                            "id": "N2",
-                            "title": "step2",
-                            "kind": "task",
-                            "description": "第二步",
-                            "reads": ["draft"],
-                            "writes": {"final": "text"},
-                        },
-                    ],
-                    "edges": [{"from": "N1", "to": "N2"}],
-                }
+                graph_payload = {"schema_version": "2.0", "nodes": [], "edges": []}
                 graph_path.write_text(json.dumps(graph_payload, ensure_ascii=False), encoding="utf-8")
 
                 args = argparse.Namespace(
@@ -126,19 +103,40 @@ class CliTaskGraph2EngineTests(unittest.TestCase):
                     graph=str(graph_path),
                 )
 
-                with patch("amon.taskgraph2.runtime.build_default_llm_client", return_value=_FakeLLMClient(["第一步", "第二步"])):
-                    stdout = io.StringIO()
-                    with redirect_stdout(stdout):
-                        cli._handle_graph(core, args)
+                with self.assertRaisesRegex(ValueError, "Unsupported graph format") as exc_ctx:
+                    cli._handle_graph(core, args)
+            finally:
+                os.environ.pop("AMON_HOME", None)
 
-                output = stdout.getvalue()
-                self.assertIn("已完成 graph 執行", output)
-                run_id = output.split("已完成 graph 執行：", 1)[1].splitlines()[0].strip()
-                run_dir = project_path / ".amon" / "runs" / run_id
-                self.assertTrue((run_dir / "state.json").exists())
-                self.assertTrue((run_dir / "events.jsonl").exists())
-                state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
-                self.assertEqual(state["status"], "completed")
+        self.assertIn("Run migrator: amon graph migrate ...", str(exc_ctx.exception))
+
+    def test_graph_run_v3_works(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore(data_dir=Path(temp_dir))
+                project = core.create_project("測試專案")
+                project_path = core.get_project_path(project.project_id)
+                graph_path = project_path / "graph-v3.json"
+                graph_payload = {
+                    "version": "taskgraph.v3",
+                    "nodes": [{"id": "w1", "type": "write_file", "path": "docs/output.txt", "content": "ok"}],
+                    "edges": [],
+                }
+                graph_path.write_text(json.dumps(graph_payload, ensure_ascii=False), encoding="utf-8")
+
+                args = argparse.Namespace(
+                    graph_command="run",
+                    template=None,
+                    var=[],
+                    project=project.project_id,
+                    graph=str(graph_path),
+                )
+                stdout = io.StringIO()
+                with redirect_stdout(stdout):
+                    cli._handle_graph(core, args)
+                self.assertIn("已完成 graph 執行", stdout.getvalue())
+                self.assertTrue((project_path / "docs" / "output.txt").exists())
             finally:
                 os.environ.pop("AMON_HOME", None)
 

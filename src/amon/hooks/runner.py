@@ -410,15 +410,10 @@ def _run_graph(
             "event_id": event.get("event_id"),
         }
     )
-    from amon.graph_runtime import GraphRuntime
-
-    runtime = GraphRuntime(
-        core=core,
+    result = core.run_graph(
         project_path=project_path,
         graph_path=graph_path,
         variables=variables,
         run_id=run_id,
-        cancel_event=cancel_event,
     )
-    result = runtime.run()
     return {"run_id": result.run_id, "run_dir": str(result.run_dir)}

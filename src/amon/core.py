@@ -43,7 +43,7 @@ from .project_registry import ProjectRegistry, load_project_config
 from .graph_runtime import GraphRunResult, GraphRuntime
 from .taskgraph2 import TaskGraphRuntime
 from .taskgraph2.planner_llm import generate_taskgraph2_with_llm
-from .taskgraph2.serialize import dumps_task_graph, loads_task_graph
+from .taskgraph2.serialize import dumps_task_graph
 from .sandbox.service import run_sandbox_step
 from .tooling import (
     ToolingError,
@@ -1550,6 +1550,7 @@ class AmonCore:
         graphs_dir = project_path / ".amon" / "graphs"
         graphs_dir.mkdir(parents=True, exist_ok=True)
         resolved = {
+            "version": "taskgraph.v3",
             "nodes": graph.get("nodes", []),
             "edges": graph.get("edges", []),
             "variables": variables,
@@ -1634,21 +1635,8 @@ class AmonCore:
             self.logger.error("讀取 graph 失敗：%s", exc, exc_info=True)
             raise
 
-        if isinstance(graph_payload, dict) and str(graph_payload.get("schema_version") or "") == "2.0":
-            nodes_payload = graph_payload.get("nodes")
-            has_legacy_node_type = isinstance(nodes_payload, list) and any(
-                isinstance(node, dict) and "type" in node for node in nodes_payload
-            )
-            if not has_legacy_node_type:
-                task_graph = loads_task_graph(json.dumps(graph_payload, ensure_ascii=False))
-                if variables:
-                    task_graph.session_defaults.update(variables)
-                runtime_v2 = TaskGraphRuntime(
-                    project_path=project_path,
-                    graph=task_graph,
-                    run_id=run_id,
-                )
-                return runtime_v2.run()
+        if not isinstance(graph_payload, dict) or str(graph_payload.get("version") or "") != "taskgraph.v3":
+            raise ValueError("Unsupported graph format\nRun migrator: amon graph migrate ...")
 
         runtime = GraphRuntime(
             core=self,
@@ -1784,9 +1772,7 @@ class AmonCore:
             "source_run_id": run_id,
             "created_at": self._now(),
             "variables_schema": template_schema,
-            "schema_version": resolved.get("schema_version"),
-            "objective": resolved.get("objective"),
-            "session_defaults": resolved.get("session_defaults", {}),
+            "version": "taskgraph.v3",
             "metadata": resolved.get("metadata"),
             "nodes": resolved.get("nodes", []),
             "edges": resolved.get("edges", []),
@@ -1834,21 +1820,14 @@ class AmonCore:
         schema = self._load_template_schema(template_path, payload)
         variables = variables or {}
         variables = self._apply_schema_defaults(schema, variables)
-        if str(payload.get("schema_version") or "") == "2.0":
-            graph = {
-                "schema_version": "2.0",
-                "objective": payload.get("objective") or "Template Graph",
-                "session_defaults": payload.get("session_defaults", {}),
-                "nodes": payload.get("nodes", []),
-                "edges": payload.get("edges", []),
-                "metadata": payload.get("metadata"),
-            }
-        else:
-            graph = {
-                "nodes": payload.get("nodes", []),
-                "edges": payload.get("edges", []),
-                "variables": payload.get("variables", {}),
-            }
+        if str(payload.get("version") or "") != "taskgraph.v3":
+            raise ValueError("Unsupported graph format\nRun migrator: amon graph migrate ...")
+        graph = {
+            "version": "taskgraph.v3",
+            "nodes": payload.get("nodes", []),
+            "edges": payload.get("edges", []),
+            "variables": payload.get("variables", {}),
+        }
         resolved_graph = self._resolve_template_values(graph, variables)
         template_dir = template_path.parent
         rendered_path = template_dir / "graph.rendered.json"

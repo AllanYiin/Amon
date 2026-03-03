@@ -121,6 +121,7 @@ class GraphRuntimeTests(unittest.TestCase):
                 project_path = Path(project.path)
 
                 graph = {
+                    "version": "taskgraph.v3",
                     "variables": {"name": "Amon"},
                     "nodes": [
                         {
@@ -211,7 +212,7 @@ class GraphRuntimeTests(unittest.TestCase):
                 self.assertEqual(item["run_id"], "run-correlation")
                 self.assertEqual(item["request_id"], "req-correlation")
 
-    def test_core_run_graph_uses_legacy_runtime_when_schema_version_missing(self) -> None:
+    def test_core_run_graph_rejects_legacy_graph_without_v3_version(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir
             try:
@@ -233,14 +234,32 @@ class GraphRuntimeTests(unittest.TestCase):
                 graph_path = project_path / "graph.json"
                 graph_path.write_text(json.dumps(graph, ensure_ascii=False), encoding="utf-8")
 
-                result = core.run_graph(project_path=project_path, graph_path=graph_path)
+                with self.assertRaisesRegex(ValueError, "Unsupported graph format") as exc_ctx:
+                    core.run_graph(project_path=project_path, graph_path=graph_path)
             finally:
                 os.environ.pop("AMON_HOME", None)
 
-            output_path = project_path / "docs" / "legacy.txt"
-            self.assertTrue(output_path.exists())
-            self.assertEqual(output_path.read_text(encoding="utf-8"), "legacy")
-            self.assertEqual(result.state["status"], "completed")
+            self.assertIn("Run migrator: amon graph migrate ...", str(exc_ctx.exception))
+            self.assertFalse((project_path / "docs" / "legacy.txt").exists())
+
+    def test_core_run_graph_rejects_v2_graph(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("V2 Graph 專案")
+                project_path = Path(project.path)
+                graph = {"schema_version": "2.0", "nodes": [], "edges": []}
+                graph_path = project_path / "graph-v2.json"
+                graph_path.write_text(json.dumps(graph, ensure_ascii=False), encoding="utf-8")
+
+                with self.assertRaisesRegex(ValueError, "Unsupported graph format") as exc_ctx:
+                    core.run_graph(project_path=project_path, graph_path=graph_path)
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+            self.assertIn("Run migrator: amon graph migrate ...", str(exc_ctx.exception))
 
     def test_graph_template_parametrize_and_run(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -252,7 +271,7 @@ class GraphRuntimeTests(unittest.TestCase):
                 project_path = Path(project.path)
 
                 graph = {
-                    "schema_version": "2.0",
+                    "version": "taskgraph.v3",
                     "variables": {},
                     "nodes": [
                         {
@@ -306,6 +325,7 @@ class GraphRuntimeTests(unittest.TestCase):
                 project_path = Path(project.path)
 
                 graph = {
+                    "version": "taskgraph.v3",
                     "variables": {},
                     "nodes": [
                         {
@@ -459,7 +479,7 @@ class GraphRuntimeTests(unittest.TestCase):
                 )
 
                 slow_graph = {
-                    "schema_version": "2.0",
+                    "version": "taskgraph.v3",
                     "nodes": [
                         {
                             "id": "slow",
@@ -472,7 +492,7 @@ class GraphRuntimeTests(unittest.TestCase):
                     "edges": [],
                 }
                 fast_graph = {
-                    "schema_version": "2.0",
+                    "version": "taskgraph.v3",
                     "nodes": [
                         {
                             "id": "fast",
