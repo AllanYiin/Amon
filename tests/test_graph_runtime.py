@@ -11,7 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from amon.core import AmonCore
-from amon.graph_runtime import GraphRuntime, _is_client_disconnect_error
+from amon.graph_runtime import GraphRuntime, _NodeTimeoutError, _is_client_disconnect_error
 from amon.run.context import append_run_constraints
 
 
@@ -68,6 +68,46 @@ class GraphRuntimeTests(unittest.TestCase):
                 )
 
         self.assertEqual(result.get("content"), "ok")
+
+    def test_agent_task_hard_timeout_raises_node_timeout(self) -> None:
+        class _StubCore:
+            def __init__(self) -> None:
+                self.logger = __import__("logging").getLogger("graph-runtime-test")
+
+            def run_agent_task(self, *_args, **_kwargs):
+                time.sleep(1.4)
+                return "late"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_path = Path(temp_dir)
+            graph_path = project_path / "graph.json"
+            graph_path.write_text(json.dumps({"nodes": [], "edges": []}, ensure_ascii=False), encoding="utf-8")
+            events_path = project_path / "events.jsonl"
+            runtime = GraphRuntime(core=_StubCore(), project_path=project_path, graph_path=graph_path)
+            runtime._inject_run_constraints = lambda prompt, _run_id: prompt  # type: ignore[method-assign]
+            node = {
+                "id": "agent",
+                "type": "agent_task",
+                "prompt": "hello",
+                "inactivity_timeout_s": 10,
+                "hard_timeout_s": 1,
+            }
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                with self.assertRaises(_NodeTimeoutError):
+                    runtime._execute_node_with_timeout(
+                        node,
+                        {},
+                        "run-hard-timeout",
+                        events_path=events_path,
+                        executor=executor,
+                    )
+
+            events = [
+                json.loads(line)
+                for line in events_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertTrue(any(item.get("event") == "node_hard_timeout_warning" for item in events))
 
     def test_graph_run_creates_state_and_outputs(self) -> None:
         if not os.getenv("OPENAI_API_KEY"):
