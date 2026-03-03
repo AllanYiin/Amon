@@ -216,6 +216,7 @@ def _to_task_node(raw: Any) -> TaskNode:
         node_type="TASK",
         title=str(raw.get("title") or ""),
         execution=str(raw.get("execution") or "SINGLE"),
+        execution_config=raw.get("executionConfig") if isinstance(raw.get("executionConfig"), dict) else None,
         output_contract=OutputContract(ports=ports),
     )
 
@@ -302,4 +303,3 @@ def _optional_str(value: Any) -> str | None:
 def _ensure_dict(value: Any, *, name: str) -> None:
     if not isinstance(value, dict):
         raise ValueError(f"{name} 必須是 object")
-
