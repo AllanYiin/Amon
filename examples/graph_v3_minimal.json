@@ -1,0 +1,66 @@
+{
+  "schemaVersion": "taskgraph.v3",
+  "nodes": [
+    {
+      "nodeId": "n1",
+      "kind": "input",
+      "title": "Input",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "text",
+          "typeRef": "string"
+        }
+      ],
+      "config": {}
+    },
+    {
+      "nodeId": "n2",
+      "kind": "output",
+      "title": "Output",
+      "inputs": [
+        {
+          "name": "text",
+          "typeRef": "string"
+        }
+      ],
+      "outputs": [],
+      "config": {}
+    }
+  ],
+  "edges": [
+    {
+      "edgeId": "e1",
+      "fromNodeId": "n1",
+      "fromPort": "text",
+      "toNodeId": "n2",
+      "toPort": "text",
+      "typeRef": "string"
+    }
+  ],
+  "enums": [
+    {
+      "enumId": "Priority",
+      "values": ["low", "high"],
+      "description": "Task priority"
+    }
+  ],
+  "policy": {
+    "retryMax": 1,
+    "timeoutSec": 30
+  },
+  "outputContract": {
+    "typeRef": "string",
+    "required": []
+  },
+  "guardrails": {
+    "blockedPatterns": []
+  },
+  "outputBoundary": {
+    "maxChars": 2000
+  },
+  "scorer": {
+    "metric": "pass_rate",
+    "threshold": 0.8
+  }
+}

@@ -1,0 +1,261 @@
+{
+  "$defs": {
+    "edge": {
+      "additionalProperties": false,
+      "properties": {
+        "edgeId": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "fromNodeId": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "fromPort": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "toNodeId": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "toPort": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "typeRef": {
+          "$ref": "#/$defs/typeRef"
+        }
+      },
+      "required": [
+        "edgeId",
+        "fromNodeId",
+        "fromPort",
+        "toNodeId",
+        "toPort"
+      ],
+      "type": "object"
+    },
+    "enumType": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "enumId": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "values": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "enumId",
+        "values"
+      ],
+      "type": "object"
+    },
+    "guardrails": {
+      "additionalProperties": false,
+      "properties": {
+        "blockedPatterns": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "blockedPatterns"
+      ],
+      "type": "object"
+    },
+    "node": {
+      "additionalProperties": false,
+      "properties": {
+        "config": {
+          "type": "object"
+        },
+        "inputs": {
+          "items": {
+            "$ref": "#/$defs/port"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "nodeId": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "outputs": {
+          "items": {
+            "$ref": "#/$defs/port"
+          },
+          "type": "array"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "nodeId",
+        "kind",
+        "inputs",
+        "outputs",
+        "config"
+      ],
+      "type": "object"
+    },
+    "outputBoundary": {
+      "additionalProperties": false,
+      "properties": {
+        "maxChars": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "maxChars"
+      ],
+      "type": "object"
+    },
+    "outputContract": {
+      "additionalProperties": false,
+      "properties": {
+        "required": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "typeRef": {
+          "$ref": "#/$defs/typeRef"
+        }
+      },
+      "required": [
+        "required"
+      ],
+      "type": "object"
+    },
+    "policy": {
+      "additionalProperties": false,
+      "properties": {
+        "retryMax": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "timeoutSec": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "retryMax",
+        "timeoutSec"
+      ],
+      "type": "object"
+    },
+    "port": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "typeRef": {
+          "$ref": "#/$defs/typeRef"
+        }
+      },
+      "required": [
+        "name",
+        "typeRef"
+      ],
+      "type": "object"
+    },
+    "scorer": {
+      "additionalProperties": false,
+      "properties": {
+        "metric": {
+          "type": "string"
+        },
+        "threshold": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "metric",
+        "threshold"
+      ],
+      "type": "object"
+    },
+    "typeRef": {
+      "pattern": "^(string|number|integer|boolean|object|array|null|any|#/enums/[A-Za-z0-9_-]+)$",
+      "type": "string"
+    }
+  },
+  "$id": "https://amon.dev/schemas/taskgraph.v3.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "edges": {
+      "items": {
+        "$ref": "#/$defs/edge"
+      },
+      "type": "array"
+    },
+    "enums": {
+      "items": {
+        "$ref": "#/$defs/enumType"
+      },
+      "type": "array"
+    },
+    "guardrails": {
+      "$ref": "#/$defs/guardrails"
+    },
+    "nodes": {
+      "items": {
+        "$ref": "#/$defs/node"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "outputBoundary": {
+      "$ref": "#/$defs/outputBoundary"
+    },
+    "outputContract": {
+      "$ref": "#/$defs/outputContract"
+    },
+    "policy": {
+      "$ref": "#/$defs/policy"
+    },
+    "schemaVersion": {
+      "const": "taskgraph.v3"
+    },
+    "scorer": {
+      "$ref": "#/$defs/scorer"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "nodes",
+    "edges",
+    "enums",
+    "policy",
+    "outputContract",
+    "guardrails",
+    "outputBoundary",
+    "scorer"
+  ],
+  "title": "Amon TaskGraph v3",
+  "type": "object"
+}
