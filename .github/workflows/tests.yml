@@ -5,6 +5,14 @@ on:
   pull_request:
 
 jobs:
+  check_no_legacy_graph:
+    name: check:no_legacy_graph
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run anti-legacy graph scan (warn mode)
+        run: scripts/anti_legacy_graph.sh
+
   tests:
     runs-on: ubuntu-latest
     steps:
