@@ -744,6 +744,7 @@ class GraphRuntime:
                     raise _NodeCanceledError()
                 if hard_timeout_s and (now - start) > hard_timeout_s and not hard_timeout_warned:
                     hard_timeout_warned = True
+                    node_cancel.set()
                     self._append_event(
                         events_path,
                         {
@@ -752,6 +753,7 @@ class GraphRuntime:
                             "timeout_s": hard_timeout_s,
                         },
                     )
+                    raise _NodeTimeoutError()
                 if inactivity_timeout_s and saw_progress and (now - last_progress_ts) > inactivity_timeout_s:
                     node_cancel.set()
                     self._append_event(
