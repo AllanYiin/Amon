@@ -16,36 +16,57 @@ echo "[anti-legacy-graph] mode: ${MODE}"
 output="$(python - <<'PY'
 from pathlib import Path
 
+ROOT = Path('.')
 violations: list[str] = []
+
+deleted_paths = [
+    'src/amon/graph_runtime.py',
+    'src/amon/taskgraph2',
+]
+for item in deleted_paths:
+    if Path(item).exists():
+        violations.append(f'{item}: deleted legacy path still exists')
 
 core_path = Path('src/amon/core.py')
 core_text = core_path.read_text(encoding='utf-8')
 start = core_text.find('def run_graph(')
-end = core_text.find('\n    def run_taskgraph2(', start)
-if start == -1 or end == -1:
-    violations.append('src/amon/core.py:run_graph function not found for legacy scan')
+if start == -1:
+    violations.append('src/amon/core.py: run_graph function not found')
 else:
-    run_graph_body = core_text[start:end]
-    forbidden = ('schema_version', 'TaskGraphRuntime', 'loads_task_graph')
-    for token in forbidden:
-        if token in run_graph_body:
-            violations.append(f'src/amon/core.py:run_graph contains forbidden token: {token}')
+    run_graph_body = core_text[start:]
     required = ('Unsupported graph format', 'Run migrator: amon graph migrate ...')
     for token in required:
         if token not in run_graph_body:
             violations.append(f'src/amon/core.py:run_graph missing required token: {token}')
 
-for path in [Path('src/amon/cli.py'), Path('src/amon/commands/executor.py'), Path('src/amon/hooks/runner.py')]:
-    text = path.read_text(encoding='utf-8')
-    if 'from amon.graph_runtime import GraphRuntime' in text:
-        violations.append(f'{path}: direct GraphRuntime import is forbidden in graph.run entrypoints')
+for path in ROOT.rglob('*'):
+    if not path.is_file():
+        continue
+    rel = path.as_posix()
+    if '/.git/' in rel or rel.startswith('.git/'):
+        continue
+    if 'taskgraph2' in rel or 'graph_runtime' in rel:
+        violations.append(f'{rel}: forbidden legacy path name')
 
-ui_text = Path('src/amon/ui_server.py').read_text(encoding='utf-8')
-if 'edge.get("from_node")' in ui_text or 'edge.get("to_node")' in ui_text:
-    violations.append('src/amon/ui_server.py: mermaid renderer still has legacy/v2 edge key fallback')
+scan_globs = ('src/**/*.py', 'tests/**/*.py', 'docs/**/*.md', 'scripts/**/*.sh', '.github/workflows/*.yml')
+for pattern in scan_globs:
+    for path in ROOT.glob(pattern):
+        if not path.is_file():
+            continue
+        if path.as_posix() == 'scripts/anti_legacy_graph.sh':
+            continue
+        text = path.read_text(encoding='utf-8', errors='ignore')
+        if 'amon.taskgraph2' in text or 'amon.graph_runtime' in text:
+            violations.append(f'{path.as_posix()}: forbidden legacy import reference')
+
+for doc_path in ROOT.glob('docs/**/*.md'):
+    text = doc_path.read_text(encoding='utf-8', errors='ignore')
+    for deleted in deleted_paths:
+        if deleted in text:
+            violations.append(f'{doc_path.as_posix()}: references deleted path {deleted}')
 
 if violations:
-    print('\n'.join(violations))
+    print('\n'.join(sorted(set(violations))))
 PY
 )"
 

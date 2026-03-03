@@ -22,7 +22,7 @@ def run_chat_repl(
     project_id: str | None,
     input_func: Callable[[str], str] = input,
     output_func: Callable[[str], None] = print,
-    engine: str = "taskgraph2",
+    engine: str = "taskgraph3",
 ) -> str:
     core.ensure_base_structure()
     chat_id: str | None = None
@@ -116,9 +116,7 @@ def run_chat_repl(
                     continue
                 output_func("Amon：")
                 prompt = turn_bundle.prompt_with_history if turn_bundle else message
-                if engine == "v1":
-                    output_func("[notice] v1 已停用，改以 taskgraph2 執行。")
-                response = core.run_taskgraph2(
+                response = core.run_taskgraph3(
                     prompt,
                     project_path=project_path,
                     project_id=project_id,

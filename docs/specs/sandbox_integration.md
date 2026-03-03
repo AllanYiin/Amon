@@ -12,14 +12,14 @@
 - `src/amon/sandbox/path_rules.py`
 - `src/amon/sandbox/types.py`
 - `src/amon/cli.py`
-- `src/amon/graph_runtime.py`
+- `src/amon/taskgraph3/engine_runtime.py`
 - `src/amon/tooling.py`
 - `src/amon/core.py`
 
 ### 0.2 目前入口與能力
 - **CLI sandbox 入口（已存在）**：`amon sandbox exec`，讀取 runner 設定、打包 `input_files`、呼叫 runner、解碼 `output_files` 到 `--out-dir`。  
   參考：`build_parser()` 與 `_handle_sandbox(...)`。
-- **Graph 執行入口（已存在）**：`AmonCore.run_graph(...)` 建立 `GraphRuntime`，於專案 `.amon/runs/<run_id>/` 產生 `state.json`、`events.jsonl`、`graph.resolved.json`。
+- **Graph 執行入口（已存在）**：`AmonCore.run_graph(...)` 建立 v3 `GraphRuntime`，於專案 `.amon/runs/<run_id>/` 產生 `state.json`、`events.jsonl`、`graph.resolved.json`。
 - **Graph node 類型（已存在）**：`agent_task`、`write_file`、`condition`、`map`、`tool.call|tool_call`（目前尚無 `sandbox_run`）。
 - **Tooling（已存在）**：`AmonCore.run_tool(...)` 走 legacy tool 目錄與 `tool.py` 子程序，透過 `allowed_paths` + `canonicalize_path(...)` 進行路徑限制。
 - **Sandbox client（已存在）**：`SandboxRunnerClient.run_code(...)` 呼叫外部 runner；`validate_relative_path(...)` 與 `decode_output_files(...)` 提供 path traversal 防護。

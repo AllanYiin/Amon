@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from amon.graph_runtime import GraphRuntime
+from amon.taskgraph3.engine_runtime import GraphRuntime
 
 
 class _StubCore:

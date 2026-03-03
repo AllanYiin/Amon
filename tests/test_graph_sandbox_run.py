@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from amon.graph_runtime import GraphRuntime
+from amon.taskgraph3.engine_runtime import GraphRuntime
 
 
 class _MockHTTPResponse:
