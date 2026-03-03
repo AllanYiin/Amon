@@ -1,0 +1,42 @@
+{
+  "version": "taskgraph.v3",
+  "nodes": [
+    {
+      "id": "n1",
+      "node_type": "TASK",
+      "title": "first",
+      "policy": {"rate_limit": 10, "stream_limit": 1},
+      "output_contract": {
+        "ports": [
+          {"name": "payload", "extractor": "json", "json_schema": {"type": "object", "required": ["value"]}, "type_ref": "object"}
+        ]
+      }
+    },
+    {
+      "id": "n2",
+      "node_type": "TASK",
+      "title": "second",
+      "policy": {"rate_limit": 10, "stream_limit": 1},
+      "output_contract": {
+        "ports": [
+          {"name": "payload", "extractor": "json", "json_schema": {"type": "object", "required": ["value"]}, "type_ref": "object"}
+        ]
+      }
+    },
+    {
+      "id": "n3",
+      "node_type": "TASK",
+      "title": "third",
+      "policy": {"rate_limit": 10, "stream_limit": 1},
+      "output_contract": {
+        "ports": [
+          {"name": "payload", "extractor": "json", "json_schema": {"type": "object", "required": ["value"]}, "type_ref": "object"}
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {"from_node": "n1", "to_node": "n2", "edge_type": "CONTROL", "kind": "next"},
+    {"from_node": "n2", "to_node": "n3", "edge_type": "CONTROL", "kind": "next"}
+  ]
+}
