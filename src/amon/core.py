@@ -29,7 +29,7 @@ import urllib.request
 
 import yaml
 
-from .config import DEFAULT_CONFIG, deep_merge, get_config_value, read_yaml, set_config_value, write_yaml
+from .config import DEFAULT_CONFIG, deep_merge, default_system_prompt, get_config_value, read_yaml, set_config_value, write_yaml
 from .fs.atomic import atomic_write_text, file_lock
 from .fs.safety import canonicalize_path, make_change_plan, require_confirm
 from .fs.trash import trash_move, trash_restore
@@ -3932,18 +3932,7 @@ class AmonCore:
         config: dict[str, Any],
         skill_names: list[str] | None = None,
     ) -> str:
-        system_message = (
-            "你是 Amon 的專案助理，請用繁體中文回覆。"
-            "將使用者需求視為任務委託：主動釐清目標與限制，提出並交付可執行方案/產出，並以完成任務為責任。"
-            "除非缺少關鍵資訊而無法繼續，否則先做合理假設直接開始；需要詢問時僅提 1–2 個最必要問題，"
-            "並在同一則訊息先列出暫定假設與可立即執行步驟，再附上問題。"
-            "除非真的缺關鍵資訊，否則不要以反問句結尾，改用明確結論或下一步行動收束。"
-            "技術與流程選擇由你自行決策並說明理由。"
-            "避免重複：同一輪只提供一次完整版本，後續僅更新差異與決策，不重寫等價 PRD/規格。"
-            "需要網路資料時優先使用第一方工具 web.search 與 web.fetch，不要直接宣稱無法上網。"
-            "若要輸出可落地的程式碼檔案，必須使用三引號 code fence 並於首行採用"
-            " `<lang> file=workspace/<path>` 格式；禁止輸出 workspace 外路徑（含絕對路徑與 ..）。"
-        )
+        system_message = default_system_prompt()
         tool_context = self._first_party_tool_context(project_path)
         if tool_context:
             system_message = f"{system_message}\n\n{tool_context}"
