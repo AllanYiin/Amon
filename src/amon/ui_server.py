@@ -3422,8 +3422,8 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             lines.append(f"  {safe_id}[\"{escape_mermaid_label(label)}\"]")
 
         for edge in edges:
-            source_id = str(edge.get("from") or edge.get("from_node") or "")
-            target_id = str(edge.get("to") or edge.get("to_node") or "")
+            source_id = str(edge.get("from") or "")
+            target_id = str(edge.get("to") or "")
             source = id_map.get(source_id, "")
             target = id_map.get(target_id, "")
             if source and target:

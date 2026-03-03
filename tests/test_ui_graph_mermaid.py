@@ -33,13 +33,13 @@ class GraphMermaidRenderTests(unittest.TestCase):
         self.assertIn("  task_1_2 --> task_1_3", mermaid)
 
 
-    def test_graph_to_mermaid_supports_taskgraph2_edge_keys_and_title_description_label(self) -> None:
+    def test_graph_to_mermaid_uses_v3_edge_keys_and_title_description_label(self) -> None:
         graph = {
             "nodes": [
                 {"id": "N1", "title": "產生 TODO", "description": "每個項目短說明都要中文"},
                 {"id": "N2", "title": "審核 TODO"},
             ],
-            "edges": [{"from_node": "N1", "to_node": "N2"}],
+            "edges": [{"from": "N1", "to": "N2"}],
         }
 
         mermaid = self.handler._graph_to_mermaid(graph)
@@ -47,6 +47,10 @@ class GraphMermaidRenderTests(unittest.TestCase):
         self.assertIn('  N1["產生 TODO\\n每個項目短說明都要中文"]', mermaid)
         self.assertIn('  N2["審核 TODO"]', mermaid)
         self.assertIn("  N1 --> N2", mermaid)
+
+        legacy_graph = {"nodes": graph["nodes"], "edges": [{"from_node": "N1", "to_node": "N2"}]}
+        legacy_mermaid = self.handler._graph_to_mermaid(legacy_graph)
+        self.assertNotIn("  N1 --> N2", legacy_mermaid)
 
     def test_graph_to_mermaid_escapes_labels_and_ignores_unknown_edge_nodes(self) -> None:
         graph = {
