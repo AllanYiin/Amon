@@ -16,6 +16,7 @@ from .schema import (
     validate_graph_definition,
 )
 from .serialize import dumps_graph_definition
+from .runtime import OutputContractError, TaskGraph3RunResult, TaskGraph3Runtime
 
 __all__ = [
     "ArtifactNode",
@@ -32,4 +33,7 @@ __all__ = [
     "TaskNode",
     "validate_graph_definition",
     "dumps_graph_definition",
+    "OutputContractError",
+    "TaskGraph3RunResult",
+    "TaskGraph3Runtime",
 ]
