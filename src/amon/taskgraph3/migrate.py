@@ -1,4 +1,4 @@
-"""One-shot migrators from legacy/TaskGraph2 payloads to TaskGraph v3."""
+"""One-shot migrators from legacy/v2 payloads to TaskGraph v3."""
 
 from __future__ import annotations
 
@@ -73,24 +73,24 @@ def legacy_to_v3(graph_json: dict[str, Any]) -> dict[str, Any]:
     return v3_graph
 
 
-def v2_to_v3(taskgraph2_json: dict[str, Any]) -> dict[str, Any]:
-    """Convert a TaskGraph2 payload to TaskGraph v3 JSON payload."""
-    _ensure_dict(taskgraph2_json, name="taskgraph2 graph")
-    nodes_payload = taskgraph2_json.get("nodes")
-    edges_payload = taskgraph2_json.get("edges")
+def v2_to_v3(v2_graph_json: dict[str, Any]) -> dict[str, Any]:
+    """Convert a v2 payload to TaskGraph v3 JSON payload."""
+    _ensure_dict(v2_graph_json, name="v2 graph")
+    nodes_payload = v2_graph_json.get("nodes")
+    edges_payload = v2_graph_json.get("edges")
     if not isinstance(nodes_payload, list):
-        raise ValueError("taskgraph2 轉換失敗：nodes 必須是 list")
+        raise ValueError("v2 轉換失敗：nodes 必須是 list")
     if not isinstance(edges_payload, list):
-        raise ValueError("taskgraph2 轉換失敗：edges 必須是 list")
+        raise ValueError("v2 轉換失敗：edges 必須是 list")
 
     v3_nodes: list[dict[str, Any]] = []
     v3_edges: list[dict[str, Any]] = []
 
     for index, node in enumerate(nodes_payload):
-        _ensure_dict(node, name=f"taskgraph2 node[{index}]")
+        _ensure_dict(node, name=f"v2 node[{index}]")
         node_id = str(node.get("id") or "").strip()
         if not node_id:
-            raise ValueError(f"taskgraph2 轉換失敗：node[{index}].id 必須是非空字串")
+            raise ValueError(f"v2 轉換失敗：node[{index}].id 必須是非空字串")
         output = node.get("output") if isinstance(node.get("output"), dict) else {}
         schema_type = _v2_output_schema_type(output)
 
@@ -144,7 +144,7 @@ def v2_to_v3(taskgraph2_json: dict[str, Any]) -> dict[str, Any]:
                 }
             )
 
-    v3_edges.extend(_convert_control_edges(edges_payload, source_label="taskgraph2"))
+    v3_edges.extend(_convert_control_edges(edges_payload, source_label="v2"))
     v3_graph = {
         "version": "taskgraph.v3",
         "nodes": v3_nodes,

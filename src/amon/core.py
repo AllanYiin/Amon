@@ -40,10 +40,7 @@ from .mcp_client import MCPClientError, MCPServerConfig, MCPStdioClient
 from .planning import compile_plan_to_exec_graph, dumps_plan, generate_plan_with_llm, render_todo_markdown
 from .models import ProviderError, build_provider, decode_reasoning_chunk, encode_reasoning_chunk
 from .project_registry import ProjectRegistry, load_project_config
-from .graph_runtime import GraphRunResult, GraphRuntime
-from .taskgraph2 import TaskGraphRuntime
-from .taskgraph2.planner_llm import generate_taskgraph2_with_llm
-from .taskgraph2.serialize import dumps_task_graph
+from .taskgraph3.engine_runtime import GraphRunResult, GraphRuntime
 from .sandbox.service import run_sandbox_step
 from .tooling import (
     ToolingError,
@@ -1046,13 +1043,13 @@ class AmonCore:
         planner_enabled = self._coerce_config_bool(config.get("amon", {}).get("planner", {}).get("enabled", True))
         if not planner_enabled:
             project_identity = project_id or self.resolve_project_identity(project_path)[0]
-            self.logger.warning("planner 設定為 disabled，但 task graph v2 已強制啟用（project_id=%s）", project_identity)
+            self.logger.warning("planner 設定為 disabled，但 task graph v3 已強制啟用（project_id=%s）", project_identity)
             log_event(
                 {
                     "level": "WARNING",
                     "event": "plan_execute_force_enable_planner",
                     "project_id": project_identity,
-                    "reason": "planner disabled in config but ignored by task graph v2",
+                    "reason": "planner disabled in config but ignored by task graph v3",
                 }
             )
             emit_event(
@@ -1061,7 +1058,7 @@ class AmonCore:
                     "scope": "planning",
                     "project_id": project_identity,
                     "actor": "system",
-                    "payload": {"reason": "planner disabled in config but ignored by task graph v2"},
+                    "payload": {"reason": "planner disabled in config but ignored by task graph v3"},
                     "risk": "low",
                 }
             )
@@ -1143,7 +1140,7 @@ class AmonCore:
         config = self.load_config(project_path)
         planner_enabled = self._coerce_config_bool(config.get("amon", {}).get("planner", {}).get("enabled", True))
         if not planner_enabled:
-            self.logger.warning("planner 設定為 disabled，但 plan_execute 仍會強制走 task graph v2")
+            self.logger.warning("planner 設定為 disabled，但 plan_execute 仍會強制走 task graph v3")
 
         _, response = self.run_plan_execute_stream(
             prompt,
@@ -1650,7 +1647,7 @@ class AmonCore:
         )
         return runtime.run()
 
-    def run_taskgraph2(
+    def run_taskgraph3(
         self,
         prompt: str,
         *,
@@ -1660,9 +1657,6 @@ class AmonCore:
         llm_client=None,
         skill_names: list[str] | None = None,
     ) -> str:
-        if not project_path:
-            raise ValueError("執行 taskgraph2 需要指定專案")
-
         resolved_project_id = project_id or self.resolve_project_identity(project_path)[0]
         available_tools = self.describe_available_tools(project_id=resolved_project_id)
         available_skills = self._load_skills(
@@ -1670,59 +1664,15 @@ class AmonCore:
             project_path,
             ignore_missing=True,
         )
-        graph = generate_taskgraph2_with_llm(
+        return self.run_plan_execute(
             prompt,
-            llm_client=llm_client,
-            model=model,
+            project_path=project_path,
+            project_id=resolved_project_id,
             available_tools=available_tools,
             available_skills=available_skills,
-        )
-
-        docs_dir = project_path / "docs"
-        docs_dir.mkdir(parents=True, exist_ok=True)
-        plan_path = docs_dir / "plan.json"
-        self._atomic_write_text(plan_path, dumps_task_graph(graph))
-
-        runtime = TaskGraphRuntime(project_path=project_path, graph=graph)
-        result = runtime.run()
-        return self._load_graph_primary_output(result.run_dir)
-
-    def run_taskgraph2(
-        self,
-        prompt: str,
-        *,
-        project_path: Path,
-        project_id: str | None = None,
-        model: str | None = None,
-        llm_client=None,
-        skill_names: list[str] | None = None,
-    ) -> str:
-        if not project_path:
-            raise ValueError("執行 taskgraph2 需要指定專案")
-
-        resolved_project_id = project_id or self.resolve_project_identity(project_path)[0]
-        available_tools = self.describe_available_tools(project_id=resolved_project_id)
-        available_skills = self._load_skills(
-            self._normalize_skill_names(skill_names),
-            project_path,
-            ignore_missing=True,
-        )
-        graph = generate_taskgraph2_with_llm(
-            prompt,
             llm_client=llm_client,
             model=model,
-            available_tools=available_tools,
-            available_skills=available_skills,
         )
-
-        docs_dir = project_path / "docs"
-        docs_dir.mkdir(parents=True, exist_ok=True)
-        plan_path = docs_dir / "plan.json"
-        self._atomic_write_text(plan_path, dumps_task_graph(graph))
-
-        runtime = TaskGraphRuntime(project_path=project_path, graph=graph)
-        result = runtime.run()
-        return self._load_graph_primary_output(result.run_dir)
 
     def get_run_status(self, project_path: Path, run_id: str) -> dict[str, Any]:
         if not project_path:

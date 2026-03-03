@@ -13,7 +13,7 @@
 - Project 與 Run 核心流程：`src/amon/core.py`
   - 專案生命週期（create/list/show/update/delete/restore）
   - `run_single/run_self_critique/run_team/run_graph/...` 皆集中在 AmonCore。 
-- Graph runtime：`src/amon/graph_runtime.py`
+- Graph runtime：`src/amon/taskgraph3/engine_runtime.py`
   - `GraphRuntime.run()` 負責建立 `graph.resolved.json`、`state.json`、`events.jsonl`。
 
 ### UI 入口

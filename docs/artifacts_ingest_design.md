@@ -71,7 +71,7 @@
   "run_id": "<graph_run_id>",
   "node_id": "<graph_node_id>",
   "source": {
-    "kind": "graph_runtime",
+    "kind": "taskgraph3_runtime",
     "mode": "single|self_critique|team|unknown",
     "doc_path": "docs/...md"
   },
