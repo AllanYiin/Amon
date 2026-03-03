@@ -1312,6 +1312,58 @@ class UIAsyncAPITests(unittest.TestCase):
                     server.server_close()
                 os.environ.pop("AMON_HOME", None)
 
+    def test_project_context_stats_prefers_chat_history_when_api_usage_lower(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("context-chat-history-fallback")
+                project_path = Path(project.path)
+
+                sessions_dir = project_path / "sessions" / "chat"
+                sessions_dir.mkdir(parents=True, exist_ok=True)
+                (sessions_dir / "chat-01.jsonl").write_text(
+                    "\n".join(
+                        [
+                            json.dumps({"type": "user", "text": "a" * 2000, "ts": "2026-01-01T10:00:00Z"}, ensure_ascii=False),
+                            json.dumps({"type": "assistant", "text": "b" * 1600, "ts": "2026-01-01T10:00:01Z"}, ensure_ascii=False),
+                        ]
+                    ),
+                    encoding="utf-8",
+                )
+
+                run_dir = project_path / ".amon" / "runs" / "run-context-chat-fallback"
+                run_dir.mkdir(parents=True, exist_ok=True)
+                (run_dir / "events.jsonl").write_text(
+                    json.dumps({"event": "run_usage", "usage": {"prompt_tokens": 42}}, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port)
+                encoded_project = quote(project.project_id)
+                conn.request("GET", f"/v1/projects/{encoded_project}/context/stats?chat_id=chat-01")
+                response = conn.getresponse()
+                payload = json.loads(response.read().decode("utf-8"))
+
+                self.assertEqual(response.status, 200)
+                chat_history = next(item for item in payload["categories"] if item.get("key") == "chat_history")
+                self.assertGreater(chat_history.get("tokens", 0), 42)
+                self.assertIn("estimated", payload.get("meta", {}).get("dialogue_token_source", ""))
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
     def test_context_clear_chat_requires_chat_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"

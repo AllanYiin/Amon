@@ -108,3 +108,8 @@ def extract_dialogue_input_tokens(recent_events: list[dict[str, Any]]) -> TokenC
     if not seen:
         return TokenCountResult(tokens=None, method="api_usage_unavailable", available=False)
     return TokenCountResult(tokens=total, method="api_usage", available=True)
+
+
+def estimate_dialogue_tokens(messages: list[dict[str, Any]]) -> TokenCountResult:
+    dialogue_text = "\n".join(str(item.get("text") or "") for item in messages if isinstance(item, dict) and item.get("text"))
+    return TokenCountResult(tokens=_estimate_tokens_from_text(dialogue_text), method="estimated_chars_div4", available=False)
