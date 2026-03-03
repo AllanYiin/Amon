@@ -36,7 +36,7 @@ from amon.chat.session_store import (
     load_latest_run_context,
 )
 from amon.commands.executor import CommandPlan, execute
-from amon.config import ConfigLoader, resolve_system_prompt
+from amon.config import ConfigLoader, default_system_prompt, resolve_system_prompt
 from amon.daemon.queue import get_queue_depth
 from amon.events import emit_event
 from amon.jobs.runner import start_job
@@ -2376,16 +2376,34 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
 
         effective_config = config_payload.get("effective_config") or {}
         project_context_text = self._read_project_context(project_path)
-        system_prompt = resolve_system_prompt(effective_config)
+        system_prompt = resolve_system_prompt(effective_config) or default_system_prompt()
         chat_messages = chat_history.get("messages") or []
         tool_defs = tools_catalog.get("tools") or []
         skills = skills_catalog.get("skills") or []
+
+        configured_skills = (effective_config.get("skills") or {}).get("selected")
+        selected_skill_names = {str(name).strip() for name in (configured_skills or []) if str(name).strip()}
+        for message in reversed(chat_messages):
+            if str(message.get("type") or "") != "user":
+                continue
+            text = str(message.get("text") or "").strip()
+            if not text.startswith("/"):
+                continue
+            command_name = text.split()[0].lstrip("/").strip()
+            if command_name:
+                selected_skill_names.add(command_name)
+            break
+        selected_skills = [
+            skill
+            for skill in skills
+            if str(skill.get("name") or "").strip() in selected_skill_names
+        ]
 
         non_dialogue_counts = {
             "project_context": count_non_dialogue_tokens(project_context_text, effective_config=effective_config),
             "system_prompt": count_non_dialogue_tokens(system_prompt, effective_config=effective_config),
             "tools_definition": count_non_dialogue_tokens(tool_defs, effective_config=effective_config),
-            "skills": count_non_dialogue_tokens(skills, effective_config=effective_config),
+            "skills": count_non_dialogue_tokens(selected_skills, effective_config=effective_config),
         }
 
         tool_use_events = [
@@ -2402,9 +2420,12 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         ]
 
         dialogue_usage = extract_dialogue_input_tokens(recent_events)
+        chat_text = "\n".join(str(item.get("text") or "") for item in chat_messages if item.get("text"))
+        chat_history_estimate = count_non_dialogue_tokens(chat_text, effective_config=effective_config)
         if dialogue_usage.tokens is None:
-            chat_text = "\n".join(str(item.get("text") or "") for item in chat_messages if item.get("text"))
-            dialogue_usage = count_non_dialogue_tokens(chat_text, effective_config=effective_config)
+            dialogue_usage = chat_history_estimate
+        elif int(chat_history_estimate.tokens or 0) > int(dialogue_usage.tokens or 0):
+            dialogue_usage = chat_history_estimate
 
         categories = [
             {
@@ -2432,8 +2453,8 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 "key": "skills",
                 "label": "Skills",
                 "tokens": int(non_dialogue_counts["skills"].tokens or 0),
-                "items": len(skills),
-                "note": "可觸發技能與前言",
+                "items": len(selected_skills),
+                "note": "依目前對話/設定實際取用的 skills",
             },
             {
                 "key": "tool_use",
