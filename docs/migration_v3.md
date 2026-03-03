@@ -28,6 +28,20 @@
 - Keep feature flags/opt-in guards where needed to minimize rollout risk.
 - Validate parity with existing characterization tests.
 
+### Stage 3 Deliverable — One-shot Migrator (legacy/v2 → v3)
+- Added converter module: `src/amon/taskgraph3/migrate.py`.
+- Supported commands:
+  - `amon graph migrate <input> --format legacy --output <output>`
+  - `amon graph migrate <input> --format v2 --output <output>`
+  - `amon graph migrate --in-dir <input_dir> --out-dir <output_dir> --format legacy|v2`
+- Converter behavior:
+  - Preserve execution order using `CONTROL` edges with `kind=DEPENDS_ON`.
+  - Convert old task-like nodes to v3 `TASK` nodes.
+  - Convert old output targets (`writes` or path-like fields) into v3 `ARTIFACT` nodes plus `DATA` edges where possible.
+  - Always emit minimal `outputContract` port `result` with string/object schema inference.
+  - Enable default `runtimeCapabilities` for generated v3 payloads.
+  - Run v3 graph validation after conversion; fail fast on invalid references.
+
 ### Stage 4 — Legacy Runtime Callsite Removal
 - Remove direct legacy runtime construction/usages from production code.
 - Keep temporary compatibility wrappers only if still required by unchanged public API.

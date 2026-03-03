@@ -20,6 +20,7 @@ from .core import AmonCore
 from .events import emit_event
 from .fs.safety import make_change_plan, require_confirm
 from .mcp_client import MCPClientError
+from .taskgraph3.migrate import migrate_json_file
 from .sandbox import (
     SandboxRunnerClient,
     build_input_file,
@@ -215,6 +216,13 @@ def build_parser() -> argparse.ArgumentParser:
     template_param.add_argument("--template", required=True, help="template ID")
     template_param.add_argument("--path", required=True, help="JSONPath")
     template_param.add_argument("--var_name", required=True, help="變數名稱")
+
+    graph_migrate = graph_sub.add_parser("migrate", help="將 legacy/v2 graph 轉為 TaskGraph v3")
+    graph_migrate.add_argument("input", nargs="?", help="輸入 JSON 檔案")
+    graph_migrate.add_argument("--format", choices=["legacy", "v2"], required=True, help="來源格式")
+    graph_migrate.add_argument("--output", help="輸出 JSON 檔案")
+    graph_migrate.add_argument("--in-dir", help="批次輸入目錄（轉換 *.json）")
+    graph_migrate.add_argument("--out-dir", help="批次輸出目錄")
 
     chat_parser = subparsers.add_parser("chat", help="互動式 Chat")
     chat_parser.add_argument("--project", help="指定專案 ID")
@@ -852,7 +860,35 @@ def _handle_graph(core: AmonCore, args: argparse.Namespace) -> None:
             print(f"template 路徑：{result['path']}")
             return
         raise ValueError("請指定 graph template 指令")
+    if args.graph_command == "migrate":
+        _handle_graph_migrate(args)
+        return
     raise ValueError("請指定 graph 指令")
+
+
+def _handle_graph_migrate(args: argparse.Namespace) -> None:
+    if args.in_dir or args.out_dir:
+        if not args.in_dir or not args.out_dir:
+            raise ValueError("批次轉換需要同時指定 --in-dir 與 --out-dir")
+        input_dir = Path(args.in_dir).expanduser()
+        output_dir = Path(args.out_dir).expanduser()
+        if not input_dir.exists() or not input_dir.is_dir():
+            raise ValueError(f"輸入目錄不存在：{input_dir}")
+        converted = 0
+        for source in sorted(input_dir.glob("*.json")):
+            target = output_dir / source.name
+            migrate_json_file(input_path=source, output_path=target, source_format=args.format)
+            print(f"已轉換：{source} -> {target}")
+            converted += 1
+        print(f"批次轉換完成，共 {converted} 個檔案")
+        return
+
+    if not args.input or not args.output:
+        raise ValueError("單檔轉換需要指定 <input> 與 --output")
+    input_path = Path(args.input).expanduser()
+    output_path = Path(args.output).expanduser()
+    migrate_json_file(input_path=input_path, output_path=output_path, source_format=args.format)
+    print(f"已轉換：{input_path} -> {output_path}")
 
 
 def _handle_chat(core: AmonCore, args: argparse.Namespace) -> None:
