@@ -48,7 +48,7 @@ from .core import AmonCore, ProjectRecord
 from .logging import log_event
 from .models import decode_reasoning_chunk
 from .skills import build_skill_injection_preview
-from .token_counter import count_non_dialogue_tokens, extract_dialogue_input_tokens
+from .token_counter import TokenCountResult, count_non_dialogue_tokens, estimate_dialogue_tokens, extract_dialogue_input_tokens
 
 
 
@@ -2420,12 +2420,15 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         ]
 
         dialogue_usage = extract_dialogue_input_tokens(recent_events)
-        chat_text = "\n".join(str(item.get("text") or "") for item in chat_messages if item.get("text"))
-        chat_history_estimate = count_non_dialogue_tokens(chat_text, effective_config=effective_config)
+        estimated_dialogue_usage = estimate_dialogue_tokens(chat_messages)
         if dialogue_usage.tokens is None:
-            dialogue_usage = chat_history_estimate
-        elif int(chat_history_estimate.tokens or 0) > int(dialogue_usage.tokens or 0):
-            dialogue_usage = chat_history_estimate
+            dialogue_usage = estimated_dialogue_usage
+        elif int(dialogue_usage.tokens or 0) < int(estimated_dialogue_usage.tokens or 0):
+            dialogue_usage = TokenCountResult(
+                tokens=int(estimated_dialogue_usage.tokens or 0),
+                method=f"{estimated_dialogue_usage.method}_preferred_over_api_usage",
+                available=False,
+            )
 
         categories = [
             {
