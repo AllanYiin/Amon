@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -42,6 +44,8 @@ def _build_graph_from_fixture(path: Path) -> GraphDefinition:
             TaskNode(
                 id=item["id"],
                 title=item.get("title", ""),
+                execution=item.get("execution", "SINGLE"),
+                execution_config=item.get("executionConfig") if isinstance(item.get("executionConfig"), dict) else None,
                 policy=Policy(
                     rate_limit=policy_obj.get("rateLimit", policy_obj.get("rate_limit")),
                     stream_limit=policy_obj.get("streamLimit", policy_obj.get("stream_limit")),
@@ -109,6 +113,73 @@ class TaskGraph3RuntimeSmokeTests(unittest.TestCase):
             self.assertEqual(result.state["nodes"]["a"]["status"], "FAILED")
             self.assertIn("missing required key=value", str(result.state["nodes"]["a"]["error"]))
             self.assertEqual(result.state["nodes"]["b"]["status"], "PENDING")
+
+    def test_parallel_map_respects_max_concurrency_and_rate_limit(self) -> None:
+        lock = threading.Lock()
+        active = 0
+        max_seen = 0
+        invoked: list[float] = []
+        graph = GraphDefinition(
+            nodes=[
+                TaskNode(
+                    id="map",
+                    execution="PARALLEL_MAP",
+                    execution_config={"items": ["a", "b", "c"], "maxConcurrency": 2},
+                    policy=Policy(rate_limit=2),
+                    output_contract=OutputContract(ports=[OutputPort(name="items", extractor="json", type_ref="array")]),
+                )
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = TaskGraph3Runtime(project_path=Path(tmp), graph=graph, run_id="run-map")
+
+            def node_runner(_: TaskNode, ctx: dict[str, object]) -> str:
+                nonlocal active, max_seen
+                with lock:
+                    active += 1
+                    max_seen = max(max_seen, active)
+                invoked.append(time.monotonic())
+                time.sleep(0.02)
+                with lock:
+                    active -= 1
+                return str(ctx.get("map_item", ""))
+
+            result = runtime.run(node_runner)
+            payload = result.state["nodes"]["map"]["output"]["ports"]["items"]
+            self.assertEqual(payload, ["a", "b", "c"])
+            self.assertLessEqual(max_seen, 2)
+            self.assertEqual(result.state["nodes"]["map"]["status"], "SUCCEEDED")
+            self.assertGreaterEqual(len(invoked), 3)
+
+    def test_recursive_respects_stop_condition_and_max_iters(self) -> None:
+        graph = GraphDefinition(
+            nodes=[
+                TaskNode(
+                    id="recur",
+                    execution="RECURSIVE",
+                    execution_config={"maxIters": 5, "stopCondition": {"contains": "done"}},
+                    output_contract=OutputContract(ports=[OutputPort(name="line", extractor="line", type_ref="string")]),
+                )
+            ]
+        )
+
+        calls: list[int] = []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = TaskGraph3Runtime(project_path=Path(tmp), graph=graph, run_id="run-rec")
+
+            def node_runner(_: TaskNode, ctx: dict[str, object]) -> str:
+                idx = int(ctx.get("recursive_iter", 0))
+                calls.append(idx)
+                if idx >= 2:
+                    return "done"
+                return f"continue-{idx}"
+
+            result = runtime.run(node_runner)
+            self.assertEqual(result.state["status"], "completed")
+            self.assertEqual(calls, [0, 1, 2])
+            self.assertEqual(result.state["nodes"]["recur"]["output"]["ports"]["line"], "done")
 
     def test_rate_limit_and_stream_limit_are_applied(self) -> None:
         clock = FakeClock()
