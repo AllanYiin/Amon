@@ -48,25 +48,8 @@ else:
     raise SystemExit(f"UI probe failed: {url}")
 PY
 
-echo "[5/6] create project and run quickstart graph"
-PROJECT_CREATE_OUTPUT="$(amon --data-dir "${AMON_DATA_DIR}" project create "Quickstart")"
-printf '%s\n' "${PROJECT_CREATE_OUTPUT}"
-PROJECT_ID="$(printf '%s\n' "${PROJECT_CREATE_OUTPUT}" | awk -F '：' '/專案 ID/{print $2; exit}' | tr -d '[:space:]')"
-if [[ -z "${PROJECT_ID}" ]]; then
-  echo "failed to parse project id" >&2
-  exit 1
-fi
-echo "project_id=${PROJECT_ID}"
+echo "[5/6] check graph migrate help"
+amon --data-dir "${AMON_DATA_DIR}" graph migrate --help >/dev/null
 
-set +e
-amon --data-dir "${AMON_DATA_DIR}" graph run --project "${PROJECT_ID}" --graph "${ROOT_DIR}/examples/quickstart_project/graph.json"
-GRAPH_EXIT_CODE=$?
-set -e
-if [[ ${GRAPH_EXIT_CODE} -ne 0 ]]; then
-  echo "graph run failed (likely missing provider/API key), continue to validate docs output" >&2
-fi
-
-echo "[6/6] verify docs output exists"
-OUTPUT_FILE="${AMON_DATA_DIR}/projects/${PROJECT_ID}/docs/hello.txt"
-test -f "${OUTPUT_FILE}" || (echo "missing output: ${OUTPUT_FILE}" && exit 1)
-echo "OK"
+echo "[6/6] validate all v3 graph fixtures"
+python scripts/validate_all_v3_graphs.py

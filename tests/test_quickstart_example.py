@@ -7,24 +7,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 
 class QuickstartExampleTests(unittest.TestCase):
-    def test_quickstart_graph_contains_expected_nodes(self) -> None:
+    def test_quickstart_graph_is_valid_v3_and_contains_expected_nodes(self) -> None:
         graph_path = Path(__file__).resolve().parents[1] / "examples" / "quickstart_project" / "graph.json"
         payload = json.loads(graph_path.read_text(encoding="utf-8"))
 
+        self.assertEqual(payload.get("version"), "taskgraph.v3")
         nodes = payload.get("nodes", [])
-        node_types = [node.get("type") for node in nodes]
-        self.assertIn("write_file", node_types)
-        self.assertIn("agent_task", node_types)
-        self.assertIn("sandbox_run", node_types)
+        task_nodes = [node for node in nodes if node.get("node_type") == "TASK"]
+        artifact_nodes = [node for node in nodes if node.get("node_type") == "ARTIFACT"]
+        self.assertEqual(len(task_nodes), 4)
+        self.assertGreaterEqual(len(artifact_nodes), 3)
+        self.assertTrue(any(node.get("id") == "write_hello" for node in task_nodes))
+        self.assertTrue(any(node.get("id") == "sandbox_transform" for node in task_nodes))
 
-        write_paths = {node.get("path") for node in nodes if node.get("type") == "write_file"}
-        self.assertIn("docs/hello.txt", write_paths)
+        artifact_titles = {node.get("title") for node in artifact_nodes}
+        self.assertIn("docs/hello.txt", artifact_titles)
+        self.assertIn("docs/agent_brief.md", artifact_titles)
 
-        sandbox_nodes = [node for node in nodes if node.get("type") == "sandbox_run"]
-        self.assertEqual(len(sandbox_nodes), 1)
-        sandbox_node = sandbox_nodes[0]
-        self.assertEqual(sandbox_node.get("language"), "python")
-        self.assertIn("docs/hello.txt", sandbox_node.get("input_paths", []))
+        control_edges = [edge for edge in payload.get("edges", []) if edge.get("edge_type") == "CONTROL"]
+        self.assertEqual(len(control_edges), 3)
 
 
 if __name__ == "__main__":
