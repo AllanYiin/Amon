@@ -1,13 +1,12 @@
 # Quickstart Project 範例
 
-這個範例提供「最小可用 sample project + sample graph」，用來快速驗證 Amon 的 graph 執行能力。
+這個範例提供 TaskGraph v3 的最小可用 sample graph，示範 v3 結構與遷移後的節點關係。
 
 ## 這個 graph 會做什麼
 
-1. `write_file`：建立 `docs/hello.txt`。
-2. `agent_task`：請 LLM 產生簡短說明，寫入 `docs/agent_brief.md`。
-3. `sandbox_run`：讀取 `/input/docs/hello.txt`，把處理結果寫到 `/output/result.txt`，最後由 Amon 回寫到 `docs/artifacts/<run_id>/sandbox_transform/`。
-4. `write_file`：寫入 `docs/quickstart_result.md` 作為驗收提示。
+1. 包含 4 個 `TASK` 節點：`write_hello`、`agent_brief`、`sandbox_transform`、`write_result_note`。
+2. 對應輸出檔案已轉為 `ARTIFACT` 節點，並以 `DATA/EMITS` 邊表示。
+3. 任務先後依賴以 `CONTROL/DEPENDS_ON` 表示。
 
 ## 前置條件
 
@@ -15,23 +14,16 @@
 - `agent_task` 需要可用的 provider 設定（如 `OPENAI_API_KEY` 與對應 config）。
 - `sandbox_run` 需要可用的 sandbox runner / Docker 環境。
 
-## Smoke 測試
+## 驗證（TaskGraph v3）
 
 ```bash
-amon project create "Quickstart"
-amon graph run --project <project_id> --graph examples/quickstart_project/graph.json
+python scripts/validate_all_v3_graphs.py
+amon graph migrate --help
 ```
 
 ## 驗收重點
 
-執行完成後，請確認專案目錄中至少出現以下檔案：
-
-- `docs/hello.txt`
-- `docs/agent_brief.md`
-- `docs/quickstart_result.md`
-- `docs/artifacts/<run_id>/sandbox_transform/result.txt`
-
-如果 `agent_task` 或 `sandbox_run` 失敗，請先確認 provider 與 sandbox 設定，再重新執行。
+執行後應顯示所有 examples/fixtures graph JSON 均為 `taskgraph.v3` 且 schema 驗證成功。
 
 
 ## 一鍵驗證腳本

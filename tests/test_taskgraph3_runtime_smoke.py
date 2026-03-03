@@ -26,26 +26,38 @@ def _build_graph_from_fixture(path: Path) -> GraphDefinition:
     payload = json.loads(path.read_text(encoding="utf-8"))
     nodes: list[TaskNode] = []
     for item in payload["nodes"]:
+        output_contract = item.get("outputContract") or item.get("output_contract") or {}
         ports = [
             OutputPort(
                 name=port["name"],
                 extractor=port.get("extractor"),
                 parser=port.get("parser"),
-                json_schema=port.get("json_schema"),
-                type_ref=port.get("type_ref"),
+                json_schema=port.get("jsonSchema") or port.get("json_schema"),
+                type_ref=port.get("typeRef") or port.get("type_ref"),
             )
-            for port in item.get("output_contract", {}).get("ports", [])
+            for port in output_contract.get("ports", [])
         ]
         policy_obj = item.get("policy", {})
         nodes.append(
             TaskNode(
                 id=item["id"],
                 title=item.get("title", ""),
-                policy=Policy(rate_limit=policy_obj.get("rate_limit"), stream_limit=policy_obj.get("stream_limit")),
+                policy=Policy(
+                    rate_limit=policy_obj.get("rateLimit", policy_obj.get("rate_limit")),
+                    stream_limit=policy_obj.get("streamLimit", policy_obj.get("stream_limit")),
+                ),
                 output_contract=OutputContract(ports=ports),
             )
         )
-    edges = [GraphEdge(**edge) for edge in payload["edges"]]
+    edges = [
+        GraphEdge(
+            from_node=edge.get("from_node", edge.get("from")),
+            to_node=edge.get("to_node", edge.get("to")),
+            edge_type=edge["edge_type"],
+            kind=edge["kind"],
+        )
+        for edge in payload["edges"]
+    ]
     return GraphDefinition(version=payload["version"], nodes=nodes, edges=edges)
 
 

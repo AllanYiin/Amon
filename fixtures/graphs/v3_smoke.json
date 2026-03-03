@@ -5,10 +5,10 @@
       "id": "n1",
       "node_type": "TASK",
       "title": "first",
-      "policy": {"rate_limit": 10, "stream_limit": 1},
-      "output_contract": {
+      "policy": {"rateLimit": 10, "streamLimit": 1},
+      "outputContract": {
         "ports": [
-          {"name": "payload", "extractor": "json", "json_schema": {"type": "object", "required": ["value"]}, "type_ref": "object"}
+          {"name": "payload", "extractor": "json", "jsonSchema": {"type": "object", "required": ["value"]}, "typeRef": "object"}
         ]
       }
     },
@@ -16,10 +16,10 @@
       "id": "n2",
       "node_type": "TASK",
       "title": "second",
-      "policy": {"rate_limit": 10, "stream_limit": 1},
-      "output_contract": {
+      "policy": {"rateLimit": 10, "streamLimit": 1},
+      "outputContract": {
         "ports": [
-          {"name": "payload", "extractor": "json", "json_schema": {"type": "object", "required": ["value"]}, "type_ref": "object"}
+          {"name": "payload", "extractor": "json", "jsonSchema": {"type": "object", "required": ["value"]}, "typeRef": "object"}
         ]
       }
     },
@@ -27,16 +27,24 @@
       "id": "n3",
       "node_type": "TASK",
       "title": "third",
-      "policy": {"rate_limit": 10, "stream_limit": 1},
-      "output_contract": {
+      "policy": {"rateLimit": 10, "streamLimit": 1},
+      "outputContract": {
         "ports": [
-          {"name": "payload", "extractor": "json", "json_schema": {"type": "object", "required": ["value"]}, "type_ref": "object"}
+          {"name": "payload", "extractor": "json", "jsonSchema": {"type": "object", "required": ["value"]}, "typeRef": "object"}
         ]
       }
     }
   ],
   "edges": [
-    {"from_node": "n1", "to_node": "n2", "edge_type": "CONTROL", "kind": "next"},
-    {"from_node": "n2", "to_node": "n3", "edge_type": "CONTROL", "kind": "next"}
-  ]
+    {"from": "n1", "to": "n2", "edge_type": "CONTROL", "kind": "next"},
+    {"from": "n2", "to": "n3", "edge_type": "CONTROL", "kind": "next"}
+  ],
+  "runtimeCapabilities": {
+    "supports_control_edges": true,
+    "supports_data_edges": true,
+    "supports_parallel_map": true,
+    "supports_recursive": true,
+    "supports_task_guardrails": true,
+    "supports_task_boundaries": true
+  }
 }

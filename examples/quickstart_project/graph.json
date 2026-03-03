@@ -1,46 +1,134 @@
 {
+  "version": "taskgraph.v3",
   "nodes": [
     {
       "id": "write_hello",
-      "type": "write_file",
-      "path": "docs/hello.txt",
-      "content": "Hello from Amon quickstart!"
+      "node_type": "TASK",
+      "title": "write_file",
+      "execution": "SINGLE",
+      "outputContract": {
+        "ports": [
+          {
+            "name": "result",
+            "jsonSchema": {
+              "type": "object"
+            }
+          }
+        ]
+      },
+      "policy": {}
+    },
+    {
+      "id": "write_hello__artifact__path",
+      "node_type": "ARTIFACT",
+      "title": "docs/hello.txt"
     },
     {
       "id": "agent_brief",
-      "type": "agent_task",
-      "prompt": "請用 2 句話說明這個 Quickstart graph 會做什麼，語氣簡潔。",
-      "output_path": "docs/agent_brief.md"
+      "node_type": "TASK",
+      "title": "agent_task",
+      "execution": "SINGLE",
+      "outputContract": {
+        "ports": [
+          {
+            "name": "result",
+            "jsonSchema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "policy": {}
+    },
+    {
+      "id": "agent_brief__artifact__output_path",
+      "node_type": "ARTIFACT",
+      "title": "docs/agent_brief.md"
     },
     {
       "id": "sandbox_transform",
-      "type": "sandbox_run",
-      "language": "python",
-      "input_paths": [
-        "docs/hello.txt"
-      ],
-      "code": "from pathlib import Path\n\ninput_path = Path('/input/docs/hello.txt')\ntext = input_path.read_text(encoding='utf-8').strip()\nresult = f'Processed by sandbox: {text}'\noutput_path = Path('/output/result.txt')\noutput_path.parent.mkdir(parents=True, exist_ok=True)\noutput_path.write_text(result + '\\n', encoding='utf-8')\nprint('sandbox done')"
+      "node_type": "TASK",
+      "title": "sandbox_run",
+      "execution": "SINGLE",
+      "outputContract": {
+        "ports": [
+          {
+            "name": "result",
+            "jsonSchema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "policy": {}
     },
     {
       "id": "write_result_note",
-      "type": "write_file",
-      "path": "docs/quickstart_result.md",
-      "content": "Quickstart 完成：請查看 docs/hello.txt、docs/agent_brief.md，以及 sandbox 輸出 docs/artifacts/<run_id>/sandbox_transform/result.txt。"
+      "node_type": "TASK",
+      "title": "write_file",
+      "execution": "SINGLE",
+      "outputContract": {
+        "ports": [
+          {
+            "name": "result",
+            "jsonSchema": {
+              "type": "object"
+            }
+          }
+        ]
+      },
+      "policy": {}
+    },
+    {
+      "id": "write_result_note__artifact__path",
+      "node_type": "ARTIFACT",
+      "title": "docs/quickstart_result.md"
     }
   ],
   "edges": [
     {
       "from": "write_hello",
-      "to": "agent_brief"
+      "to": "write_hello__artifact__path",
+      "edge_type": "DATA",
+      "kind": "EMITS"
     },
     {
       "from": "agent_brief",
-      "to": "sandbox_transform"
+      "to": "agent_brief__artifact__output_path",
+      "edge_type": "DATA",
+      "kind": "EMITS"
+    },
+    {
+      "from": "write_result_note",
+      "to": "write_result_note__artifact__path",
+      "edge_type": "DATA",
+      "kind": "EMITS"
+    },
+    {
+      "from": "write_hello",
+      "to": "agent_brief",
+      "edge_type": "CONTROL",
+      "kind": "DEPENDS_ON"
+    },
+    {
+      "from": "agent_brief",
+      "to": "sandbox_transform",
+      "edge_type": "CONTROL",
+      "kind": "DEPENDS_ON"
     },
     {
       "from": "sandbox_transform",
-      "to": "write_result_note"
+      "to": "write_result_note",
+      "edge_type": "CONTROL",
+      "kind": "DEPENDS_ON"
     }
   ],
-  "variables": {}
+  "runtimeCapabilities": {
+    "supports_control_edges": true,
+    "supports_data_edges": true,
+    "supports_parallel_map": true,
+    "supports_recursive": true,
+    "supports_task_guardrails": true,
+    "supports_task_boundaries": true
+  }
 }
