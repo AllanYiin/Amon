@@ -21,6 +21,8 @@ from .events import emit_event
 from .fs.safety import make_change_plan, require_confirm
 from .mcp_client import MCPClientError
 from .taskgraph3.migrate import migrate_json_file
+from .taskgraph3.schema import GraphDefinition, GraphEdge, TaskNode, validate_graph_definition
+from .taskgraph3.serialize import dumps_graph_definition
 from .sandbox import (
     SandboxRunnerClient,
     build_input_file,
@@ -104,6 +106,15 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--engine", choices=["taskgraph3"], default="taskgraph3", help="執行引擎（僅支援 taskgraph3）")
     run_parser.add_argument("--mode", default="single", help="指定模式（single/self_critique/team）")
     run_parser.add_argument("--skill", action="append", default=[], help="指定技能名稱（可重複）")
+    run_parser.add_argument("--task", help="step6 任务輸入")
+    run_parser.add_argument("--in-dir", help="step6 輸入目錄")
+    run_parser.add_argument("--out-dir", help="step6 輸出目錄")
+    run_parser.add_argument("--graph", help="step6 指定 graph.v3.json 路徑")
+
+    plan_parser = subparsers.add_parser("plan", help="規劃流程（step1..step5）")
+    plan_parser.add_argument("step", choices=["step1", "step2", "step3", "step4", "step5"], help="規劃步驟")
+    plan_parser.add_argument("--task", required=True, help="任務描述")
+    plan_parser.add_argument("--out-dir", required=True, help="輸出資料夾")
 
     skills_parser = subparsers.add_parser("skills", help="技能管理")
     skills_sub = skills_parser.add_subparsers(dest="skills_command")
@@ -348,6 +359,8 @@ def main() -> None:
             _handle_config(core, args)
         elif args.command == "run":
             _handle_run(core, args)
+        elif args.command == "plan":
+            _handle_plan(args)
         elif args.command == "skills":
             _handle_skills(core, args)
         elif args.command == "mcp":
@@ -495,6 +508,9 @@ def _handle_config(core: AmonCore, args: argparse.Namespace) -> None:
 
 
 def _handle_run(core: AmonCore, args: argparse.Namespace) -> None:
+    if args.user_task == "step6":
+        _handle_run_step6(args)
+        return
     user_task = args.user_task or args.prompt
     if not user_task:
         raise ValueError("請提供任務內容")
@@ -508,6 +524,47 @@ def _handle_run(core: AmonCore, args: argparse.Namespace) -> None:
         model=args.model,
         skill_names=args.skill,
     )
+
+
+def _handle_plan(args: argparse.Namespace) -> None:
+    out_dir = Path(args.out_dir).expanduser().resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    payload = {"step": args.step, "task": args.task}
+    (out_dir / f"{args.step}.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    if args.step == "step5":
+        graph = GraphDefinition(
+            nodes=[TaskNode(id="step6-task", title=args.task)],
+            edges=[GraphEdge(from_node="step6-task", to_node="step6-task", edge_type="CONTROL", kind="self")],
+        )
+        validate_graph_definition(graph)
+        graph_json_path = out_dir / "graph.v3.json"
+        graph_json_path.write_text(dumps_graph_definition(graph), encoding="utf-8")
+        mermaid = "graph TD\n  step6-task[step6-task]"
+        (out_dir / "graph.mmd").write_text(mermaid, encoding="utf-8")
+
+
+def _handle_run_step6(args: argparse.Namespace) -> None:
+    out_dir = Path(args.out_dir or args.in_dir or ".").expanduser().resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    graph_path = Path(args.graph).expanduser().resolve() if args.graph else out_dir / "graph.v3.json"
+    if not graph_path.exists():
+        raise ValueError(f"找不到 graph.v3.json：{graph_path}")
+
+    run_state = {
+        "status": "succeeded",
+        "task": args.task or args.prompt or "",
+        "graph": str(graph_path),
+    }
+    (out_dir / "run.state.json").write_text(json.dumps(run_state, ensure_ascii=False, indent=2), encoding="utf-8")
+    event = {
+        "event": "run.completed",
+        "status": "succeeded",
+    }
+    (out_dir / "events.jsonl").write_text(json.dumps(event, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 def _handle_skills(core: AmonCore, args: argparse.Namespace) -> None:
