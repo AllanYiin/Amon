@@ -102,6 +102,9 @@ amon eval --suite basic
 amon doctor
 
 # Graph 執行與模板（僅支援 taskgraph.v3）
+
+> 過渡說明（重要）：TaskGraph v3 cutover **尚未完成**。repo 內仍可見 `PlanGraph`、`compile_plan_to_exec_graph`、`taskgraph3.engine_runtime.GraphRuntime`、`plan_execute` 命名與 CLI step5/step6 相容殘留。
+> 目標終態為：`docs/plan.json` 固定 `taskgraph.v3`，且 `TaskGraph3Runtime` 為唯一 production runtime；legacy/v2 僅保留 migrate/import 工具用途，不再走主執行路徑。詳見 `docs/migration_v3.md`。
 amon graph run --project <project_id> --graph ./graph.v3.json
 amon graph template create --project <project_id> --run <run_id>
 amon graph template parametrize --template <template_id> --path "$.nodes[0].prompt" --var_name topic

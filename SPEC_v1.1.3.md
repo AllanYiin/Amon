@@ -7,6 +7,23 @@
 
 ---
 
+## TaskGraph v3 過渡狀態聲明（避免誤導）
+
+本規格中的 TaskGraph v3 目標架構目前仍在 cutover 過程中，尚未宣告完成。現況仍存在下列舊路徑/命名：
+
+- `PlanGraph`
+- `compile_plan_to_exec_graph`
+- `taskgraph3.engine_runtime.GraphRuntime`
+- `plan_execute` 命名與相關測試
+- CLI step5/step6 相容殘留
+
+終態定義：
+
+1. `docs/plan.json` 必須為 `taskgraph.v3`。
+2. `TaskGraph3Runtime` 是唯一 production runtime。
+3. legacy/v2 只保留 migrate/import，不可作為主執行路徑。
+詳見 `docs/migration_v3.md` 與 `docs/refactor/taskgraph_v3_cutover.md`。
+
 ## 一、技術可行性分析（Feasibility）
 
 ### 1) 多模型接入（雲端 + 本地）
