@@ -4,6 +4,22 @@
 
 ## 0) 一鍵檢查指令
 
+## 0-1) Anti-legacy 檢查（TaskGraph v3）
+
+發版前先確認未新增 legacy 參考：
+
+```bash
+rg -n "PlanGraph|compile_plan_to_exec_graph|taskgraph3\.engine_runtime\.GraphRuntime|plan_execute|step5|step6" src tests docs
+```
+
+禁止再擴散的關鍵字/模組：
+
+- `PlanGraph`
+- `compile_plan_to_exec_graph`
+- `taskgraph3.engine_runtime.GraphRuntime`
+- `plan_execute`（新功能不得再沿用此命名）
+- CLI step5/step6 舊相容邏輯（新功能不得依賴）
+
 ```bash
 python -m compileall src tests
 python -m unittest discover -s tests -p "test_*.py"

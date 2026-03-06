@@ -58,6 +58,16 @@ amon init
 amon project list
 ```
 
+## TaskGraph v3 文件維護（Phase 0 起）
+
+當調整 TaskGraph 相關程式時，需同步檢查：
+
+- `docs/migration_v3.md`
+- `docs/refactor/taskgraph_v3_cutover.md`
+- `docs/refactor/taskgraph_v3_forbidden_legacy_refs.md`
+
+並確認沒有把 legacy/v2 執行路徑重新當成主路徑。
+
 ## 5) 啟動 UI（預覽）
 ```bash
 amon ui --port 8000

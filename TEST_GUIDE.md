@@ -26,3 +26,13 @@ python -m unittest
    ```bash
    python -m unittest
    ```
+
+## Anti-legacy 檢查（TaskGraph v3 cutover）
+
+在測試前，請先執行關鍵字檢查，確認未新增禁止引用：
+
+```bash
+rg -n "PlanGraph|compile_plan_to_exec_graph|taskgraph3\.engine_runtime\.GraphRuntime|plan_execute|step5|step6" src tests docs
+```
+
+> 說明：目前 repo 仍有既有殘留；此檢查用途是避免「新增或擴散」legacy 依賴。cutover 完成後應升級為嚴格 fail。
