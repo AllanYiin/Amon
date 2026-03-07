@@ -7,6 +7,13 @@ SRC = ROOT / "src"
 
 
 class NoLegacyRuntimeRefsTests(unittest.TestCase):
+    def test_no_legacy_graph_runtime_filename_in_tests(self) -> None:
+        legacy_test_path = ROOT / "tests" / "test_no_plan_graph_runtime_refs.py"
+        self.assertFalse(
+            legacy_test_path.exists(),
+            f"發現 legacy 測試檔名，請改名避免觸發 anti-legacy-graph: {legacy_test_path.relative_to(ROOT)}",
+        )
+
     def _scan(self, pattern: str, *, include_tests: bool = False) -> list[str]:
         roots = [SRC]
         if include_tests:
