@@ -26,9 +26,9 @@ class GraphMermaidRenderTests(unittest.TestCase):
 
         mermaid = self.handler._graph_to_mermaid(graph)
 
-        self.assertIn('  task_1["task-1"]', mermaid)
-        self.assertIn('  task_1_2["task_1"]', mermaid)
-        self.assertIn('  task_1_3["task 1"]', mermaid)
+        self.assertIn('  task_1["task-1\\nTASK"]', mermaid)
+        self.assertIn('  task_1_2["task_1\\nTASK"]', mermaid)
+        self.assertIn('  task_1_3["task 1\\nTASK"]', mermaid)
         self.assertIn("  task_1 --> task_1_2", mermaid)
         self.assertIn("  task_1_2 --> task_1_3", mermaid)
 
@@ -36,17 +36,23 @@ class GraphMermaidRenderTests(unittest.TestCase):
     def test_graph_to_mermaid_uses_v3_edge_keys_and_title_description_label(self) -> None:
         graph = {
             "nodes": [
-                {"id": "N1", "title": "產生 TODO", "description": "每個項目短說明都要中文"},
-                {"id": "N2", "title": "審核 TODO"},
+                {
+                    "id": "N1",
+                    "title": "產生 TODO",
+                    "description": "每個項目短說明都要中文",
+                    "node_type": "TASK",
+                    "taskSpec": {"executor": "agent", "runnable": True},
+                },
+                {"id": "N2", "title": "審核 TODO", "node_type": "TASK"},
             ],
-            "edges": [{"from": "N1", "to": "N2"}],
+            "edges": [{"from": "N1", "to": "N2", "kind": "next", "edge_type": "CONTROL"}],
         }
 
         mermaid = self.handler._graph_to_mermaid(graph)
 
-        self.assertIn('  N1["產生 TODO\\n每個項目短說明都要中文"]', mermaid)
-        self.assertIn('  N2["審核 TODO"]', mermaid)
-        self.assertIn("  N1 --> N2", mermaid)
+        self.assertIn('  N1["產生 TODO\\n每個項目短說明都要中文\\nTASK | agent | runnable"]', mermaid)
+        self.assertIn('  N2["審核 TODO\\nTASK"]', mermaid)
+        self.assertIn('  N1 -- "next/CONTROL" --> N2', mermaid)
 
         legacy_graph = {"nodes": graph["nodes"], "edges": [{"from_node": "N1", "to_node": "N2"}]}
         legacy_mermaid = self.handler._graph_to_mermaid(legacy_graph)
@@ -54,13 +60,13 @@ class GraphMermaidRenderTests(unittest.TestCase):
 
     def test_graph_to_mermaid_escapes_labels_and_ignores_unknown_edge_nodes(self) -> None:
         graph = {
-            "nodes": [{"id": '"quote"\\node\nline'}],
+            "nodes": [{"id": '"quote"\\node\nline', "taskSpec": {"display": {"summary": "a" * 60}}}],
             "edges": [{"from": '"quote"\\node\nline', "to": "missing-node"}],
         }
 
         mermaid = self.handler._graph_to_mermaid(graph)
 
-        self.assertIn(r'  quote__node_line["\"quote\"\\node\nline"]', mermaid)
+        self.assertIn(r'  quote__node_line["\"quote\"\\node\nline\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa…\nTASK"]', mermaid)
         self.assertNotIn("missing-node", mermaid)
 
 
