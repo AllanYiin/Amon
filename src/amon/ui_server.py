@@ -3439,14 +3439,43 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 .replace("\n", "\\n")
             )
 
+        def first_non_empty_text(*values: Any) -> str:
+            for value in values:
+                text = str(value or "").strip()
+                if text:
+                    return text
+            return ""
+
+        def truncate_text(text: str, limit: int) -> str:
+            if len(text) <= limit:
+                return text
+            return text[:limit] + "…"
+
+        def build_node_label(node: dict[str, Any], node_id: str) -> str:
+            title = first_non_empty_text(node.get("title"), node.get("name"), node_id)
+            display = node.get("taskSpec", {}).get("display", {}) if isinstance(node.get("taskSpec"), dict) else {}
+            description = first_non_empty_text(node.get("description"), display.get("summary"))
+            node_type = first_non_empty_text(node.get("node_type"), "TASK")
+            executor = first_non_empty_text(node.get("taskSpec", {}).get("executor"), node.get("executor")) if isinstance(node.get("taskSpec"), dict) else first_non_empty_text(node.get("executor"))
+            runnable = node.get("taskSpec", {}).get("runnable") if isinstance(node.get("taskSpec"), dict) else None
+
+            lines: list[str] = [title]
+            if description:
+                lines.append(truncate_text(description.replace("\n", " "), 48))
+
+            meta_parts = [node_type]
+            if executor:
+                meta_parts.append(executor)
+            if isinstance(runnable, bool):
+                meta_parts.append("runnable" if runnable else "blocked")
+            lines.append(" | ".join(meta_parts))
+            return "\n".join(lines)
+
         for node in nodes:
             node_id = str(node.get("id", ""))
             safe_id = to_safe_mermaid_id(node_id)
             id_map[node_id] = safe_id
-            title = str(node.get("title") or node.get("name") or node_id).strip()
-            description = str(node.get("description") or "").strip().replace("\n", " ")
-            short_description = description[:32] + ("…" if len(description) > 32 else "") if description else ""
-            label = title if not short_description else f"{title}\n{short_description}"
+            label = build_node_label(node, node_id)
             lines.append(f"  {safe_id}[\"{escape_mermaid_label(label)}\"]")
 
         for edge in edges:
@@ -3455,7 +3484,13 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             source = id_map.get(source_id, "")
             target = id_map.get(target_id, "")
             if source and target:
-                lines.append(f"  {source} --> {target}")
+                kind = str(edge.get("kind") or "").strip()
+                edge_type = str(edge.get("edge_type") or "").strip()
+                edge_label = "/".join([part for part in [kind, edge_type] if part])
+                if edge_label:
+                    lines.append(f"  {source} -- \"{escape_mermaid_label(edge_label)}\" --> {target}")
+                else:
+                    lines.append(f"  {source} --> {target}")
 
         return "\n".join(lines)
 
