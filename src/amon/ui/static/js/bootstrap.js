@@ -73,7 +73,37 @@ appStore.patch({ bootstrappedAt: Date.now() });
         contextCollapsed: "amon.ui.contextPanelCollapsed",
         contextWidth: "amon.ui.contextPanelWidth",
         contextDraftPrefix: "amon.ui.contextDraft:",
+        projectChatSessions: "amon.ui.projectChatSessions",
       };
+
+      function loadProjectChatSessions() {
+        try {
+          const raw = readStorage(STORAGE_KEYS.projectChatSessions);
+          if (!raw) return {};
+          const parsed = JSON.parse(raw);
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+          return Object.fromEntries(
+            Object.entries(parsed)
+              .filter(([projectId, chatId]) => String(projectId || "").trim() && String(chatId || "").trim())
+              .map(([projectId, chatId]) => [String(projectId).trim(), String(chatId).trim()])
+          );
+        } catch (_error) {
+          return {};
+        }
+      }
+
+      function persistProjectChatSessions() {
+        writeStorage(STORAGE_KEYS.projectChatSessions, JSON.stringify(state.projectChatSessions || {}));
+      }
+
+      function rememberProjectChatSession(projectId, chatId) {
+        const normalizedProjectId = String(projectId || "").trim();
+        const normalizedChatId = String(chatId || "").trim();
+        if (!normalizedProjectId || !normalizedChatId) return;
+        if ((state.projectChatSessions[normalizedProjectId] || "") === normalizedChatId) return;
+        state.projectChatSessions[normalizedProjectId] = normalizedChatId;
+        persistProjectChatSessions();
+      }
 
       function getContextDraftStorageKey(projectIdOverride = undefined) {
         const resolvedProjectId = projectIdOverride === undefined ? state.projectId : projectIdOverride;
@@ -89,6 +119,11 @@ appStore.patch({ bootstrappedAt: Date.now() });
 
         return `${STORAGE_KEYS.contextDraftPrefix}default`;
       }
+
+      state.projectChatSessions = {
+        ...(state.projectChatSessions || {}),
+        ...loadProjectChatSessions(),
+      };
 
       const isMobileViewport = window.innerWidth < 768;
       appStore.patch({
@@ -1175,7 +1210,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
         const payload = await services.runs.getProjectHistory(state.projectId, preferredChatId || "");
         state.chatId = payload.chat_id || null;
         if (state.projectId && state.chatId) {
-          state.projectChatSessions[state.projectId] = state.chatId;
+          rememberProjectChatSession(state.projectId, state.chatId);
         }
         const messages = Array.isArray(payload.messages) ? payload.messages : [];
         if (!messages.length) {
@@ -1255,7 +1290,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
         if (state.projectId !== nextProjectId) {
           const previousProjectId = state.projectId;
           if (previousProjectId && state.chatId) {
-            state.projectChatSessions[previousProjectId] = state.chatId;
+            rememberProjectChatSession(previousProjectId, state.chatId);
           }
           state.chatId = nextProjectId ? (state.projectChatSessions[nextProjectId] || null) : null;
         }
@@ -1476,13 +1511,13 @@ appStore.patch({ bootstrappedAt: Date.now() });
         if (!state.projectId) return;
         const existingChatId = String(state.chatId || "").trim();
         if (existingChatId) {
-          state.projectChatSessions[state.projectId] = existingChatId;
+          rememberProjectChatSession(state.projectId, existingChatId);
           return;
         }
         const payload = await services.runs.ensureChatSession(state.projectId, existingChatId || null);
         state.chatId = payload.chat_id;
         if (state.projectId && state.chatId) {
-          state.projectChatSessions[state.projectId] = state.chatId;
+          rememberProjectChatSession(state.projectId, state.chatId);
         }
       }
 
@@ -1866,7 +1901,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
           state.chatId = data.chat_id;
         }
         if (state.projectId && state.chatId) {
-          state.projectChatSessions[state.projectId] = state.chatId;
+          rememberProjectChatSession(state.projectId, state.chatId);
         }
         if (Array.isArray(data.artifacts)) {
           state.runArtifacts = data.artifacts.filter((artifact) => !isConversationArtifact(artifact));
@@ -2283,6 +2318,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
 
       elements.projectSelect.addEventListener("change", async (event) => {
         const selectedProject = event.target.value;
+        CHAT_VIEW.__chatStopStream?.();
         setProjectState(selectedProject);
         await refreshUiPreferences(state.projectId);
         await hydrateSelectedProject();

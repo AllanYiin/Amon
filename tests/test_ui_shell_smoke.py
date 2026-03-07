@@ -224,10 +224,15 @@ class UIShellSmokeTests(unittest.TestCase):
         app_state_js = Path("src/amon/ui/static/js/store/app_state.js").read_text(encoding="utf-8")
 
         self.assertIn("projectChatSessions: {}", app_state_js)
-        self.assertIn("state.projectChatSessions[previousProjectId] = state.chatId;", bootstrap_js)
+        self.assertIn('projectChatSessions: "amon.ui.projectChatSessions"', bootstrap_js)
+        self.assertIn("function loadProjectChatSessions()", bootstrap_js)
+        self.assertIn("function rememberProjectChatSession(projectId, chatId)", bootstrap_js)
+        self.assertIn("state.projectChatSessions = {", bootstrap_js)
+        self.assertIn("rememberProjectChatSession(previousProjectId, state.chatId);", bootstrap_js)
         self.assertIn("state.chatId = nextProjectId ? (state.projectChatSessions[nextProjectId] || null) : null;", bootstrap_js)
         self.assertIn('const preferredChatId = String(state.projectChatSessions?.[state.projectId] || state.chatId || "").trim();', bootstrap_js)
         self.assertIn('services.runs.getProjectHistory(state.projectId, preferredChatId || "")', bootstrap_js)
+        self.assertIn('CHAT_VIEW.__chatStopStream?.();', bootstrap_js)
         self.assertIn('async getProjectHistory(projectId, chatId = "")', runs_service_js)
         self.assertIn("`?chat_id=${encodeURIComponent(String(chatId).trim())}`", runs_service_js)
 
