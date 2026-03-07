@@ -1,38 +1,37 @@
 # TEST_GUIDE
 
-本專案測試規範如下：
-
-## 唯一測試入口
-請使用以下命令執行測試：
+## 1) 核心測試矩陣（TaskGraph v3）
 
 ```bash
-python -m unittest
+python -m compileall src tests
+python -m unittest discover -s tests -p "test_*.py"
+python -m unittest \
+  tests.test_chat_continuation_guard \
+  tests.test_chat_continuation_flow \
+  tests.test_ui_chat_stream_init \
+  tests.test_chat_session_store
+python -m unittest tests.test_ui_graph_frontend_smoke
+python -m unittest tests.test_ui_graph_run_adapter
 ```
 
-- 不應另行定義其他主要測試入口作為正式流程。
-- 若需要指定子集合，仍應以 `python -m unittest` 的標準機制延伸。
-
-## 網路依賴限制
-- 所有測試必須可在離線（無外網）環境執行。
-- 測試不得依賴外部第三方服務、公開 API 或即時網路資源。
-- 若流程需要外部互動，應改以 stub/mock/fixture 處理，確保可重現與穩定。
-
-## 建議執行順序
-1. 先執行最小品質檢查：
-   ```bash
-   python -m compileall src tests
-   ```
-2. 再執行測試入口：
-   ```bash
-   python -m unittest
-   ```
-
-## Anti-legacy 檢查（TaskGraph v3 cutover）
-
-在測試前，請先執行關鍵字檢查，確認未新增禁止引用：
+## 2) Anti-legacy 檢查
 
 ```bash
-rg -n "PlanGraph|compile_plan_to_exec_graph|taskgraph3\.engine_runtime\.GraphRuntime|plan_execute|step5|step6" src tests docs
+rg -n "PlanGraph|plan_execute|legacy runtime|GraphRuntime|exec graph|graph\.v2|graph\.legacy|compile_plan_to_exec_graph" src tests docs README.md DEVELOPMENT.md TEST_GUIDE.md SPEC_v1.1.3.md
 ```
 
-> 說明：目前 repo 仍有既有殘留；此檢查用途是避免「新增或擴散」legacy 依賴。cutover 完成後應升級為嚴格 fail。
+驗收規則：
+
+- 正式執行文件與主流程碼不得把舊術語當主路徑。
+- 舊術語僅可出現在 migration/import 或歷史追蹤文件。
+
+## 3) v3 graph fixture / smoke / UI regression
+
+- fixture：`docs/plan.json`（`taskgraph.v3`）
+- smoke：`tests.test_ui_graph_frontend_smoke`
+- adapter contract：`tests.test_ui_graph_run_adapter`
+- 手動 UI 回歸：`docs/ui-regression-graph-context.md`
+
+## 4) 環境限制處理
+
+若環境受限，至少需通過 `python -m compileall src tests`，並在 PR 註明未跑項目與原因。
