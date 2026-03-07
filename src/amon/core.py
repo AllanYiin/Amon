@@ -37,7 +37,7 @@ from .events import emit_event
 from .logging import log_billing, log_event
 from .logging_utils import setup_logger
 from .mcp_client import MCPClientError, MCPServerConfig, MCPStdioClient
-from .planning import compile_plan_to_exec_graph, dumps_plan, generate_plan_with_llm, render_todo_markdown
+from .planning import generate_plan_with_llm
 from .models import ProviderError, build_provider, decode_reasoning_chunk, encode_reasoning_chunk
 from .project_registry import ProjectRegistry, load_project_config
 from .taskgraph3.amon_node_runner import AmonNodeRunner
@@ -51,6 +51,7 @@ from .taskgraph3.payloads import (
 )
 from .taskgraph3.runtime import TaskGraph3RunResult, TaskGraph3Runtime
 from .taskgraph3.schema import ArtifactNode, GateNode, GateRoute, GraphDefinition, GraphEdge, GroupNode, TaskNode
+from .taskgraph3.serialize import dumps_graph_definition
 from .sandbox.service import run_sandbox_step
 from .tooling import (
     ToolingError,
@@ -959,7 +960,7 @@ class AmonCore:
         available_tools: list[dict[str, Any]] | None = None,
         available_skills: list[dict[str, Any]] | None = None,
     ):
-        """Generate PlanGraph and materialize docs/plan.json + docs/TODO.md."""
+        """Generate TaskGraph v3 and materialize docs/plan.json + docs/TODO.md."""
         if available_tools is None:
             available_tools = self.describe_available_tools(project_id=project_id)
 
@@ -973,8 +974,8 @@ class AmonCore:
         )
         docs_dir = project_path / "docs"
         docs_dir.mkdir(parents=True, exist_ok=True)
-        plan_json = dumps_plan(plan)
-        todo_markdown = render_todo_markdown(plan)
+        plan_json = dumps_graph_definition(plan)
+        todo_markdown = self._render_todo_markdown_from_v3(plan, objective=message)
 
         plan_path = docs_dir / "plan.json"
         todo_path = docs_dir / "TODO.md"
@@ -985,7 +986,7 @@ class AmonCore:
         payload = {
             "plan_hash": plan_hash,
             "node_count": len(plan.nodes),
-            "objective": plan.objective,
+            "objective": message,
             "output_paths": ["docs/plan.json", "docs/TODO.md"],
         }
         log_event(
@@ -1007,6 +1008,19 @@ class AmonCore:
             }
         )
         return plan
+
+    def _render_todo_markdown_from_v3(self, graph: GraphDefinition, *, objective: str) -> str:
+        lines: list[str] = [f"# TODO Plan: {objective}", ""]
+        for node in graph.nodes:
+            if not isinstance(node, TaskNode):
+                continue
+            summary = (node.task_spec.display.summary or "").strip() if node.task_spec and node.task_spec.display else ""
+            todo_hint = (node.task_spec.display.todo_hint or "").strip() if node.task_spec and node.task_spec.display else ""
+            dod_summary = todo_hint or "（未提供 DoD）"
+            lines.append(f"- [ ] {node.id} {node.title or (node.task_spec.display.label if node.task_spec and node.task_spec.display else '')}".rstrip())
+            lines.append(f"  - Goal: {summary or '（未提供目標）'}")
+            lines.append(f"  - DoD: {dod_summary}")
+        return "\n".join(lines) + "\n"
 
     def run_plan_execute_stream(
         self,
@@ -1091,9 +1105,9 @@ class AmonCore:
         )
         phase_metrics["plan_generation_ms"] = int((time.monotonic() - phase_started_at) * 1000)
 
-        _emit_planning_progress("任務計畫已產生，正在編譯執行圖…")
+        _emit_planning_progress("任務計畫已產生，正在準備執行圖…")
         phase_started_at = time.monotonic()
-        exec_graph = compile_plan_to_exec_graph(plan)
+        plan_graph_payload = json.loads(dumps_graph_definition(plan))
         phase_metrics["compile_graph_ms"] = int((time.monotonic() - phase_started_at) * 1000)
         emit_event(
             {
@@ -1102,19 +1116,19 @@ class AmonCore:
                 "project_id": project_id or self.resolve_project_identity(project_path)[0],
                 "actor": "system",
                 "payload": {
-                    "node_count": len(exec_graph.get("nodes", [])),
-                    "edge_count": len(exec_graph.get("edges", [])),
+                    "node_count": len(plan_graph_payload.get("nodes", [])),
+                    "edge_count": len(plan_graph_payload.get("edges", [])),
                 },
                 "risk": "low",
             }
         )
         graph_path = self._write_graph_resolved(
             project_path,
-            exec_graph,
-            exec_graph.get("variables", {}),
+            plan_graph_payload,
+            {},
             mode="plan_execute",
         )
-        _emit_planning_progress("執行圖編譯完成，開始執行任務…")
+        _emit_planning_progress("執行圖準備完成，開始執行任務…")
         phase_started_at = time.monotonic()
         result = _run_with_heartbeat(
             "任務執行中",

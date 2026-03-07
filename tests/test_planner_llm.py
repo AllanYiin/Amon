@@ -5,6 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from amon.planning.planner_llm import generate_plan_with_llm
+from amon.taskgraph3.schema import ArtifactNode, TaskNode
 
 
 class _MockLLM:
@@ -23,29 +24,31 @@ class _MockLLM:
 class PlannerLLMTests(unittest.TestCase):
     def test_generate_plan_with_llm_success(self) -> None:
         llm = _MockLLM([
-            '{"schema_version":"1.0","objective":"測試","nodes":[{"id":"T1","title":"做事","goal":"完成","definition_of_done":["done"],"depends_on":[],"requires_llm":false,"llm":null,"tools":[],"skills":[],"expected_artifacts":[]}],"edges":[],"context":{"assumptions":[],"constraints":[],"glossary":{}}}',
+            '{"version":"taskgraph.v3","nodes":[{"id":"task-1","node_type":"TASK","title":"做事","taskSpec":{"executor":"agent","agent":{"prompt":"完成","instructions":"執行"},"artifacts":[{"name":"todo","mediaType":"text/markdown","description":"待辦","required":true}],"display":{"label":"做事","summary":"完成","todoHint":"done","tags":[]},"runnable":true}},{"id":"artifact-task-1-todo","node_type":"ARTIFACT","title":"docs/TODO.md"}],"edges":[{"from":"task-1","to":"artifact-task-1-todo","edge_type":"DATA","kind":"EMITS"}]}',
         ])
         plan = generate_plan_with_llm("請規劃", llm_client=llm)
-        self.assertEqual(plan.schema_version, "1.0")
-        self.assertEqual(len(plan.nodes), 1)
+        self.assertEqual(plan.version, "taskgraph.v3")
+        self.assertEqual(len(plan.nodes), 2)
 
     def test_generate_plan_with_llm_retry_once(self) -> None:
         llm = _MockLLM([
             "not-json",
-            '{"schema_version":"1.0","objective":"測試","nodes":[{"id":"T1","title":"做事","goal":"完成","definition_of_done":["done"],"depends_on":[],"requires_llm":false,"llm":null,"tools":[],"skills":[],"expected_artifacts":[]}],"edges":[],"context":{"assumptions":[],"constraints":[],"glossary":{}}}',
+            '{"version":"taskgraph.v3","nodes":[{"id":"task-1","node_type":"TASK","title":"做事","taskSpec":{"executor":"agent","agent":{"prompt":"完成","instructions":"執行"},"artifacts":[{"name":"todo","mediaType":"text/markdown","description":"待辦","required":true}],"display":{"label":"做事","summary":"測試","todoHint":"done","tags":[]},"runnable":true}},{"id":"artifact-task-1-todo","node_type":"ARTIFACT","title":"docs/TODO.md"}],"edges":[{"from":"task-1","to":"artifact-task-1-todo","edge_type":"DATA","kind":"EMITS"}]}',
         ])
         plan = generate_plan_with_llm("請規劃", llm_client=llm)
-        self.assertEqual(plan.objective, "測試")
+        task_node = next(node for node in plan.nodes if isinstance(node, TaskNode))
+        self.assertEqual(task_node.task_spec.display.summary, "測試")
 
     def test_generate_plan_with_llm_fallback_minimal(self) -> None:
         llm = _MockLLM(["not-json", "still-not-json"])
         plan = generate_plan_with_llm("請規劃", llm_client=llm)
-        self.assertEqual(plan.schema_version, "1.0")
-        self.assertEqual(plan.nodes[0].id, "T1")
+        self.assertEqual(plan.version, "taskgraph.v3")
+        self.assertEqual(plan.nodes[0].id, "task-1")
+        self.assertTrue(any(isinstance(node, ArtifactNode) for node in plan.nodes))
 
     def test_generate_plan_with_llm_payload_contains_simplified_tools_skills(self) -> None:
         llm = _MockLLM([
-            '{"schema_version":"1.0","objective":"測試","nodes":[{"id":"T1","title":"做事","goal":"完成","definition_of_done":["done"],"depends_on":[],"requires_llm":false,"llm":null,"tools":[],"skills":[],"expected_artifacts":[]}],"edges":[],"context":{"assumptions":[],"constraints":[],"glossary":{}}}',
+            '{"version":"taskgraph.v3","nodes":[{"id":"task-1","node_type":"TASK","title":"做事","taskSpec":{"executor":"agent","agent":{"prompt":"完成","instructions":"執行"},"artifacts":[{"name":"todo","mediaType":"text/markdown","description":"待辦","required":true}],"display":{"label":"做事","summary":"測試","todoHint":"done","tags":[]},"runnable":true}},{"id":"artifact-task-1-todo","node_type":"ARTIFACT","title":"docs/TODO.md"}],"edges":[{"from":"task-1","to":"artifact-task-1-todo","edge_type":"DATA","kind":"EMITS"}]}',
         ])
         generate_plan_with_llm(
             "請規劃",

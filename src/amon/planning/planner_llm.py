@@ -1,4 +1,4 @@
-"""LLM planner for generating PlanGraph TODO graphs."""
+"""LLM planner for generating TaskGraph v3 TODO graphs."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ from typing import Any, Iterable, Protocol
 from amon.config import ConfigLoader
 from amon.models import build_provider
 
-from .schema import PlanContext, PlanGraph, PlanNode
-from .serialize import loads_plan
+from amon.taskgraph3.payloads import AgentTaskConfig, ArtifactOutput, TaskDisplayMetadata, TaskSpec, task_spec_from_payload
+from amon.taskgraph3.schema import ArtifactNode, GateNode, GateRoute, GraphDefinition, GraphEdge, GroupNode, TaskNode, validate_graph_definition
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ def generate_plan_with_llm(
     model: str | None = None,
     available_tools: list[dict[str, Any]] | None = None,
     available_skills: list[dict[str, Any]] | None = None,
-) -> PlanGraph:
+) -> GraphDefinition:
     normalized = " ".join((message or "").split())
     if not normalized:
         return _minimal_plan("未提供任務描述")
@@ -49,7 +49,7 @@ def generate_plan_with_llm(
             previous_raw=None,
         )
         try:
-            return loads_plan(_strip_code_fences(raw))
+            return _loads_graph_definition(_strip_code_fences(raw))
         except ValueError as exc:
             repaired = _request_plan(
                 client,
@@ -60,7 +60,7 @@ def generate_plan_with_llm(
                 repair_error=str(exc),
                 previous_raw=raw,
             )
-            return loads_plan(_strip_code_fences(repaired))
+            return _loads_graph_definition(_strip_code_fences(repaired))
     except Exception as exc:  # noqa: BLE001
         logger.warning("LLM planner 失敗，改用最小計畫：%s", exc)
         return _minimal_plan(normalized)
@@ -78,7 +78,7 @@ def _request_plan(
 ) -> str:
     payload: dict[str, Any] = {
         "message": message,
-        "plan_schema": _plan_schema_definition(),
+        "graph_schema": _graph_schema_definition(),
         "available_tools": _normalize_available_tools(available_tools),
         "available_skills": _normalize_available_skills(available_skills),
     }
@@ -123,42 +123,41 @@ def _strip_code_fences(text: str) -> str:
 def _planner_system_prompt(*, is_repair: bool) -> str:
     if is_repair:
         return (
-            "你是 PlanGraph JSON 修復器。"
-            "只輸出符合 PlanGraph schema 的 JSON，不得輸出 markdown 或解釋。"
-            "請根據錯誤原因修正上一版輸出，使其可被嚴格 JSON parser 與 PlanGraph validator 接受。"
+            "你是 TaskGraph v3 JSON 修復器。"
+            "只輸出符合 GraphDefinition schema 的 JSON，不得輸出 markdown 或解釋。"
+            "請根據錯誤原因修正上一版輸出，使其可被嚴格 JSON parser 與 TaskGraph v3 validator 接受。"
         )
     return (
         "你是 LLM Planner。"
-        "你必須只輸出符合 PlanGraph schema 的 JSON，不得輸出 markdown、code fence、說明文字。"
-        "先列 assumptions，再產生 TODO nodes（包含 depends_on），再為每個 node 補齊 tools/skills/llm prompt+instructions/DoD。"
-        "所有欄位型別必須正確，schema_version 使用 1.0。"
+        "你必須只輸出符合 TaskGraph v3 GraphDefinition 的 JSON，不得輸出 markdown、code fence、說明文字。"
+        "每個高階 task 都應該是 TASK node 並含 taskSpec，executor 可用 agent/tool。"
+        "expected_artifacts 要映射到 taskSpec.artifacts 並建立對應 ARTIFACT node + DATA/EMITS edge。"
+        "所有欄位型別必須正確，version 固定使用 taskgraph.v3。"
     )
 
 
-def _plan_schema_definition() -> dict[str, Any]:
+def _graph_schema_definition() -> dict[str, Any]:
     return {
-        "schema_version": "1.0",
-        "objective": "string",
-        "context": {
-            "assumptions": ["string"],
-            "constraints": ["string"],
-            "glossary": {"term": "definition"},
-        },
+        "version": "taskgraph.v3",
         "nodes": [
             {
-                "id": "T1",
+                "id": "task-1",
+                "node_type": "TASK",
                 "title": "string",
-                "goal": "string",
-                "definition_of_done": ["string"],
-                "depends_on": ["T0"],
-                "requires_llm": True,
-                "llm": {"mode": "single|self_critique|team|plan_execute", "prompt": "string", "instructions": "string"},
-                "tools": [{"tool_name": "string", "args_schema_hint": {}, "when_to_use": "string"}],
-                "skills": ["string"],
-                "expected_artifacts": [{"path": "docs/...", "type": "md|json|txt", "description": "string"}],
+                "taskSpec": {
+                    "executor": "agent|tool",
+                    "agent": {"prompt": "string", "instructions": "string", "model": "string|null"},
+                    "tool": {
+                        "tools": [{"name": "string", "args": {}, "whenToUse": "string"}],
+                        "skills": ["string"],
+                    },
+                    "artifacts": [{"name": "string", "mediaType": "string", "description": "string", "required": True}],
+                    "display": {"label": "string", "summary": "string", "todoHint": "string", "tags": ["string"]},
+                    "runnable": True,
+                },
             }
         ],
-        "edges": [{"from": "T1", "to": "T2"}],
+        "edges": [{"from": "task-1", "to": "task-2", "edge_type": "CONTROL", "kind": "next"}],
     }
 
 
@@ -193,28 +192,89 @@ def _normalize_available_skills(available_skills: list[dict[str, Any]] | None) -
     return result
 
 
-def _minimal_plan(message: str) -> PlanGraph:
-    return PlanGraph(
-        schema_version="1.0",
-        objective=message,
+def _minimal_plan(message: str) -> GraphDefinition:
+    return GraphDefinition(
+        version="taskgraph.v3",
         nodes=[
-            PlanNode(
-                id="T1",
+            TaskNode(
+                id="task-1",
                 title="釐清需求並產出初版",
-                goal="先完成可執行的最小任務切分",
-                definition_of_done=["產出初版 TODO", "標註後續需要資訊"],
-                depends_on=[],
-                requires_llm=True,
-                llm={
-                    "mode": "plan_execute",
-                    "prompt": message,
-                    "instructions": "先做最小可行拆解，再逐步細化。",
-                },
-                tools=[],
-                skills=[],
-                expected_artifacts=[{"path": "docs/TODO.md", "type": "md", "description": "最小任務清單"}],
-            )
+                task_spec=TaskSpec(
+                    executor="agent",
+                    agent=AgentTaskConfig(prompt=message, instructions="先做最小可行拆解，再逐步細化。"),
+                    artifacts=[ArtifactOutput(name="todo", media_type="text/markdown", description="最小任務清單", required=True)],
+                    display=TaskDisplayMetadata(label="釐清需求並產出初版", summary="先完成可執行的最小任務切分", todo_hint="產出初版 TODO；標註後續需要資訊"),
+                    runnable=True,
+                ),
+            ),
+            ArtifactNode(id="artifact-task-1-todo", title="docs/TODO.md"),
         ],
-        edges=[],
-        context=PlanContext(assumptions=["LLM planner fallback"], constraints=[], glossary={}),
+        edges=[GraphEdge(from_node="task-1", to_node="artifact-task-1-todo", edge_type="DATA", kind="EMITS")],
+    )
+
+
+def _loads_graph_definition(text: str) -> GraphDefinition:
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"TaskGraph JSON 格式錯誤：{exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("TaskGraph 必須是 object")
+    if str(payload.get("version") or "") != "taskgraph.v3":
+        raise ValueError("TaskGraph version 必須是 taskgraph.v3")
+    nodes_raw = payload.get("nodes")
+    if not isinstance(nodes_raw, list):
+        raise ValueError("nodes 必須是 list")
+    edges_raw = payload.get("edges")
+    if not isinstance(edges_raw, list):
+        raise ValueError("edges 必須是 list")
+
+    nodes = [_coerce_node(item) for item in nodes_raw]
+    edges = [_coerce_edge(item) for item in edges_raw]
+    graph = GraphDefinition(version="taskgraph.v3", nodes=nodes, edges=edges)
+    validate_graph_definition(graph)
+    return graph
+
+
+def _coerce_node(raw: Any):
+    if not isinstance(raw, dict):
+        raise ValueError("node 必須是 object")
+    node_id = str(raw.get("id") or "")
+    node_type = str(raw.get("node_type") or "").upper()
+    title = str(raw.get("title") or "")
+    if node_type == "TASK":
+        spec_raw = raw.get("taskSpec")
+        if not isinstance(spec_raw, dict):
+            raise ValueError(f"TASK node 必須包含 taskSpec：{node_id}")
+        return TaskNode(
+            id=node_id,
+            title=title,
+            execution=str(raw.get("execution") or "SINGLE"),
+            execution_config=raw.get("executionConfig") if isinstance(raw.get("executionConfig"), dict) else None,
+            task_spec=task_spec_from_payload(spec_raw),
+            task_boundaries=[str(item) for item in (raw.get("taskBoundaries") or [])] if isinstance(raw.get("taskBoundaries"), list) else None,
+            guardrails=raw.get("guardrails") if isinstance(raw.get("guardrails"), dict) else None,
+        )
+    if node_type == "ARTIFACT":
+        return ArtifactNode(id=node_id, title=title)
+    if node_type == "GROUP":
+        return GroupNode(id=node_id, title=title, children=[str(item) for item in (raw.get("children") or [])])
+    if node_type == "GATE":
+        routes = []
+        for item in raw.get("routes") or []:
+            if not isinstance(item, dict):
+                raise ValueError(f"gate route 必須是 object：{node_id}")
+            routes.append(GateRoute(on_outcome=str(item.get("onOutcome") or ""), to_node=str(item.get("toNode") or "")))
+        return GateNode(id=node_id, title=title, routes=routes)
+    raise ValueError(f"不支援的 node_type：{node_type or '<empty>'}")
+
+
+def _coerce_edge(raw: Any) -> GraphEdge:
+    if not isinstance(raw, dict):
+        raise ValueError("edge 必須是 object")
+    return GraphEdge(
+        from_node=str(raw.get("from") or raw.get("from_node") or ""),
+        to_node=str(raw.get("to") or raw.get("to_node") or ""),
+        edge_type=str(raw.get("edge_type") or "CONTROL"),
+        kind=str(raw.get("kind") or "next"),
     )
