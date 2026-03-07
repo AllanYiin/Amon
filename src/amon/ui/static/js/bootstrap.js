@@ -1171,8 +1171,12 @@ appStore.patch({ bootstrappedAt: Date.now() });
           appendTimelineStatus("目前為無專案模式。輸入任務後會自動建立新專案並切換。");
           return;
         }
-        const payload = await services.runs.getProjectHistory(state.projectId);
+        const preferredChatId = String(state.projectChatSessions?.[state.projectId] || state.chatId || "").trim();
+        const payload = await services.runs.getProjectHistory(state.projectId, preferredChatId || "");
         state.chatId = payload.chat_id || null;
+        if (state.projectId && state.chatId) {
+          state.projectChatSessions[state.projectId] = state.chatId;
+        }
         const messages = Array.isArray(payload.messages) ? payload.messages : [];
         if (!messages.length) {
           appendTimelineStatus("目前尚無歷史對話。請直接輸入需求開始。");
@@ -1249,7 +1253,11 @@ appStore.patch({ bootstrappedAt: Date.now() });
       function setProjectState(projectId) {
         const nextProjectId = projectId || null;
         if (state.projectId !== nextProjectId) {
-          state.chatId = null;
+          const previousProjectId = state.projectId;
+          if (previousProjectId && state.chatId) {
+            state.projectChatSessions[previousProjectId] = state.chatId;
+          }
+          state.chatId = nextProjectId ? (state.projectChatSessions[nextProjectId] || null) : null;
         }
         state.projectId = nextProjectId;
         const layoutState = appStore.getState().layout || {};
@@ -1467,9 +1475,15 @@ appStore.patch({ bootstrappedAt: Date.now() });
       async function ensureChatSession() {
         if (!state.projectId) return;
         const existingChatId = String(state.chatId || "").trim();
-        if (existingChatId) return;
+        if (existingChatId) {
+          state.projectChatSessions[state.projectId] = existingChatId;
+          return;
+        }
         const payload = await services.runs.ensureChatSession(state.projectId, existingChatId || null);
         state.chatId = payload.chat_id;
+        if (state.projectId && state.chatId) {
+          state.projectChatSessions[state.projectId] = state.chatId;
+        }
       }
 
       async function loadContext() {
@@ -1850,6 +1864,9 @@ appStore.patch({ bootstrappedAt: Date.now() });
         }
         if (data.chat_id) {
           state.chatId = data.chat_id;
+        }
+        if (state.projectId && state.chatId) {
+          state.projectChatSessions[state.projectId] = state.chatId;
         }
         if (Array.isArray(data.artifacts)) {
           state.runArtifacts = data.artifacts.filter((artifact) => !isConversationArtifact(artifact));
