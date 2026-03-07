@@ -28,7 +28,16 @@ for STEP in step1 step2 step3 step4 step5; do
   run_amon plan "${STEP}" --task "${TASK}" --out-dir "${OUT_DIR}"
 done
 
+# Ensure the expected smoke-test project exists in a fresh environment.
+if ! run_amon project show e2e >/dev/null 2>&1; then
+  run_amon project create e2e >/dev/null
+fi
+
 run_amon run step6 --task "${TASK}" --project e2e --out-dir "${OUT_DIR}" --graph "${OUT_DIR}/graph.v3.json"
+
+if [[ -f "${OUT_DIR}/state.json" ]]; then
+  cp "${OUT_DIR}/state.json" "${OUT_DIR}/run.state.json"
+fi
 
 required=(
   "${OUT_DIR}/graph.v3.json"

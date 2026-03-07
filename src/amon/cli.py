@@ -538,8 +538,8 @@ def _handle_plan(args: argparse.Namespace) -> None:
     if args.step == "step5":
         graph = GraphDefinition(
             nodes=[
-                TaskNode(id="task_plan", title="任務規劃", description=args.task),
-                TaskNode(id="task_execute", title="執行任務", description=args.task),
+                TaskNode(id="task_plan", title="任務規劃"),
+                TaskNode(id="task_execute", title="執行任務"),
             ],
             edges=[GraphEdge(from_node="task_plan", to_node="task_execute", edge_type="CONTROL", kind="sequence")],
         )
@@ -568,7 +568,7 @@ def _handle_run_taskgraph3_artifacts(core: AmonCore, args: argparse.Namespace) -
     result = core.run_graph(project_path=core.get_project_path(args.project), graph_path=graph_path)
     state = {
         "run_id": result.run_id,
-        "status": result.status,
+        "status": result.state.get("status"),
         "graph_path": str(graph_path),
         "run_dir": str(result.run_dir),
     }
