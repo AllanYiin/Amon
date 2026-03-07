@@ -17,6 +17,16 @@ class IndexHtmlVendorSmokeTests(unittest.TestCase):
         self.assertNotIn("cdn.jsdelivr.net/npm/mermaid", index_html)
         self.assertNotIn("cdn.jsdelivr.net/npm/svg-pan-zoom", index_html)
 
+    def test_vendor_mermaid_build_is_umd_bundle(self) -> None:
+        mermaid_vendor_js = Path("src/amon/ui/static/vendor/mermaid/mermaid.min.js").read_text(encoding="utf-8")
+        self.assertIn("JM.mermaid=Ag()", mermaid_vendor_js)
+        self.assertNotIn('import {', mermaid_vendor_js)
+
+    def test_vendor_svg_pan_zoom_build_exports_svgPanZoom_without_svgjs_global(self) -> None:
+        svg_pan_zoom_vendor_js = Path("src/amon/ui/static/vendor/svg-pan-zoom/svg-pan-zoom.min.js").read_text(encoding="utf-8")
+        self.assertIn("svgPanZoom", svg_pan_zoom_vendor_js)
+        self.assertNotIn("new SVG(document.createDocumentFragment())", svg_pan_zoom_vendor_js)
+
 
 @unittest.skipIf(shutil.which("node") is None, "node is required for graph frontend smoke tests")
 class GraphViewMermaidMissingSmokeTests(unittest.TestCase):
@@ -83,6 +93,12 @@ class GraphViewMermaidMissingSmokeTests(unittest.TestCase):
         )
         payload = json.loads(completed.stdout)
         self.assertIn("Mermaid 未載入", payload["previewText"])
+
+    def test_graph_view_does_not_store_cleanup_on_undefined_this(self) -> None:
+        graph_js = Path("src/amon/ui/static/js/views/graph.js").read_text(encoding="utf-8")
+        self.assertIn("GRAPH_VIEW.__graphCleanup = () =>", graph_js)
+        self.assertIn("GRAPH_VIEW.__graphLoad = load;", graph_js)
+        self.assertNotIn("this.__graphCleanup = () =>", graph_js)
 
 
 if __name__ == "__main__":
