@@ -12,7 +12,7 @@ from amon.planning.serialize import dumps_plan, loads_plan
 class PlanSchemaTests(unittest.TestCase):
     def _sample_plan(self) -> PlanGraph:
         return PlanGraph(
-            schema_version="1.0",
+            schema_version="legacy.plan.v1",
             objective="重構兩層圖",
             nodes=[
                 PlanNode(
@@ -33,7 +33,7 @@ class PlanSchemaTests(unittest.TestCase):
                     definition_of_done=["串接入口"],
                     depends_on=["T1"],
                     requires_llm=True,
-                    llm={"mode": "plan_execute", "prompt": "請拆解", "instructions": "輸出 JSON"},
+                    llm={"mode": "taskgraph.v3", "prompt": "請拆解", "instructions": "輸出 JSON"},
                 ),
             ],
             context=PlanContext(

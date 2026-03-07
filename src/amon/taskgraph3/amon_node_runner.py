@@ -8,8 +8,6 @@ from string import Template
 from typing import Any
 
 from amon.artifacts.store import ingest_artifacts
-from amon.fs.atomic import atomic_write_text
-from amon.fs.safety import canonicalize_path
 from amon.sandbox.service import run_sandbox_step
 
 from .schema import TaskNode
@@ -45,8 +43,6 @@ class AmonNodeRunner:
             return self._run_tool(node, context)
         if executor == "sandbox_run":
             return self._run_sandbox(node, context)
-        if executor == "write_file":
-            return self._run_write_file(node, context)
         raise ValueError(f"node={node.id} unsupported executor={executor}")
 
     def _run_agent(self, node: TaskNode, context: dict[str, Any]) -> dict[str, Any]:
@@ -111,20 +107,6 @@ class AmonNodeRunner:
             overwrite=False,
         )
         return {"raw_output": json.dumps(result, ensure_ascii=False), **result}
-
-    def _run_write_file(self, node: TaskNode, context: dict[str, Any]) -> dict[str, Any]:
-        cfg = node.task_spec.write_file
-        assert cfg is not None
-        render_ctx = self._render_context(context)
-        rel_path = Template(cfg.path or "").safe_substitute(render_ctx)
-        content = Template(cfg.content_template or "").safe_substitute(render_ctx)
-        target = canonicalize_path(self.project_path, rel_path, allowed_prefixes=["docs", "audits"])
-        target.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_text(target, content)
-        return {
-            "raw_output": content,
-            "path": str(target.relative_to(self.project_path).as_posix()),
-        }
 
     def _render_context(self, context: dict[str, Any]) -> dict[str, Any]:
         return {**self.variables, **context, "run_id": self.run_id}

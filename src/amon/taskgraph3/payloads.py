@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-_EXECUTORS = {"agent", "tool", "sandbox_run", "write_file"}
+_EXECUTORS = {"agent", "tool", "sandbox_run"}
 _BINDING_SOURCES = {"variable", "upstream", "literal"}
 
 
@@ -34,12 +34,6 @@ class SandboxRunConfig:
     command: str | None = None
     shell: str | None = None
     workdir: str | None = None
-
-
-@dataclass
-class WriteFileConfig:
-    path: str | None = None
-    content_template: str | None = None
 
 
 @dataclass
@@ -73,7 +67,6 @@ class TaskSpec:
     agent: AgentTaskConfig | None = None
     tool: ToolTaskConfig | None = None
     sandbox_run: SandboxRunConfig | None = None
-    write_file: WriteFileConfig | None = None
     input_bindings: list[InputBinding] = field(default_factory=list)
     artifacts: list[ArtifactOutput] = field(default_factory=list)
     display: TaskDisplayMetadata = field(default_factory=TaskDisplayMetadata)
@@ -101,11 +94,6 @@ def validate_task_spec(node_id: str, task_spec: TaskSpec) -> None:
     elif task_spec.executor == "sandbox_run":
         if task_spec.sandbox_run is None or not task_spec.sandbox_run.command:
             raise ValueError(f"task.task_spec.sandbox_run.command 不可為空：node_id={node_id}")
-    elif task_spec.executor == "write_file":
-        if task_spec.write_file is None:
-            raise ValueError(f"task.task_spec.write_file 缺失：node_id={node_id}")
-        if not task_spec.write_file.path or task_spec.write_file.content_template is None:
-            raise ValueError(f"task.task_spec.write_file 需包含 path/content_template：node_id={node_id}")
 
     for binding in task_spec.input_bindings:
         if binding.source not in _BINDING_SOURCES:
@@ -144,7 +132,6 @@ def task_spec_from_payload(raw: dict[str, Any]) -> TaskSpec:
         if isinstance(raw.get("tool"), dict)
         else None,
         sandbox_run=_sandbox_from_payload(raw.get("sandboxRun")),
-        write_file=_write_file_from_payload(raw.get("writeFile")),
         input_bindings=[_input_binding_from_payload(item) for item in raw.get("inputBindings", []) if isinstance(item, dict)],
         artifacts=[_artifact_from_payload(item) for item in raw.get("artifacts", []) if isinstance(item, dict)],
         display=_display_from_payload(raw.get("display")),
@@ -159,7 +146,6 @@ def task_spec_to_payload(task_spec: TaskSpec) -> dict[str, Any]:
         "agent": None,
         "tool": None,
         "sandboxRun": None,
-        "writeFile": None,
         "inputBindings": [
             {
                 "source": b.source,
@@ -212,11 +198,6 @@ def task_spec_to_payload(task_spec: TaskSpec) -> dict[str, Any]:
             "shell": task_spec.sandbox_run.shell,
             "workdir": task_spec.sandbox_run.workdir,
         }
-    if task_spec.write_file is not None:
-        payload["writeFile"] = {
-            "path": task_spec.write_file.path,
-            "contentTemplate": task_spec.write_file.content_template,
-        }
     return payload
 
 
@@ -237,15 +218,6 @@ def _sandbox_from_payload(raw: Any) -> SandboxRunConfig | None:
         command=_optional_str(raw.get("command")),
         shell=_optional_str(raw.get("shell")),
         workdir=_optional_str(raw.get("workdir")),
-    )
-
-
-def _write_file_from_payload(raw: Any) -> WriteFileConfig | None:
-    if not isinstance(raw, dict):
-        return None
-    return WriteFileConfig(
-        path=_optional_str(raw.get("path")),
-        content_template=_optional_str(raw.get("contentTemplate")),
     )
 
 

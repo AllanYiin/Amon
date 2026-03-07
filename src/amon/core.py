@@ -47,7 +47,6 @@ from .taskgraph3.payloads import (
     TaskSpec,
     ToolCallSpec,
     ToolTaskConfig,
-    WriteFileConfig,
 )
 from .taskgraph3.runtime import TaskGraph3RunResult, TaskGraph3Runtime
 from .taskgraph3.schema import ArtifactNode, GateNode, GateRoute, GraphDefinition, GraphEdge, GroupNode, TaskNode
@@ -1126,7 +1125,7 @@ class AmonCore:
             project_path,
             plan_graph_payload,
             {},
-            mode="plan_execute",
+            mode="taskgraph.v3",
         )
         _emit_planning_progress("執行圖準備完成，開始執行任務…")
         phase_started_at = time.monotonic()
@@ -1148,6 +1147,37 @@ class AmonCore:
         setattr(result, "execution_route", "planner")
         setattr(result, "planner_enabled", True)
         return result, self._load_graph_primary_output(result.run_dir)
+
+    def run_graph_stream(
+        self,
+        prompt: str,
+        *,
+        project_path: Path,
+        project_id: str | None = None,
+        model: str | None = None,
+        llm_client=None,
+        available_tools: list[dict[str, Any]] | None = None,
+        available_skills: list[dict[str, Any]] | None = None,
+        stream_handler=None,
+        run_id: str | None = None,
+        chat_id: str | None = None,
+        conversation_history: list[dict[str, str]] | None = None,
+        request_id: str | None = None,
+    ) -> tuple[TaskGraph3RunResult, str]:
+        return self.run_plan_execute_stream(
+            prompt,
+            project_path=project_path,
+            project_id=project_id,
+            model=model,
+            llm_client=llm_client,
+            available_tools=available_tools,
+            available_skills=available_skills,
+            stream_handler=stream_handler,
+            run_id=run_id,
+            chat_id=chat_id,
+            conversation_history=conversation_history,
+            request_id=request_id,
+        )
 
     def run_graph_response(
         self,
@@ -1717,13 +1747,17 @@ class AmonCore:
                     )
                     if isinstance(spec.get("tool"), dict)
                     else None,
-                    sandbox_run=SandboxRunConfig(**spec["sandboxRun"]) if isinstance(spec.get("sandboxRun"), dict) else None,
-                    write_file=WriteFileConfig(
-                        path=str(spec.get("writeFile", {}).get("path") or ""),
-                        content_template=str(spec.get("writeFile", {}).get("contentTemplate") or ""),
-                    )
-                    if isinstance(spec.get("writeFile"), dict)
-                    else None,
+                    sandbox_run=(
+                        SandboxRunConfig(**spec["sandboxRun"]) if isinstance(spec.get("sandboxRun"), dict)
+                        else (
+                            SandboxRunConfig(
+                                command=f"cat <<'EOF' > {str(spec.get('writeFile', {}).get('path') or 'docs/output.txt')}\n{str(spec.get('writeFile', {}).get('contentTemplate') or '')}\nEOF",
+                                shell="bash",
+                            )
+                            if isinstance(spec.get("writeFile"), dict)
+                            else None
+                        )
+                    ),
                     runnable=bool(spec.get("runnable", True)),
                     non_runnable_reason=str(spec.get("nonRunnableReason") or "") or None,
                 ),
@@ -1750,13 +1784,13 @@ class AmonCore:
                 task_spec=TaskSpec(executor="sandbox_run", sandbox_run=SandboxRunConfig(command=command, shell=shell)),
             )
         if legacy_type == "write_file":
+            path = str(raw.get("path") or "docs/output.txt")
+            content = str(raw.get("content") or "")
+            command = f"cat <<'EOF' > {path}\n{content}\nEOF"
             return TaskNode(
                 id=node_id,
                 title=title,
-                task_spec=TaskSpec(
-                    executor="write_file",
-                    write_file=WriteFileConfig(path=str(raw.get("path") or ""), content_template=str(raw.get("content") or "")),
-                ),
+                task_spec=TaskSpec(executor="sandbox_run", sandbox_run=SandboxRunConfig(command=command, shell="bash")),
             )
         raise ValueError(f"Unsupported node payload: node_id={node_id}")
 

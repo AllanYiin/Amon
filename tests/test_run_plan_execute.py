@@ -12,7 +12,7 @@ from amon.taskgraph3.payloads import AgentTaskConfig, TaskDisplayMetadata, TaskS
 from amon.taskgraph3.schema import GraphDefinition, TaskNode
 
 
-class RunPlanExecuteTests(unittest.TestCase):
+class RunGraphPlannerTests(unittest.TestCase):
     def _fake_plan(self) -> GraphDefinition:
         return GraphDefinition(
             version="taskgraph.v3",
@@ -30,12 +30,12 @@ class RunPlanExecuteTests(unittest.TestCase):
             edges=[],
         )
 
-    def test_run_plan_execute_uses_planner_by_default(self) -> None:
+    def test_run_graph_response_uses_planner_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir
             try:
                 core = AmonCore(data_dir=Path(temp_dir))
-                record = core.create_project("plan-exec-default")
+                record = core.create_project("graph-planner-default")
                 project_path = core.get_project_path(record.project_id)
                 with patch("amon.core.generate_plan_with_llm", return_value=self._fake_plan()), patch.object(core, "run_graph") as run_graph, patch.object(
                     core, "_load_graph_primary_output", return_value="plan-output"
@@ -53,7 +53,7 @@ class RunPlanExecuteTests(unittest.TestCase):
             os.environ["AMON_HOME"] = temp_dir
             try:
                 core = AmonCore(data_dir=Path(temp_dir))
-                record = core.create_project("plan-exec-string-false")
+                record = core.create_project("graph-planner-string-false")
                 project_path = core.get_project_path(record.project_id)
                 core.set_config_value("amon.planner.enabled", "false", project_path=project_path)
                 with patch("amon.core.generate_plan_with_llm", return_value=self._fake_plan()), patch.object(core, "run_graph") as run_graph, patch.object(
@@ -71,7 +71,7 @@ class RunPlanExecuteTests(unittest.TestCase):
             os.environ["AMON_HOME"] = temp_dir
             try:
                 core = AmonCore(data_dir=Path(temp_dir))
-                record = core.create_project("plan-exec-legacy-fallback")
+                record = core.create_project("graph-planner-legacy-fallback")
                 project_path = core.get_project_path(record.project_id)
                 core.set_config_value("amon.planner.enabled", False, project_path=project_path)
                 with patch("amon.core.generate_plan_with_llm", return_value=self._fake_plan()), patch.object(core, "run_graph") as run_graph, patch.object(
@@ -84,12 +84,12 @@ class RunPlanExecuteTests(unittest.TestCase):
             finally:
                 os.environ.pop("AMON_HOME", None)
 
-    def test_run_graph_response_compiles_and_runs_when_enabled(self) -> None:
+    def test_run_graph_response_runs_graph_when_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir
             try:
                 core = AmonCore(data_dir=Path(temp_dir))
-                record = core.create_project("plan-exec-enabled")
+                record = core.create_project("graph-planner-enabled")
                 project_path = core.get_project_path(record.project_id)
                 core.set_config_value("amon.planner.enabled", True, project_path=project_path)
                 with patch("amon.core.generate_plan_with_llm", return_value=self._fake_plan()), patch.object(core, "run_graph") as run_graph, patch.object(

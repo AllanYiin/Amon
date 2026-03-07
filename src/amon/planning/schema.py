@@ -1,4 +1,7 @@
-"""PlanGraph schema models."""
+"""Legacy planning schema models for import/convert tooling only.
+
+Execution and persistence formats are exclusively TaskGraph v3 GraphDefinition.
+"""
 
 from __future__ import annotations
 
@@ -29,8 +32,9 @@ class PlanNode:
 
 @dataclass
 class PlanGraph:
-    """Deprecated: retained for legacy tests and compatibility only."""
-    schema_version: str = "1.0"
+    """Deprecated legacy planning object; not a runtime or run-artifact format."""
+
+    schema_version: str = "legacy.plan.v1"
     objective: str = ""
     nodes: list[PlanNode] = field(default_factory=list)
     edges: list[dict[str, str]] = field(default_factory=list)
@@ -52,6 +56,7 @@ def validate_plan_graph(plan: PlanGraph) -> None:
         if node.id in node_ids:
             raise ValueError(f"node.id 不可重複：{node.id}")
         node_ids.add(node.id)
+
         if not isinstance(node.title, str) or not node.title.strip():
             raise ValueError(f"node.title 不可為空：{node.id}")
         if not isinstance(node.goal, str) or not node.goal.strip():
@@ -60,6 +65,7 @@ def validate_plan_graph(plan: PlanGraph) -> None:
             raise ValueError(f"node.definition_of_done 格式錯誤：{node.id}")
         if not isinstance(node.depends_on, list) or any(not isinstance(item, str) for item in node.depends_on):
             raise ValueError(f"node.depends_on 格式錯誤：{node.id}")
+
         if not isinstance(node.requires_llm, bool):
             raise ValueError(f"node.requires_llm 必須是 bool：{node.id}")
         if node.requires_llm:

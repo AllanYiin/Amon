@@ -1,6 +1,8 @@
-"""Planning models and serializers."""
+"""Planning helpers.
 
-from .compiler import compile_plan_to_exec_graph
+TaskGraph v3 GraphDefinition is the only execution/persistence format.
+"""
+
 from .planner_llm import generate_plan_with_llm
 from .render import render_todo_markdown
 from .schema import PlanContext, PlanGraph, PlanNode, infer_edges_from_depends_on, validate_plan_graph
@@ -16,5 +18,4 @@ __all__ = [
     "loads_plan",
     "render_todo_markdown",
     "generate_plan_with_llm",
-    "compile_plan_to_exec_graph",
 ]
