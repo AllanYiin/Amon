@@ -2091,7 +2091,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     active_run_id = uuid.uuid4().hex
                     if should_emit_bootstrap_notices:
                         send_event("notice", {"text": "Amon：已路由到 graph，將先產生 TaskGraph v3 並執行。"}, run_id=active_run_id)
-                    plan_result, response_text = self.core.run_plan_execute_stream(
+                    plan_result, response_text = self.core.run_graph_stream(
                         prompt_with_history,
                         project_path=self.core.get_project_path(project_id),
                         project_id=project_id,

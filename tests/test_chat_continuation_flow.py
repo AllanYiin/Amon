@@ -31,7 +31,7 @@ class ChatContinuationFlowTests(unittest.TestCase):
                 run_calls: list[tuple[str | None, list[dict[str, str]] | None]] = []
                 call_count = 0
 
-                def fake_run_plan_execute_stream(
+                def fake_run_graph_stream(
                     prompt,
                     project_path,
                     project_id=None,
@@ -64,7 +64,7 @@ class ChatContinuationFlowTests(unittest.TestCase):
 
                 with patch("amon.ui_server.decide_execution_mode", return_value="single"), patch(
                     "amon.ui_server.should_continue_run_with_llm", return_value=True
-                ), patch.object(core, "run_plan_execute_stream", side_effect=fake_run_plan_execute_stream):
+                ), patch.object(core, "run_graph_stream", side_effect=fake_run_graph_stream):
                     conn1 = HTTPConnection("127.0.0.1", port, timeout=5)
                     conn1.request(
                         "GET",

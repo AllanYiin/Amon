@@ -98,7 +98,7 @@ class CoreStreamHandlerTests(unittest.TestCase):
             finally:
                 os.environ.pop("AMON_HOME", None)
 
-    def test_run_plan_execute_stream_uses_planner_when_enabled(self) -> None:
+    def test_run_graph_stream_uses_planner_when_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir
             try:
@@ -110,7 +110,7 @@ class CoreStreamHandlerTests(unittest.TestCase):
                 fake_result = SimpleNamespace(run_id="run-plan", run_dir=project_path / ".amon" / "runs" / "run-plan")
 
                 with patch.object(core, "generate_plan_docs") as mock_generate, patch("amon.core.compile_plan_to_exec_graph", return_value={"nodes": [], "edges": [], "variables": {}}) as mock_compile, patch.object(core, "run_graph", return_value=fake_result), patch.object(core, "_load_graph_primary_output", return_value="plan-ok"):
-                    core.run_plan_execute_stream(
+                    core.run_graph_stream(
                         "請完成任務",
                         project_path=project_path,
                         project_id=project.project_id,
@@ -122,7 +122,7 @@ class CoreStreamHandlerTests(unittest.TestCase):
             finally:
                 os.environ.pop("AMON_HOME", None)
 
-    def test_run_plan_execute_stream_ignores_disabled_and_keeps_planner_route(self) -> None:
+    def test_run_graph_stream_ignores_disabled_and_keeps_planner_route(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir
             try:
@@ -138,7 +138,7 @@ class CoreStreamHandlerTests(unittest.TestCase):
                 ) as mock_compile, patch.object(core, "run_graph", return_value=fake_result), patch.object(
                     core, "_load_graph_primary_output", return_value="plan response"
                 ):
-                    result, response = core.run_plan_execute_stream(
+                    result, response = core.run_graph_stream(
                         "請完成任務",
                         project_path=project_path,
                         project_id=project.project_id,
@@ -156,7 +156,7 @@ class CoreStreamHandlerTests(unittest.TestCase):
             finally:
                 os.environ.pop("AMON_HOME", None)
 
-    def test_run_plan_execute_stream_emits_planning_progress_reasoning_chunks(self) -> None:
+    def test_run_graph_stream_emits_planning_progress_reasoning_chunks(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir
             try:
@@ -172,7 +172,7 @@ class CoreStreamHandlerTests(unittest.TestCase):
                 ) as mock_compile, patch.object(core, "run_graph", return_value=fake_result), patch.object(
                     core, "_load_graph_primary_output", return_value="plan response"
                 ):
-                    core.run_plan_execute_stream(
+                    core.run_graph_stream(
                         "請完成任務",
                         project_path=project_path,
                         project_id=project.project_id,

@@ -29,7 +29,7 @@ class UIChatStreamInitTests(unittest.TestCase):
                 project = core.create_project("stream-init")
                 long_message = "長訊息" * 1200
 
-                def fake_run_plan_execute_stream(
+                def fake_run_graph_stream(
                     prompt,
                     project_path,
                     project_id=None,
@@ -71,8 +71,8 @@ class UIChatStreamInitTests(unittest.TestCase):
 
                 with patch("amon.ui_server.decide_execution_mode", return_value="single"), patch.object(
                     core,
-                    "run_plan_execute_stream",
-                    side_effect=fake_run_plan_execute_stream,
+                    "run_graph_stream",
+                    side_effect=fake_run_graph_stream,
                 ):
                     conn = HTTPConnection("127.0.0.1", port, timeout=5)
                     conn.request(
