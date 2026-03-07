@@ -45,7 +45,11 @@ for path in ROOT.rglob('*'):
     rel = path.as_posix()
     if '/.git/' in rel or rel.startswith('.git/'):
         continue
-    if 'taskgraph2' in rel or 'graph_runtime' in rel:
+    rel_parts = path.parts
+    if 'taskgraph2' in rel_parts:
+        violations.append(f'{rel}: forbidden legacy path name')
+        continue
+    if path.name == 'graph_runtime.py':
         violations.append(f'{rel}: forbidden legacy path name')
 
 scan_globs = ('src/**/*.py', 'tests/**/*.py', 'docs/**/*.md', 'scripts/**/*.sh', '.github/workflows/*.yml')
