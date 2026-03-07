@@ -14,8 +14,8 @@ class TaskGraph3MigrateTests(unittest.TestCase):
     def test_legacy_fixture_converts_to_valid_v3(self) -> None:
         legacy_graph = {
             "nodes": [
-                {"id": "N1", "type": "agent_task", "title": "分析"},
-                {"id": "N2", "type": "write_file", "path": "docs/out.md"},
+                {"id": "N1", "type": "agent_task", "title": "分析", "description": "整理摘要"},
+                {"id": "N2", "type": "write_file", "path": "docs/out.md", "content": "hello"},
             ],
             "edges": [{"from": "N1", "to": "N2"}],
         }
@@ -26,6 +26,8 @@ class TaskGraph3MigrateTests(unittest.TestCase):
         self.assertEqual(converted["version"], "taskgraph.v3")
         self.assertTrue(any(edge["kind"] == "DEPENDS_ON" for edge in converted["edges"]))
         self.assertTrue(any(node["node_type"] == "ARTIFACT" for node in converted["nodes"]))
+        n1 = next(node for node in converted["nodes"] if node["id"] == "N1")
+        self.assertEqual(n1["taskSpec"]["executor"], "agent")
 
     def test_v2_fixture_converts_to_valid_v3(self) -> None:
         v2_graph = {
@@ -61,6 +63,13 @@ class TaskGraph3MigrateTests(unittest.TestCase):
             t1["outputContract"]["ports"][0]["jsonSchema"]["type"],
             "object",
         )
+        self.assertEqual(t1["taskSpec"]["executor"], "agent")
+
+    def test_migrate_marks_non_runnable_when_source_insufficient(self) -> None:
+        converted = legacy_to_v3({"nodes": [{"id": "N1", "type": "agent_task"}], "edges": []})
+        node = next(item for item in converted["nodes"] if item["id"] == "N1")
+        self.assertFalse(node["taskSpec"]["runnable"])
+        self.assertIn("nonRunnableReason", node["taskSpec"])
 
     def test_invalid_input_fails_with_clear_message(self) -> None:
         with self.assertRaisesRegex(ValueError, "nodes 必須是 list"):
@@ -72,7 +81,7 @@ class TaskGraph3MigrateTests(unittest.TestCase):
             out_dir = Path(tempdir) / "out"
             in_dir.mkdir(parents=True, exist_ok=True)
             payload = {
-                "nodes": [{"id": "N1", "type": "agent_task"}],
+                "nodes": [{"id": "N1", "type": "agent_task", "description": "run"}],
                 "edges": [],
             }
             (in_dir / "a.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
