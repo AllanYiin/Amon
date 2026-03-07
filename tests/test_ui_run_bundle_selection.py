@@ -54,6 +54,54 @@ class UiRunBundleSelectionTests(unittest.TestCase):
             self.assertEqual(payload["run_id"], "run-running")
             self.assertEqual(payload["run_status"], "running")
 
+    def test_resolve_project_path_from_run_id_returns_matched_project(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_path = Path(tmp) / "project-a"
+            run_id = "run-123"
+            (project_path / ".amon" / "runs" / run_id).mkdir(parents=True)
+
+            handler = AmonUIHandler.__new__(AmonUIHandler)
+            handler.core = type(
+                "StubCore",
+                (),
+                {
+                    "list_projects": staticmethod(
+                        lambda include_deleted=False: [
+                            type("ProjectRecord", (), {"path": str(project_path)})(),
+                        ]
+                    )
+                },
+            )()
+
+            resolved = handler._resolve_project_path_from_run_id(run_id)
+            self.assertEqual(resolved, project_path)
+
+    def test_resolve_project_path_from_run_id_rejects_ambiguous_run_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            run_id = "run-123"
+            project_a = base / "project-a"
+            project_b = base / "project-b"
+            (project_a / ".amon" / "runs" / run_id).mkdir(parents=True)
+            (project_b / ".amon" / "runs" / run_id).mkdir(parents=True)
+
+            handler = AmonUIHandler.__new__(AmonUIHandler)
+            handler.core = type(
+                "StubCore",
+                (),
+                {
+                    "list_projects": staticmethod(
+                        lambda include_deleted=False: [
+                            type("ProjectRecord", (), {"path": str(project_a)})(),
+                            type("ProjectRecord", (), {"path": str(project_b)})(),
+                        ]
+                    )
+                },
+            )()
+
+            with self.assertRaisesRegex(ValueError, "run_id 對應多個專案"):
+                handler._resolve_project_path_from_run_id(run_id)
+
 
 if __name__ == "__main__":
     unittest.main()
