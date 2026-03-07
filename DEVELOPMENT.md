@@ -1,75 +1,49 @@
 # 開發環境快速上手（本機）
 
-以下步驟以 macOS/Linux 為例，Windows 可用 WSL 或等效指令。
-
-## Agent 任務執行流程（必遵守）
-
-1. 接到任何人類委託後，先拆解具體步驟並建立 TODO list。
-2. TODO list 完成前不得直接進入開發或修改程式碼。
-3. 開發時遵循下列修改原則。
-
-### **修改原則**
-  若是對既有專案做修改，理解此次改動的關鍵目的，在完成此目的的前提下：
-  - 只能改動與bug或重構直接相關的區塊
-  - 不得改變任何對外可觀察行為（characterization/contract tests 必須全過）
-  - 除非特別要求指定，儘量不破壞原有 API / 資料結構 / 前端路由。
-  - 不要把整個架構翻掉，除非使用者明說要重構或換技術。
-4. 完成後需執行最小品質門檻與測試，並記錄結果。
-
-### TODO list 建議格式
-
-```markdown
-- [ ] 釐清需求與影響範圍
-- [ ] 依修改原則實作必要變更
-- [ ] 執行 `python -m compileall src tests`
-- [ ] 執行 `python -m unittest discover -s tests`
-- [ ] 更新文件與提交紀錄
-```
-
 ## 1) 安裝與初始化
+
 ```bash
-python -m venv .venv
-source .venv/bin/activate
 pip install -e .
+amon init
 ```
 
-若只需最小依賴：
+## 2) TaskGraph v3 單一路徑開發原則
+
+- 正式執行模型：只允許 `taskgraph.v3`。
+- `docs/plan.json` 視為正式 v3 範例與 smoke 基準。
+- legacy/v2 僅能存在於 migrate/import 工具，不得回流主執行路徑。
+
+## 3) Anti-legacy 檢查（開發期必跑）
+
 ```bash
-pip install -r requirements.txt
+rg -n "PlanGraph|plan_execute|legacy runtime|GraphRuntime|exec graph|graph\.v2|graph\.legacy|compile_plan_to_exec_graph" src tests docs README.md DEVELOPMENT.md TEST_GUIDE.md SPEC_v1.1.3.md
 ```
 
-> 模型金鑰需放在環境變數中（例如 `OPENAI_API_KEY`）。
+若命中結果屬於正式文件或主流程程式碼，需修正為 v3 語彙；只有 migration/history 區可保留舊術語。
 
-## 2) Lint / 最小品質門檻
+## 4) 必跑檢查
+
 ```bash
 python -m compileall src tests
+python -m unittest discover -s tests -p "test_*.py"
+python -m unittest \
+  tests.test_chat_continuation_guard \
+  tests.test_chat_continuation_flow \
+  tests.test_ui_chat_stream_init \
+  tests.test_chat_session_store
 ```
 
-## 3) 測試
+## 5) v3 Graph fixture / smoke / UI regression
+
 ```bash
-python -m unittest discover -s tests
+python -m unittest tests.test_ui_graph_frontend_smoke
+python -m unittest tests.test_ui_graph_run_adapter
 ```
 
-> 若測試涉及外部模型連線，請先設定對應的環境變數與可用的網路/Proxy。
+手動 UI 回歸依 `docs/ui-regression-graph-context.md` 執行。
 
-## 4) 執行 CLI
-```bash
-amon init
-amon project list
-```
+## 6) 啟動 UI
 
-## TaskGraph v3 文件維護（Phase 0 起）
-
-當調整 TaskGraph 相關程式時，需同步檢查：
-
-- `docs/migration_v3.md`
-- `docs/refactor/taskgraph_v3_cutover.md`
-- `docs/refactor/taskgraph_v3_forbidden_legacy_refs.md`
-
-並確認沒有把 legacy/v2 執行路徑重新當成主路徑。
-
-## 5) 啟動 UI（預覽）
 ```bash
 amon ui --port 8000
 ```
-瀏覽器開啟：`http://localhost:8000`
