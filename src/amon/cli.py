@@ -106,12 +106,12 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--engine", choices=["taskgraph3"], default="taskgraph3", help="執行引擎（僅支援 taskgraph3）")
     run_parser.add_argument("--mode", default="single", help="指定模式（single/self_critique/team）")
     run_parser.add_argument("--skill", action="append", default=[], help="指定技能名稱（可重複）")
-    run_parser.add_argument("--task", help="step6 任务輸入")
-    run_parser.add_argument("--in-dir", help="step6 輸入目錄")
-    run_parser.add_argument("--out-dir", help="step6 輸出目錄")
-    run_parser.add_argument("--graph", help="step6 指定 graph.v3.json 路徑")
+    run_parser.add_argument("--task", help="TaskGraph v3 任務輸入")
+    run_parser.add_argument("--in-dir", help="TaskGraph v3 輸入目錄")
+    run_parser.add_argument("--out-dir", help="TaskGraph v3 輸出目錄")
+    run_parser.add_argument("--graph", help="指定 graph.v3.json 路徑")
 
-    plan_parser = subparsers.add_parser("plan", help="規劃流程（step1..step5）")
+    plan_parser = subparsers.add_parser("plan", help="規劃流程（產生 TaskGraph v3 草稿）")
     plan_parser.add_argument("step", choices=["step1", "step2", "step3", "step4", "step5"], help="規劃步驟")
     plan_parser.add_argument("--task", required=True, help="任務描述")
     plan_parser.add_argument("--out-dir", required=True, help="輸出資料夾")
@@ -228,7 +228,7 @@ def build_parser() -> argparse.ArgumentParser:
     template_param.add_argument("--path", required=True, help="JSONPath")
     template_param.add_argument("--var_name", required=True, help="變數名稱")
 
-    graph_migrate = graph_sub.add_parser("migrate", help="將 legacy/v2 graph 轉為 TaskGraph v3")
+    graph_migrate = graph_sub.add_parser("migrate", help="Graph 匯入/轉換工具（轉為 TaskGraph v3）")
     graph_migrate.add_argument("input", nargs="?", help="輸入 JSON 檔案")
     graph_migrate.add_argument("--format", choices=["legacy", "v2"], required=True, help="來源格式")
     graph_migrate.add_argument("--output", help="輸出 JSON 檔案")
@@ -509,7 +509,7 @@ def _handle_config(core: AmonCore, args: argparse.Namespace) -> None:
 
 def _handle_run(core: AmonCore, args: argparse.Namespace) -> None:
     if args.user_task == "step6":
-        _handle_run_step6(args)
+        _handle_run_taskgraph3_artifacts(core, args)
         return
     user_task = args.user_task or args.prompt
     if not user_task:
@@ -537,34 +537,52 @@ def _handle_plan(args: argparse.Namespace) -> None:
 
     if args.step == "step5":
         graph = GraphDefinition(
-            nodes=[TaskNode(id="step6-task", title=args.task)],
-            edges=[GraphEdge(from_node="step6-task", to_node="step6-task", edge_type="CONTROL", kind="self")],
+            nodes=[
+                TaskNode(id="task_plan", title="任務規劃", description=args.task),
+                TaskNode(id="task_execute", title="執行任務", description=args.task),
+            ],
+            edges=[GraphEdge(from_node="task_plan", to_node="task_execute", edge_type="CONTROL", kind="sequence")],
         )
         validate_graph_definition(graph)
         graph_json_path = out_dir / "graph.v3.json"
         graph_json_path.write_text(dumps_graph_definition(graph), encoding="utf-8")
-        mermaid = "graph TD\n  step6-task[step6-task]"
+        mermaid = "graph TD\n  task_plan[任務規劃] --> task_execute[執行任務]"
         (out_dir / "graph.mmd").write_text(mermaid, encoding="utf-8")
 
 
-def _handle_run_step6(args: argparse.Namespace) -> None:
+def _handle_run_taskgraph3_artifacts(core: AmonCore, args: argparse.Namespace) -> None:
     out_dir = Path(args.out_dir or args.in_dir or ".").expanduser().resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     graph_path = Path(args.graph).expanduser().resolve() if args.graph else out_dir / "graph.v3.json"
     if not graph_path.exists():
         raise ValueError(f"找不到 graph.v3.json：{graph_path}")
+    if not args.project:
+        raise ValueError("step6 模式需要 --project，以便使用 TaskGraph v3 runtime")
 
     run_state = {
         "status": "succeeded",
         "task": args.task or args.prompt or "",
         "graph": str(graph_path),
     }
-    (out_dir / "run.state.json").write_text(json.dumps(run_state, ensure_ascii=False, indent=2), encoding="utf-8")
-    event = {
-        "event": "run.completed",
-        "status": "succeeded",
+    (out_dir / "state.json").write_text(json.dumps(run_state, ensure_ascii=False, indent=2), encoding="utf-8")
+    result = core.run_graph(project_path=core.get_project_path(args.project), graph_path=graph_path)
+    state = {
+        "run_id": result.run_id,
+        "status": result.status,
+        "graph_path": str(graph_path),
+        "run_dir": str(result.run_dir),
     }
-    (out_dir / "events.jsonl").write_text(json.dumps(event, ensure_ascii=False) + "\n", encoding="utf-8")
+    (out_dir / "state.json").write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    events_path = result.run_dir / "events.jsonl"
+    if events_path.exists():
+        (out_dir / "events.jsonl").write_text(events_path.read_text(encoding="utf-8"), encoding="utf-8")
+    else:
+        (out_dir / "events.jsonl").write_text("", encoding="utf-8")
+    resolved_path = result.run_dir / "graph.resolved.json"
+    if resolved_path.exists():
+        (out_dir / "graph.resolved.json").write_text(resolved_path.read_text(encoding="utf-8"), encoding="utf-8")
+    else:
+        (out_dir / "graph.resolved.json").write_text(graph_path.read_text(encoding="utf-8"), encoding="utf-8")
 
 
 def _handle_skills(core: AmonCore, args: argparse.Namespace) -> None:

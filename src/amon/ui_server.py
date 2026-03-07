@@ -2024,11 +2024,11 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                             "event": "execution_mode_coerced",
                             "project_id": project_id,
                             "from_mode": "single",
-                            "to_mode": "plan_execute",
-                            "reason": "task graph v2 requires plan_execute route",
+                            "to_mode": "graph",
+                            "reason": "taskgraph v3 unified graph route",
                         }
                     )
-                    execution_mode = "plan_execute"
+                    execution_mode = "graph"
                 prompt_with_history = turn_bundle.prompt_with_history
 
                 streamed_token_count = 0
@@ -2090,8 +2090,8 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 else:
                     active_run_id = uuid.uuid4().hex
                     if should_emit_bootstrap_notices:
-                        send_event("notice", {"text": "Amon：已路由到 plan_execute，將先產生計畫並編譯執行圖。"}, run_id=active_run_id)
-                    plan_result, response_text = self.core.run_plan_execute_stream(
+                        send_event("notice", {"text": "Amon：已路由到 graph，將先產生 TaskGraph v3 並執行。"}, run_id=active_run_id)
+                    plan_result, response_text = self.core.run_graph_stream(
                         prompt_with_history,
                         project_path=self.core.get_project_path(project_id),
                         project_id=project_id,
@@ -2155,7 +2155,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     "history_count": len(history),
                     "chat_id_source": turn_bundle.chat_id_source,
                 }
-                if execution_mode == "plan_execute":
+                if execution_mode == "graph":
                     route = getattr(plan_result, "execution_route", "planner")
                     done_payload["execution_route"] = route
                     done_payload["planner_enabled"] = bool(getattr(plan_result, "planner_enabled", True))

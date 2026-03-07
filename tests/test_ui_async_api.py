@@ -223,7 +223,7 @@ class UIAsyncAPITests(unittest.TestCase):
 
                 with patch("amon.ui_server.decide_execution_mode", return_value="single"), patch.object(
                     core,
-                    "run_plan_execute_stream",
+                    "run_graph_stream",
                     return_value=(SimpleNamespace(run_id="run-follow-up", execution_route="planner", planner_enabled=True), "done"),
                 ):
                     first_notices, first_done = collect_stream(
@@ -241,12 +241,12 @@ class UIAsyncAPITests(unittest.TestCase):
                 first_joined = "\n".join(first_notices)
                 self.assertIn("已收到你的需求", first_joined)
                 self.assertIn("正在分析需求並進入執行流程", first_joined)
-                self.assertIn("已路由到 plan_execute", first_joined)
+                self.assertIn("已路由到 graph", first_joined)
 
                 second_joined = "\n".join(second_notices)
                 self.assertNotIn("已收到你的需求", second_joined)
                 self.assertNotIn("正在分析需求並進入執行流程", second_joined)
-                self.assertNotIn("已路由到 plan_execute", second_joined)
+                self.assertNotIn("已路由到 graph", second_joined)
             finally:
                 if server:
                     server.shutdown()
@@ -301,7 +301,7 @@ class UIAsyncAPITests(unittest.TestCase):
 
                 with patch("amon.ui_server.decide_execution_mode", return_value="single"), patch.object(
                     core,
-                    "run_plan_execute_stream",
+                    "run_graph_stream",
                     return_value=(SimpleNamespace(run_id="run-follow-up-no-chatid", execution_route="planner", planner_enabled=True), "done"),
                 ):
                     first_notices = collect_notices("第一輪需求")
@@ -310,12 +310,12 @@ class UIAsyncAPITests(unittest.TestCase):
                 first_joined = "\n".join(first_notices)
                 self.assertIn("已收到你的需求", first_joined)
                 self.assertIn("正在分析需求並進入執行流程", first_joined)
-                self.assertIn("已路由到 plan_execute", first_joined)
+                self.assertIn("已路由到 graph", first_joined)
 
                 second_joined = "\n".join(second_notices)
                 self.assertNotIn("已收到你的需求", second_joined)
                 self.assertNotIn("正在分析需求並進入執行流程", second_joined)
-                self.assertNotIn("已路由到 plan_execute", second_joined)
+                self.assertNotIn("已路由到 graph", second_joined)
             finally:
                 if server:
                     server.shutdown()
@@ -378,7 +378,7 @@ class UIAsyncAPITests(unittest.TestCase):
                 core.initialize()
                 project = core.create_project("stream-contract")
 
-                def fake_run_plan_execute_stream(
+                def fake_run_graph_stream(
                     prompt,
                     project_path,
                     project_id=None,
@@ -412,8 +412,8 @@ class UIAsyncAPITests(unittest.TestCase):
 
                 with patch("amon.ui_server.decide_execution_mode", return_value="single"), patch.object(
                     core,
-                    "run_plan_execute_stream",
-                    side_effect=fake_run_plan_execute_stream,
+                    "run_graph_stream",
+                    side_effect=fake_run_graph_stream,
                 ):
                     conn = HTTPConnection("127.0.0.1", port, timeout=5)
                     conn.request(
@@ -476,7 +476,7 @@ class UIAsyncAPITests(unittest.TestCase):
                 observed_histories: list[list[dict[str, str]] | None] = []
                 call_count = 0
 
-                def fake_run_plan_execute_stream(
+                def fake_run_graph_stream(
                     prompt,
                     project_path,
                     project_id=None,
@@ -517,8 +517,8 @@ class UIAsyncAPITests(unittest.TestCase):
                     "amon.ui_server.should_continue_run_with_llm", return_value=True
                 ), patch.object(
                     core,
-                    "run_plan_execute_stream",
-                    side_effect=fake_run_plan_execute_stream,
+                    "run_graph_stream",
+                    side_effect=fake_run_graph_stream,
                 ):
                     conn = HTTPConnection("127.0.0.1", port, timeout=5)
                     conn.request(
@@ -600,7 +600,7 @@ class UIAsyncAPITests(unittest.TestCase):
                 observed_run_ids: list[str | None] = []
                 call_count = 0
 
-                def fake_run_plan_execute_stream(
+                def fake_run_graph_stream(
                     prompt,
                     project_path,
                     project_id=None,
@@ -640,8 +640,8 @@ class UIAsyncAPITests(unittest.TestCase):
                     "amon.ui_server.should_continue_run_with_llm", return_value=True
                 ), patch.object(
                     core,
-                    "run_plan_execute_stream",
-                    side_effect=fake_run_plan_execute_stream,
+                    "run_graph_stream",
+                    side_effect=fake_run_graph_stream,
                 ):
                     conn = HTTPConnection("127.0.0.1", port, timeout=5)
                     conn.request(
@@ -712,7 +712,7 @@ class UIAsyncAPITests(unittest.TestCase):
                 core.initialize()
                 project = core.create_project("chat-timeout-warning")
 
-                def fake_run_plan_execute_stream(*_args, **_kwargs):
+                def fake_run_graph_stream(*_args, **_kwargs):
                     raise RuntimeError("node inactivity timeout")
 
                 handler = partial(
@@ -727,8 +727,8 @@ class UIAsyncAPITests(unittest.TestCase):
 
                 with patch("amon.ui_server.decide_execution_mode", return_value="single"), patch.object(
                     core,
-                    "run_plan_execute_stream",
-                    side_effect=fake_run_plan_execute_stream,
+                    "run_graph_stream",
+                    side_effect=fake_run_graph_stream,
                 ):
                     conn = HTTPConnection("127.0.0.1", port, timeout=5)
                     conn.request(
@@ -1624,7 +1624,7 @@ class UIAsyncAPITests(unittest.TestCase):
                     server.server_close()
                 os.environ.pop("AMON_HOME", None)
 
-    def test_chat_stream_plan_execute_reports_planner_route(self) -> None:
+    def test_chat_stream_graph_reports_planner_route(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"
             os.environ["AMON_HOME"] = str(data_dir)
@@ -1651,9 +1651,9 @@ class UIAsyncAPITests(unittest.TestCase):
                     phase_metrics={"plan_generation_ms": 11, "compile_graph_ms": 7, "run_graph_ms": 29, "total_ms": 47},
                 )
 
-                with patch("amon.ui_server.decide_execution_mode", return_value="plan_execute"), patch.object(
+                with patch("amon.ui_server.decide_execution_mode", return_value="graph"), patch.object(
                     core,
-                    "run_plan_execute_stream",
+                    "run_graph_stream",
                     return_value=(fallback_result, "fallback-response"),
                 ):
                     conn = HTTPConnection("127.0.0.1", port, timeout=5)
@@ -1676,7 +1676,7 @@ class UIAsyncAPITests(unittest.TestCase):
                             event_type = decoded.split(":", 1)[1].strip()
                         elif decoded.startswith("data: "):
                             payload = json.loads(decoded.split(": ", 1)[1])
-                            if event_type == "notice" and "plan_execute" in str(payload.get("text") or ""):
+                            if event_type == "notice" and "graph" in str(payload.get("text") or ""):
                                 noticed_plan = True
                             elif event_type == "done":
                                 done_payload = payload
@@ -1684,7 +1684,7 @@ class UIAsyncAPITests(unittest.TestCase):
 
                 self.assertTrue(noticed_plan)
                 self.assertIsNotNone(done_payload)
-                self.assertEqual(done_payload.get("execution_mode"), "plan_execute")
+                self.assertEqual(done_payload.get("execution_mode"), "graph")
                 self.assertEqual(done_payload.get("execution_route"), "planner")
                 self.assertTrue(done_payload.get("planner_enabled"))
                 self.assertEqual(done_payload.get("phase_metrics", {}).get("total_ms"), 47)
@@ -1714,7 +1714,7 @@ class UIAsyncAPITests(unittest.TestCase):
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
                 thread.start()
 
-                def fake_plan_execute_stream(
+                def fake_graph_stream(
                     prompt,
                     project_path,
                     project_id=None,
@@ -1734,10 +1734,10 @@ class UIAsyncAPITests(unittest.TestCase):
                         stream_handler("```\n")
                     return SimpleNamespace(run_id="run-stream-art", execution_route="planner", planner_enabled=True), "完成"
 
-                with patch("amon.ui_server.decide_execution_mode", return_value="plan_execute"), patch.object(
+                with patch("amon.ui_server.decide_execution_mode", return_value="graph"), patch.object(
                     core,
-                    "run_plan_execute_stream",
-                    side_effect=fake_plan_execute_stream,
+                    "run_graph_stream",
+                    side_effect=fake_graph_stream,
                 ):
                     conn = HTTPConnection("127.0.0.1", port, timeout=5)
                     conn.request(
@@ -1772,7 +1772,7 @@ class UIAsyncAPITests(unittest.TestCase):
                 os.environ.pop("AMON_HOME", None)
 
 
-    def test_chat_stream_coerces_single_to_plan_execute(self) -> None:
+    def test_chat_stream_coerces_single_to_graph(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"
             os.environ["AMON_HOME"] = str(data_dir)
@@ -1796,7 +1796,7 @@ class UIAsyncAPITests(unittest.TestCase):
 
                 with patch("amon.ui_server.decide_execution_mode", return_value="single"), patch.object(
                     core,
-                    "run_plan_execute_stream",
+                    "run_graph_stream",
                     return_value=(plan_result, "plan-response"),
                 ), patch.object(core, "run_single_stream") as mock_single_stream:
                     conn = HTTPConnection("127.0.0.1", port, timeout=5)
@@ -1822,7 +1822,7 @@ class UIAsyncAPITests(unittest.TestCase):
 
                 self.assertFalse(mock_single_stream.called)
                 self.assertIsNotNone(done_payload)
-                self.assertEqual(done_payload.get("execution_mode"), "plan_execute")
+                self.assertEqual(done_payload.get("execution_mode"), "graph")
             finally:
                 if server:
                     server.shutdown()

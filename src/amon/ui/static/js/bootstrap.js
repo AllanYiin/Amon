@@ -343,7 +343,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
         const planner = payload.planner || {};
         if (elements.plannerEnabledStatus) {
           const plannerEnabled = Boolean(planner.enabled);
-          elements.plannerEnabledStatus.textContent = plannerEnabled ? "目前為啟用（plan_execute 預設走 planner）" : "目前為停用（plan_execute 會 fallback 到 single）";
+          elements.plannerEnabledStatus.textContent = plannerEnabled ? "目前為啟用（graph 預設走 planner）" : "目前為停用（graph 會 fallback 到 single）";
         }
         if (elements.plannerEnabledSource) {
           elements.plannerEnabledSource.textContent = `來源：${planner.source || "default"}`;
@@ -468,7 +468,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
         state.configView = response.config || state.configView;
         applyUiPreferencesFromConfig(state.configView?.effective_config || {});
         renderConfigTable();
-        showToast(nextEnabled ? "Planner 已啟用。" : "Planner 已停用，plan_execute 會 fallback。", 8000, "info");
+        showToast(nextEnabled ? "Planner 已啟用。" : "Planner 已停用，graph 會 fallback。", 8000, "info");
       }
 
       function formatBillMetric(cost, usage, currency) {

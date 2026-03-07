@@ -26,7 +26,7 @@ class MockLLM:
         _ = model
         if self.responses:
             return [self.responses.pop(0)]
-        return ['{"mode":"plan_execute","confidence":0.95,"rationale":["fallback"],"requires_planning":true}']
+        return ['{"mode":"graph","confidence":0.95,"rationale":["fallback"],"requires_planning":true}']
 
 
 class ChatRouterTests(unittest.TestCase):
@@ -105,10 +105,10 @@ class ChatRouterTests(unittest.TestCase):
         mode = choose_execution_mode_with_llm("請產出多代理協作架構研究報告", llm_client=mock)
         self.assertEqual(mode, "team")
 
-    def test_choose_execution_mode_single_low_confidence_escalates_to_plan_execute(self) -> None:
+    def test_choose_execution_mode_single_low_confidence_escalates_to_graph(self) -> None:
         mock = MockLLM('{"mode":"single","confidence":0.4,"rationale":["不確定"],"requires_planning":true}')
         mode = choose_execution_mode_with_llm("請幫我修改多個檔案並執行測試", llm_client=mock)
-        self.assertEqual(mode, "plan_execute")
+        self.assertEqual(mode, "graph")
 
     def test_should_continue_run_with_llm_returns_true_for_semantic_followup(self) -> None:
         mock = MockLLM('{"continue_run":true,"confidence":0.93}')
@@ -145,10 +145,10 @@ class ChatRouterTests(unittest.TestCase):
         mode = choose_execution_mode_with_llm("請幫我潤稿", llm_client=mock)
         self.assertEqual(mode, "self_critique")
 
-    def test_choose_execution_mode_with_llm_fallbacks_to_plan_execute_on_double_failure(self) -> None:
+    def test_choose_execution_mode_with_llm_fallbacks_to_graph_on_double_failure(self) -> None:
         mock = MockLLM(["not-json", "still-not-json"])
         mode = choose_execution_mode_with_llm("我要把模型改裝為擴散語言模型", llm_client=mock)
-        self.assertEqual(mode, "plan_execute")
+        self.assertEqual(mode, "graph")
 
     def test_route_with_llm_enters_cooldown_after_provider_error(self) -> None:
         class FailingLLM:

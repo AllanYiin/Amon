@@ -41,14 +41,14 @@ class RunPlanExecuteTests(unittest.TestCase):
                     core, "_load_graph_primary_output", return_value="plan-output"
                 ), patch.object(core, "run_single_stream") as run_single_stream, patch("amon.core.emit_event"):
                     run_graph.return_value = type("R", (), {"run_dir": project_path / ".amon" / "runs" / "r1"})()
-                    response = core.run_plan_execute("任務", project_path=project_path, project_id=record.project_id)
+                    response = core.run_graph_response("任務", project_path=project_path, project_id=record.project_id)
                 self.assertEqual(response, "plan-output")
                 self.assertTrue(run_graph.called)
                 self.assertFalse(run_single_stream.called)
             finally:
                 os.environ.pop("AMON_HOME", None)
 
-    def test_run_plan_execute_ignores_false_string_and_still_uses_planner(self) -> None:
+    def test_run_graph_response_ignores_false_string_and_still_uses_planner(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir
             try:
@@ -60,13 +60,13 @@ class RunPlanExecuteTests(unittest.TestCase):
                     core, "_load_graph_primary_output", return_value="plan-output"
                 ), patch("amon.core.emit_event"):
                     run_graph.return_value = type("R", (), {"run_dir": project_path / ".amon" / "runs" / "r1"})()
-                    response = core.run_plan_execute("任務", project_path=project_path, project_id=record.project_id)
+                    response = core.run_graph_response("任務", project_path=project_path, project_id=record.project_id)
                 self.assertEqual(response, "plan-output")
                 self.assertTrue(run_graph.called)
             finally:
                 os.environ.pop("AMON_HOME", None)
 
-    def test_run_plan_execute_ignores_disabled_and_still_uses_planner(self) -> None:
+    def test_run_graph_response_ignores_disabled_and_still_uses_planner(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir
             try:
@@ -78,13 +78,13 @@ class RunPlanExecuteTests(unittest.TestCase):
                     core, "_load_graph_primary_output", return_value="plan-output"
                 ), patch("amon.core.emit_event"):
                     run_graph.return_value = type("R", (), {"run_dir": project_path / ".amon" / "runs" / "r1"})()
-                    response = core.run_plan_execute("任務", project_path=project_path, project_id=record.project_id)
+                    response = core.run_graph_response("任務", project_path=project_path, project_id=record.project_id)
                 self.assertEqual(response, "plan-output")
                 self.assertTrue(run_graph.called)
             finally:
                 os.environ.pop("AMON_HOME", None)
 
-    def test_run_plan_execute_compiles_and_runs_when_enabled(self) -> None:
+    def test_run_graph_response_compiles_and_runs_when_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir
             try:
@@ -96,7 +96,7 @@ class RunPlanExecuteTests(unittest.TestCase):
                     core, "_load_graph_primary_output", return_value="plan-output"
                 ), patch("amon.core.emit_event"):
                     run_graph.return_value = type("R", (), {"run_dir": project_path / ".amon" / "runs" / "r1"})()
-                    response = core.run_plan_execute("任務", project_path=project_path, project_id=record.project_id)
+                    response = core.run_graph_response("任務", project_path=project_path, project_id=record.project_id)
                 self.assertEqual(response, "plan-output")
                 self.assertTrue(run_graph.called)
             finally:

@@ -1071,14 +1071,14 @@ class AmonCore:
             log_event(
                 {
                     "level": "WARNING",
-                    "event": "plan_execute_force_enable_planner",
+                    "event": "graph_force_enable_planner",
                     "project_id": project_identity,
                     "reason": "planner disabled in config but ignored by task graph v3",
                 }
             )
             emit_event(
                 {
-                    "type": "plan_execute_force_enable_planner",
+                    "type": "graph_force_enable_planner",
                     "scope": "planning",
                     "project_id": project_identity,
                     "actor": "system",
@@ -1149,7 +1149,7 @@ class AmonCore:
         setattr(result, "planner_enabled", True)
         return result, self._load_graph_primary_output(result.run_dir)
 
-    def run_plan_execute(
+    def run_graph_response(
         self,
         prompt: str,
         *,
@@ -1161,12 +1161,7 @@ class AmonCore:
         available_skills: list[dict[str, Any]] | None = None,
         stream_handler=None,
     ) -> str:
-        config = self.load_config(project_path)
-        planner_enabled = self._coerce_config_bool(config.get("amon", {}).get("planner", {}).get("enabled", True))
-        if not planner_enabled:
-            self.logger.warning("planner 設定為 disabled，但 plan_execute 仍會強制走 task graph v3")
-
-        _, response = self.run_plan_execute_stream(
+        _, response = self.run_graph_stream(
             prompt,
             project_path=project_path,
             project_id=project_id,
@@ -1177,18 +1172,6 @@ class AmonCore:
             stream_handler=stream_handler,
         )
         return response
-
-    @staticmethod
-    def _coerce_config_bool(value: Any) -> bool:
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, str):
-            normalized = value.strip().lower()
-            if normalized in {"", "0", "false", "no", "off"}:
-                return False
-            if normalized in {"1", "true", "yes", "on"}:
-                return True
-        return bool(value)
 
     @staticmethod
     def _coerce_config_bool(value: Any) -> bool:
@@ -1794,7 +1777,7 @@ class AmonCore:
             project_path,
             ignore_missing=True,
         )
-        return self.run_plan_execute(
+        return self.run_graph_response(
             prompt,
             project_path=project_path,
             project_id=resolved_project_id,
