@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from .payloads import TaskSpec, validate_task_spec
+
 _NODE_TYPES = {"TASK", "GATE", "GROUP", "ARTIFACT"}
 _EDGE_TYPES = {"CONTROL", "DATA"}
 _EXECUTION_TYPES = {"SINGLE", "PARALLEL_MAP", "RECURSIVE"}
@@ -81,6 +83,13 @@ class TaskNode(BaseNode):
     node_type: str = "TASK"
     execution: str = "SINGLE"
     execution_config: dict[str, Any] | None = None
+    task_spec: TaskSpec = field(
+        default_factory=lambda: TaskSpec(
+            executor="agent",
+            runnable=False,
+            non_runnable_reason="task_spec 未提供，節點不可直接執行",
+        )
+    )
     output_contract: OutputContract = field(default_factory=OutputContract)
     policy: Policy = field(default_factory=Policy)
     guardrails: dict[str, Any] | None = None
@@ -174,6 +183,13 @@ def _validate_node(node: BaseNode) -> None:
             raise ValueError(f"task.execution 不合法：node_id={node.id}, execution={node.execution}")
         if node.execution_config is not None and not isinstance(node.execution_config, dict):
             raise ValueError(f"task.execution_config 必須是 object：node_id={node.id}")
+        if node.execution == "SINGLE" and node.execution_config:
+            raise ValueError(f"task.execution_config 僅允許 PARALLEL_MAP/RECURSIVE：node_id={node.id}")
+        if node.execution in {"PARALLEL_MAP", "RECURSIVE"} and node.execution_config is None:
+            raise ValueError(f"task.execution={node.execution} 時必須提供 execution_config：node_id={node.id}")
+        if node.task_spec is None:
+            raise ValueError(f"task.task_spec 缺失：node_id={node.id}")
+        validate_task_spec(node.id, node.task_spec)
         for port in node.output_contract.ports:
             _validate_output_port(node.id, port)
 

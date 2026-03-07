@@ -1,0 +1,118 @@
+{
+  "version": "taskgraph.v3",
+  "runtimeCapabilities": {
+    "supports_control_edges": true,
+    "supports_data_edges": true,
+    "supports_parallel_map": true,
+    "supports_recursive": true,
+    "supports_task_guardrails": true,
+    "supports_task_boundaries": true
+  },
+  "nodes": [
+    {
+      "id": "agent-1",
+      "node_type": "TASK",
+      "title": "分析",
+      "execution": "SINGLE",
+      "taskSpec": {
+        "executor": "agent",
+        "agent": {
+          "prompt": "整理重點",
+          "instructions": "使用繁體中文",
+          "model": "gpt-4.1"
+        },
+        "inputBindings": [
+          {
+            "source": "variable",
+            "key": "topic",
+            "value": "taskgraph"
+          }
+        ],
+        "artifacts": [
+          {
+            "name": "summary",
+            "mediaType": "text/markdown",
+            "required": true
+          }
+        ],
+        "display": {
+          "label": "分析任務",
+          "summary": "摘要輸出",
+          "todoHint": "先讀檔",
+          "tags": ["fixture"]
+        },
+        "runnable": true
+      },
+      "outputContract": {
+        "ports": [
+          {
+            "name": "result",
+            "jsonSchema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "policy": {}
+    },
+    {
+      "id": "tool-1",
+      "node_type": "TASK",
+      "title": "查詢",
+      "execution": "SINGLE",
+      "taskSpec": {
+        "executor": "tool",
+        "tool": {
+          "tools": [
+            {
+              "name": "search",
+              "args": {
+                "q": "TaskGraph"
+              },
+              "whenToUse": "需要外部資料"
+            }
+          ],
+          "skills": ["skill-installer"]
+        },
+        "inputBindings": [],
+        "artifacts": [],
+        "display": {
+          "label": "查詢任務",
+          "summary": "使用工具",
+          "tags": ["fixture"]
+        },
+        "runnable": true
+      },
+      "outputContract": {
+        "ports": [
+          {
+            "name": "result",
+            "jsonSchema": {
+              "type": "object"
+            }
+          }
+        ]
+      },
+      "policy": {}
+    },
+    {
+      "id": "artifact-1",
+      "node_type": "ARTIFACT",
+      "title": "輸出報告"
+    }
+  ],
+  "edges": [
+    {
+      "from": "agent-1",
+      "to": "tool-1",
+      "edge_type": "CONTROL",
+      "kind": "DEPENDS_ON"
+    },
+    {
+      "from": "tool-1",
+      "to": "artifact-1",
+      "edge_type": "DATA",
+      "kind": "EMITS"
+    }
+  ]
+}

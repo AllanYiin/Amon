@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .payloads import task_spec_from_payload
 from .schema import GraphDefinition, GraphEdge, OutputContract, OutputPort, RuntimeCapabilities, TaskNode, validate_graph_definition
 
 
@@ -28,11 +29,13 @@ def legacy_to_v3(graph_json: dict[str, Any]) -> dict[str, Any]:
         if not node_id:
             raise ValueError(f"legacy graph 轉換失敗：node[{index}].id 必須是非空字串")
 
+        task_spec = _legacy_task_spec(node)
         task_node = {
             "id": node_id,
             "node_type": "TASK",
             "title": str(node.get("title") or node.get("name") or node.get("type") or node_id),
             "execution": "SINGLE",
+            "taskSpec": task_spec,
             "outputContract": {
                 "ports": [
                     {
@@ -99,6 +102,7 @@ def v2_to_v3(v2_graph_json: dict[str, Any]) -> dict[str, Any]:
             "node_type": "TASK",
             "title": str(node.get("title") or node_id),
             "execution": "SINGLE",
+            "taskSpec": _v2_task_spec(node),
             "outputContract": {
                 "ports": [
                     {
@@ -177,16 +181,18 @@ def validate_v3_graph_json(graph_json: dict[str, Any]) -> None:
     _ensure_dict(graph_json, name="v3 graph")
     nodes_payload = graph_json.get("nodes")
     edges_payload = graph_json.get("edges")
+    runtime_caps = graph_json.get("runtimeCapabilities")
     if not isinstance(nodes_payload, list) or not isinstance(edges_payload, list):
         raise ValueError("v3 graph 驗證失敗：nodes/edges 必須是 list")
 
+    runtime_dict = runtime_caps if isinstance(runtime_caps, dict) else _default_runtime_capabilities()
     nodes = [_to_task_node(raw) for raw in nodes_payload]
     edges = [_to_edge(raw) for raw in edges_payload]
     graph = GraphDefinition(
         version=str(graph_json.get("version") or ""),
         nodes=nodes,
         edges=edges,
-        runtime_capabilities=RuntimeCapabilities(**_default_runtime_capabilities()),
+        runtime_capabilities=RuntimeCapabilities(**runtime_dict),
     )
     validate_graph_definition(graph)
 
@@ -211,12 +217,29 @@ def _to_task_node(raw: Any) -> TaskNode:
         if isinstance(port, dict)
     ]
 
+    task_spec_raw = raw.get("taskSpec")
+    if not isinstance(task_spec_raw, dict):
+        task_spec_raw = {
+            "executor": "agent",
+            "agent": {"prompt": None, "instructions": None, "model": None},
+            "inputBindings": [],
+            "artifacts": [],
+            "display": {"label": str(raw.get("title") or ""), "summary": "missing taskSpec", "tags": ["incomplete"]},
+            "runnable": False,
+            "nonRunnableReason": "taskSpec 缺失，節點不可直接執行",
+        }
+
+    execution_config = raw.get("executionConfig")
+    if execution_config is not None and not isinstance(execution_config, dict):
+        raise ValueError(f"v3 graph 驗證失敗：executionConfig 必須是 object：node_id={raw.get('id')}")
+
     return TaskNode(
         id=str(raw.get("id") or ""),
         node_type="TASK",
         title=str(raw.get("title") or ""),
         execution=str(raw.get("execution") or "SINGLE"),
-        execution_config=raw.get("executionConfig") if isinstance(raw.get("executionConfig"), dict) else None,
+        execution_config=execution_config,
+        task_spec=task_spec_from_payload(task_spec_raw),
         output_contract=OutputContract(ports=ports),
     )
 
@@ -248,6 +271,112 @@ def _convert_control_edges(edges_payload: list[Any], *, source_label: str) -> li
             }
         )
     return converted
+
+
+def _legacy_task_spec(node: dict[str, Any]) -> dict[str, Any]:
+    node_type = str(node.get("type") or "").lower()
+    title = str(node.get("title") or node.get("name") or "")
+    if node_type in {"write_file", "write-file"}:
+        path = _first_str(node.get("path"), node.get("output_path"))
+        if path:
+            return {
+                "executor": "write_file",
+                "writeFile": {"path": path, "contentTemplate": str(node.get("content") or "")},
+                "display": {"label": title, "summary": "legacy migrated write_file", "tags": ["legacy"]},
+                "inputBindings": [],
+                "artifacts": [],
+                "runnable": True,
+            }
+    if node_type in {"tool.call", "tool_call", "tool"}:
+        tool_name = _first_str(node.get("tool"), node.get("tool_name"))
+        if tool_name:
+            return {
+                "executor": "tool",
+                "tool": {
+                    "tools": [{"name": tool_name, "args": node.get("args") if isinstance(node.get("args"), dict) else {}}],
+                    "skills": [str(s) for s in (node.get("skills") or [])],
+                },
+                "display": {"label": title, "summary": "legacy migrated tool", "tags": ["legacy"]},
+                "inputBindings": [],
+                "artifacts": [],
+                "runnable": True,
+            }
+    prompt = _first_str(node.get("prompt"), node.get("description"), node.get("instruction"))
+    if prompt:
+        return {
+            "executor": "agent",
+            "agent": {
+                "prompt": prompt,
+                "instructions": _optional_str(node.get("instructions")),
+                "model": _optional_str(node.get("model")),
+            },
+            "display": {"label": title, "summary": "legacy migrated agent", "tags": ["legacy"]},
+            "inputBindings": [],
+            "artifacts": [],
+            "runnable": True,
+        }
+    return {
+        "executor": "agent",
+        "agent": {"prompt": None, "instructions": None, "model": _optional_str(node.get("model"))},
+        "display": {"label": title, "summary": "legacy migrated but missing runnable payload", "tags": ["legacy", "incomplete"]},
+        "inputBindings": [],
+        "artifacts": [],
+        "runnable": False,
+        "nonRunnableReason": "來源缺少可執行 task payload（prompt/tool/command/path）",
+    }
+
+
+def _v2_task_spec(node: dict[str, Any]) -> dict[str, Any]:
+    kind = str(node.get("kind") or "").lower()
+    title = str(node.get("title") or "")
+    if kind == "tool":
+        tool_name = _first_str(node.get("tool"), node.get("tool_name"))
+        if tool_name:
+            return {
+                "executor": "tool",
+                "tool": {
+                    "tools": [{"name": tool_name, "args": node.get("args") if isinstance(node.get("args"), dict) else {}}],
+                    "skills": [str(s) for s in (node.get("skills") or [])],
+                },
+                "display": {"label": title, "summary": str(node.get("description") or ""), "tags": ["v2"]},
+                "inputBindings": [],
+                "artifacts": [],
+                "runnable": True,
+            }
+    if kind == "sandbox_run":
+        command = _first_str(node.get("command"), node.get("script"))
+        if command:
+            return {
+                "executor": "sandbox_run",
+                "sandboxRun": {"command": command, "shell": _optional_str(node.get("shell")), "workdir": _optional_str(node.get("workdir"))},
+                "display": {"label": title, "summary": str(node.get("description") or ""), "tags": ["v2"]},
+                "inputBindings": [],
+                "artifacts": [],
+                "runnable": True,
+            }
+    prompt = _first_str(node.get("prompt"), node.get("description"))
+    if kind in {"agent", ""} and prompt:
+        return {
+            "executor": "agent",
+            "agent": {
+                "prompt": prompt,
+                "instructions": _optional_str(node.get("instructions")),
+                "model": _optional_str(node.get("model")),
+            },
+            "display": {"label": title, "summary": str(node.get("description") or ""), "tags": ["v2"]},
+            "inputBindings": [],
+            "artifacts": [],
+            "runnable": True,
+        }
+    return {
+        "executor": "agent",
+        "agent": {"prompt": None, "instructions": _optional_str(node.get("instructions")), "model": _optional_str(node.get("model"))},
+        "display": {"label": title, "summary": str(node.get("description") or ""), "tags": ["v2", "incomplete"]},
+        "inputBindings": [],
+        "artifacts": [],
+        "runnable": False,
+        "nonRunnableReason": "v2 節點資訊不足，無法補齊可執行 task_spec",
+    }
 
 
 def _legacy_output_schema_type(node: dict[str, Any]) -> str:
@@ -292,6 +421,13 @@ def _default_runtime_capabilities() -> dict[str, bool]:
         "supports_task_guardrails": True,
         "supports_task_boundaries": True,
     }
+
+
+def _first_str(*values: Any) -> str | None:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
 
 
 def _optional_str(value: Any) -> str | None:
