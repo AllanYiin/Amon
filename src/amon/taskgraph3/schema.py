@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import InitVar, dataclass, field
 from typing import Any
 
 from .payloads import TaskSpec, validate_task_spec
@@ -81,6 +81,7 @@ class BaseNode:
 @dataclass
 class TaskNode(BaseNode):
     node_type: str = "TASK"
+    description: InitVar[str | None] = None
     execution: str = "SINGLE"
     execution_config: dict[str, Any] | None = None
     task_spec: TaskSpec = field(
