@@ -11,10 +11,10 @@ class PlanExecGraphSmokeTests(unittest.TestCase):
 
         self.assertIsNotNone(AmonCore)
 
-    def test_import_graph_runtime(self) -> None:
-        from amon.taskgraph3.engine_runtime import GraphRuntime
+    def test_import_taskgraph3_runtime(self) -> None:
+        from amon.taskgraph3.runtime import TaskGraph3Runtime
 
-        self.assertIsNotNone(GraphRuntime)
+        self.assertIsNotNone(TaskGraph3Runtime)
 
     def test_import_choose_execution_mode_variants(self) -> None:
         from amon.chat.project_bootstrap import choose_execution_mode

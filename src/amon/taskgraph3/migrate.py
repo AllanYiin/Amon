@@ -279,9 +279,10 @@ def _legacy_task_spec(node: dict[str, Any]) -> dict[str, Any]:
     if node_type in {"write_file", "write-file"}:
         path = _first_str(node.get("path"), node.get("output_path"))
         if path:
+            content = str(node.get("content") or "")
             return {
-                "executor": "write_file",
-                "writeFile": {"path": path, "contentTemplate": str(node.get("content") or "")},
+                "executor": "sandbox_run",
+                "sandboxRun": {"command": f"cat <<'EOF' > {path}\n{content}\nEOF", "shell": "bash"},
                 "display": {"label": title, "summary": "legacy migrated write_file", "tags": ["legacy"]},
                 "inputBindings": [],
                 "artifacts": [],
