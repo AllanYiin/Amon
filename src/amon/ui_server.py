@@ -2116,13 +2116,19 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                             run_id=active_run_id,
                         )
 
+                streamed_response_text = "".join(streamed_text_buffer)
+                normalized_response_text = response_text if isinstance(response_text, str) else ""
+                if not normalized_response_text and streamed_response_text:
+                    normalized_response_text = streamed_response_text
+                if not normalized_response_text:
+                    normalized_response_text = "（本輪未產生文字回覆）"
+
                 assistant_payload: dict[str, Any] = {
                     "type": "assistant",
-                    "text": response_text,
+                    "text": normalized_response_text,
                     "project_id": project_id,
                     "run_id": active_run_id or None,
                 }
-                streamed_response_text = "".join(streamed_text_buffer)
                 artifact_ingest_summary = None
                 if streamed_response_text and project_id:
                     try:
@@ -2174,8 +2180,8 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         done_payload["artifacts"] = [self._artifact_public_fields(item) for item in artifacts]
                     except Exception:
                         done_payload["artifacts"] = []
-                if streamed_token_count == 0 and response_text:
-                    done_payload["final_text"] = response_text
+                if streamed_token_count == 0 and normalized_response_text:
+                    done_payload["final_text"] = normalized_response_text
                 if isinstance(artifact_ingest_summary, dict):
                     done_payload["stream_ingest"] = {
                         "total": int(artifact_ingest_summary.get("total", 0)),
