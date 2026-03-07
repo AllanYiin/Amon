@@ -2039,6 +2039,8 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     nonlocal streamed_token_count
                     is_reasoning, reasoning_text = decode_reasoning_chunk(token)
                     if is_reasoning:
+                        if not isinstance(reasoning_text, str) or reasoning_text == "":
+                            return
                         send_event("reasoning", {"text": reasoning_text}, run_id=active_run_id)
                         append_event(
                             chat_id,
@@ -2049,6 +2051,8 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                                 "run_id": active_run_id or None,
                             },
                         )
+                        return
+                    if not isinstance(token, str) or token == "":
                         return
                     streamed_token_count += 1
                     streamed_text_buffer.append(token)
