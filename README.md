@@ -12,9 +12,13 @@ pip install -e .
 
 # 安裝 Amon CLI + sandbox runner 服務依賴（FastAPI / uvicorn）
 pip install -e .[sandbox-runner]
+
+# 若在離線/受限網路環境（例如公司 Proxy）安裝失敗，改用：
+python -m pip install --no-build-isolation -e ".[sandbox-runner]"
 ```
 
 > 注意：`pip install -e.`（少一個空白）是錯誤寫法，請使用 `pip install -e .`。
+> 若看到 `Could not find a version that satisfies the requirement setuptools>=40.8.0`，通常是 pip 無法連到套件來源；請先確認 `pip config list` 的 index/proxy 設定，或改用上方 `--no-build-isolation` 指令重試。
 
 ```bash
 # 安裝套件
