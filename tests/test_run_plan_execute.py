@@ -8,24 +8,36 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from amon.core import AmonCore
-from amon.planning.schema import PlanContext, PlanGraph, PlanNode
+from amon.taskgraph3.payloads import AgentTaskConfig, TaskDisplayMetadata, TaskSpec
+from amon.taskgraph3.schema import GraphDefinition, TaskNode
 
 
 class RunPlanExecuteTests(unittest.TestCase):
-    def test_run_graph_response_uses_planner_by_default(self) -> None:
+    def _fake_plan(self) -> GraphDefinition:
+        return GraphDefinition(
+            version="taskgraph.v3",
+            nodes=[
+                TaskNode(
+                    id="task-1",
+                    title="任務",
+                    task_spec=TaskSpec(
+                        executor="agent",
+                        agent=AgentTaskConfig(prompt="任務", instructions="完成"),
+                        display=TaskDisplayMetadata(label="任務", summary="完成", todo_hint="done"),
+                    ),
+                )
+            ],
+            edges=[],
+        )
+
+    def test_run_plan_execute_uses_planner_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir
             try:
                 core = AmonCore(data_dir=Path(temp_dir))
                 record = core.create_project("plan-exec-default")
                 project_path = core.get_project_path(record.project_id)
-                fake_plan = PlanGraph(
-                    schema_version="1.0",
-                    objective="測試",
-                    nodes=[PlanNode(id="T1", title="任務", goal="完成", definition_of_done=["done"], depends_on=[], requires_llm=False)],
-                    context=PlanContext(),
-                )
-                with patch("amon.core.generate_plan_with_llm", return_value=fake_plan), patch.object(core, "run_graph") as run_graph, patch.object(
+                with patch("amon.core.generate_plan_with_llm", return_value=self._fake_plan()), patch.object(core, "run_graph") as run_graph, patch.object(
                     core, "_load_graph_primary_output", return_value="plan-output"
                 ), patch.object(core, "run_single_stream") as run_single_stream, patch("amon.core.emit_event"):
                     run_graph.return_value = type("R", (), {"run_dir": project_path / ".amon" / "runs" / "r1"})()
@@ -44,13 +56,7 @@ class RunPlanExecuteTests(unittest.TestCase):
                 record = core.create_project("plan-exec-string-false")
                 project_path = core.get_project_path(record.project_id)
                 core.set_config_value("amon.planner.enabled", "false", project_path=project_path)
-                fake_plan = PlanGraph(
-                    schema_version="1.0",
-                    objective="測試",
-                    nodes=[PlanNode(id="T1", title="任務", goal="完成", definition_of_done=["done"], depends_on=[], requires_llm=False)],
-                    context=PlanContext(),
-                )
-                with patch("amon.core.generate_plan_with_llm", return_value=fake_plan), patch.object(core, "run_graph") as run_graph, patch.object(
+                with patch("amon.core.generate_plan_with_llm", return_value=self._fake_plan()), patch.object(core, "run_graph") as run_graph, patch.object(
                     core, "_load_graph_primary_output", return_value="plan-output"
                 ), patch("amon.core.emit_event"):
                     run_graph.return_value = type("R", (), {"run_dir": project_path / ".amon" / "runs" / "r1"})()
@@ -68,13 +74,7 @@ class RunPlanExecuteTests(unittest.TestCase):
                 record = core.create_project("plan-exec-legacy-fallback")
                 project_path = core.get_project_path(record.project_id)
                 core.set_config_value("amon.planner.enabled", False, project_path=project_path)
-                fake_plan = PlanGraph(
-                    schema_version="1.0",
-                    objective="測試",
-                    nodes=[PlanNode(id="T1", title="任務", goal="完成", definition_of_done=["done"], depends_on=[], requires_llm=False)],
-                    context=PlanContext(),
-                )
-                with patch("amon.core.generate_plan_with_llm", return_value=fake_plan), patch.object(core, "run_graph") as run_graph, patch.object(
+                with patch("amon.core.generate_plan_with_llm", return_value=self._fake_plan()), patch.object(core, "run_graph") as run_graph, patch.object(
                     core, "_load_graph_primary_output", return_value="plan-output"
                 ), patch("amon.core.emit_event"):
                     run_graph.return_value = type("R", (), {"run_dir": project_path / ".amon" / "runs" / "r1"})()
@@ -92,13 +92,7 @@ class RunPlanExecuteTests(unittest.TestCase):
                 record = core.create_project("plan-exec-enabled")
                 project_path = core.get_project_path(record.project_id)
                 core.set_config_value("amon.planner.enabled", True, project_path=project_path)
-                fake_plan = PlanGraph(
-                    schema_version="1.0",
-                    objective="測試",
-                    nodes=[PlanNode(id="T1", title="任務", goal="完成", definition_of_done=["done"], depends_on=[], requires_llm=False)],
-                    context=PlanContext(),
-                )
-                with patch("amon.core.generate_plan_with_llm", return_value=fake_plan), patch.object(core, "run_graph") as run_graph, patch.object(
+                with patch("amon.core.generate_plan_with_llm", return_value=self._fake_plan()), patch.object(core, "run_graph") as run_graph, patch.object(
                     core, "_load_graph_primary_output", return_value="plan-output"
                 ), patch("amon.core.emit_event"):
                     run_graph.return_value = type("R", (), {"run_dir": project_path / ".amon" / "runs" / "r1"})()

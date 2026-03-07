@@ -11,9 +11,28 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from amon.core import AmonCore
 from amon.models import decode_reasoning_chunk
+from amon.taskgraph3.payloads import AgentTaskConfig, TaskDisplayMetadata, TaskSpec
+from amon.taskgraph3.schema import GraphDefinition, TaskNode
 
 
 class CoreStreamHandlerTests(unittest.TestCase):
+    def _fake_v3_plan(self) -> GraphDefinition:
+        return GraphDefinition(
+            version="taskgraph.v3",
+            nodes=[
+                TaskNode(
+                    id="task-1",
+                    title="任務",
+                    task_spec=TaskSpec(
+                        executor="agent",
+                        agent=AgentTaskConfig(prompt="請完成任務", instructions="執行"),
+                        display=TaskDisplayMetadata(label="任務", summary="完成", todo_hint="done"),
+                    ),
+                )
+            ],
+            edges=[],
+        )
+
     def test_run_single_stream_forwards_conversation_history_to_graph_variables(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir
@@ -109,8 +128,8 @@ class CoreStreamHandlerTests(unittest.TestCase):
                 core.set_config_value("amon.planner.enabled", True, project_path=project_path)
                 fake_result = SimpleNamespace(run_id="run-plan", run_dir=project_path / ".amon" / "runs" / "run-plan")
 
-                with patch.object(core, "generate_plan_docs") as mock_generate, patch("amon.core.compile_plan_to_exec_graph", return_value={"nodes": [], "edges": [], "variables": {}}) as mock_compile, patch.object(core, "run_graph", return_value=fake_result), patch.object(core, "_load_graph_primary_output", return_value="plan-ok"):
-                    core.run_graph_stream(
+                with patch.object(core, "generate_plan_docs", return_value=self._fake_v3_plan()) as mock_generate, patch.object(core, "run_graph", return_value=fake_result), patch.object(core, "_load_graph_primary_output", return_value="plan-ok"):
+                    core.run_plan_execute_stream(
                         "請完成任務",
                         project_path=project_path,
                         project_id=project.project_id,
@@ -118,7 +137,6 @@ class CoreStreamHandlerTests(unittest.TestCase):
                     )
 
                 self.assertTrue(mock_generate.called)
-                self.assertTrue(mock_compile.called)
             finally:
                 os.environ.pop("AMON_HOME", None)
 
@@ -133,9 +151,7 @@ class CoreStreamHandlerTests(unittest.TestCase):
                 core.set_config_value("amon.planner.enabled", False, project_path=project_path)
                 fake_result = SimpleNamespace(run_id="run-plan", run_dir=project_path / ".amon" / "runs" / "run-plan")
 
-                with patch.object(core, "generate_plan_docs") as mock_generate, patch(
-                    "amon.core.compile_plan_to_exec_graph", return_value={"nodes": [], "edges": [], "variables": {}}
-                ) as mock_compile, patch.object(core, "run_graph", return_value=fake_result), patch.object(
+                with patch.object(core, "generate_plan_docs", return_value=self._fake_v3_plan()) as mock_generate, patch.object(core, "run_graph", return_value=fake_result), patch.object(
                     core, "_load_graph_primary_output", return_value="plan response"
                 ):
                     result, response = core.run_graph_stream(
@@ -150,7 +166,6 @@ class CoreStreamHandlerTests(unittest.TestCase):
                 self.assertEqual(result.run_id, "run-plan")
                 self.assertEqual(response, "plan response")
                 self.assertTrue(mock_generate.called)
-                self.assertTrue(mock_compile.called)
                 self.assertEqual(getattr(result, "execution_route", ""), "planner")
                 self.assertTrue(getattr(result, "planner_enabled", False))
             finally:
@@ -167,9 +182,7 @@ class CoreStreamHandlerTests(unittest.TestCase):
                 fake_result = SimpleNamespace(run_id="run-plan", run_dir=project_path / ".amon" / "runs" / "run-plan")
                 streamed_tokens: list[str] = []
 
-                with patch.object(core, "generate_plan_docs") as mock_generate, patch(
-                    "amon.core.compile_plan_to_exec_graph", return_value={"nodes": [], "edges": [], "variables": {}}
-                ) as mock_compile, patch.object(core, "run_graph", return_value=fake_result), patch.object(
+                with patch.object(core, "generate_plan_docs", return_value=self._fake_v3_plan()) as mock_generate, patch.object(core, "run_graph", return_value=fake_result), patch.object(
                     core, "_load_graph_primary_output", return_value="plan response"
                 ):
                     core.run_graph_stream(
@@ -180,12 +193,11 @@ class CoreStreamHandlerTests(unittest.TestCase):
                     )
 
                 self.assertTrue(mock_generate.called)
-                self.assertTrue(mock_compile.called)
                 reasoning_chunks = [decode_reasoning_chunk(token)[1] for token in streamed_tokens if decode_reasoning_chunk(token)[0]]
                 self.assertGreaterEqual(len(reasoning_chunks), 4)
                 self.assertIn("正在產生任務計畫…", reasoning_chunks)
-                self.assertIn("任務計畫已產生，正在編譯執行圖…", reasoning_chunks)
-                self.assertIn("執行圖編譯完成，開始執行任務…", reasoning_chunks)
+                self.assertIn("任務計畫已產生，正在準備執行圖…", reasoning_chunks)
+                self.assertIn("執行圖準備完成，開始執行任務…", reasoning_chunks)
                 self.assertIn("任務已執行完成，正在整理結果…", reasoning_chunks)
             finally:
                 os.environ.pop("AMON_HOME", None)
