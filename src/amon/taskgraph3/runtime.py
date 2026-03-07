@@ -14,7 +14,9 @@ from typing import Any, Callable
 
 from amon.fs.atomic import append_jsonl, atomic_write_text
 
-from .schema import GraphDefinition, GraphEdge, TaskNode, validate_graph_definition
+from amon.artifacts.store import ingest_artifacts
+
+from .schema import ArtifactNode, GateNode, GraphDefinition, GraphEdge, GroupNode, TaskNode, validate_graph_definition
 
 
 class OutputContractError(ValueError):
@@ -50,7 +52,7 @@ class TaskGraph3Runtime:
         self._stream_state: dict[str, dict[str, float]] = {}
         self._rate_lock = threading.Lock()
 
-    def run(self, node_runner: Callable[[TaskNode, dict[str, Any]], str]) -> TaskGraph3RunResult:
+    def run(self, node_runner: Callable[[TaskNode, dict[str, Any]], Any]) -> TaskGraph3RunResult:
         run_id = self.run_id or uuid.uuid4().hex
         run_dir = self.project_path / ".amon" / "runs" / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -76,6 +78,7 @@ class TaskGraph3Runtime:
                 }
                 for node_id in nodes
             },
+            "variables": {"run_id": run_id},
             "metrics": {
                 "counters": {"nodes_total": len(nodes), "nodes_succeeded": 0, "nodes_failed": 0},
                 "latency_ms": {},
@@ -94,35 +97,77 @@ class TaskGraph3Runtime:
 
         while ready:
             node_id = ready.popleft()
-            node = nodes[node_id]
-            if not isinstance(node, TaskNode):
-                continue
-
             node_state = state["nodes"][node_id]
             node_state["status"] = "RUNNING"
+            node = nodes[node_id]
+            stream_limit = node.policy.stream_limit if isinstance(node, TaskNode) else None
             self._emit_event(
                 events_path,
                 {"event": "node_status", "node_id": node_id, "status": "RUNNING"},
-                stream_limit=node.policy.stream_limit,
+                stream_limit=stream_limit,
             )
 
             try:
                 started = self._time()
-                raw_output = self._execute_node_by_mode(node, state, node_runner)
-                node_state["attempt_logs"].append(f"attempt=1 output_len={len(raw_output)}")
-                extracted = self._extract_ports(node, raw_output)
-                self._validate_output_contract(node, extracted)
-                self._flush_stream(events_path, node.id)
+                output_payload: dict[str, Any] = {}
+                extracted: dict[str, Any] = {}
+                if isinstance(node, TaskNode):
+                    output_payload = self._execute_node_by_mode(node, state, node_runner)
+                    raw_output = str(output_payload.get("raw_output") or "")
+                    node_state["attempt_logs"].append(f"attempt=1 output_len={len(raw_output)}")
+                    extracted = self._extract_ports(node, raw_output)
+                    self._validate_output_contract(node, extracted)
+                    self._flush_stream(events_path, node.id)
+                elif isinstance(node, GateNode):
+                    output_payload = self._execute_gate_node(node, state, adjacency)
+                    self._emit_event(
+                        events_path,
+                        {
+                            "event": "gate_route_evaluated",
+                            "node_id": node.id,
+                            "outcome": output_payload.get("outcome"),
+                            "selected_targets": output_payload.get("selected_targets", []),
+                        },
+                        stream_limit=None,
+                    )
+                    self._flush_stream(events_path, node.id)
+                elif isinstance(node, ArtifactNode):
+                    output_payload = self._execute_artifact_node(node, state, adjacency)
+                    self._emit_event(
+                        events_path,
+                        {
+                            "event": "artifact_materialized",
+                            "node_id": node.id,
+                            "action": output_payload.get("action"),
+                            "metadata": output_payload.get("metadata", {}),
+                        },
+                        stream_limit=None,
+                    )
+                    self._flush_stream(events_path, node.id)
+                elif isinstance(node, GroupNode):
+                    raise NotImplementedError(
+                        f"node={node.id} GROUP execution is not supported yet; fail-fast by design"
+                    )
+                else:
+                    raise TypeError(f"Unsupported node class for node={node.id}")
 
                 latency_ms = int((self._time() - started) * 1000)
                 state["metrics"]["latency_ms"][node_id] = latency_ms
                 state["metrics"]["counters"]["nodes_succeeded"] += 1
                 node_state["status"] = "SUCCEEDED"
-                node_state["output"] = {"raw": raw_output, "ports": extracted}
+                if isinstance(node, TaskNode):
+                    merged_output = {"raw": str(output_payload.get("raw_output") or ""), "ports": extracted}
+                    for key, value in output_payload.items():
+                        if key == "raw_output":
+                            continue
+                        merged_output[key] = value
+                    node_state["output"] = merged_output
+                else:
+                    node_state["output"] = output_payload
                 self._emit_event(
                     events_path,
                     {"event": "node_status", "node_id": node_id, "status": "SUCCEEDED", "latency_ms": latency_ms},
-                    stream_limit=node.policy.stream_limit,
+                    stream_limit=stream_limit,
                 )
             except Exception as exc:  # noqa: BLE001
                 self._flush_stream(events_path, node.id)
@@ -133,7 +178,7 @@ class TaskGraph3Runtime:
                 self._emit_event(
                     events_path,
                     {"event": "node_status", "node_id": node_id, "status": "FAILED", "error": str(exc)},
-                    stream_limit=node.policy.stream_limit,
+                    stream_limit=stream_limit,
                 )
                 state["status"] = "failed"
                 break
@@ -159,22 +204,22 @@ class TaskGraph3Runtime:
         self,
         node: TaskNode,
         state: dict[str, Any],
-        node_runner: Callable[[TaskNode, dict[str, Any]], str],
-    ) -> str:
+        node_runner: Callable[[TaskNode, dict[str, Any]], Any],
+    ) -> dict[str, Any]:
         mode = node.execution
         if mode == "PARALLEL_MAP":
             return self._run_parallel_map(node, state, node_runner)
         if mode == "RECURSIVE":
             return self._run_recursive(node, state, node_runner)
         self._acquire_rate_limit(node.id, node.policy.rate_limit)
-        return node_runner(node, state)
+        return self._normalize_runner_output(node_runner(node, state))
 
     def _run_parallel_map(
         self,
         node: TaskNode,
         state: dict[str, Any],
-        node_runner: Callable[[TaskNode, dict[str, Any]], str],
-    ) -> str:
+        node_runner: Callable[[TaskNode, dict[str, Any]], Any],
+    ) -> dict[str, Any]:
         config = node.execution_config or {}
         items = config.get("items") if isinstance(config.get("items"), list) else []
         max_concurrency = int(config.get("maxConcurrency") or 1)
@@ -188,7 +233,8 @@ class TaskGraph3Runtime:
             ctx["map_item"] = item
             ctx["map_index"] = index
             self._acquire_rate_limit(node.id, node.policy.rate_limit)
-            return index, node_runner(node, ctx)
+            normalized = self._normalize_runner_output(node_runner(node, ctx))
+            return index, str(normalized.get("raw_output") or "")
 
         with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
             futures = [executor.submit(_worker, idx, item) for idx, item in enumerate(items)]
@@ -197,14 +243,14 @@ class TaskGraph3Runtime:
                 results[idx] = output
 
         ordered = [results[idx] for idx in range(len(items))]
-        return json.dumps(ordered, ensure_ascii=False)
+        return {"raw_output": json.dumps(ordered, ensure_ascii=False), "items": ordered}
 
     def _run_recursive(
         self,
         node: TaskNode,
         state: dict[str, Any],
-        node_runner: Callable[[TaskNode, dict[str, Any]], str],
-    ) -> str:
+        node_runner: Callable[[TaskNode, dict[str, Any]], Any],
+    ) -> dict[str, Any]:
         config = node.execution_config or {}
         max_iters = int(config.get("maxIters") or 1)
         if max_iters <= 0:
@@ -216,10 +262,51 @@ class TaskGraph3Runtime:
             ctx = dict(state)
             ctx["recursive_iter"] = iteration
             self._acquire_rate_limit(node.id, node.policy.rate_limit)
-            latest = node_runner(node, ctx)
+            normalized = self._normalize_runner_output(node_runner(node, ctx))
+            latest = str(normalized.get("raw_output") or "")
             if self._is_recursive_stop(latest, stop_condition):
                 break
-        return latest
+        return {"raw_output": latest}
+
+    def _execute_gate_node(
+        self,
+        node: GateNode,
+        state: dict[str, Any],
+        adjacency: dict[str, list[str]],
+    ) -> dict[str, Any]:
+        outcome = "success"
+        routes = {route.on_outcome: route.to_node for route in node.routes}
+        selected = routes.get(outcome) or routes.get("default")
+        selected_targets = {selected} if selected else set(adjacency.get(node.id, []))
+        for target in adjacency.get(node.id, []):
+            if target in selected_targets:
+                continue
+            target_state = state["nodes"].get(target)
+            if isinstance(target_state, dict) and target_state.get("status") == "PENDING":
+                target_state["status"] = "SKIPPED"
+                target_state["error"] = f"gate {node.id} route outcome={outcome} not selected"
+        return {"outcome": outcome, "selected_targets": sorted(selected_targets)}
+
+    def _execute_artifact_node(
+        self,
+        node: ArtifactNode,
+        state: dict[str, Any],
+        adjacency: dict[str, list[str]],
+    ) -> dict[str, Any]:
+        _ = adjacency
+        raw_output = ""
+        for node_id, node_state in state["nodes"].items():
+            if node_state.get("status") != "SUCCEEDED":
+                continue
+            output = node_state.get("output")
+            if isinstance(output, dict) and isinstance(output.get("raw"), str):
+                raw_output = output["raw"]
+        ingest_summary = ingest_artifacts(
+            response_text=raw_output,
+            project_path=self.project_path,
+            source={"run_id": state["run_id"], "node_id": node.id},
+        )
+        return {"action": "ingest", "metadata": {"node": node.id}, "ingest_summary": ingest_summary}
 
     def _is_recursive_stop(self, raw_output: str, stop_condition: dict[str, Any]) -> bool:
         if not stop_condition:
@@ -350,6 +437,13 @@ class TaskGraph3Runtime:
 
     def _write_json(self, path: Path, payload: dict[str, Any]) -> None:
         atomic_write_text(path, json.dumps(payload, ensure_ascii=False, indent=2))
+
+    def _normalize_runner_output(self, output: Any) -> dict[str, Any]:
+        if isinstance(output, dict):
+            if "raw_output" not in output:
+                output = {"raw_output": json.dumps(output, ensure_ascii=False), **output}
+            return output
+        return {"raw_output": str(output)}
 
     def _node_to_dict(self, node: Any) -> dict[str, Any]:
         payload = {"id": node.id, "node_type": node.node_type, "title": node.title}

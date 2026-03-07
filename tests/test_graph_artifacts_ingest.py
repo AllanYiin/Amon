@@ -6,7 +6,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from amon.taskgraph3.engine_runtime import GraphRuntime
+from amon.taskgraph3.amon_node_runner import AmonNodeRunner
+from amon.taskgraph3.payloads import AgentTaskConfig, TaskSpec
+from amon.taskgraph3.runtime import TaskGraph3Runtime
+from amon.taskgraph3.schema import GraphDefinition, TaskNode
 
 
 class _StubCore:
@@ -24,24 +27,27 @@ class GraphArtifactsIngestTests(unittest.TestCase):
     def test_agent_task_auto_ingest_workspace_and_manifest(self) -> None:
         with tempfile.TemporaryDirectory(prefix="amon-graph-artifacts-") as tmpdir:
             project_path = Path(tmpdir)
-            graph = {
-                "nodes": [
-                    {
-                        "id": "agent",
-                        "type": "agent_task",
-                        "prompt": "請輸出程式",
-                        "output_path": "docs/out.md",
-                    }
+            graph = GraphDefinition(
+                version="taskgraph.v3",
+                nodes=[
+                    TaskNode(
+                        id="agent",
+                        task_spec=TaskSpec(executor="agent", agent=AgentTaskConfig(prompt="請輸出程式")),
+                    )
                 ],
-                "edges": [],
-            }
-            graph_path = project_path / "graph.json"
-            graph_path.write_text(json.dumps(graph, ensure_ascii=False), encoding="utf-8")
+                edges=[],
+            )
 
+            runtime = TaskGraph3Runtime(project_path=project_path, graph=graph, run_id="run-1")
             os.environ["AMON_PROJECT_PATH"] = str(project_path)
             try:
-                runtime = GraphRuntime(core=_StubCore(), project_path=project_path, graph_path=graph_path, run_id="run-1")
-                result = runtime.run()
+                runner = AmonNodeRunner(
+                    core=_StubCore(),
+                    project_path=project_path,
+                    run_id="run-1",
+                    variables={},
+                )
+                result = runtime.run(runner.run_task)
             finally:
                 os.environ.pop("AMON_PROJECT_PATH", None)
 

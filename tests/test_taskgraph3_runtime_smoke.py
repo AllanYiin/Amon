@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 from amon.taskgraph3.runtime import TaskGraph3Runtime
-from amon.taskgraph3.schema import GraphDefinition, GraphEdge, OutputContract, OutputPort, Policy, TaskNode
+from amon.taskgraph3.schema import ArtifactNode, GateNode, GateRoute, GraphDefinition, GraphEdge, GroupNode, OutputContract, OutputPort, Policy, TaskNode
 
 
 class FakeClock:
@@ -208,6 +208,46 @@ class TaskGraph3RuntimeSmokeTests(unittest.TestCase):
                 if line.strip()
             ]
             self.assertTrue(any(event.get("coalesced", 0) > 0 for event in events))
+
+    def test_gate_node_routes_and_marks_unselected_as_skipped(self) -> None:
+        graph = GraphDefinition(
+            nodes=[
+                GateNode(id="gate", routes=[GateRoute(on_outcome="success", to_node="next")]),
+                TaskNode(id="next"),
+                TaskNode(id="fallback"),
+            ],
+            edges=[
+                GraphEdge(from_node="gate", to_node="next", edge_type="CONTROL", kind="success"),
+                GraphEdge(from_node="gate", to_node="fallback", edge_type="CONTROL", kind="default"),
+            ],
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = TaskGraph3Runtime(project_path=Path(tmp), graph=graph, run_id="run-gate")
+            result = runtime.run(lambda *_: "ok")
+            self.assertEqual(result.state["status"], "completed")
+            self.assertEqual(result.state["nodes"]["gate"]["output"]["outcome"], "success")
+            self.assertEqual(result.state["nodes"]["fallback"]["status"], "SKIPPED")
+
+    def test_group_node_fail_fast(self) -> None:
+        graph = GraphDefinition(nodes=[GroupNode(id="grp", children=[])], edges=[])
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = TaskGraph3Runtime(project_path=Path(tmp), graph=graph, run_id="run-group")
+            result = runtime.run(lambda *_: "ok")
+            self.assertEqual(result.state["status"], "failed")
+            self.assertEqual(result.state["nodes"]["grp"]["status"], "FAILED")
+            self.assertIn("fail-fast", result.state["nodes"]["grp"]["error"])
+
+    def test_artifact_node_ingests_upstream_output(self) -> None:
+        graph = GraphDefinition(
+            nodes=[TaskNode(id="agent"), ArtifactNode(id="artifact")],
+            edges=[GraphEdge(from_node="agent", to_node="artifact", edge_type="CONTROL", kind="next")],
+        )
+        response = "```python file=workspace/demo.py\nprint('v3')\n```"
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = TaskGraph3Runtime(project_path=Path(tmp), graph=graph, run_id="run-artifact")
+            result = runtime.run(lambda *_: response)
+            self.assertEqual(result.state["nodes"]["artifact"]["status"], "SUCCEEDED")
+            self.assertEqual(result.state["nodes"]["artifact"]["output"]["ingest_summary"]["created"], 1)
 
 
 if __name__ == "__main__":
