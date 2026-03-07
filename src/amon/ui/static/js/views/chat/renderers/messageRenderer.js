@@ -95,7 +95,8 @@ export function createMessageRenderer({ timelineEl, renderMarkdown }) {
     footer.className = "chat-msg__meta";
     const timestamp = document.createElement("time");
     timestamp.className = "chat-msg__timestamp";
-    timestamp.textContent = new Date().toLocaleTimeString("zh-TW", { hour12: false });
+    const timestampText = String(meta.timestampText || "").trim();
+    timestamp.textContent = timestampText || new Date().toLocaleTimeString("zh-TW", { hour12: false });
     footer.appendChild(timestamp);
 
     const footerStatusEl = document.createElement("span");

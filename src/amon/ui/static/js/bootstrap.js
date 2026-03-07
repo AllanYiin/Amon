@@ -1163,22 +1163,43 @@ appStore.patch({ bootstrappedAt: Date.now() });
         }
       }
 
+      function normalizeHistoryTimestamp(ts = "") {
+        const rawValue = String(ts || "").trim();
+        if (!rawValue) return "";
+        const parsed = new Date(rawValue);
+        if (Number.isNaN(parsed.getTime())) {
+          return rawValue;
+        }
+        return parsed.toLocaleTimeString("zh-TW", { hour12: false });
+      }
+
       function appendRestoredMessage(role, text, ts = "") {
+        const normalizedText = String(text || "");
+        const timestampText = normalizeHistoryTimestamp(ts);
+        if (typeof CHAT_VIEW.__chatAppendMessage === "function") {
+          CHAT_VIEW.__chatAppendMessage(role, normalizedText, { timestampText });
+          return;
+        }
+
         const row = document.createElement("article");
-        row.className = "timeline-row";
+        row.className = `chat-msg chat-msg--${role}`;
 
         const bubble = document.createElement("div");
-        bubble.className = `chat-bubble ${role}`;
-        const prefix = role === "user" ? "你：" : "Amon：";
-        bubble.innerHTML = renderMarkdown(`${prefix}${text}`);
+        bubble.className = `chat-msg__bubble chat-msg__bubble--${role}`;
+        const bubbleBody = document.createElement("div");
+        bubbleBody.className = "chat-msg__body";
+        bubbleBody.innerHTML = renderMarkdown(normalizedText);
+        bubble.appendChild(bubbleBody);
+        row.appendChild(bubble);
 
         const footer = document.createElement("footer");
-        footer.className = "timeline-meta";
-        const roleLabel = role === "user" ? "你" : "Amon";
-        footer.textContent = ts ? `${ts}・${roleLabel}` : roleLabel;
-
-        row.appendChild(bubble);
+        footer.className = "chat-msg__meta";
+        const timestamp = document.createElement("time");
+        timestamp.className = "chat-msg__timestamp";
+        timestamp.textContent = timestampText || new Date().toLocaleTimeString("zh-TW", { hour12: false });
+        footer.appendChild(timestamp);
         row.appendChild(footer);
+
         elements.timeline.appendChild(row);
       }
 
@@ -1219,7 +1240,9 @@ appStore.patch({ bootstrappedAt: Date.now() });
         }
         messages.forEach((item) => {
           const role = item.role === "user" ? "user" : "agent";
-          appendRestoredMessage(role, item.text || "", item.ts || "");
+          const text = String(item.text || "").trim();
+          if (!text) return;
+          appendRestoredMessage(role, text, item.ts || "");
         });
         elements.timeline.scrollTop = elements.timeline.scrollHeight;
       }
@@ -1893,17 +1916,29 @@ appStore.patch({ bootstrappedAt: Date.now() });
       async function applySessionFromEvent(data) {
         if (!data) return;
         let projectChanged = false;
-        if (data.project_id && data.project_id !== state.projectId) {
-          setProjectState(data.project_id);
+        const eventProjectId = String(data.project_id || "").trim();
+        const eventChatId = String(data.chat_id || "").trim();
+        const activeProjectId = String(state.projectId || "").trim();
+
+        // 僅在「無專案模式」下，才讓事件自動切換專案，避免切換專案後被舊串流事件覆寫。
+        if (eventProjectId && !activeProjectId) {
+          setProjectState(eventProjectId);
           projectChanged = true;
         }
-        if (data.chat_id) {
-          state.chatId = data.chat_id;
+
+        if (eventProjectId && eventChatId) {
+          rememberProjectChatSession(eventProjectId, eventChatId);
         }
-        if (state.projectId && state.chatId) {
-          rememberProjectChatSession(state.projectId, state.chatId);
+
+        const latestActiveProjectId = String(state.projectId || "").trim();
+        const shouldApplyToActiveProject = !eventProjectId || eventProjectId === latestActiveProjectId;
+        if (shouldApplyToActiveProject && eventChatId) {
+          state.chatId = eventChatId;
         }
-        if (Array.isArray(data.artifacts)) {
+        if (latestActiveProjectId && state.chatId) {
+          rememberProjectChatSession(latestActiveProjectId, state.chatId);
+        }
+        if (shouldApplyToActiveProject && Array.isArray(data.artifacts)) {
           state.runArtifacts = data.artifacts.filter((artifact) => !isConversationArtifact(artifact));
           renderArtifactsInspector(state.runArtifacts);
         }

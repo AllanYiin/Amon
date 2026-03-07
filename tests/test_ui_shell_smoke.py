@@ -89,6 +89,7 @@ class UIShellSmokeTests(unittest.TestCase):
         self.assertIn('messageRenderer.applyTokenChunk(data.text || "")', chat_js)
         self.assertIn("applySessionFromEvent(data)", chat_js)
         self.assertIn("dataset.buffer", message_renderer_js)
+        self.assertIn('const timestampText = String(meta.timestampText || "").trim();', message_renderer_js)
         self.assertIn("applyExecutionEvent", timeline_renderer_js)
         self.assertIn("renderAttachmentPreview", input_bar_js)
 
@@ -233,6 +234,13 @@ class UIShellSmokeTests(unittest.TestCase):
         self.assertIn('const preferredChatId = String(state.projectChatSessions?.[state.projectId] || state.chatId || "").trim();', bootstrap_js)
         self.assertIn('services.runs.getProjectHistory(state.projectId, preferredChatId || "")', bootstrap_js)
         self.assertIn('CHAT_VIEW.__chatStopStream?.();', bootstrap_js)
+        self.assertIn('function normalizeHistoryTimestamp(ts = "") {', bootstrap_js)
+        self.assertIn('if (typeof CHAT_VIEW.__chatAppendMessage === "function") {', bootstrap_js)
+        self.assertIn('CHAT_VIEW.__chatAppendMessage(role, normalizedText, { timestampText });', bootstrap_js)
+        self.assertIn('const eventProjectId = String(data.project_id || "").trim();', bootstrap_js)
+        self.assertIn('if (eventProjectId && !activeProjectId) {', bootstrap_js)
+        self.assertIn('const shouldApplyToActiveProject = !eventProjectId || eventProjectId === latestActiveProjectId;', bootstrap_js)
+        self.assertIn('if (shouldApplyToActiveProject && eventChatId) {', bootstrap_js)
         self.assertIn('async getProjectHistory(projectId, chatId = "")', runs_service_js)
         self.assertIn("`?chat_id=${encodeURIComponent(String(chatId).trim())}`", runs_service_js)
 
