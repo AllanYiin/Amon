@@ -81,6 +81,16 @@ class TaskGraph3SchemaTests(unittest.TestCase):
         self.assertIn('"version":"taskgraph.v3"', output_one)
         self.assertIn('"taskSpec":', output_one)
 
+
+    def test_task_node_accepts_legacy_description_field(self) -> None:
+        node = TaskNode(
+            id="task-legacy",
+            description="legacy description",
+            task_spec=TaskSpec(executor="agent", agent=AgentTaskConfig(prompt="p")),
+        )
+        graph = GraphDefinition(nodes=[node])
+        validate_graph_definition(graph)
+
     def test_non_runnable_default_task_spec_is_allowed(self) -> None:
         graph = GraphDefinition(nodes=[TaskNode(id="task-1")])
         validate_graph_definition(graph)
