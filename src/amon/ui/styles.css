@@ -109,6 +109,7 @@ html[data-theme="dark"] {
   --logs-warn-border: color-mix(in srgb, var(--c-warning) 35%, var(--c-border));
   --logs-error-bg: color-mix(in srgb, var(--c-danger-soft) 58%, var(--c-surface-1));
   --logs-error-border: color-mix(in srgb, var(--c-danger) 42%, var(--c-border));
+  --logs-json-text: #f8fafc;
 }
 
 /* C. Light theme tokens (default) */
@@ -165,6 +166,7 @@ html:not([data-theme]) {
   --logs-item-bg: color-mix(in srgb, var(--c-surface-1) 90%, var(--c-surface-2) 10%);
   --logs-item-hover: color-mix(in srgb, var(--c-surface-1) 68%, var(--c-surface-2) 32%);
   --logs-dot: color-mix(in srgb, var(--c-primary) 72%, var(--c-surface-3));
+  --logs-json-text: #e2e8f0;
 }
 
 /* D. Base styles & semantic aliases */
@@ -2550,6 +2552,11 @@ body.is-resizing-context-panel {
   color: var(--muted);
 }
 
+.logs-panel-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .logs-list {
   max-height: 380px;
   overflow: auto;
@@ -2626,6 +2633,19 @@ body.is-resizing-context-panel {
   font-size: var(--font-size-sm);
 }
 
+.logs-timeline-item__actions {
+  margin-top: 8px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.logs-timeline-item details > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .logs-timeline-item__json {
   margin-top: 8px;
   white-space: pre-wrap;
@@ -2637,6 +2657,7 @@ body.is-resizing-context-panel {
   border: 1px solid color-mix(in srgb, var(--c-border) 72%, var(--c-code-bg) 28%);
   border-radius: var(--radius-md);
   padding: 8px;
+  color: var(--logs-json-text);
 }
 
 .logs-timeline-item[data-level="warning"] .logs-timeline-item__content,

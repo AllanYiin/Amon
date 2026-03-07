@@ -675,6 +675,29 @@ appStore.patch({ bootstrappedAt: Date.now() });
         return pairs.map(([key, value]) => `${key}:${value}`).join(" · ") || "-";
       }
 
+      function stringifyTimelineItem(item = {}, options = {}) {
+        const { isEvent = false } = options;
+        const levelRaw = isEvent ? "EVENT" : item.level || item.severity || "INFO";
+        const title = String(isEvent ? item.event || item.type || "event" : levelRaw).toUpperCase();
+        const rows = [
+          `time: ${formatLogTime(item.ts || item.time || item.timestamp)}`,
+          `title: ${title}`,
+          `message: ${getLogMessage(item)}`,
+          `meta: ${formatMetaLine(item)}`,
+          `raw: ${JSON.stringify(item)}`,
+        ];
+        return rows.join("\n");
+      }
+
+      function getVisibleItemsText(payload = {}, options = {}) {
+        const { isEvent = false, keyword = "" } = options;
+        const items = (payload.items || []).filter((item) => matchesSearch(item, keyword));
+        if (!items.length) {
+          return "";
+        }
+        return items.map((item) => stringifyTimelineItem(item, { isEvent })).join("\n\n--------------------\n\n");
+      }
+
       function matchesSearch(item = {}, keyword = "") {
         const normalized = String(keyword || "").trim().toLowerCase();
         if (!normalized) return true;
@@ -709,6 +732,8 @@ appStore.patch({ bootstrappedAt: Date.now() });
 
         const eventType = item.event || item.type || "event";
         const title = isEvent ? eventType : levelRaw;
+        const rawJsonPretty = JSON.stringify(item, null, 2);
+        const itemText = stringifyTimelineItem(item, { isEvent });
 
         article.innerHTML = `
           <div class="logs-timeline-item__time">${escapeHtml(formatLogTime(item.ts || item.time || item.timestamp))}</div>
@@ -720,12 +745,36 @@ appStore.patch({ bootstrappedAt: Date.now() });
             </div>
             <p class="logs-timeline-item__message">${escapeHtml(getLogMessage(item))}</p>
             <div class="logs-timeline-item__meta">${escapeHtml(formatMetaLine(item))}</div>
+            <div class="logs-timeline-item__actions">
+              <button type="button" class="btn btn--secondary secondary-btn small" data-copy-log-item="true">複製此筆</button>
+            </div>
             <details>
-              <summary>Raw JSON</summary>
-              <pre class="logs-timeline-item__json">${escapeHtml(JSON.stringify(item, null, 2))}</pre>
+              <summary>
+                <span>Raw JSON</span>
+                <button type="button" class="btn btn--secondary secondary-btn small" data-copy-raw-json="true">複製 Raw JSON</button>
+              </summary>
+              <pre class="logs-timeline-item__json">${escapeHtml(rawJsonPretty)}</pre>
             </details>
           </div>
         `;
+        const copyItemBtn = article.querySelector('[data-copy-log-item="true"]');
+        copyItemBtn?.addEventListener("click", async () => {
+          await copyText(itemText, {
+            toast: (message, options = {}) => showToast(message, options.duration || 7000, options.type || "success"),
+            successMessage: "已複製此筆明細。",
+            errorMessage: "複製失敗，請手動選取內容。",
+          });
+        });
+        const copyRawBtn = article.querySelector('[data-copy-raw-json="true"]');
+        copyRawBtn?.addEventListener("click", async (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          await copyText(rawJsonPretty, {
+            toast: (message, options = {}) => showToast(message, options.duration || 7000, options.type || "success"),
+            successMessage: "已複製 Raw JSON。",
+            errorMessage: "複製失敗，請手動選取 Raw JSON。",
+          });
+        });
         return article;
       }
 
@@ -809,6 +858,34 @@ appStore.patch({ bootstrappedAt: Date.now() });
         if (!items.length) {
           elements.eventsList.innerHTML = '<p class="empty-context">目前條件查無 event。</p>';
         }
+      }
+
+      async function copyVisibleLogsItems() {
+        const payload = state.logsPage.latestLogsPayload || { items: [] };
+        const text = getVisibleItemsText(payload, { keyword: elements.logsSearch?.value || "" });
+        if (!text) {
+          showToast("目前沒有可複製的 Logs 明細。", 7000, "warning");
+          return;
+        }
+        await copyText(text, {
+          toast: (message, options = {}) => showToast(message, options.duration || 7000, options.type || "success"),
+          successMessage: "已複製目前 Logs 結果。",
+          errorMessage: "複製失敗，請手動選取內容。",
+        });
+      }
+
+      async function copyVisibleEventsItems() {
+        const payload = state.logsPage.latestEventsPayload || { items: [] };
+        const text = getVisibleItemsText(payload, { isEvent: true, keyword: elements.eventsSearch?.value || "" });
+        if (!text) {
+          showToast("目前沒有可複製的 Events 明細。", 7000, "warning");
+          return;
+        }
+        await copyText(text, {
+          toast: (message, options = {}) => showToast(message, options.duration || 7000, options.type || "success"),
+          successMessage: "已複製目前 Events 結果。",
+          errorMessage: "複製失敗，請手動選取內容。",
+        });
       }
 
       async function loadLogsPage(page = 1) {
@@ -2323,6 +2400,8 @@ appStore.patch({ bootstrappedAt: Date.now() });
       elements.eventsPrev?.addEventListener("click", () => void loadEventsPage(Math.max(1, state.logsPage.eventsPage - 1)));
       elements.eventsNext?.addEventListener("click", () => void loadEventsPage(state.logsPage.eventsPage + 1));
       elements.logsDownload?.addEventListener("click", downloadLogsPayload);
+      elements.logsCopyVisible?.addEventListener("click", () => void copyVisibleLogsItems());
+      elements.eventsCopyVisible?.addEventListener("click", () => void copyVisibleEventsItems());
       elements.logsSearch?.addEventListener("input", () => renderLogsPage(state.logsPage.latestLogsPayload || { items: [], total: 0, page: 1, has_next: false }));
       elements.eventsSearch?.addEventListener("input", () => renderEventsPage(state.logsPage.latestEventsPayload || { items: [], total: 0, page: 1, has_next: false }));
       elements.logsFilterSeverity?.addEventListener("change", () => {
