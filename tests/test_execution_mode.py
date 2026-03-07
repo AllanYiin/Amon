@@ -16,7 +16,7 @@ class _MockLLM:
         _ = (messages, model)
         if self._responses:
             return [self._responses.pop(0)]
-        return ['{"mode":"plan_execute","confidence":0.9,"rationale":["fallback"],"requires_planning":true}']
+        return ['{"mode":"graph","confidence":0.9,"rationale":["fallback"],"requires_planning":true}']
 
 
 class ExecutionModeTests(unittest.TestCase):
@@ -29,11 +29,11 @@ class ExecutionModeTests(unittest.TestCase):
             mode = decide_execution_mode("請協助潤稿", llm_client=llm)
         self.assertEqual(mode, "self_critique")
 
-    def test_invalid_json_then_repair_fail_fallback_plan_execute(self) -> None:
+    def test_invalid_json_then_repair_fail_fallback_graph(self) -> None:
         llm = _MockLLM(["not-json", "still-not-json"])
         with patch("amon.chat.execution_mode.emit_event"):
             mode = decide_execution_mode("請幫我修改專案", llm_client=llm)
-        self.assertEqual(mode, "plan_execute")
+        self.assertEqual(mode, "graph")
 
     def test_single_low_confidence_or_requires_planning_escalates(self) -> None:
         llm = _MockLLM([
@@ -41,7 +41,7 @@ class ExecutionModeTests(unittest.TestCase):
         ])
         with patch("amon.chat.execution_mode.emit_event"):
             mode = decide_execution_mode("任務", llm_client=llm)
-        self.assertEqual(mode, "plan_execute")
+        self.assertEqual(mode, "graph")
 
     def test_valid_team_preserved(self) -> None:
         llm = _MockLLM([

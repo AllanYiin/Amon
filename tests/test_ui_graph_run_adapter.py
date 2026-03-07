@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 @unittest.skipIf(shutil.which("node") is None, "node is required for frontend adapter tests")
-class GraphRuntimeAdapterTests(unittest.TestCase):
+class TaskGraphV3AdapterTests(unittest.TestCase):
     def _run_adapter_script(self, script: str) -> dict:
         completed = subprocess.run(
             ["node", "--input-type=module", "-e", script],

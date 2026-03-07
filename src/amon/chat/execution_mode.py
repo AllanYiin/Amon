@@ -12,7 +12,7 @@ from amon.models import ProviderError, build_provider
 
 logger = logging.getLogger(__name__)
 
-_ALLOWED_MODES = {"single", "self_critique", "team", "plan_execute"}
+_ALLOWED_MODES = {"single", "self_critique", "team", "graph"}
 
 
 class LLMClient(Protocol):
@@ -64,17 +64,17 @@ def decide_execution_mode(
         )
         return final_mode
     except Exception as exc:  # noqa: BLE001
-        logger.warning("execution mode 決策失敗，改用 plan_execute：%s", exc)
+        logger.warning("execution mode 決策失敗，改用 graph：%s", exc)
         _emit_decision_event(
             project_id=project_id,
-            mode="plan_execute",
+            mode="graph",
             reason="router_invalid_json_fallback",
             raw_output=locals().get("raw", ""),
             error=str(exc),
             confidence=0.0,
             requires_planning=True,
         )
-        return "plan_execute"
+        return "graph"
 
 
 def _classify_mode(
@@ -104,7 +104,7 @@ def _repair_decision(llm_client: LLMClient, model: str | None, *, raw_output: st
         "raw_output": raw_output,
         "error": error,
         "required_schema": {
-            "mode": "single|self_critique|team|plan_execute",
+            "mode": "single|self_critique|team|graph",
             "confidence": "number between 0 and 1",
             "rationale": ["string"],
             "requires_planning": "boolean",
@@ -122,7 +122,7 @@ def _apply_calibration(decision: dict[str, Any]) -> str:
     confidence = float(decision["confidence"])
     requires_planning = bool(decision["requires_planning"])
     if mode == "single" and (requires_planning or confidence < 0.60):
-        return "plan_execute"
+        return "graph"
     return mode
 
 
@@ -200,10 +200,10 @@ def _classification_system_prompt() -> str:
         "single：可在單一回合完成，不需多步規劃、不需多工具串接、不需多角色分工。"
         "self_critique：單一 agent，但需高品質自我審查（草稿->檢查->修訂），通常是正式輸出。"
         "team：需要多角色/多專長並行，或任務面向多且需分工（研究、比較、跨領域長文）。"
-        "plan_execute：需要多步驟執行、工具調用、檔案或程式修改，或先產 TODO/圖再逐步完成。"
-        "校正指令：避免過度選 single；只要任務存在規劃與執行鏈需求，優先選 plan_execute。"
+        "graph：需要多步驟執行、工具調用、檔案或程式修改，或先產 TODO/圖再逐步完成。"
+        "校正指令：避免過度選 single；只要任務存在規劃與執行鏈需求，優先選 graph。"
         "輸出格式必須是："
-        '{"mode":"single|self_critique|team|plan_execute","confidence":0.0,"rationale":["..."],"requires_planning":true}'
+        '{"mode":"single|self_critique|team|graph","confidence":0.0,"rationale":["..."],"requires_planning":true}'
     )
 
 
@@ -213,7 +213,7 @@ def _repair_system_prompt() -> str:
         "你會拿到前一次模型輸出與錯誤原因。"
         "請只輸出一個合法 JSON 物件，不要 code fence，不要解釋。"
         "必須符合 schema："
-        '{"mode":"single|self_critique|team|plan_execute","confidence":0.0-1.0,"rationale":["string"],"requires_planning":true|false}'
+        '{"mode":"single|self_critique|team|graph","confidence":0.0-1.0,"rationale":["string"],"requires_planning":true|false}'
     )
 
 
