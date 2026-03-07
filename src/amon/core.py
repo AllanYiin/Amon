@@ -40,7 +40,17 @@ from .mcp_client import MCPClientError, MCPServerConfig, MCPStdioClient
 from .planning import compile_plan_to_exec_graph, dumps_plan, generate_plan_with_llm, render_todo_markdown
 from .models import ProviderError, build_provider, decode_reasoning_chunk, encode_reasoning_chunk
 from .project_registry import ProjectRegistry, load_project_config
-from .taskgraph3.engine_runtime import GraphRunResult, GraphRuntime
+from .taskgraph3.amon_node_runner import AmonNodeRunner
+from .taskgraph3.payloads import (
+    AgentTaskConfig,
+    SandboxRunConfig,
+    TaskSpec,
+    ToolCallSpec,
+    ToolTaskConfig,
+    WriteFileConfig,
+)
+from .taskgraph3.runtime import TaskGraph3RunResult, TaskGraph3Runtime
+from .taskgraph3.schema import ArtifactNode, GateNode, GateRoute, GraphDefinition, GraphEdge, GroupNode, TaskNode
 from .sandbox.service import run_sandbox_step
 from .tooling import (
     ToolingError,
@@ -794,7 +804,7 @@ class AmonCore:
         conversation_history: list[dict[str, str]] | None = None,
         chat_id: str | None = None,
         request_id: str | None = None,
-    ) -> tuple[GraphRunResult, str]:
+    ) -> tuple[TaskGraph3RunResult, str]:
         if not project_path:
             raise ValueError("執行 stream 需要指定專案")
         lock_context = self._project_lock(project_path, "single") if project_path else nullcontext()
@@ -1013,7 +1023,7 @@ class AmonCore:
         chat_id: str | None = None,
         conversation_history: list[dict[str, str]] | None = None,
         request_id: str | None = None,
-    ) -> tuple[GraphRunResult, str]:
+    ) -> tuple[TaskGraph3RunResult, str]:
         def _emit_planning_progress(text: str) -> None:
             if not callable(stream_handler):
                 return
@@ -1623,7 +1633,7 @@ class AmonCore:
         run_id: str | None = None,
         request_id: str | None = None,
         chat_id: str | None = None,
-    ) -> GraphRunResult:
+    ) -> TaskGraph3RunResult:
         if not project_path:
             raise ValueError("執行 graph 需要指定專案")
         try:
@@ -1635,17 +1645,123 @@ class AmonCore:
         if not isinstance(graph_payload, dict) or str(graph_payload.get("version") or "") != "taskgraph.v3":
             raise ValueError("Unsupported graph format\nRun migrator: amon graph migrate ...")
 
-        runtime = GraphRuntime(
+        effective_run_id = run_id or uuid.uuid4().hex
+        graph = self._to_taskgraph3_definition(graph_payload)
+        runtime = TaskGraph3Runtime(project_path=project_path, graph=graph, run_id=effective_run_id)
+        runtime_vars = dict(graph_payload.get("variables", {})) if isinstance(graph_payload.get("variables"), dict) else {}
+        if variables:
+            runtime_vars.update(variables)
+        node_runner = AmonNodeRunner(
             core=self,
             project_path=project_path,
-            graph_path=graph_path,
-            variables=variables,
+            run_id=effective_run_id,
+            variables=runtime_vars,
             stream_handler=stream_handler,
-            run_id=run_id,
             request_id=request_id,
             chat_id=chat_id,
         )
-        return runtime.run()
+        result = runtime.run(node_runner.run_task)
+        return result
+
+    def _to_taskgraph3_definition(self, payload: dict[str, Any]) -> GraphDefinition:
+        nodes_payload = payload.get("nodes") if isinstance(payload.get("nodes"), list) else []
+        edges_payload = payload.get("edges") if isinstance(payload.get("edges"), list) else []
+        nodes = [self._to_taskgraph3_node(item) for item in nodes_payload if isinstance(item, dict)]
+        edges = [
+            GraphEdge(
+                from_node=str(item.get("from") or item.get("from_node") or ""),
+                to_node=str(item.get("to") or item.get("to_node") or ""),
+                edge_type=str(item.get("edge_type") or "CONTROL"),
+                kind=str(item.get("kind") or "next"),
+            )
+            for item in edges_payload
+            if isinstance(item, dict)
+        ]
+        return GraphDefinition(version="taskgraph.v3", nodes=nodes, edges=edges)
+
+    def _to_taskgraph3_node(self, raw: dict[str, Any]):
+        node_type = str(raw.get("node_type") or "").upper()
+        legacy_type = str(raw.get("type") or "").strip().lower()
+        node_id = str(raw.get("id") or "")
+        title = str(raw.get("title") or "")
+
+        if node_type == "GATE" or legacy_type == "condition":
+            routes: list[GateRoute] = []
+            for route in raw.get("routes", []):
+                if not isinstance(route, dict):
+                    continue
+                routes.append(GateRoute(on_outcome=str(route.get("onOutcome") or "default"), to_node=str(route.get("toNode") or "")))
+            return GateNode(id=node_id, title=title, routes=routes)
+
+        if node_type == "GROUP":
+            children = [str(item) for item in raw.get("children", []) if str(item).strip()]
+            return GroupNode(id=node_id, title=title, children=children)
+
+        if node_type == "ARTIFACT" or legacy_type == "artifact":
+            return ArtifactNode(id=node_id, title=title)
+
+        if legacy_type in {"map", "recursive"}:
+            raise ValueError(f"node={node_id} legacy type={legacy_type} no longer supported in v3 runtime")
+
+        if isinstance(raw.get("taskSpec"), dict):
+            spec = raw["taskSpec"]
+            executor = str(spec.get("executor") or "")
+            return TaskNode(
+                id=node_id,
+                title=title,
+                execution=str(raw.get("execution") or "SINGLE"),
+                execution_config=raw.get("executionConfig") if isinstance(raw.get("executionConfig"), dict) else None,
+                task_spec=TaskSpec(
+                    executor=executor,
+                    agent=AgentTaskConfig(**spec["agent"]) if isinstance(spec.get("agent"), dict) else None,
+                    tool=ToolTaskConfig(
+                        tools=[ToolCallSpec(name=str(it.get("name") or ""), args=it.get("args") or {}) for it in spec.get("tool", {}).get("tools", []) if isinstance(it, dict)],
+                        skills=[str(s) for s in spec.get("tool", {}).get("skills", [])],
+                    )
+                    if isinstance(spec.get("tool"), dict)
+                    else None,
+                    sandbox_run=SandboxRunConfig(**spec["sandboxRun"]) if isinstance(spec.get("sandboxRun"), dict) else None,
+                    write_file=WriteFileConfig(
+                        path=str(spec.get("writeFile", {}).get("path") or ""),
+                        content_template=str(spec.get("writeFile", {}).get("contentTemplate") or ""),
+                    )
+                    if isinstance(spec.get("writeFile"), dict)
+                    else None,
+                    runnable=bool(spec.get("runnable", True)),
+                    non_runnable_reason=str(spec.get("nonRunnableReason") or "") or None,
+                ),
+            )
+
+        if legacy_type == "agent_task":
+            prompt = str(raw.get("prompt") or "")
+            return TaskNode(id=node_id, title=title, task_spec=TaskSpec(executor="agent", agent=AgentTaskConfig(prompt=prompt)))
+        if legacy_type in {"tool.call", "tool_call", "tool"}:
+            return TaskNode(
+                id=node_id,
+                title=title,
+                task_spec=TaskSpec(
+                    executor="tool",
+                    tool=ToolTaskConfig(tools=[ToolCallSpec(name=str(raw.get("tool") or ""), args=raw.get("args") or {})]),
+                ),
+            )
+        if legacy_type == "sandbox_run":
+            command = str(raw.get("command") or raw.get("code") or "")
+            shell = str(raw.get("language") or raw.get("shell") or "bash")
+            return TaskNode(
+                id=node_id,
+                title=title,
+                task_spec=TaskSpec(executor="sandbox_run", sandbox_run=SandboxRunConfig(command=command, shell=shell)),
+            )
+        if legacy_type == "write_file":
+            return TaskNode(
+                id=node_id,
+                title=title,
+                task_spec=TaskSpec(
+                    executor="write_file",
+                    write_file=WriteFileConfig(path=str(raw.get("path") or ""), content_template=str(raw.get("content") or "")),
+                ),
+            )
+        raise ValueError(f"Unsupported node payload: node_id={node_id}")
 
     def run_taskgraph3(
         self,
@@ -1757,7 +1873,7 @@ class AmonCore:
         self._atomic_write_text(schema_path, json.dumps(schema, ensure_ascii=False, indent=2))
         return {"template_id": template_id, "path": str(template_path), "schema_path": str(schema_path)}
 
-    def run_graph_template(self, template_id: str, variables: dict[str, Any] | None = None) -> GraphRunResult:
+    def run_graph_template(self, template_id: str, variables: dict[str, Any] | None = None) -> TaskGraph3RunResult:
         template_path = self._template_path(template_id)
         try:
             payload = json.loads(template_path.read_text(encoding="utf-8"))

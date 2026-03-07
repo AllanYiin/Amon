@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import sys
 import tempfile
@@ -8,7 +10,10 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from amon.taskgraph3.engine_runtime import GraphRuntime
+from amon.taskgraph3.amon_node_runner import AmonNodeRunner
+from amon.taskgraph3.payloads import SandboxRunConfig, TaskSpec
+from amon.taskgraph3.runtime import TaskGraph3Runtime
+from amon.taskgraph3.schema import GraphDefinition, TaskNode
 
 
 class _MockHTTPResponse:
@@ -50,46 +55,32 @@ class GraphSandboxRunTests(unittest.TestCase):
             project_path = Path(temp_dir) / "project"
             project_path.mkdir(parents=True, exist_ok=True)
             (project_path / "docs").mkdir(parents=True, exist_ok=True)
-            (project_path / "scripts").mkdir(parents=True, exist_ok=True)
-            (project_path / "scripts" / "task.py").write_text("print('ok')", encoding="utf-8")
-            (project_path / "docs" / "input.txt").write_text("abc", encoding="utf-8")
-
-            graph_payload = {
-                "nodes": [
-                    {
-                        "id": "sandbox1",
-                        "type": "sandbox_run",
-                        "language": "python",
-                        "code_file": "scripts/task.py",
-                        "input_files": ["docs/input.txt"],
-                        "output_prefix": "docs/artifacts/${run_id}/sandbox1/",
-                        "overwrite": False,
-                        "store_output": "sandbox_result",
-                    }
-                ],
-                "edges": [],
-            }
-            graph_path = project_path / "graph.json"
-            graph_path.write_text(json.dumps(graph_payload, ensure_ascii=False), encoding="utf-8")
 
             core = SimpleNamespace(
                 logger=SimpleNamespace(error=lambda *args, **kwargs: None),
                 load_config=lambda project_path: {"sandbox": {"runner": {"base_url": "http://sandbox.local"}}},
             )
-
-            runtime = GraphRuntime(
-                core=core,
-                project_path=project_path,
-                graph_path=graph_path,
-                run_id="run-1",
+            graph = GraphDefinition(
+                version="taskgraph.v3",
+                nodes=[
+                    TaskNode(
+                        id="sandbox1",
+                        task_spec=TaskSpec(
+                            executor="sandbox_run",
+                            sandbox_run=SandboxRunConfig(command="echo hi", shell="bash"),
+                        ),
+                    )
+                ],
+                edges=[],
             )
-            result = runtime.run()
+            runtime = TaskGraph3Runtime(project_path=project_path, graph=graph, run_id="run-1")
+            runner = AmonNodeRunner(core=core, project_path=project_path, run_id="run-1", variables={})
+            result = runtime.run(runner.run_task)
 
             state_payload = json.loads((result.run_dir / "state.json").read_text(encoding="utf-8"))
             self.assertEqual(state_payload["status"], "completed")
             node_output = state_payload["nodes"]["sandbox1"]["output"]
             self.assertEqual(node_output["exit_code"], 0)
-            self.assertEqual(state_payload["variables"]["sandbox_result"]["exit_code"], 0)
 
             output_file = project_path / "docs" / "artifacts" / "run-1" / "sandbox1" / "result.txt"
             self.assertTrue(output_file.exists())
@@ -103,9 +94,7 @@ class GraphSandboxRunTests(unittest.TestCase):
                 for line in (result.run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
                 if line.strip()
             ]
-            sandbox_events = [item for item in events if item.get("event") == "sandbox_run_summary"]
-            self.assertEqual(len(sandbox_events), 1)
-            self.assertEqual(sandbox_events[0]["node_id"], "sandbox1")
+            self.assertTrue(any(item.get("event") == "node_status" and item.get("node_id") == "sandbox1" for item in events))
 
 
 if __name__ == "__main__":
