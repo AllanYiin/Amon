@@ -24,6 +24,20 @@
       "upstream": "https://github.com/highlightjs/highlight.js/releases/tag/11.10.0"
     },
     {
+      "name": "Mermaid",
+      "global": "window.mermaid",
+      "version": "10.9.1",
+      "local_path": "src/amon/ui/static/vendor/mermaid/mermaid.min.js",
+      "upstream": "https://www.npmjs.com/package/mermaid/v/10.9.1"
+    },
+    {
+      "name": "svg-pan-zoom",
+      "global": "window.svgPanZoom",
+      "version": "3.6.1",
+      "local_path": "src/amon/ui/static/vendor/svg-pan-zoom/svg-pan-zoom.min.js",
+      "upstream": "https://www.npmjs.com/package/svg-pan-zoom/v/3.6.1"
+    },
+    {
       "name": "Chart.js",
       "global": "Chart",
       "version": "4.4.3",

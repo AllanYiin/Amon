@@ -703,7 +703,7 @@ export const GRAPH_VIEW = {
     subscribeGraphLiveUpdates();
     renderGraphNodeDrawer(null);
 
-    this.__graphCleanup = () => {
+    GRAPH_VIEW.__graphCleanup = () => {
       listEl.removeEventListener("click", onListClick);
       runSelectEl?.removeEventListener("change", onRunChange);
       drawerCloseEl?.removeEventListener("click", onDrawerClose);
@@ -716,12 +716,12 @@ export const GRAPH_VIEW = {
       local.panZoom = null;
       closeGraphNodeDrawer();
     };
-    this.__graphLoad = load;
+    GRAPH_VIEW.__graphLoad = load;
   },
   unmount() {
-    this.__graphCleanup?.();
-    this.__graphCleanup = null;
-    this.__graphLoad = null;
+    GRAPH_VIEW.__graphCleanup?.();
+    GRAPH_VIEW.__graphCleanup = null;
+    GRAPH_VIEW.__graphLoad = null;
   },
   onRoute: async () => {
     await GRAPH_VIEW.__graphLoad?.();
