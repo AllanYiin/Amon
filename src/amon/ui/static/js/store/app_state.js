@@ -2,6 +2,7 @@ export function createInitialUiState(createUiEventStore) {
   return {
     chatId: null,
     projectId: null,
+    projectChatSessions: {},
     plan: null,
     streaming: false,
     attachments: [],

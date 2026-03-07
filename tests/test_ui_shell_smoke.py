@@ -218,6 +218,19 @@ class UIShellSmokeTests(unittest.TestCase):
         ]:
             self.assertTrue(Path(module_path).exists(), module_path)
 
+    def test_project_switch_restores_last_chat_session_and_requests_history_with_chat_id(self) -> None:
+        bootstrap_js = Path("src/amon/ui/static/js/bootstrap.js").read_text(encoding="utf-8")
+        runs_service_js = Path("src/amon/ui/static/js/domain/runsService.js").read_text(encoding="utf-8")
+        app_state_js = Path("src/amon/ui/static/js/store/app_state.js").read_text(encoding="utf-8")
+
+        self.assertIn("projectChatSessions: {}", app_state_js)
+        self.assertIn("state.projectChatSessions[previousProjectId] = state.chatId;", bootstrap_js)
+        self.assertIn("state.chatId = nextProjectId ? (state.projectChatSessions[nextProjectId] || null) : null;", bootstrap_js)
+        self.assertIn('const preferredChatId = String(state.projectChatSessions?.[state.projectId] || state.chatId || "").trim();', bootstrap_js)
+        self.assertIn('services.runs.getProjectHistory(state.projectId, preferredChatId || "")', bootstrap_js)
+        self.assertIn('async getProjectHistory(projectId, chatId = "")', runs_service_js)
+        self.assertIn("`?chat_id=${encodeURIComponent(String(chatId).trim())}`", runs_service_js)
+
     def test_ui_server_exposes_graph_history_and_billing_series_endpoints(self) -> None:
         server_py = Path("src/amon/ui_server.py").read_text(encoding="utf-8")
         self.assertIn('if parsed.path == "/v1/billing/series"', server_py)

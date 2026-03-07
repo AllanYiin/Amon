@@ -44,8 +44,11 @@ export function createRunsService({ api }) {
         body: JSON.stringify(payload),
       });
     },
-    async getProjectHistory(projectId) {
-      return api.request(`/projects/${encodeURIComponent(projectId)}/chat-history`);
+    async getProjectHistory(projectId, chatId = "") {
+      const query = String(chatId || "").trim()
+        ? `?chat_id=${encodeURIComponent(String(chatId).trim())}`
+        : "";
+      return api.request(`/projects/${encodeURIComponent(projectId)}/chat-history${query}`);
     },
   };
 }
