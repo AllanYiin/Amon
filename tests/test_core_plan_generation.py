@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import tempfile
@@ -8,37 +9,41 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from amon.core import AmonCore
-from amon.planning.schema import PlanContext, PlanGraph, PlanNode
+from amon.taskgraph3.payloads import AgentTaskConfig, TaskDisplayMetadata, TaskSpec
+from amon.taskgraph3.schema import ArtifactNode, GraphDefinition, GraphEdge, TaskNode
 
 
 class CorePlanGenerationTests(unittest.TestCase):
-    def test_generate_plan_docs_writes_files_and_emits_event(self) -> None:
+    def test_generate_plan_docs_writes_v3_plan_and_todo_and_emits_event(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir
             try:
                 core = AmonCore(data_dir=Path(temp_dir))
                 record = core.create_project("plan-test")
                 project_path = core.get_project_path(record.project_id)
-                fake_plan = PlanGraph(
-                    schema_version="1.0",
-                    objective="測試任務",
+                fake_plan = GraphDefinition(
+                    version="taskgraph.v3",
                     nodes=[
-                        PlanNode(
-                            id="T1",
+                        TaskNode(
+                            id="task-1",
                             title="任務",
-                            goal="完成",
-                            definition_of_done=["done"],
-                            depends_on=[],
-                            requires_llm=False,
-                        )
+                            task_spec=TaskSpec(
+                                executor="agent",
+                                agent=AgentTaskConfig(prompt="請完成", instructions="執行"),
+                                display=TaskDisplayMetadata(label="任務", summary="完成", todo_hint="done"),
+                            ),
+                        ),
+                        ArtifactNode(id="artifact-task-1-todo", title="docs/TODO.md"),
                     ],
-                    context=PlanContext(),
+                    edges=[GraphEdge(from_node="task-1", to_node="artifact-task-1-todo", edge_type="DATA", kind="EMITS")],
                 )
                 with patch("amon.core.generate_plan_with_llm", return_value=fake_plan), patch("amon.core.emit_event") as emit_mock:
                     plan = core.generate_plan_docs("請規劃", project_path=project_path, project_id=record.project_id)
-                self.assertEqual(plan.objective, "測試任務")
-                self.assertTrue((project_path / "docs" / "plan.json").exists())
-                self.assertTrue((project_path / "docs" / "TODO.md").exists())
+                self.assertEqual(plan.version, "taskgraph.v3")
+                plan_payload = json.loads((project_path / "docs" / "plan.json").read_text(encoding="utf-8"))
+                self.assertEqual(plan_payload.get("version"), "taskgraph.v3")
+                todo_text = (project_path / "docs" / "TODO.md").read_text(encoding="utf-8")
+                self.assertIn("- [ ] task-1 任務", todo_text)
                 self.assertTrue(emit_mock.called)
             finally:
                 os.environ.pop("AMON_HOME", None)

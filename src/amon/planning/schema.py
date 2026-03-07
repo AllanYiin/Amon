@@ -29,6 +29,7 @@ class PlanNode:
 
 @dataclass
 class PlanGraph:
+    """Deprecated: retained for legacy tests and compatibility only."""
     schema_version: str = "1.0"
     objective: str = ""
     nodes: list[PlanNode] = field(default_factory=list)
