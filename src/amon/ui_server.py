@@ -2594,6 +2594,24 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         fallback_graph = self._load_latest_graph(project_path)
         return self._load_run_bundle_from_dir(run_dir, fallback_graph=fallback_graph)
 
+    def _resolve_project_path_from_run_id(self, run_id: str) -> Path:
+        normalized = str(run_id or "").strip()
+        if not normalized or "/" in normalized or "\\" in normalized or ".." in normalized:
+            raise ValueError("run_id 格式不正確")
+
+        matched_paths: list[Path] = []
+        for record in self.core.list_projects(include_deleted=False):
+            project_path = Path(record.path)
+            run_dir = project_path / ".amon" / "runs" / normalized
+            if run_dir.exists() and run_dir.is_dir():
+                matched_paths.append(project_path)
+
+        if not matched_paths:
+            raise FileNotFoundError("找不到 run")
+        if len(matched_paths) > 1:
+            raise ValueError("run_id 對應多個專案，請提供 project_id")
+        return matched_paths[0]
+
     def _load_run_bundle_from_dir(self, run_dir: Path, *, fallback_graph: dict[str, Any]) -> dict[str, Any]:
         run_id = run_dir.name
         graph = fallback_graph
