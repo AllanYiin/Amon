@@ -121,6 +121,26 @@ class UIEventStreamClientTests(unittest.TestCase):
         )
         self._run_node(script)
 
+
+    def test_notice_event_carries_run_id_into_store(self) -> None:
+        script = textwrap.dedent(
+            """
+            const { createUiEventStore } = require('./src/amon/ui/event_stream_client.js');
+            const store = createUiEventStore();
+
+            store.applyEvent('notice', { run_id: 'run-notice-1', text: 'processing' });
+
+            const snapshot = store.getState();
+            if (!snapshot.run || snapshot.run.run_id !== 'run-notice-1') {
+              throw new Error('run_id from notice event was not captured');
+            }
+            if (snapshot.run.status !== 'running') {
+              throw new Error(`unexpected run status: ${snapshot.run.status}`);
+            }
+            """
+        )
+        self._run_node(script)
+
     def test_sse_error_event_stops_reconnect(self) -> None:
         script = textwrap.dedent(
             """

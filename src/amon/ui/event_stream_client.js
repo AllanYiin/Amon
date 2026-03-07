@@ -29,6 +29,22 @@
       listeners.forEach((listener) => listener(state));
     }
 
+    function mergeRunFromPayload(payload, fallback = {}) {
+      if (!payload || typeof payload !== "object") return false;
+      const runId = typeof payload.run_id === "string" ? payload.run_id.trim() : "";
+      if (!runId) return false;
+      const nextRun = {
+        ...(state.run || {}),
+        run_id: runId,
+        ...fallback,
+      };
+      if (payload.run_status) {
+        nextRun.status = payload.run_status;
+      }
+      state.run = nextRun;
+      return true;
+    }
+
     function applyEvent(eventType, payload) {
       if (!eventType) return;
       if (eventType === "run" || eventType === "run.update") {
@@ -72,8 +88,21 @@
       }
       if (eventType === "done" && Array.isArray(payload && payload.artifacts)) {
         state.artifacts = payload.artifacts.slice();
+        mergeRunFromPayload(payload, { status: "completed", progress: 100 });
         notify();
         return;
+      }
+      if (eventType === "notice" || eventType === "reasoning" || eventType === "token") {
+        if (mergeRunFromPayload(payload, { status: "running" })) {
+          notify();
+        }
+        return;
+      }
+      if (eventType === "done") {
+        const doneStatus = payload && typeof payload.status === "string" ? payload.status : "completed";
+        if (mergeRunFromPayload(payload, { status: doneStatus })) {
+          notify();
+        }
       }
       if (eventType === "docs" || eventType === "docs.update") {
         if (Array.isArray(payload && payload.docs)) {
