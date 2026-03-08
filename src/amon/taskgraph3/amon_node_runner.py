@@ -23,7 +23,7 @@ class AmonNodeRunner:
         variables: dict[str, Any],
         stream_handler=None,
         request_id: str | None = None,
-        chat_id: str | None = None,
+        thread_id: str | None = None,
     ) -> None:
         self.core = core
         self.project_path = Path(project_path)
@@ -31,7 +31,7 @@ class AmonNodeRunner:
         self.variables = variables
         self.stream_handler = stream_handler
         self.request_id = request_id
-        self.chat_id = chat_id
+        self.thread_id = thread_id
 
     def run_task(self, node: TaskNode, context: dict[str, Any]) -> dict[str, Any]:
         if not node.task_spec.runnable:
@@ -58,7 +58,7 @@ class AmonNodeRunner:
             stream_handler=self.stream_handler,
             run_id=self.run_id,
             node_id=node.id,
-            chat_id=self.chat_id,
+            thread_id=self.thread_id,
         )
         ingest_summary = ingest_artifacts(
             response_text=response,

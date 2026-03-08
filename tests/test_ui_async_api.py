@@ -230,11 +230,11 @@ class UIAsyncAPITests(unittest.TestCase):
                         f"/v1/threads/stream?project_id={quote(project.project_id)}&message={quote('第一輪需求')}"
                     )
                     self.assertIsNotNone(first_done)
-                    returned_chat_id = first_done.get("thread_id")
-                    self.assertTrue(returned_chat_id)
+                    returned_thread_id = first_done.get("thread_id")
+                    self.assertTrue(returned_thread_id)
 
                     second_notices, second_done = collect_stream(
-                        f"/v1/threads/stream?project_id={quote(project.project_id)}&thread_id={quote(str(returned_chat_id))}&message={quote('延續上一輪')}"
+                        f"/v1/threads/stream?project_id={quote(project.project_id)}&thread_id={quote(str(returned_thread_id))}&message={quote('延續上一輪')}"
                     )
                     self.assertIsNotNone(second_done)
 
@@ -254,7 +254,7 @@ class UIAsyncAPITests(unittest.TestCase):
                 os.environ.pop("AMON_HOME", None)
 
 
-    def test_chat_stream_follow_up_without_chat_id_suppresses_bootstrap_notices(self) -> None:
+    def test_chat_stream_follow_up_without_thread_id_suppresses_bootstrap_notices(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"
             os.environ["AMON_HOME"] = str(data_dir)
@@ -305,7 +305,7 @@ class UIAsyncAPITests(unittest.TestCase):
                     return_value=(SimpleNamespace(run_id="run-follow-up-no-chatid", execution_route="planner", planner_enabled=True), "done"),
                 ):
                     first_notices = collect_notices("第一輪需求")
-                    second_notices = collect_notices("第二輪延續但不帶 chat_id")
+                    second_notices = collect_notices("第二輪延續但不帶 thread_id")
 
                 first_joined = "\n".join(first_notices)
                 self.assertIn("已收到你的需求", first_joined)
@@ -388,7 +388,7 @@ class UIAsyncAPITests(unittest.TestCase):
                     available_skills=None,
                     stream_handler=None,
                     run_id=None,
-                    chat_id=None,
+                    thread_id=None,
                     conversation_history=None,
                     request_id=None,
                 ):
@@ -485,7 +485,7 @@ class UIAsyncAPITests(unittest.TestCase):
                     available_skills=None,
                     stream_handler=None,
                     run_id=None,
-                    chat_id=None,
+                    thread_id=None,
                     conversation_history=None,
                     request_id=None,
                 ):
@@ -540,14 +540,14 @@ class UIAsyncAPITests(unittest.TestCase):
                             break
 
                     self.assertIsNotNone(done_payload_1)
-                    chat_id = done_payload_1["thread_id"]
+                    thread_id = done_payload_1["thread_id"]
                     first_run_id = done_payload_1["run_id"]
                     self.assertTrue(first_run_id)
 
                     conn = HTTPConnection("127.0.0.1", port, timeout=5)
                     conn.request(
                         "GET",
-                        f"/v1/threads/stream?project_id={quote(project.project_id)}&thread_id={quote(chat_id)}&message={quote('先做後端')}"
+                        f"/v1/threads/stream?project_id={quote(project.project_id)}&thread_id={quote(thread_id)}&message={quote('先做後端')}"
                     )
                     resp2 = conn.getresponse()
                     self.assertEqual(resp2.status, 200)
@@ -609,7 +609,7 @@ class UIAsyncAPITests(unittest.TestCase):
                     available_skills=None,
                     stream_handler=None,
                     run_id=None,
-                    chat_id=None,
+                    thread_id=None,
                     conversation_history=None,
                     request_id=None,
                 ):
@@ -663,14 +663,14 @@ class UIAsyncAPITests(unittest.TestCase):
                             break
 
                     self.assertIsNotNone(done_payload_1)
-                    chat_id = done_payload_1["thread_id"]
+                    thread_id = done_payload_1["thread_id"]
                     first_run_id = done_payload_1["run_id"]
                     self.assertTrue(first_run_id)
 
                     conn = HTTPConnection("127.0.0.1", port, timeout=5)
                     conn.request(
                         "GET",
-                        f"/v1/threads/stream?project_id={quote(project.project_id)}&thread_id={quote(chat_id)}&message={quote('後端')}"
+                        f"/v1/threads/stream?project_id={quote(project.project_id)}&thread_id={quote(thread_id)}&message={quote('後端')}"
                     )
                     resp2 = conn.getresponse()
                     self.assertEqual(resp2.status, 200)
@@ -961,7 +961,7 @@ class UIAsyncAPITests(unittest.TestCase):
 
 
 
-    def test_project_context_prefers_chat_run_id_when_chat_id_provided(self) -> None:
+    def test_project_context_prefers_chat_run_id_when_thread_id_provided(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"
             os.environ["AMON_HOME"] = str(data_dir)
@@ -1044,7 +1044,7 @@ class UIAsyncAPITests(unittest.TestCase):
             try:
                 core = AmonCore()
                 core.initialize()
-                project = core.create_project("chat-history-test")
+                project = core.create_project("threads-test")
                 project_path = Path(project.path)
                 sessions_dir = project_path / ".amon" / "threads"
                 sessions_dir.mkdir(parents=True, exist_ok=True)
@@ -1100,7 +1100,7 @@ class UIAsyncAPITests(unittest.TestCase):
             try:
                 core = AmonCore()
                 core.initialize()
-                project = core.create_project("chat-history-cache-test")
+                project = core.create_project("threads-cache-test")
                 project_path = Path(project.path)
                 sessions_dir = project_path / ".amon" / "threads"
                 sessions_dir.mkdir(parents=True, exist_ok=True)
@@ -1324,7 +1324,7 @@ class UIAsyncAPITests(unittest.TestCase):
             try:
                 core = AmonCore()
                 core.initialize()
-                project = core.create_project("context-chat-history-fallback")
+                project = core.create_project("context-threads-fallback")
                 project_path = Path(project.path)
 
                 sessions_dir = project_path / ".amon" / "threads"
@@ -1369,7 +1369,7 @@ class UIAsyncAPITests(unittest.TestCase):
                     server.server_close()
                 os.environ.pop("AMON_HOME", None)
 
-    def test_context_clear_chat_requires_chat_id(self) -> None:
+    def test_context_clear_chat_requires_thread_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"
             os.environ["AMON_HOME"] = str(data_dir)
@@ -1396,7 +1396,7 @@ class UIAsyncAPITests(unittest.TestCase):
                 payload = json.loads(response.read().decode("utf-8"))
 
                 self.assertEqual(response.status, 400)
-                self.assertIn("chat_id", payload.get("message", ""))
+                self.assertIn("thread_id", payload.get("message", ""))
             finally:
                 if server:
                     server.shutdown()
@@ -1430,7 +1430,7 @@ class UIAsyncAPITests(unittest.TestCase):
                 conn.request(
                     "POST",
                     "/v1/context/clear",
-                    body=json.dumps({"scope": "chat", "project_id": project.project_id, "chat_id": "chat-a"}, ensure_ascii=False),
+                    body=json.dumps({"scope": "chat", "project_id": project.project_id, "thread_id": "chat-a"}, ensure_ascii=False),
                     headers={"Content-Type": "application/json"},
                 )
                 response = conn.getresponse()
@@ -1438,7 +1438,7 @@ class UIAsyncAPITests(unittest.TestCase):
 
                 self.assertEqual(response.status, 200)
                 self.assertEqual(payload.get("scope"), "chat")
-                self.assertEqual(payload.get("chat_id"), "chat-a")
+                self.assertEqual(payload.get("thread_id"), "chat-a")
                 self.assertFalse((sessions_dir / "chat-a" / "events.jsonl").exists())
                 self.assertTrue((sessions_dir / "chat-b" / "events.jsonl").exists())
             finally:
@@ -1447,7 +1447,7 @@ class UIAsyncAPITests(unittest.TestCase):
                     server.server_close()
                 os.environ.pop("AMON_HOME", None)
 
-    def test_context_clear_project_preserves_chat_sessions(self) -> None:
+    def test_context_clear_project_preserves_thread_sessions(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"
             os.environ["AMON_HOME"] = str(data_dir)
@@ -1732,7 +1732,7 @@ class UIAsyncAPITests(unittest.TestCase):
                     available_skills=None,
                     stream_handler=None,
                     run_id=None,
-                    chat_id=None,
+                    thread_id=None,
                     conversation_history=None,
                     request_id=None,
                 ):
@@ -2388,7 +2388,7 @@ class UIAsyncAPITests(unittest.TestCase):
                     "message": "UI 測試 toast 訊息",
                     "duration_ms": 18000,
                     "project_id": project.project_id,
-                    "chat_id": "chat_test_1",
+                    "thread_id": "chat_test_1",
                     "route": "#/logs",
                     "source": "ui",
                     "metadata": {"view": "logs-events", "error_code": "E_TOAST"},
@@ -2413,7 +2413,7 @@ class UIAsyncAPITests(unittest.TestCase):
                 self.assertTrue(any(item.get("event") == "ui_toast_displayed" for item in records))
                 toast_record = next(item for item in records if item.get("event") == "ui_toast_displayed")
                 self.assertEqual(toast_record["project_id"], project.project_id)
-                self.assertEqual(toast_record["chat_id"], "chat_test_1")
+                self.assertEqual(toast_record["thread_id"], "chat_test_1")
                 self.assertEqual(toast_record["level"], "WARNING")
                 self.assertEqual(toast_record["metadata"]["error_code"], "E_TOAST")
             finally:

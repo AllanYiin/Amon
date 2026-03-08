@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from amon.chat.session_store import append_event
+from amon.chat.thread_store import append_event
 from amon.config import read_yaml, write_yaml
 from amon.core import AmonCore
 from amon.events import emit_event
@@ -26,7 +26,7 @@ class CommandPlan:
     name: str
     args: dict[str, Any]
     project_id: str
-    chat_id: str
+    thread_id: str
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -394,7 +394,7 @@ def _handle_graph_patch(core: AmonCore, plan: CommandPlan) -> dict[str, Any]:
         "request_id": request_id,
         "requested_at": requested_at,
         "project_id": plan.project_id,
-        "chat_id": plan.chat_id,
+        "thread_id": plan.thread_id,
         "message": message,
     }
     append_jsonl(audit_path, payload)
@@ -600,7 +600,7 @@ def _append_plan_event(
     }
     if extra:
         event.update(extra)
-    append_event(plan.chat_id, event)
+    append_event(plan.thread_id, event)
 
 
 def _build_plan_card(command_name: str, args: dict[str, Any]) -> str:

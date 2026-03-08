@@ -30,10 +30,10 @@ export function createContextService({ api }) {
     },
     async clearContext(scope = "project", options = {}) {
       const projectId = String(options?.projectId || "").trim();
-      const threadId = String(options?.threadId || options?.chatId || "").trim();
+      const threadId = String(options?.threadId || options?.threadId || "").trim();
       return api.request("/context/clear", {
         method: "POST",
-        body: JSON.stringify({ scope, project_id: projectId, chat_id: threadId || null }),
+        body: JSON.stringify({ scope, project_id: projectId, thread_id: threadId || null }),
       });
     },
   };

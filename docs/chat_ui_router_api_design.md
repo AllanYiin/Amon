@@ -37,7 +37,7 @@
   - `src/amon/chat/session.py`（Chat session lifecycle，讀寫 sessions/）
   - `src/amon/chat/router.py`（Chat UI/CLI/API routing，對應 Graph runtime）
 - 插入點：
-  - `AmonCore` 增加 chat session 入口（例如 `core.start_chat_session()`）。
+  - `AmonCore` 增加 thread 入口（例如 `core.start_thread_session()`）。
   - `ui_server.py` 新增 `/v1/chat/*` API 路由（僅註冊，不改既有 endpoints）。
 
 ### 2) `amon/commands/`（API command registry + executor）
@@ -98,5 +98,5 @@
 ## 盡量少改的現有檔案
 - `src/amon/cli.py`（新增 `chat`、`commands` 子指令）
 - `src/amon/ui_server.py`（新增 `/v1/chat/*`、`/v1/commands/*` 路由）
-- `src/amon/core.py`（新增 chat session API，但不動既有流程）
+- `src/amon/core.py`（新增 thread API，但不動既有流程）
 

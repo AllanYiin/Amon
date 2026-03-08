@@ -25,7 +25,7 @@ class ChatAttachmentTests(unittest.TestCase):
             inbox_file = project_path / "docs" / "inbox" / "chat123" / "demo.txt"
             self.assertTrue(inbox_file.exists())
             self.assertEqual(inbox_file.read_text(encoding="utf-8"), "hello attachment")
-            self.assertEqual(manifest["chat_id"], "chat123")
+            self.assertEqual(manifest["thread_id"], "chat123")
             self.assertEqual(len(manifest["entries"]), 1)
             entry = manifest["entries"][0]
             self.assertEqual(entry["filename"], "demo.txt")
@@ -69,12 +69,12 @@ class ChatAttachCliParserTests(unittest.TestCase):
     def test_build_parser_supports_chat_attach(self) -> None:
         parser = build_parser()
         args = parser.parse_args(
-            ["chat", "attach", "--project", "proj1", "--chat-id", "chat1", "--file", "demo.txt"]
+            ["chat", "attach", "--project", "proj1", "--thread-id", "chat1", "--file", "demo.txt"]
         )
         self.assertEqual(args.command, "chat")
         self.assertEqual(args.chat_command, "attach")
         self.assertEqual(args.project, "proj1")
-        self.assertEqual(args.chat_id, "chat1")
+        self.assertEqual(args.thread_id, "chat1")
         self.assertEqual(args.file, "demo.txt")
 
 

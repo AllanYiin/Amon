@@ -239,9 +239,9 @@ def build_parser() -> argparse.ArgumentParser:
     chat_parser.add_argument("--project", help="指定專案 ID")
     chat_parser.add_argument("--engine", choices=["taskgraph3"], default="taskgraph3", help="執行引擎（僅支援 taskgraph3）")
     chat_sub = chat_parser.add_subparsers(dest="chat_command")
-    chat_attach = chat_sub.add_parser("attach", help="將附件落地到 chat inbox")
+    chat_attach = chat_sub.add_parser("attach", help="將附件落地到 thread inbox")
     chat_attach.add_argument("--project", required=True, help="指定專案 ID")
-    chat_attach.add_argument("--chat-id", required=True, help="指定 chat session ID")
+    chat_attach.add_argument("--thread-id", required=True, help="指定 thread ID")
     chat_attach.add_argument("--file", required=True, help="來源檔案路徑")
     chat_attach.add_argument("--name", help="落地檔名（可選）")
 
@@ -971,7 +971,7 @@ def _handle_chat(core: AmonCore, args: argparse.Namespace) -> None:
         project_path = core.get_project_path(args.project)
         manifest = save_attachment(
             project_path=project_path,
-            chat_id=args.chat_id,
+            thread_id=args.thread_id,
             source_file_path=args.file,
             target_name=args.name,
         )

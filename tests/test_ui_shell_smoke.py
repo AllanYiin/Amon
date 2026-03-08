@@ -243,8 +243,8 @@ class UIShellSmokeTests(unittest.TestCase):
         self.assertIn("threadList: []", app_state_js)
         self.assertIn("threadsByProject: {}", app_state_js)
         self.assertIn("pendingProjectLoadToken: 0", app_state_js)
-        self.assertNotIn("projectChatSessions", app_state_js)
-        self.assertNotIn('amon.ui.projectChatSessions', bootstrap_js)
+        self.assertNotIn("projectThreads", app_state_js)
+        self.assertNotIn('amon.ui.projectThreads', bootstrap_js)
 
         self.assertIn("function beginProjectHydration()", bootstrap_js)
         self.assertIn("function isCurrentProjectHydrationToken(token)", bootstrap_js)
