@@ -60,7 +60,7 @@ class UIChatStreamInitTests(unittest.TestCase):
                 conn = HTTPConnection("127.0.0.1", port, timeout=5)
                 conn.request(
                     "POST",
-                    "/v1/chat/stream/init",
+                    "/v1/threads/stream/init",
                     body=json.dumps({"project_id": project.project_id, "message": long_message}),
                     headers={"Content-Type": "application/json"},
                 )
@@ -77,7 +77,7 @@ class UIChatStreamInitTests(unittest.TestCase):
                     conn = HTTPConnection("127.0.0.1", port, timeout=5)
                     conn.request(
                         "GET",
-                        f"/v1/chat/stream?project_id={quote(project.project_id)}&stream_token={quote(stream_token)}",
+                        f"/v1/threads/stream?project_id={quote(project.project_id)}&stream_token={quote(stream_token)}",
                     )
                     sse_resp = conn.getresponse()
                     self.assertEqual(sse_resp.status, 200)
@@ -134,7 +134,7 @@ class UIChatStreamInitTests(unittest.TestCase):
                 conn = HTTPConnection("127.0.0.1", port, timeout=5)
                 conn.request(
                     "POST",
-                    "/v1/chat/stream/init",
+                    "/v1/threads/stream/init",
                     body=json.dumps({"project_id": project.project_id, "message": "請回覆"}),
                     headers={"Content-Type": "application/json"},
                 )
@@ -151,7 +151,7 @@ class UIChatStreamInitTests(unittest.TestCase):
                     conn = HTTPConnection("127.0.0.1", port, timeout=5)
                     conn.request(
                         "GET",
-                        f"/v1/chat/stream?project_id={quote(project.project_id)}&stream_token={quote(stream_token)}",
+                        f"/v1/threads/stream?project_id={quote(project.project_id)}&stream_token={quote(stream_token)}",
                     )
                     sse_resp = conn.getresponse()
                     self.assertEqual(sse_resp.status, 200)
@@ -204,7 +204,7 @@ class UIChatStreamInitTests(unittest.TestCase):
                 conn = HTTPConnection("127.0.0.1", port, timeout=5)
                 conn.request(
                     "POST",
-                    "/v1/chat/stream/init",
+                    "/v1/threads/stream/init",
                     body=json.dumps({"project_id": project.project_id, "message": "請回覆"}),
                     headers={"Content-Type": "application/json"},
                 )
@@ -221,7 +221,7 @@ class UIChatStreamInitTests(unittest.TestCase):
                     conn = HTTPConnection("127.0.0.1", port, timeout=5)
                     conn.request(
                         "GET",
-                        f"/v1/chat/stream?project_id={quote(project.project_id)}&stream_token={quote(stream_token)}",
+                        f"/v1/threads/stream?project_id={quote(project.project_id)}&stream_token={quote(stream_token)}",
                     )
                     sse_resp = conn.getresponse()
                     self.assertEqual(sse_resp.status, 200)

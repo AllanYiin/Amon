@@ -68,39 +68,36 @@ class ChatContinuationFlowTests(unittest.TestCase):
                     conn1 = HTTPConnection("127.0.0.1", port, timeout=5)
                     conn1.request(
                         "GET",
-                        f"/v1/chat/stream?project_id={quote(project.project_id)}&message={quote('幫我規劃上線')}",
+                        f"/v1/threads/stream?project_id={quote(project.project_id)}&message={quote('幫我規劃上線')}",
                     )
                     resp1 = conn1.getresponse()
                     self.assertEqual(resp1.status, 200)
                     first_done = _read_done_payload(resp1)
                     self.assertIsNotNone(first_done)
-                    first_chat_id = first_done["chat_id"]
+                    first_thread_id = first_done["thread_id"]
 
-                    # Simulate hydrate/reload path: UI ensures session again without passing chat_id.
+                    # Simulate hydrate/reload path: UI reads server-side active thread.
                     ensure_conn = HTTPConnection("127.0.0.1", port, timeout=5)
                     ensure_conn.request(
-                        "POST",
-                        "/v1/chat/sessions",
-                        body=json.dumps({"project_id": project.project_id}),
-                        headers={"Content-Type": "application/json"},
+                        "GET",
+                        f"/v1/projects/{quote(project.project_id)}/threads",
                     )
                     ensure_resp = ensure_conn.getresponse()
                     self.assertEqual(ensure_resp.status, 200)
                     ensure_payload = json.loads(ensure_resp.read().decode("utf-8"))
-                    self.assertEqual(ensure_payload.get("chat_id"), first_chat_id)
-                    self.assertEqual(ensure_payload.get("chat_id_source"), "active")
+                    self.assertEqual(ensure_payload.get("active_thread_id"), first_thread_id)
 
                     conn2 = HTTPConnection("127.0.0.1", port, timeout=5)
                     conn2.request(
                         "GET",
-                        f"/v1/chat/stream?project_id={quote(project.project_id)}&message={quote('後端')}",
+                        f"/v1/threads/stream?project_id={quote(project.project_id)}&message={quote('後端')}",
                     )
                     resp2 = conn2.getresponse()
                     self.assertEqual(resp2.status, 200)
                     second_done = _read_done_payload(resp2)
                     self.assertIsNotNone(second_done)
-                    self.assertEqual(second_done["chat_id"], first_chat_id)
-                    self.assertEqual(second_done.get("chat_id_source"), "active")
+                    self.assertEqual(second_done["thread_id"], first_thread_id)
+                    self.assertEqual(second_done.get("thread_id_source"), "active")
                     self.assertGreaterEqual(int(second_done.get("history_count") or 0), 2)
 
                 self.assertEqual(run_calls[0][1], [])
@@ -112,7 +109,7 @@ class ChatContinuationFlowTests(unittest.TestCase):
                     ],
                 )
 
-                session_file = data_dir / "projects" / project.project_id / ".amon" / "threads" / first_chat_id / "events.jsonl"
+                session_file = data_dir / "projects" / project.project_id / ".amon" / "threads" / first_thread_id / "events.jsonl"
                 payloads = [json.loads(line) for line in session_file.read_text(encoding="utf-8").splitlines() if line.strip()]
                 assistant_events = [item for item in payloads if item.get("type") == "assistant"]
                 self.assertGreaterEqual(len(assistant_events), 2)
