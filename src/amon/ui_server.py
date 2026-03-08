@@ -33,6 +33,7 @@ from amon.chat.router_types import RouterResult
 from amon.chat.session_store import (
     append_event,
     ensure_chat_session,
+    load_latest_chat_id,
     load_latest_run_context,
 )
 from amon.commands.executor import CommandPlan, execute
@@ -1065,6 +1066,9 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     session_path = self._chat_session_file(project_path, chat_id)
                     if session_path.exists():
                         session_path.unlink()
+                    legacy_session_path = project_path / "sessions" / "chat" / f"{chat_id}.jsonl"
+                    if legacy_session_path.exists():
+                        legacy_session_path.unlink()
                 self._send_json(200, {"status": "ok", "scope": scope, "chat_id": chat_id or None})
             except ValueError as exc:
                 self._send_json(400, {"message": str(exc)})
@@ -1277,7 +1281,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             except Exception as exc:  # noqa: BLE001
                 self._handle_error(exc, status=500)
                 return
-            status = 200 if chat_id_source in {"incoming", "latest"} else 201
+            status = 200 if chat_id_source in {"incoming", "active"} else 201
             self._send_json(status, {"chat_id": chat_id, "chat_id_source": chat_id_source})
             return
         if parsed.path == "/v1/chat/plan/confirm":
@@ -2256,33 +2260,41 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
 
     def _build_project_chat_history(self, project_id: str, chat_id: str | None = None) -> dict[str, Any]:
         project_path = self.core.get_project_path(project_id)
-        sessions_dir = project_path / "sessions" / "chat"
-        if not sessions_dir.exists():
+        _ = load_latest_chat_id(project_id)
+        threads_dir = project_path / ".amon" / "threads"
+        if not threads_dir.exists():
             return {"project_id": project_id, "chat_id": None, "messages": []}
 
-        session_files = [path for path in sessions_dir.glob("*.jsonl") if path.is_file()]
-        if not session_files:
-            return {"project_id": project_id, "chat_id": None, "messages": []}
+        selected_chat_id = str(chat_id or "").strip()
+        if not selected_chat_id:
+            selected_chat_id = str(load_latest_chat_id(project_id) or "").strip()
+        candidate_chat_ids: list[str] = []
+        if selected_chat_id:
+            candidate_chat_ids.append(selected_chat_id)
+        try:
+            index_path = threads_dir / "index.json"
+            if index_path.exists():
+                index_payload = json.loads(index_path.read_text(encoding="utf-8"))
+                threads = index_payload.get("threads") if isinstance(index_payload, dict) else None
+                if isinstance(threads, list):
+                    for item in threads:
+                        if not isinstance(item, dict):
+                            continue
+                        candidate = str(item.get("thread_id") or "").strip()
+                        if candidate and candidate not in candidate_chat_ids:
+                            candidate_chat_ids.append(candidate)
+        except (OSError, ValueError, json.JSONDecodeError):
+            pass
 
-        selected_session: Path | None = None
-        if chat_id:
-            normalized_chat_id = str(chat_id).strip()
-            candidate = sessions_dir / f"{normalized_chat_id}.jsonl"
-            if candidate.exists() and candidate.is_file():
-                selected_session = candidate
-        if selected_session is None:
-            selected_session = max(session_files, key=lambda path: path.stat().st_mtime)
-        selected_messages = self._read_chat_session_messages(project_path, selected_session)
+        for candidate_chat_id in candidate_chat_ids:
+            candidate_session = threads_dir / candidate_chat_id / "events.jsonl"
+            if not candidate_session.exists() or not candidate_session.is_file():
+                continue
+            selected_messages = self._read_chat_session_messages(project_path, candidate_session)
+            if selected_messages:
+                return {"project_id": project_id, "chat_id": candidate_chat_id, "messages": selected_messages[-60:]}
 
-        if not selected_messages:
-            for session_file in sorted(session_files, key=lambda path: path.stat().st_mtime, reverse=True):
-                fallback_messages = self._read_chat_session_messages(project_path, session_file)
-                if fallback_messages:
-                    selected_session = session_file
-                    selected_messages = fallback_messages
-                    break
-
-        return {"project_id": project_id, "chat_id": selected_session.stem, "messages": selected_messages[-60:]}
+        return {"project_id": project_id, "chat_id": selected_chat_id or None, "messages": []}
 
     def _chat_messages_cache_path(self, project_path: Path, chat_id: str) -> Path:
         safe_chat_id = re.sub(r"[^0-9A-Za-z_-]", "_", str(chat_id or "")).strip("_") or "default"
@@ -2293,7 +2305,8 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             session_stat = session_path.stat()
         except OSError:
             return []
-        cache_path = self._chat_messages_cache_path(project_path, session_path.stem)
+        session_id = session_path.parent.name if session_path.name == "events.jsonl" else session_path.stem
+        cache_path = self._chat_messages_cache_path(project_path, session_id)
         try:
             if cache_path.exists():
                 cached = json.loads(cache_path.read_text(encoding="utf-8"))
@@ -2542,7 +2555,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         normalized_chat_id = str(chat_id or "").strip()
         if not normalized_chat_id or "/" in normalized_chat_id or "\\" in normalized_chat_id or ".." in normalized_chat_id:
             raise ValueError("chat_id 格式不合法")
-        return project_path / "sessions" / "chat" / f"{normalized_chat_id}.jsonl"
+        return project_path / ".amon" / "threads" / normalized_chat_id / "events.jsonl"
 
     def _read_project_context(self, project_path: Path) -> str:
         context_path = self._project_context_file(project_path)

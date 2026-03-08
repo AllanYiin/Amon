@@ -18,7 +18,7 @@ from http.server import ThreadingHTTPServer
 
 
 class ChatContinuationFlowTests(unittest.TestCase):
-    def test_stream_without_chat_id_reuses_latest_session_and_persists_assistant(self) -> None:
+    def test_stream_without_chat_id_reuses_active_session_and_persists_assistant(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"
             os.environ["AMON_HOME"] = str(data_dir)
@@ -88,7 +88,7 @@ class ChatContinuationFlowTests(unittest.TestCase):
                     self.assertEqual(ensure_resp.status, 200)
                     ensure_payload = json.loads(ensure_resp.read().decode("utf-8"))
                     self.assertEqual(ensure_payload.get("chat_id"), first_chat_id)
-                    self.assertEqual(ensure_payload.get("chat_id_source"), "latest")
+                    self.assertEqual(ensure_payload.get("chat_id_source"), "active")
 
                     conn2 = HTTPConnection("127.0.0.1", port, timeout=5)
                     conn2.request(
@@ -100,7 +100,7 @@ class ChatContinuationFlowTests(unittest.TestCase):
                     second_done = _read_done_payload(resp2)
                     self.assertIsNotNone(second_done)
                     self.assertEqual(second_done["chat_id"], first_chat_id)
-                    self.assertEqual(second_done.get("chat_id_source"), "latest")
+                    self.assertEqual(second_done.get("chat_id_source"), "active")
                     self.assertGreaterEqual(int(second_done.get("history_count") or 0), 2)
 
                 self.assertEqual(run_calls[0][1], [])
@@ -112,7 +112,7 @@ class ChatContinuationFlowTests(unittest.TestCase):
                     ],
                 )
 
-                session_file = data_dir / "projects" / project.project_id / "sessions" / "chat" / f"{first_chat_id}.jsonl"
+                session_file = data_dir / "projects" / project.project_id / ".amon" / "threads" / first_chat_id / "events.jsonl"
                 payloads = [json.loads(line) for line in session_file.read_text(encoding="utf-8").splitlines() if line.strip()]
                 assistant_events = [item for item in payloads if item.get("type") == "assistant"]
                 self.assertGreaterEqual(len(assistant_events), 2)

@@ -132,7 +132,7 @@ class ChatSessionStoreTests(unittest.TestCase):
                 os.environ.pop("AMON_HOME", None)
 
             session_path = (
-                Path(temp_dir) / "projects" / project_id / "sessions" / "chat" / f"{chat_id}.jsonl"
+                Path(temp_dir) / "projects" / project_id / ".amon" / "threads" / chat_id / "events.jsonl"
             )
             self.assertTrue(session_path.exists())
             lines = session_path.read_text(encoding="utf-8").strip().splitlines()
@@ -161,7 +161,7 @@ class ChatSessionStoreTests(unittest.TestCase):
                 os.environ.pop("AMON_HOME", None)
 
             session_path = (
-                Path(temp_dir) / "projects" / project_id / "sessions" / "chat" / f"{chat_id}.jsonl"
+                Path(temp_dir) / "projects" / project_id / ".amon" / "threads" / chat_id / "events.jsonl"
             )
             lines = [line for line in session_path.read_text(encoding="utf-8").splitlines() if line.strip()]
             self.assertEqual(len(lines), 2)
@@ -178,7 +178,7 @@ class ChatSessionStoreTests(unittest.TestCase):
                 os.environ.pop("AMON_HOME", None)
 
 
-    def test_ensure_chat_session_prefers_incoming_then_latest_then_new(self) -> None:
+    def test_ensure_chat_session_prefers_incoming_then_active_then_new(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir
             try:
@@ -191,9 +191,9 @@ class ChatSessionStoreTests(unittest.TestCase):
                 self.assertEqual(ensured_source, "incoming")
                 self.assertEqual(ensured_chat_id, created_chat_id)
 
-                latest_chat_id, latest_source = ensure_chat_session(project_id, "missing-chat")
-                self.assertEqual(latest_source, "latest")
-                self.assertEqual(latest_chat_id, created_chat_id)
+                active_chat_id, active_source = ensure_chat_session(project_id, "missing-chat")
+                self.assertEqual(active_source, "active")
+                self.assertEqual(active_chat_id, created_chat_id)
                 self.assertEqual(load_latest_chat_id(project_id), created_chat_id)
             finally:
                 os.environ.pop("AMON_HOME", None)
@@ -308,6 +308,96 @@ class ChatSessionStoreTests(unittest.TestCase):
                 {"role": "assistant", "content": "a79"},
             ],
         )
+
+    def test_rollup_updates_after_user_and_assistant_events(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                project_id = "proj-rollup-001"
+                chat_id = create_chat_session(project_id)
+                append_event(chat_id, {"type": "user", "text": "先做後端", "project_id": project_id})
+                append_event(
+                    chat_id,
+                    {
+                        "type": "assistant",
+                        "text": "好的，先建立 API。",
+                        "project_id": project_id,
+                        "run_id": "run-rollup-1",
+                    },
+                )
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+            rollup_path = Path(temp_dir) / "projects" / project_id / ".amon" / "threads" / chat_id / "rollup.json"
+            rollup = json.loads(rollup_path.read_text(encoding="utf-8"))
+            self.assertEqual(rollup["thread_id"], chat_id)
+            self.assertEqual(rollup["message_count"], 2)
+            self.assertEqual(rollup["latest_run_id"], "run-rollup-1")
+            self.assertEqual(rollup["run_count"], 1)
+            self.assertEqual(rollup["last_user_text"], "先做後端")
+            self.assertEqual(rollup["last_assistant_text"], "好的，先建立 API。")
+            self.assertTrue(str(rollup.get("updated_at") or "").strip())
+
+    def test_migration_moves_legacy_sessions_into_thread_storage(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                project_id = "proj-migrate-001"
+                legacy_dir = Path(temp_dir) / "projects" / project_id / "sessions" / "chat"
+                legacy_dir.mkdir(parents=True, exist_ok=True)
+                older = legacy_dir / "legacy-old.jsonl"
+                newer = legacy_dir / "legacy-new.jsonl"
+                older.write_text(json.dumps({"type": "user", "text": "舊訊息", "project_id": project_id}, ensure_ascii=False) + "\n", encoding="utf-8")
+                newer.write_text(
+                    "\n".join(
+                        [
+                            json.dumps({"type": "user", "text": "新任務", "project_id": project_id}, ensure_ascii=False),
+                            json.dumps({"type": "assistant", "text": "新回覆", "project_id": project_id, "run_id": "run-new"}, ensure_ascii=False),
+                        ]
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                os.utime(older, (1000, 1000))
+                os.utime(newer, (2000, 2000))
+
+                ensured_chat_id, ensured_source = ensure_chat_session(project_id)
+                context = load_latest_run_context(project_id, "legacy-new")
+                dialogue = load_recent_dialogue(project_id, "legacy-new")
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+            self.assertEqual(ensured_source, "active")
+            self.assertEqual(ensured_chat_id, "legacy-new")
+            self.assertEqual(context["run_id"], "run-new")
+            self.assertEqual(dialogue[-1]["content"], "新回覆")
+
+            project_state_path = Path(temp_dir) / "projects" / project_id / ".amon" / "project_state.json"
+            state_payload = json.loads(project_state_path.read_text(encoding="utf-8"))
+            self.assertEqual(state_payload.get("active_thread_id"), "legacy-new")
+
+            migrated_events = Path(temp_dir) / "projects" / project_id / ".amon" / "threads" / "legacy-new" / "events.jsonl"
+            self.assertTrue(migrated_events.exists())
+
+    def test_active_thread_invariant_does_not_use_legacy_latest_mtime(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                project_id = "proj-active-001"
+                first_chat_id = create_chat_session(project_id)
+                second_chat_id = create_chat_session(project_id)
+
+                first_event_path = Path(temp_dir) / "projects" / project_id / ".amon" / "threads" / first_chat_id / "events.jsonl"
+                second_event_path = Path(temp_dir) / "projects" / project_id / ".amon" / "threads" / second_chat_id / "events.jsonl"
+                os.utime(first_event_path, (3000, 3000))
+                os.utime(second_event_path, (1000, 1000))
+
+                ensured_chat_id, ensured_source = ensure_chat_session(project_id)
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+            self.assertEqual(ensured_source, "active")
+            self.assertEqual(ensured_chat_id, second_chat_id)
 
 
 if __name__ == "__main__":
