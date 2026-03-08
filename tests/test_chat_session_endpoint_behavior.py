@@ -8,6 +8,7 @@ import unittest
 from functools import partial
 from http.client import HTTPConnection
 from pathlib import Path
+from urllib.parse import quote
 
 from amon.core import AmonCore
 from amon.ui_server import AmonUIHandler
@@ -15,7 +16,7 @@ from http.server import ThreadingHTTPServer
 
 
 class ChatSessionEndpointBehaviorTests(unittest.TestCase):
-    def test_chat_sessions_endpoint_ensures_existing_or_active_chat_id(self) -> None:
+    def test_thread_endpoints_use_active_thread_instead_of_latest(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = str(Path(temp_dir) / "data")
             server = None
@@ -34,34 +35,38 @@ class ChatSessionEndpointBehaviorTests(unittest.TestCase):
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
                 thread.start()
 
-                def ensure_session(chat_id: str | None = None) -> tuple[int, dict[str, str]]:
-                    body = {"project_id": project.project_id}
-                    if chat_id:
-                        body["chat_id"] = chat_id
-                    conn = HTTPConnection("127.0.0.1", port, timeout=5)
-                    conn.request(
-                        "POST",
-                        "/v1/chat/sessions",
-                        body=json.dumps(body),
-                        headers={"Content-Type": "application/json"},
-                    )
-                    resp = conn.getresponse()
-                    payload = json.loads(resp.read().decode("utf-8"))
-                    return resp.status, payload
+                project_path = f"/v1/projects/{quote(project.project_id)}"
 
-                first_status, first_payload = ensure_session()
-                self.assertEqual(first_status, 201)
-                self.assertEqual(first_payload.get("chat_id_source"), "new")
+                conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                conn.request("POST", f"{project_path}/threads", body=json.dumps({}), headers={"Content-Type": "application/json"})
+                create1 = conn.getresponse()
+                payload1 = json.loads(create1.read().decode("utf-8"))
+                self.assertEqual(create1.status, 201)
+                thread1 = payload1["thread_id"]
 
-                second_status, second_payload = ensure_session()
-                self.assertEqual(second_status, 200)
-                self.assertEqual(second_payload.get("chat_id_source"), "active")
-                self.assertEqual(second_payload["chat_id"], first_payload["chat_id"])
+                conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                conn.request("POST", f"{project_path}/threads", body=json.dumps({}), headers={"Content-Type": "application/json"})
+                create2 = conn.getresponse()
+                payload2 = json.loads(create2.read().decode("utf-8"))
+                self.assertEqual(create2.status, 201)
+                thread2 = payload2["thread_id"]
 
-                incoming_status, incoming_payload = ensure_session(first_payload["chat_id"])
-                self.assertEqual(incoming_status, 200)
-                self.assertEqual(incoming_payload.get("chat_id_source"), "incoming")
-                self.assertEqual(incoming_payload["chat_id"], first_payload["chat_id"])
+                conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                conn.request("POST", f"{project_path}/active-thread", body=json.dumps({"thread_id": thread1}), headers={"Content-Type": "application/json"})
+                select_resp = conn.getresponse()
+                select_payload = json.loads(select_resp.read().decode("utf-8"))
+                self.assertEqual(select_resp.status, 200)
+                self.assertEqual(select_payload.get("active_thread_id"), thread1)
+
+                conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                conn.request("GET", f"{project_path}/threads")
+                list_resp = conn.getresponse()
+                list_payload = json.loads(list_resp.read().decode("utf-8"))
+                self.assertEqual(list_resp.status, 200)
+                self.assertEqual(list_payload.get("active_thread_id"), thread1)
+                ids = {row.get("thread_id") for row in list_payload.get("threads", [])}
+                self.assertIn(thread1, ids)
+                self.assertIn(thread2, ids)
             finally:
                 if server:
                     server.shutdown()

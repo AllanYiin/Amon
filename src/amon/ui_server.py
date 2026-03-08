@@ -32,6 +32,8 @@ from amon.chat.router_llm import should_continue_run_with_llm
 from amon.chat.router_types import RouterResult
 from amon.chat.session_store import (
     append_event,
+    chat_session_exists,
+    create_chat_session,
     ensure_chat_session,
     load_latest_chat_id,
     load_latest_run_context,
@@ -63,10 +65,10 @@ class ClientDisconnectedError(ConnectionAbortedError):
     """Raised when an SSE client disconnects during stream writes."""
 
 
-def _create_chat_stream_token(*, message: str, project_id: str | None, chat_id: str | None) -> str:
+def _create_thread_stream_token(*, message: str, project_id: str | None, thread_id: str | None) -> str:
     token = uuid.uuid4().hex
     now = time.time()
-    payload = {"message": message, "project_id": project_id, "chat_id": chat_id, "created_at": now}
+    payload = {"message": message, "project_id": project_id, "thread_id": thread_id, "created_at": now}
     with _CHAT_STREAM_INIT_LOCK:
         _CHAT_STREAM_INIT_STORE[token] = payload
         expired = [key for key, item in _CHAT_STREAM_INIT_STORE.items() if now - float(item.get("created_at") or now) > _CHAT_STREAM_INIT_TTL_S]
@@ -75,7 +77,7 @@ def _create_chat_stream_token(*, message: str, project_id: str | None, chat_id: 
     return token
 
 
-def _consume_chat_stream_token(token: str) -> dict[str, Any] | None:
+def _consume_thread_stream_token(token: str) -> dict[str, Any] | None:
     if not token:
         return None
     now = time.time()
@@ -683,7 +685,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 return
             self._send_json(200, {"request": status})
             return
-        if parsed.path == "/v1/chat/stream":
+        if parsed.path == "/v1/threads/stream":
             self._handle_chat_stream(parsed)
             return
         if parsed.path == "/v1/billing/summary":
@@ -792,43 +794,76 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 },
             )
             return
-        if parsed.path.endswith("/chat-history") and parsed.path.startswith("/v1/projects/"):
+        if parsed.path.startswith("/v1/projects/") and parsed.path.endswith("/threads"):
             project_id = self._get_path_segment(parsed.path, 2)
             if not project_id:
                 self._send_json(400, {"message": "無效的 project_id"})
                 return
-            params = parse_qs(parsed.query)
-            chat_id = params.get("chat_id", [""])[0].strip() or None
             try:
-                payload = self._build_project_chat_history(project_id, chat_id=chat_id)
+                payload = self._build_project_threads(project_id)
             except Exception as exc:  # noqa: BLE001
                 self._handle_error(exc, status=500)
                 return
             self._send_json(200, payload)
             return
-        if parsed.path.endswith("/context") and parsed.path.startswith("/v1/projects/"):
+        if parsed.path.startswith("/v1/projects/") and parsed.path.endswith("/history") and "/threads/" in parsed.path:
             project_id = self._get_path_segment(parsed.path, 2)
+            thread_id = self._get_path_segment(parsed.path, 4)
             if not project_id:
                 self._send_json(400, {"message": "無效的 project_id"})
                 return
-            params = parse_qs(parsed.query)
-            chat_id = params.get("chat_id", [""])[0].strip() or None
             try:
-                context = self._build_project_context(project_id, chat_id=chat_id)
+                payload = self._build_project_thread_history(project_id, thread_id=thread_id)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, payload)
+            return
+        if parsed.path.startswith("/v1/projects/") and parsed.path.endswith("/context") and "/threads/" in parsed.path:
+            project_id = self._get_path_segment(parsed.path, 2)
+            thread_id = self._get_path_segment(parsed.path, 4)
+            if not project_id:
+                self._send_json(400, {"message": "無效的 project_id"})
+                return
+            try:
+                context = self._build_project_context(project_id, thread_id=thread_id)
             except Exception as exc:  # noqa: BLE001
                 self._handle_error(exc, status=500)
                 return
             self._send_json(200, context)
             return
-        if parsed.path.endswith("/context/stats") and parsed.path.startswith("/v1/projects/"):
+        if parsed.path.startswith("/v1/projects/") and parsed.path.endswith("/context"):
             project_id = self._get_path_segment(parsed.path, 2)
             if not project_id:
                 self._send_json(400, {"message": "無效的 project_id"})
                 return
-            params = parse_qs(parsed.query)
-            chat_id = params.get("chat_id", [""])[0].strip() or None
             try:
-                payload = self._build_project_context_stats(project_id, chat_id=chat_id)
+                context = self._build_project_context(project_id, thread_id=None)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, context)
+            return
+        if parsed.path.startswith("/v1/projects/") and parsed.path.endswith("/context/stats") and "/threads/" in parsed.path:
+            project_id = self._get_path_segment(parsed.path, 2)
+            thread_id = self._get_path_segment(parsed.path, 4)
+            if not project_id:
+                self._send_json(400, {"message": "無效的 project_id"})
+                return
+            try:
+                payload = self._build_project_context_stats(project_id, thread_id=thread_id)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, payload)
+            return
+        if parsed.path.startswith("/v1/projects/") and parsed.path.endswith("/context/stats"):
+            project_id = self._get_path_segment(parsed.path, 2)
+            if not project_id:
+                self._send_json(400, {"message": "無效的 project_id"})
+                return
+            try:
+                payload = self._build_project_context_stats(project_id, thread_id=None)
             except Exception as exc:  # noqa: BLE001
                 self._handle_error(exc, status=500)
                 return
@@ -1251,56 +1286,73 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             request_id = _TASK_MANAGER.submit_schedule_tick(request_id=None, core=self.core)
             self._send_json(202, {"request_id": request_id})
             return
-        if parsed.path == "/v1/chat/stream/init":
+        if parsed.path == "/v1/threads/stream/init":
             payload = self._read_json()
             if payload is None:
                 return
             message = str(payload.get("message", "")).strip()
             project_id = str(payload.get("project_id", "")).strip() or None
-            chat_id = str(payload.get("chat_id", "")).strip() or None
+            thread_id = str(payload.get("thread_id", "")).strip() or None
             if not message:
                 self._send_json(400, {"message": "請提供 message"})
                 return
             if len(message) > 100_000:
                 self._send_json(413, {"message": "message 過長"})
                 return
-            token = _create_chat_stream_token(message=message, project_id=project_id, chat_id=chat_id)
+            token = _create_thread_stream_token(message=message, project_id=project_id, thread_id=thread_id)
             self._send_json(201, {"stream_token": token, "ttl_s": _CHAT_STREAM_INIT_TTL_S})
             return
-        if parsed.path == "/v1/chat/sessions":
+        if parsed.path.startswith("/v1/projects/") and parsed.path.endswith("/threads"):
             payload = self._read_json()
             if payload is None:
                 return
-            project_id = str(payload.get("project_id", "")).strip()
-            incoming_chat_id = str(payload.get("chat_id", "")).strip() or None
+            project_id = self._get_path_segment(parsed.path, 2) or ""
             if not project_id:
                 self._send_json(400, {"message": "請提供 project_id"})
                 return
             try:
-                chat_id, chat_id_source = ensure_chat_session(project_id, incoming_chat_id)
+                thread_id = create_chat_session(project_id)
             except Exception as exc:  # noqa: BLE001
                 self._handle_error(exc, status=500)
                 return
-            status = 200 if chat_id_source in {"incoming", "active"} else 201
-            self._send_json(status, {"chat_id": chat_id, "chat_id_source": chat_id_source})
+            self._send_json(201, {"project_id": project_id, "thread_id": thread_id, "active_thread_id": thread_id})
             return
-        if parsed.path == "/v1/chat/plan/confirm":
+        if parsed.path.startswith("/v1/projects/") and parsed.path.endswith("/active-thread"):
+            payload = self._read_json()
+            if payload is None:
+                return
+            project_id = self._get_path_segment(parsed.path, 2) or ""
+            thread_id = str(payload.get("thread_id", "")).strip()
+            if not project_id or not thread_id:
+                self._send_json(400, {"message": "請提供 project_id、thread_id"})
+                return
+            try:
+                resolved_thread_id, thread_id_source = ensure_chat_session(project_id, thread_id)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            if resolved_thread_id != thread_id or not chat_session_exists(project_id, thread_id):
+                self._send_json(404, {"message": "找不到 thread_id"})
+                return
+            self._send_json(200, {"project_id": project_id, "active_thread_id": resolved_thread_id, "thread_id_source": thread_id_source})
+            return
+        if parsed.path == "/v1/threads/plan/confirm":
             payload = self._read_json()
             if payload is None:
                 return
             project_id = str(payload.get("project_id", "")).strip()
-            chat_id = str(payload.get("chat_id", "")).strip()
+            thread_id = str(payload.get("thread_id", "")).strip()
             command = str(payload.get("command", "")).strip()
             args = payload.get("args") or {}
             confirmed = bool(payload.get("confirmed", False))
-            if not (project_id and chat_id and command):
-                self._send_json(400, {"message": "請提供 project_id、chat_id、command"})
+            if not (project_id and thread_id and command):
+                self._send_json(400, {"message": "請提供 project_id、thread_id、command"})
                 return
             if not isinstance(args, dict):
                 self._send_json(400, {"message": "args 需為物件"})
                 return
             append_event(
-                chat_id,
+                thread_id,
                 {
                     "type": "plan_confirm",
                     "text": "confirmed" if confirmed else "cancelled",
@@ -1311,10 +1363,10 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             if not confirmed:
                 self._send_json(200, {"status": "cancelled"})
                 return
-            plan = CommandPlan(name=command, args=args, project_id=project_id, chat_id=chat_id)
+            plan = CommandPlan(name=command, args=args, project_id=project_id, chat_id=thread_id)
             result = execute(plan, confirmed=True)
             append_event(
-                chat_id,
+                thread_id,
                 {
                     "type": "command_result",
                     "text": json.dumps(result, ensure_ascii=False),
@@ -1769,24 +1821,24 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
     def _handle_chat_stream(self, parsed) -> None:
         params = parse_qs(parsed.query)
         project_id = params.get("project_id", [""])[0].strip() or None
-        chat_id = params.get("chat_id", [""])[0].strip()
+        thread_id = params.get("thread_id", [""])[0].strip()
         message = params.get("message", [""])[0].strip()
         stream_token = params.get("stream_token", [""])[0].strip()
         last_event_id_raw = params.get("last_event_id", [""])[0].strip()
         request_id = uuid.uuid4().hex
 
         if not message and stream_token:
-            token_payload = _consume_chat_stream_token(stream_token)
+            token_payload = _consume_thread_stream_token(stream_token)
             if token_payload:
                 message = str(token_payload.get("message", "")).strip()
                 project_id = project_id or str(token_payload.get("project_id", "")).strip() or None
-                chat_id = chat_id or str(token_payload.get("chat_id", "")).strip()
+                thread_id = thread_id or str(token_payload.get("thread_id", "")).strip()
 
         if not message:
             self.send_error(400, "缺少 message")
             return
         if project_id is None:
-            chat_id = ""
+            thread_id = ""
 
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
@@ -1801,13 +1853,13 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             except ValueError:
                 event_seq = 0
 
-        def send_event(event: str, data: dict[str, Any] | str, *, run_id: str | None = None, chat_id_override: str | None = None) -> None:
+        def send_event(event: str, data: dict[str, Any] | str, *, run_id: str | None = None, thread_id_override: str | None = None) -> None:
             nonlocal event_seq
             event_seq += 1
             payload_obj = {"text": data} if isinstance(data, str) else dict(data)
-            resolved_chat_id = chat_id_override if chat_id_override is not None else chat_id
-            if resolved_chat_id:
-                payload_obj.setdefault("chat_id", resolved_chat_id)
+            resolved_thread_id = thread_id_override if thread_id_override is not None else thread_id
+            if resolved_thread_id:
+                payload_obj.setdefault("thread_id", resolved_thread_id)
             payload_obj = ensure_correlation_fields(
                 payload_obj,
                 project_id=project_id,
@@ -1831,11 +1883,11 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     "level": "INFO",
                     "event": "ui_chat_stream_received",
                     "project_id": project_id,
-                    "chat_id": chat_id or None,
+                    "thread_id": thread_id or None,
                 }
             )
             sent_initial_notice = False
-            if project_id is None and not chat_id:
+            if project_id is None and not thread_id:
                 send_event("notice", {"text": "Amon：已收到你的需求，正在判斷意圖與專案。"})
                 sent_initial_notice = True
             if project_id is None:
@@ -1889,9 +1941,10 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     send_event("error", {"message": "缺少 project_id"})
                     send_event("done", {"status": "project_required"})
                     return
-            incoming_chat_id = chat_id
-            turn_bundle = assemble_chat_turn(project_id=project_id, chat_id=chat_id, message=message)
-            chat_id = turn_bundle.chat_id
+            incoming_thread_id = thread_id
+            turn_bundle = assemble_chat_turn(project_id=project_id, chat_id=thread_id, message=message)
+            thread_id = turn_bundle.chat_id
+            chat_id = thread_id
             history = turn_bundle.history
             should_emit_bootstrap_notices = turn_bundle.chat_id_source == "new"
             run_context = turn_bundle.run_context
@@ -1902,10 +1955,10 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     "level": "INFO",
                     "event": "ui_chat_stream_context",
                     "project_id": project_id,
-                    "incoming_chat_id": incoming_chat_id,
-                    "effective_chat_id": chat_id,
+                    "incoming_thread_id": incoming_thread_id,
+                    "effective_thread_id": chat_id,
                     "history_count": len(history),
-                    "chat_id_source": turn_bundle.chat_id_source,
+                    "thread_id_source": turn_bundle.chat_id_source,
                 }
             )
             router_result = route_intent(
@@ -1920,7 +1973,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         "level": "INFO",
                         "event": "ui_chat_force_continuation",
                         "project_id": project_id,
-                        "chat_id": chat_id,
+                        "thread_id": chat_id,
                         "original_router_type": router_result.type,
                     }
                 )
@@ -1958,7 +2011,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         {
                             "status": "ok",
                             "project_id": active_project.project_id,
-                            "chat_id": chat_id,
+                            "thread_id": chat_id,
                         },
                     )
                     return
@@ -2005,16 +2058,16 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                             "command": command_name,
                             "args": args,
                             "project_id": project_id,
-                            "chat_id": chat_id,
+                            "thread_id": chat_id,
                         },
                     )
                     send_event(
                         "done",
-                        {"status": "confirm_required", "chat_id": chat_id, "project_id": project_id},
+                        {"status": "confirm_required", "thread_id": chat_id, "project_id": project_id},
                     )
                     return
                 send_event("result", result)
-                send_event("done", {"status": "ok", "chat_id": chat_id, "project_id": project_id})
+                send_event("done", {"status": "ok", "thread_id": chat_id, "project_id": project_id})
                 return
             if router_result.type == "chat_response":
                 if should_emit_bootstrap_notices:
@@ -2119,7 +2172,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                                 "kind": "planner_disabled_fallback",
                                 "message": f"Amon：{fallback_reason}。{fallback_hint}",
                                 "project_id": project_id,
-                                "chat_id": chat_id,
+                                "thread_id": chat_id,
                             },
                             run_id=active_run_id,
                         )
@@ -2156,18 +2209,18 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                                 "event": "ui_chat_stream_artifact_ingest_failed",
                                 "message": str(ingest_error),
                                 "project_id": normalize_project_id(project_id),
-                                "chat_id": chat_id or None,
+                                "thread_id": chat_id or None,
                             }
                         )
                 append_event(chat_id, assistant_payload)
                 done_payload: dict[str, Any] = {
                     "status": "ok",
-                    "chat_id": chat_id,
+                    "thread_id": chat_id,
                     "project_id": project_id,
                     "run_id": active_run_id,
                     "execution_mode": execution_mode,
                     "history_count": len(history),
-                    "chat_id_source": turn_bundle.chat_id_source,
+                    "thread_id_source": turn_bundle.chat_id_source,
                 }
                 if execution_mode == "graph":
                     route = getattr(plan_result, "execution_route", "planner")
@@ -2197,17 +2250,19 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         "updated": int(artifact_ingest_summary.get("updated", 0)),
                         "errors": int(artifact_ingest_summary.get("errors", 0)),
                     }
+                if project_id and active_run_id and chat_id:
+                    self._write_run_thread_metadata(project_id=project_id, run_id=active_run_id, thread_id=chat_id)
                 send_event("done", done_payload, run_id=active_run_id)
                 return
             send_event(
                 "notice",
                 {
                     "text": "Amon：已收到你的訊息，但目前無法判斷可執行的意圖。請改用更明確的任務描述，我會立即繼續處理。",
-                    "chat_id": chat_id,
+                    "thread_id": chat_id,
                     "project_id": project_id,
                 },
             )
-            send_event("done", {"status": "unsupported", "chat_id": chat_id, "project_id": project_id})
+            send_event("done", {"status": "unsupported", "thread_id": chat_id, "project_id": project_id})
         except ClientDisconnectedError:
             log_event(
                 {
@@ -2215,7 +2270,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     "event": "ui_client_disconnected",
                     "client": self.client_address[0] if self.client_address else "unknown",
                     "project_id": normalize_project_id(project_id),
-                    "chat_id": chat_id or None,
+                    "thread_id": chat_id or None,
                     "request_id": request_id,
                 }
             )
@@ -2228,7 +2283,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     "message": str(exc),
                     "stack": traceback.format_exc(),
                     "project_id": normalize_project_id(project_id),
-                    "chat_id": chat_id or None,
+                    "thread_id": chat_id or None,
                 }
             )
             error_text = str(exc)
@@ -2243,14 +2298,14 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     {
                         "message": "回覆生成較久，仍在處理中；你可以稍後重試，或把任務拆小一點。",
                         "kind": warning_kind,
-                        "chat_id": chat_id,
+                        "thread_id": chat_id,
                         "project_id": project_id,
                     },
                 )
-                send_event("done", {"status": "warning", "chat_id": chat_id, "project_id": project_id, "warning_kind": warning_kind})
+                send_event("done", {"status": "warning", "thread_id": chat_id, "project_id": project_id, "warning_kind": warning_kind})
             else:
-                send_event("error", {"message": error_text, "chat_id": chat_id, "project_id": project_id})
-                send_event("done", {"status": "failed", "chat_id": chat_id, "project_id": project_id})
+                send_event("error", {"message": error_text, "thread_id": chat_id, "project_id": project_id})
+                send_event("done", {"status": "failed", "thread_id": chat_id, "project_id": project_id})
 
     def _list_projects_for_ui(self, *, include_deleted: bool = False) -> list[dict[str, Any]]:
         records = self.core.list_projects(include_deleted=include_deleted)
@@ -2258,43 +2313,71 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         projects.sort(key=lambda item: item.get("project_id") or "")
         return projects
 
-    def _build_project_chat_history(self, project_id: str, chat_id: str | None = None) -> dict[str, Any]:
-        project_path = self.core.get_project_path(project_id)
-        _ = load_latest_chat_id(project_id)
-        threads_dir = project_path / ".amon" / "threads"
-        if not threads_dir.exists():
-            return {"project_id": project_id, "chat_id": None, "messages": []}
-
-        selected_chat_id = str(chat_id or "").strip()
-        if not selected_chat_id:
-            selected_chat_id = str(load_latest_chat_id(project_id) or "").strip()
-        candidate_chat_ids: list[str] = []
-        if selected_chat_id:
-            candidate_chat_ids.append(selected_chat_id)
+    def _write_run_thread_metadata(self, *, project_id: str, run_id: str, thread_id: str) -> None:
         try:
-            index_path = threads_dir / "index.json"
-            if index_path.exists():
+            project_path = self.core.get_project_path(project_id)
+            run_dir = project_path / ".amon" / "runs" / run_id
+            run_dir.mkdir(parents=True, exist_ok=True)
+            metadata_path = run_dir / "run.json"
+            payload: dict[str, Any] = {}
+            if metadata_path.exists():
+                payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+                if not isinstance(payload, dict):
+                    payload = {}
+            payload["project_id"] = project_id
+            payload["run_id"] = run_id
+            payload["thread_id"] = thread_id
+            metadata_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001
+            log_event({"level": "WARNING", "event": "ui_run_thread_metadata_write_failed", "message": str(exc), "project_id": project_id, "run_id": run_id, "thread_id": thread_id})
+
+    def _build_project_threads(self, project_id: str) -> dict[str, Any]:
+        project_path = self.core.get_project_path(project_id)
+        threads_dir = project_path / ".amon" / "threads"
+        active_thread_id = str(load_latest_chat_id(project_id) or "").strip() or None
+        items: list[dict[str, Any]] = []
+        index_path = threads_dir / "index.json"
+        if index_path.exists():
+            try:
                 index_payload = json.loads(index_path.read_text(encoding="utf-8"))
-                threads = index_payload.get("threads") if isinstance(index_payload, dict) else None
-                if isinstance(threads, list):
-                    for item in threads:
-                        if not isinstance(item, dict):
-                            continue
-                        candidate = str(item.get("thread_id") or "").strip()
-                        if candidate and candidate not in candidate_chat_ids:
-                            candidate_chat_ids.append(candidate)
-        except (OSError, ValueError, json.JSONDecodeError):
-            pass
+            except (OSError, ValueError, json.JSONDecodeError):
+                index_payload = {}
+            threads = index_payload.get("threads") if isinstance(index_payload, dict) else None
+            if isinstance(threads, list):
+                for row in threads:
+                    if not isinstance(row, dict):
+                        continue
+                    thread_id = str(row.get("thread_id") or "").strip()
+                    if not thread_id:
+                        continue
+                    items.append(
+                        {
+                            "thread_id": thread_id,
+                            "title": str(row.get("title") or ""),
+                            "created_at": str(row.get("created_at") or ""),
+                            "updated_at": str(row.get("updated_at") or ""),
+                            "is_active": thread_id == active_thread_id,
+                        }
+                    )
+        return {"project_id": project_id, "active_thread_id": active_thread_id, "threads": items}
 
-        for candidate_chat_id in candidate_chat_ids:
-            candidate_session = threads_dir / candidate_chat_id / "events.jsonl"
-            if not candidate_session.exists() or not candidate_session.is_file():
-                continue
-            selected_messages = self._read_chat_session_messages(project_path, candidate_session)
-            if selected_messages:
-                return {"project_id": project_id, "chat_id": candidate_chat_id, "messages": selected_messages[-60:]}
+    def _resolve_thread_id(self, project_id: str, thread_id: str | None = None) -> str | None:
+        requested_thread_id = str(thread_id or "").strip() or None
+        if requested_thread_id:
+            return requested_thread_id
+        return str(load_latest_chat_id(project_id) or "").strip() or None
 
-        return {"project_id": project_id, "chat_id": selected_chat_id or None, "messages": []}
+    def _build_project_thread_history(self, project_id: str, thread_id: str | None = None) -> dict[str, Any]:
+        project_path = self.core.get_project_path(project_id)
+        threads_dir = project_path / ".amon" / "threads"
+        selected_thread_id = self._resolve_thread_id(project_id, thread_id)
+        if not selected_thread_id:
+            return {"project_id": project_id, "thread_id": None, "messages": []}
+        session_path = threads_dir / selected_thread_id / "events.jsonl"
+        if not session_path.exists() or not session_path.is_file():
+            return {"project_id": project_id, "thread_id": selected_thread_id, "messages": []}
+        selected_messages = self._read_chat_session_messages(project_path, session_path)
+        return {"project_id": project_id, "thread_id": selected_thread_id, "messages": selected_messages[-60:]}
 
     def _chat_messages_cache_path(self, project_path: Path, chat_id: str) -> Path:
         safe_chat_id = re.sub(r"[^0-9A-Za-z_-]", "_", str(chat_id or "")).strip("_") or "default"
@@ -2360,18 +2443,26 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             self.logger.warning("寫入 chat messages cache 失敗：%s", exc)
         return parsed_messages
 
-    def _build_project_context(self, project_id: str, chat_id: str | None = None) -> dict[str, Any]:
+    def _build_project_context(self, project_id: str, thread_id: str | None = None) -> dict[str, Any]:
         project_path = self.core.get_project_path(project_id)
-        run_bundle = self._load_latest_run_bundle(project_path)
-        selected_chat_id = str(chat_id or "").strip() or None
-        if selected_chat_id:
-            run_context = load_latest_run_context(project_id, selected_chat_id)
+        selected_thread_id = self._resolve_thread_id(project_id, thread_id)
+        run_bundle = {
+            "run_id": None,
+            "run_status": "not_found",
+            "graph": self._load_latest_graph(project_path),
+            "node_states": {},
+            "recent_events": [],
+        }
+        if selected_thread_id:
+            run_context = load_latest_run_context(project_id, selected_thread_id)
             run_id = str(run_context.get("run_id") or "").strip()
             if run_id:
                 try:
                     run_bundle = self._load_run_bundle(run_id=run_id, project_id=project_id)
                 except (FileNotFoundError, ValueError, OSError):
                     pass
+        else:
+            run_bundle = self._load_latest_run_bundle(project_path)
         graph = run_bundle["graph"]
         docs = self._build_docs_catalog(project_id=project_id, project_path=project_path)
         project_context_text = self._read_project_context(project_path)
@@ -2384,13 +2475,13 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             "recent_events": run_bundle["recent_events"],
             "docs": docs,
             "context": project_context_text,
-            "chat_id": selected_chat_id,
+            "thread_id": selected_thread_id,
         }
 
 
-    def _build_project_context_stats(self, project_id: str, chat_id: str | None = None) -> dict[str, Any]:
+    def _build_project_context_stats(self, project_id: str, thread_id: str | None = None) -> dict[str, Any]:
         project_path = self.core.get_project_path(project_id)
-        chat_history = self._build_project_chat_history(project_id, chat_id=chat_id)
+        chat_history = self._build_project_thread_history(project_id, thread_id=thread_id)
         tools_catalog = self._build_tools_catalog(project_id=project_id, refresh_mcp=False)
         skills_catalog = self._build_skills_catalog(project_id=project_id)
         config_payload = self._build_config_view_payload(project_id=project_id, cli_overrides={}, chat_overrides={})
@@ -2521,7 +2612,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
 
         return {
             "project_id": project_id,
-            "chat_id": chat_history.get("chat_id"),
+            "thread_id": chat_history.get("thread_id"),
             "run_id": latest_run.get("run_id"),
             "token_estimate": {
                 "used": total_used,
