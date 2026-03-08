@@ -32,9 +32,10 @@ class ChatCliTests(unittest.TestCase):
                 Path(temp_dir)
                 / "projects"
                 / record.project_id
-                / "sessions"
-                / "chat"
-                / f"{chat_id}.jsonl"
+                / ".amon"
+                / "threads"
+                / chat_id
+                / "events.jsonl"
             )
             self.assertTrue(session_path.exists())
             payloads = [

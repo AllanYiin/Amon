@@ -15,7 +15,7 @@ from http.server import ThreadingHTTPServer
 
 
 class ChatSessionEndpointBehaviorTests(unittest.TestCase):
-    def test_chat_sessions_endpoint_ensures_existing_or_latest_chat_id(self) -> None:
+    def test_chat_sessions_endpoint_ensures_existing_or_active_chat_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = str(Path(temp_dir) / "data")
             server = None
@@ -55,7 +55,7 @@ class ChatSessionEndpointBehaviorTests(unittest.TestCase):
 
                 second_status, second_payload = ensure_session()
                 self.assertEqual(second_status, 200)
-                self.assertEqual(second_payload.get("chat_id_source"), "latest")
+                self.assertEqual(second_payload.get("chat_id_source"), "active")
                 self.assertEqual(second_payload["chat_id"], first_payload["chat_id"])
 
                 incoming_status, incoming_payload = ensure_session(first_payload["chat_id"])

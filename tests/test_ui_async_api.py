@@ -449,7 +449,7 @@ class UIAsyncAPITests(unittest.TestCase):
 
                 chat_id = done_payload.get("chat_id")
                 self.assertTrue(chat_id)
-                session_path = core.get_project_path(project.project_id) / "sessions" / "chat" / f"{chat_id}.jsonl"
+                session_path = core.get_project_path(project.project_id) / ".amon" / "threads" / chat_id / "events.jsonl"
                 lines = [json.loads(line) for line in session_path.read_text(encoding="utf-8").splitlines() if line.strip()]
                 assistant_events = [item for item in lines if item.get("type") == "assistant"]
                 self.assertTrue(assistant_events)
@@ -1133,7 +1133,8 @@ class UIAsyncAPITests(unittest.TestCase):
                 cache_path = project_path / ".amon" / "context" / "chat_messages" / "chat-cache.json"
                 self.assertTrue(cache_path.exists())
 
-                with session_path.open("a", encoding="utf-8") as handle:
+                migrated_session_path = project_path / ".amon" / "threads" / "chat-cache" / "events.jsonl"
+                with migrated_session_path.open("a", encoding="utf-8") as handle:
                     handle.write("\n" + json.dumps({"type": "user", "text": "第二句", "ts": "2026-01-01T10:00:02Z"}, ensure_ascii=False))
 
                 conn.request("GET", f"/v1/projects/{encoded_project}/chat-history?chat_id=chat-cache")

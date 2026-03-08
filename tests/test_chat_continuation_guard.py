@@ -10,7 +10,7 @@ from amon.chat.session_store import append_event, create_chat_session
 
 
 class ChatContinuationGuardTests(unittest.TestCase):
-    def test_assemble_turn_uses_latest_chat_and_marks_short_continuation(self) -> None:
+    def test_assemble_turn_uses_active_chat_and_marks_short_continuation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir
             try:
@@ -49,22 +49,22 @@ class ChatContinuationGuardTests(unittest.TestCase):
             os.environ["AMON_HOME"] = temp_dir
             try:
                 project_id = "proj-cont-fallback"
-                latest_chat_id = create_chat_session(project_id)
-                append_event(latest_chat_id, {"type": "user", "text": "第一輪", "project_id": project_id})
-                append_event(latest_chat_id, {"type": "assistant", "text": "第一輪回覆", "project_id": project_id})
+                active_chat_id = create_chat_session(project_id)
+                append_event(active_chat_id, {"type": "user", "text": "第一輪", "project_id": project_id})
+                append_event(active_chat_id, {"type": "assistant", "text": "第一輪回覆", "project_id": project_id})
 
                 with patch("amon.chat.continuation.log_event") as mock_log_event:
                     bundle = assemble_chat_turn(project_id=project_id, chat_id="missing-chat-id", message="第二輪")
             finally:
                 os.environ.pop("AMON_HOME", None)
 
-        self.assertEqual(bundle.chat_id, latest_chat_id)
-        self.assertEqual(bundle.chat_id_source, "latest")
+        self.assertEqual(bundle.chat_id, active_chat_id)
+        self.assertEqual(bundle.chat_id_source, "active")
         warning_events = [args[0] for args, _ in mock_log_event.call_args_list if args and isinstance(args[0], dict)]
         fallback_warning = [item for item in warning_events if item.get("event") == "chat_session_fallback"]
         self.assertTrue(fallback_warning)
         self.assertEqual(fallback_warning[0].get("incoming_chat_id"), "missing-chat-id")
-        self.assertEqual(fallback_warning[0].get("fallback_chat_id"), latest_chat_id)
+        self.assertEqual(fallback_warning[0].get("fallback_chat_id"), active_chat_id)
 
 
 if __name__ == "__main__":
