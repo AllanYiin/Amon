@@ -8,6 +8,9 @@ class UIShellSmokeTests(unittest.TestCase):
 
         for token in [
             "shell-sidebar",
+            'id="thread-tree"',
+            'id="thread-list"',
+            'id="create-thread-btn"',
             "toggle-context-panel",
             "toggle-sidebar",
             'data-i18n="nav.tools"',
@@ -181,6 +184,17 @@ class UIShellSmokeTests(unittest.TestCase):
         self.assertIn('.context-resizer', css)
         self.assertIn('.context-waffle', css)
 
+    def test_sidebar_thread_tree_styles_and_rollup_preview_tokens_exist(self) -> None:
+        css = Path("src/amon/ui/styles.css").read_text(encoding="utf-8")
+        bootstrap_js = Path("src/amon/ui/static/js/bootstrap.js").read_text(encoding="utf-8")
+
+        self.assertIn(".thread-tree", css)
+        self.assertIn(".thread-row", css)
+        self.assertIn(".thread-row.is-active", css)
+        self.assertIn("function renderRollupPreview()", bootstrap_js)
+        self.assertIn("sortThreadsForDisplay", bootstrap_js)
+        self.assertIn("formatThreadUpdatedAt", bootstrap_js)
+
     def test_app_entry_only_bootstraps_composition_root(self) -> None:
         app_js = Path("src/amon/ui/static/js/app.js").read_text(encoding="utf-8")
         bootstrap_js = Path("src/amon/ui/static/js/bootstrap.js").read_text(encoding="utf-8")
@@ -225,6 +239,7 @@ class UIShellSmokeTests(unittest.TestCase):
         app_state_js = Path("src/amon/ui/static/js/store/app_state.js").read_text(encoding="utf-8")
 
         self.assertIn("activeThreadId: null", app_state_js)
+        self.assertIn("activeThreadByProject: {}", app_state_js)
         self.assertIn("threadList: []", app_state_js)
         self.assertIn("threadsByProject: {}", app_state_js)
         self.assertIn("pendingProjectLoadToken: 0", app_state_js)
@@ -240,8 +255,13 @@ class UIShellSmokeTests(unittest.TestCase):
         self.assertIn("if (!isCurrentProjectHydrationToken(token)) return;", bootstrap_js)
         self.assertIn("state.activeThreadId = payload.thread_id || null;", bootstrap_js)
         self.assertIn("state.activeThreadId = payload.active_thread_id || payload.thread_id || null;", bootstrap_js)
+        self.assertIn("state.activeThreadByProject[state.projectId] = state.activeThreadId;", bootstrap_js)
+        self.assertIn("await services.threads.setActiveThread(state.projectId, normalizedThreadId);", bootstrap_js)
+        self.assertIn("elements.createThreadBtn?.addEventListener", bootstrap_js)
+        self.assertIn("renderThreadList();", bootstrap_js)
 
         self.assertIn("async listProjectThreads(projectId)", thread_service_js)
+        self.assertIn("async setActiveThread(projectId, threadId)", thread_service_js)
         self.assertIn("/active-thread", thread_service_js)
         self.assertIn('async getProjectThreadHistory(projectId, threadId = "")', thread_service_js)
         self.assertIn("/threads/", thread_service_js)

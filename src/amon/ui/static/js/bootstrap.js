@@ -1279,9 +1279,18 @@ appStore.patch({ bootstrappedAt: Date.now() });
           appendTimelineStatus("目前為無專案模式。輸入任務後會自動建立新專案並切換。");
           return;
         }
+        renderRollupPreview();
         const payload = await services.threads.getProjectThreadHistory(state.projectId, state.activeThreadId || "");
         if (!isCurrentProjectHydrationToken(token)) return;
         state.activeThreadId = payload.thread_id || null;
+        if (state.projectId && state.activeThreadId) {
+          state.activeThreadByProject[state.projectId] = state.activeThreadId;
+        }
+        state.threadList = (state.threadList || []).map((thread) => ({
+          ...thread,
+          is_active: String(thread.thread_id || "").trim() === String(state.activeThreadId || "").trim(),
+        }));
+        renderThreadList();
         const messages = Array.isArray(payload.messages) ? payload.messages : [];
         if (!messages.length) {
           appendTimelineStatus("目前尚無歷史對話。請直接輸入需求開始。");
@@ -1358,10 +1367,14 @@ appStore.patch({ bootstrappedAt: Date.now() });
       }
 
       function setProjectState(projectId) {
+        const previousProjectId = String(state.projectId || "").trim();
+        if (previousProjectId) {
+          state.activeThreadByProject[previousProjectId] = state.activeThreadId;
+        }
         const nextProjectId = projectId || null;
         if (state.projectId !== nextProjectId) {
-          state.activeThreadId = null;
-          state.threadList = [];
+          state.activeThreadId = String(state.activeThreadByProject[nextProjectId] || "").trim() || null;
+          state.threadList = [...(state.threadsByProject[nextProjectId] || [])];
         }
         state.projectId = nextProjectId;
         const layoutState = appStore.getState().layout || {};
@@ -1382,6 +1395,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
         }
         elements.projectSelect.value = projectId || "";
         syncContextHeader();
+        renderThreadList();
         refreshContextDraftUi();
         if (!state.projectId) {
           state.activeThreadId = null;
@@ -1400,6 +1414,9 @@ appStore.patch({ bootstrappedAt: Date.now() });
         const selected = elements.projectSelect.selectedOptions[0]?.textContent || "未指定專案";
         elements.contextProject.textContent = `目前專案：${selected}`;
         elements.chatProjectLabel.textContent = `目前專案：${selected}`;
+        if (elements.sidebarProjectName) {
+          elements.sidebarProjectName.textContent = selected;
+        }
       }
 
       function openInspectorPanel(tabName = "thinking") {
@@ -1551,6 +1568,84 @@ appStore.patch({ bootstrappedAt: Date.now() });
         };
       }
 
+      function normalizeThreadRecord(thread = {}) {
+        const threadId = String(thread.thread_id || thread.id || "").trim();
+        if (!threadId) return null;
+        const title = String(thread.title || "").trim() || `Thread ${threadId}`;
+        return {
+          thread_id: threadId,
+          title,
+          created_at: String(thread.created_at || "").trim(),
+          updated_at: String(thread.updated_at || "").trim(),
+          is_active: Boolean(thread.is_active),
+        };
+      }
+
+      function toSortableTimestamp(value = "") {
+        const parsed = Date.parse(String(value || "").trim());
+        return Number.isNaN(parsed) ? 0 : parsed;
+      }
+
+      function formatThreadUpdatedAt(value = "") {
+        const raw = String(value || "").trim();
+        if (!raw) return "尚未更新";
+        const parsed = new Date(raw);
+        if (Number.isNaN(parsed.getTime())) return raw;
+        return parsed.toLocaleString("zh-TW", { hour12: false });
+      }
+
+      function sortThreadsForDisplay(threads = []) {
+        return [...threads].sort((a, b) => {
+          const updatedDiff = toSortableTimestamp(b.updated_at) - toSortableTimestamp(a.updated_at);
+          if (updatedDiff !== 0) return updatedDiff;
+          const createdDiff = toSortableTimestamp(b.created_at) - toSortableTimestamp(a.created_at);
+          if (createdDiff !== 0) return createdDiff;
+          return String(a.thread_id || "").localeCompare(String(b.thread_id || ""));
+        });
+      }
+
+      function renderThreadList() {
+        if (!elements.threadList) return;
+        elements.createThreadBtn.disabled = !state.projectId;
+        if (!state.projectId) {
+          elements.threadList.innerHTML = '<p class="thread-tree__empty">請先選擇 Project。</p>';
+          return;
+        }
+        const threads = sortThreadsForDisplay(state.threadList || []);
+        if (!threads.length) {
+          elements.threadList.innerHTML = '<p class="thread-tree__empty">目前尚無 Threads。</p>';
+          return;
+        }
+        const activeThreadId = String(state.activeThreadId || "").trim();
+        const fragment = document.createDocumentFragment();
+        threads.forEach((thread) => {
+          const threadId = String(thread.thread_id || "").trim();
+          if (!threadId) return;
+          const row = document.createElement("button");
+          row.type = "button";
+          row.className = "thread-row";
+          row.dataset.threadId = threadId;
+          const isActive = threadId === activeThreadId;
+          row.classList.toggle("is-active", isActive);
+          row.innerHTML = `
+            <strong class="thread-row__title">${escapeHtml(String(thread.title || threadId))}</strong>
+            <span class="thread-row__meta">${isActive ? "Active" : ""} ${formatThreadUpdatedAt(thread.updated_at)}</span>
+          `;
+          row.addEventListener("click", () => void selectActiveThread(threadId));
+          fragment.appendChild(row);
+        });
+        elements.threadList.innerHTML = "";
+        elements.threadList.appendChild(fragment);
+      }
+
+      function renderRollupPreview() {
+        const activeThreadId = String(state.activeThreadId || "").trim();
+        if (!activeThreadId) return;
+        const targetThread = (state.threadList || []).find((item) => String(item.thread_id || "").trim() === activeThreadId);
+        if (!targetThread) return;
+        appendTimelineStatus(`已載入 Thread 摘要：${targetThread.title || activeThreadId}（更新：${formatThreadUpdatedAt(targetThread.updated_at)}）`);
+      }
+
       async function loadProjects() {
         let projects = [];
         try {
@@ -1586,20 +1681,67 @@ appStore.patch({ bootstrappedAt: Date.now() });
         const payload = await services.threads.createProjectThread(state.projectId);
         if (!isCurrentProjectHydrationToken(token)) return;
         state.activeThreadId = payload.active_thread_id || payload.thread_id || null;
+        if (state.activeThreadId) {
+          state.activeThreadByProject[state.projectId] = state.activeThreadId;
+        }
+        await loadThreadList(token);
       }
 
       async function loadThreadList(token = state.pendingProjectLoadToken) {
         if (!state.projectId || !isCurrentProjectHydrationToken(token)) {
           state.threadList = [];
+          renderThreadList();
           return;
         }
         const payload = await services.threads.listProjectThreads(state.projectId);
         if (!isCurrentProjectHydrationToken(token)) return;
-        const threads = Array.isArray(payload.threads) ? payload.threads : [];
+        const threads = (Array.isArray(payload.threads) ? payload.threads : []).map(normalizeThreadRecord).filter(Boolean);
         const activeThreadId = String(payload.active_thread_id || "").trim() || null;
+        const cachedActiveThreadId = String(state.activeThreadByProject[state.projectId] || "").trim() || null;
         state.threadList = threads;
         state.threadsByProject[state.projectId] = threads;
-        state.activeThreadId = activeThreadId || state.activeThreadId || null;
+        state.activeThreadId = activeThreadId || cachedActiveThreadId || state.activeThreadId || null;
+        if (state.activeThreadId) {
+          state.activeThreadByProject[state.projectId] = state.activeThreadId;
+        }
+        state.threadList = state.threadList.map((thread) => ({
+          ...thread,
+          is_active: String(thread.thread_id || "").trim() === String(state.activeThreadId || "").trim(),
+        }));
+        renderThreadList();
+      }
+
+      async function selectActiveThread(threadId, token = state.pendingProjectLoadToken) {
+        if (!state.projectId) return;
+        const normalizedThreadId = String(threadId || "").trim();
+        if (!normalizedThreadId) return;
+        await services.threads.setActiveThread(state.projectId, normalizedThreadId);
+        if (!isCurrentProjectHydrationToken(token)) return;
+        state.activeThreadId = normalizedThreadId;
+        state.activeThreadByProject[state.projectId] = normalizedThreadId;
+        state.threadList = (state.threadList || []).map((thread) => ({
+          ...thread,
+          is_active: String(thread.thread_id || "").trim() === normalizedThreadId,
+        }));
+        renderThreadList();
+        await loadProjectHistory(token);
+        await loadContext(token);
+      }
+
+      async function createThreadAndActivate(token = state.pendingProjectLoadToken) {
+        if (!state.projectId) {
+          showToast("請先選擇專案。", 9000, "warning");
+          return;
+        }
+        const payload = await services.threads.createProjectThread(state.projectId);
+        if (!isCurrentProjectHydrationToken(token)) return;
+        state.activeThreadId = payload.active_thread_id || payload.thread_id || null;
+        if (state.activeThreadId) {
+          state.activeThreadByProject[state.projectId] = state.activeThreadId;
+        }
+        await loadThreadList(token);
+        await loadProjectHistory(token);
+        await loadContext(token);
       }
 
       async function loadContext(token = state.pendingProjectLoadToken) {
@@ -2427,6 +2569,17 @@ appStore.patch({ bootstrappedAt: Date.now() });
         await refreshUiPreferences(state.projectId);
         await hydrateSelectedProject();
         await loadShellViewDependencies(state.shellView);
+      });
+
+      elements.createThreadBtn?.addEventListener("click", async () => {
+        const token = beginProjectHydration();
+        try {
+          await createThreadAndActivate(token);
+        } catch (error) {
+          if (isCurrentProjectHydrationToken(token)) {
+            showToast(`建立 Thread 失敗：${error.message}`, 9000, "warning");
+          }
+        }
       });
 
       elements.refreshContext.addEventListener("click", loadContext);

@@ -55,6 +55,14 @@
             <a class="shell-nav__item shell-nav__link segmented__item" data-shell-view="docs" data-route="docs" data-icon="description" href="#/docs" data-i18n="nav.docs">文件</a>
             <a class="shell-nav__item shell-nav__link segmented__item" data-shell-view="bill" data-route="billing" data-icon="payments" href="#/billing" data-i18n="nav.billing">計費</a>
           </nav>
+          <section class="thread-tree" id="thread-tree" aria-label="Project Threads">
+            <header class="thread-tree__header">
+              <p class="thread-tree__caption">Project</p>
+              <strong id="sidebar-project-name">未選擇專案</strong>
+              <button type="button" class="btn btn--secondary secondary-btn small" id="create-thread-btn">新 Thread</button>
+            </header>
+            <div class="thread-tree__body" id="thread-list" role="list" aria-label="Threads"></div>
+          </section>
         </aside>
 
         <section class="shell-main">
