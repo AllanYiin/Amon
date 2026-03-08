@@ -36,10 +36,10 @@ export function createSidebarLayout({ elements, store }) {
 
     navItems.forEach((item, index) => {
       item.addEventListener("keydown", (event) => {
-        if (event.key === "ArrowDown") {
+        if (event.key === "ArrowDown" || event.key === "ArrowRight") {
           event.preventDefault();
           focusByOffset(index, 1);
-        } else if (event.key === "ArrowUp") {
+        } else if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
           event.preventDefault();
           focusByOffset(index, -1);
         } else if (event.key === "Home") {

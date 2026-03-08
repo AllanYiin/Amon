@@ -41,6 +41,175 @@ appStore.patch({ bootstrappedAt: Date.now() });
       const state = createInitialUiState(createUiEventStore);
 
       const elements = collectElements(document);
+      const toolsSkillsUi = {
+        activeTab: "tools",
+        search: "",
+        toolsFilter: "all",
+        skillsSource: "all",
+        skillsView: "grid",
+      };
+      const TOOL_TYPE_META = {
+        mcp: { label: "MCP", icon: "lan", tone: "info" },
+        "built-in": { label: "Built-in", icon: "build_circle", tone: "neutral" },
+        forged: { label: "Forged", icon: "extension", tone: "warn" },
+        unknown: { label: "Unknown", icon: "help", tone: "neutral" },
+      };
+      const TAB_SEQUENCE = ["tools", "skills"];
+
+      function normalizeToolType(type) {
+        const normalized = String(type || "unknown").trim().toLowerCase();
+        return TOOL_TYPE_META[normalized] ? normalized : "unknown";
+      }
+
+      function extractToolMethodName(toolName) {
+        const rawName = String(toolName || "");
+        if (!rawName) return "(unnamed)";
+        const separator = rawName.includes(":") ? ":" : ".";
+        const parts = rawName.split(separator);
+        return parts[parts.length - 1] || rawName;
+      }
+
+      function extractToolGroupName(tool) {
+        const rawName = String(tool?.name || "");
+        const normalizedType = normalizeToolType(tool?.type);
+        if (!rawName) return "default";
+        if (rawName.includes(":")) {
+          return rawName.split(":")[0] || "default";
+        }
+        if (normalizedType === "built-in") {
+          return "built-in";
+        }
+        return "default";
+      }
+
+      function getToolSearchText(tool) {
+        return [
+          tool?.name,
+          tool?.type,
+          tool?.risk,
+          tool?.policy_decision,
+          tool?.policy_reason,
+          (tool?.allowed_paths || []).join(" "),
+          JSON.stringify(tool?.input_schema || {}),
+          JSON.stringify(tool?.output_schema || {}),
+        ]
+          .join(" ")
+          .toLowerCase();
+      }
+
+      function getSkillSearchText(skill) {
+        const frontmatter = skill?.frontmatter || {};
+        return [
+          skill?.name,
+          skill?.description,
+          frontmatter?.description,
+          skill?.source,
+          skill?.path,
+        ]
+          .join(" ")
+          .toLowerCase();
+      }
+
+      function formatCatalogTimestamp(rawValue) {
+        if (!rawValue) return "尚未同步";
+        const timestamp = typeof rawValue === "number" ? rawValue : Date.parse(String(rawValue));
+        if (!Number.isFinite(timestamp)) {
+          return `同步：${String(rawValue)}`;
+        }
+        return `同步：${new Date(timestamp).toLocaleString("zh-TW", { hour12: false })}`;
+      }
+
+      function getLatestCatalogTimestamp() {
+        const values = [state.toolsCatalogUpdatedAt, state.skillsCatalogUpdatedAt]
+          .map((value) => (typeof value === "number" ? value : Date.parse(String(value || ""))))
+          .filter((value) => Number.isFinite(value));
+        if (!values.length) return "";
+        return Math.max(...values);
+      }
+
+      function buildToolFilterOptions(tools = []) {
+        const options = [{ key: "all", label: "All", count: tools.length }];
+        Array.from(new Set((tools || []).map((tool) => normalizeToolType(tool.type))))
+          .sort((a, b) => a.localeCompare(b))
+          .forEach((type) => {
+            const meta = TOOL_TYPE_META[type] || TOOL_TYPE_META.unknown;
+            options.push({
+              key: type,
+              label: meta.label,
+              count: tools.filter((tool) => normalizeToolType(tool.type) === type).length,
+            });
+          });
+        return options;
+      }
+
+      function buildSkillsSourceOptions(skills = []) {
+        const options = [{ key: "all", label: "All", count: skills.length }];
+        Array.from(new Set((skills || []).map((skill) => String(skill.source || "unknown"))))
+          .sort((a, b) => a.localeCompare(b))
+          .forEach((source) => {
+            options.push({
+              key: source,
+              label: source,
+              count: skills.filter((skill) => String(skill.source || "unknown") === source).length,
+            });
+          });
+        return options;
+      }
+
+      function renderFilterChip(button) {
+        return `
+          <button
+            type="button"
+            class="chip${button.active ? " is-active" : ""}"
+            ${button.dataset}
+          >${escapeHtml(button.label)}<span class="chip__count">${escapeHtml(String(button.count))}</span></button>
+        `;
+      }
+
+      function ensureToolsSkillsSelection() {
+        const toolFilters = buildToolFilterOptions(state.toolsCatalog || []);
+        const skillFilters = buildSkillsSourceOptions(state.skillsCatalog || []);
+        if (!toolFilters.some((item) => item.key === toolsSkillsUi.toolsFilter)) {
+          toolsSkillsUi.toolsFilter = "all";
+        }
+        if (!skillFilters.some((item) => item.key === toolsSkillsUi.skillsSource)) {
+          toolsSkillsUi.skillsSource = "all";
+        }
+      }
+
+      function setToolsSkillsTab(nextTab, { focus = false } = {}) {
+        toolsSkillsUi.activeTab = nextTab === "skills" ? "skills" : "tools";
+        const isTools = toolsSkillsUi.activeTab === "tools";
+        elements.toolsPanel.hidden = !isTools;
+        elements.skillsPanel.hidden = isTools;
+        elements.toolsPanel.classList.toggle("is-active", isTools);
+        elements.skillsPanel.classList.toggle("is-active", !isTools);
+        elements.toolsSkillsTabTools.classList.toggle("is-active", isTools);
+        elements.toolsSkillsTabSkills.classList.toggle("is-active", !isTools);
+        elements.toolsSkillsTabTools.setAttribute("aria-selected", String(isTools));
+        elements.toolsSkillsTabSkills.setAttribute("aria-selected", String(!isTools));
+        elements.toolsSkillsTabTools.tabIndex = isTools ? 0 : -1;
+        elements.toolsSkillsTabSkills.tabIndex = isTools ? -1 : 0;
+        if (focus) {
+          (isTools ? elements.toolsSkillsTabTools : elements.toolsSkillsTabSkills)?.focus();
+        }
+      }
+
+      function syncToolsSkillsSummary(skillsPayload = {}) {
+        const tools = state.toolsCatalog || [];
+        const skills = state.skillsCatalog || [];
+        const collisions = skillsPayload.collisions || state.skillsCollisions || [];
+        const guardedCount = tools.filter((tool) => ["ask", "deny"].includes(String(tool.policy_decision || ""))).length;
+        const latestTimestamp = getLatestCatalogTimestamp();
+
+        elements.toolsSkillsToolsCount.textContent = String(tools.length);
+        elements.toolsSkillsSkillsCount.textContent = String(skills.length);
+        elements.toolsSkillsSummaryTools.textContent = String(tools.length);
+        elements.toolsSkillsSummaryGuarded.textContent = String(guardedCount);
+        elements.toolsSkillsSummarySkills.textContent = String(skills.length);
+        elements.toolsSkillsSummaryOverrides.textContent = String(collisions.length);
+        elements.toolsSkillsLastSync.textContent = formatCatalogTimestamp(latestTimestamp);
+      }
 
       async function logToastEvent(entry = {}) {
         const payload = {
@@ -898,12 +1067,18 @@ appStore.patch({ bootstrappedAt: Date.now() });
         await Promise.all([loadLogsPage(1), loadEventsPage(1)]);
       }
       async function loadToolsSkillsPage() {
-        const toolsPayload = await services.admin.getToolsCatalog(state.projectId);
-        const skillsPayload = await services.admin.getSkillsCatalog(state.projectId);
+        const [toolsPayload, skillsPayload] = await Promise.all([
+          services.admin.getToolsCatalog(state.projectId),
+          services.admin.getSkillsCatalog(state.projectId),
+        ]);
         state.toolsCatalog = toolsPayload.tools || [];
         state.skillsCatalog = skillsPayload.skills || [];
-        renderToolsList(state.toolsCatalog, toolsPayload.policy_editable);
-        renderSkillsList(state.skillsCatalog, skillsPayload.collisions || []);
+        state.toolsCatalogPolicyEditable = Boolean(toolsPayload.policy_editable);
+        state.toolsCatalogUpdatedAt = toolsPayload.updated_at || "";
+        state.skillsCatalogUpdatedAt = skillsPayload.updated_at || "";
+        state.skillsCollisions = skillsPayload.collisions || [];
+        ensureToolsSkillsSelection();
+        renderToolsSkillsPage();
       }
 
       function formatRecentUsage(usage) {
@@ -913,7 +1088,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
       }
 
       function renderSchema(schema) {
-        return `<pre>${escapeHtml(JSON.stringify(schema || {}, null, 2))}</pre>`;
+        return `<pre class="tools-codeblock">${escapeHtml(JSON.stringify(schema || {}, null, 2))}</pre>`;
       }
 
       function queueToolPolicyPlan(toolName, action, requireConfirm) {
@@ -927,133 +1102,304 @@ appStore.patch({ bootstrappedAt: Date.now() });
           .catch((error) => showToast(`建立 Plan Card 失敗：${error.message}`));
       }
 
-      function renderToolsList(tools = [], policyEditable = false) {
-        elements.toolsList.innerHTML = "";
-        if (!tools.length) {
-          elements.toolsList.innerHTML = '<p class="empty-context">尚未找到工具。</p>';
-          return;
+      function renderToolsSkillsPage() {
+        syncToolsSkillsSummary({ collisions: state.skillsCollisions || [] });
+        setToolsSkillsTab(toolsSkillsUi.activeTab);
+        renderToolsFilterChips(state.toolsCatalog || []);
+        renderSkillsSourceFilters(state.skillsCatalog || []);
+        renderSkillTriggerOptions(state.skillsCatalog || []);
+        renderToolsList(state.toolsCatalog || [], state.toolsCatalogPolicyEditable);
+        renderSkillsList(state.skillsCatalog || [], state.skillsCollisions || []);
+      }
+
+      function renderToolsFilterChips(tools = []) {
+        const options = buildToolFilterOptions(tools);
+        elements.toolsFilterChips.innerHTML = options
+          .map((item) => renderFilterChip({
+            label: item.label,
+            count: item.count,
+            active: toolsSkillsUi.toolsFilter === item.key,
+            dataset: `data-tools-filter="${escapeHtml(item.key)}"`,
+          }))
+          .join("");
+      }
+
+      function renderSkillsSourceFilters(skills = []) {
+        const options = buildSkillsSourceOptions(skills);
+        elements.skillsSourceFilters.innerHTML = options
+          .map((item) => renderFilterChip({
+            label: item.label,
+            count: item.count,
+            active: toolsSkillsUi.skillsSource === item.key,
+            dataset: `data-skills-source="${escapeHtml(item.key)}"`,
+          }))
+          .join("");
+      }
+
+      function renderSkillTriggerOptions(skills = []) {
+        const currentValue = elements.skillTriggerSelect.value;
+        elements.skillTriggerSelect.innerHTML = "";
+        skills.forEach((skill) => {
+          const option = document.createElement("option");
+          option.value = skill.name || "";
+          option.textContent = `${skill.name || "(未命名)"} / ${skill.source || "unknown"}`;
+          elements.skillTriggerSelect.appendChild(option);
+        });
+        if (!skills.length) {
+          const option = document.createElement("option");
+          option.value = "";
+          option.textContent = "尚無可預覽的 skill";
+          elements.skillTriggerSelect.appendChild(option);
+        } else if (skills.some((skill) => skill.name === currentValue)) {
+          elements.skillTriggerSelect.value = currentValue;
         }
-        const byNode = new Map();
-        tools.forEach((tool) => {
-          const nodeLabel = String(tool.type || "unknown");
-          const rawName = String(tool.name || "");
-          const parts = rawName.split(":");
-          let groupLabel = "default";
-          if (nodeLabel === "mcp" && parts.length > 1) {
-            groupLabel = parts[0] || "default";
-          } else if (parts.length > 1) {
-            groupLabel = parts[0] || "default";
-          }
-          if (!byNode.has(nodeLabel)) byNode.set(nodeLabel, new Map());
-          const groups = byNode.get(nodeLabel);
-          if (!groups.has(groupLabel)) groups.set(groupLabel, []);
-          groups.get(groupLabel).push(tool);
+        updateSkillsPreviewMeta();
+      }
+
+      function renderEmptyCatalog(title, description) {
+        return `
+          <article class="tools-empty-state">
+            <span class="tools-empty-state__icon" aria-hidden="true">search_off</span>
+            <strong>${escapeHtml(title)}</strong>
+            <p>${escapeHtml(description)}</p>
+          </article>
+        `;
+      }
+
+      function renderToolsList(tools = [], policyEditable = false) {
+        const query = toolsSkillsUi.search.trim().toLowerCase();
+        const filteredTools = tools.filter((tool) => {
+          const typeMatches = toolsSkillsUi.toolsFilter === "all" || normalizeToolType(tool.type) === toolsSkillsUi.toolsFilter;
+          const searchMatches = !query || getToolSearchText(tool).includes(query);
+          return typeMatches && searchMatches;
+        });
+        const groupMap = new Map();
+
+        filteredTools.forEach((tool) => {
+          const typeKey = normalizeToolType(tool.type);
+          const groupKey = extractToolGroupName(tool);
+          if (!groupMap.has(typeKey)) groupMap.set(typeKey, new Map());
+          const bucket = groupMap.get(typeKey);
+          if (!bucket.has(groupKey)) bucket.set(groupKey, []);
+          bucket.get(groupKey).push(tool);
         });
 
-        Array.from(byNode.entries())
+        elements.toolsListMeta.textContent = filteredTools.length
+          ? `顯示 ${filteredTools.length} / ${tools.length} 個 tools`
+          : `0 / ${tools.length} 個 tools 符合篩選`;
+
+        if (!filteredTools.length) {
+          elements.toolsList.innerHTML = renderEmptyCatalog("找不到符合條件的工具", "請調整搜尋關鍵字或切換類型篩選。");
+          return;
+        }
+
+        elements.toolsList.innerHTML = Array.from(groupMap.entries())
           .sort(([a], [b]) => a.localeCompare(b))
-          .forEach(([nodeLabel, groupMap]) => {
-            const nodeItem = document.createElement("details");
-            nodeItem.className = "tree-node tree-node--root";
-            nodeItem.open = true;
-            const nodeSummary = document.createElement("summary");
-            nodeSummary.textContent = `${nodeLabel}（${groupMap.size}）`;
-            nodeItem.appendChild(nodeSummary);
-
-            Array.from(groupMap.entries())
-              .sort(([a], [b]) => a.localeCompare(b))
-              .forEach(([groupLabel, groupedTools]) => {
-                const groupItem = document.createElement("details");
-                groupItem.className = "tree-node tree-node--group";
-                groupItem.open = true;
-                const groupSummary = document.createElement("summary");
-                groupSummary.textContent = `${groupLabel}（${groupedTools.length}）`;
-                groupItem.appendChild(groupSummary);
-
-                groupedTools.forEach((tool) => {
-                  const card = document.createElement("article");
-                  card.className = "tool-card";
-                  card.innerHTML = `
-                    <header>
-                      <div>
-                        <strong>${escapeHtml(tool.name)}</strong>
-                        <p>${escapeHtml(tool.type)} ｜ v${escapeHtml(String(tool.version || "unknown"))}</p>
-                      </div>
-                      <span class="risk-chip">risk: ${escapeHtml(String(tool.risk || "unknown"))}</span>
-                    </header>
-                    <p>allowed_paths：${escapeHtml((tool.allowed_paths || []).join(", ") || "workspace")}</p>
-                    <p>預設策略：<strong>${escapeHtml(String(tool.policy_decision || "deny").toUpperCase())}</strong></p>
-                    <p>策略說明：${escapeHtml(tool.policy_reason || "未命中 allow 規則，預設拒絕")}</p>
-                    <p>最近使用：${escapeHtml(formatRecentUsage(tool.recent_usage))}</p>
-                    <details><summary>inputs schema</summary>${renderSchema(tool.input_schema)}</details>
-                    <details><summary>outputs schema</summary>${renderSchema(tool.output_schema)}</details>
-                  `;
-                  const actions = document.createElement("div");
-                  actions.className = "tool-card__actions";
-                  if (policyEditable) {
-                    const enableButton = document.createElement("button");
-                    enableButton.type = "button";
-                    enableButton.className = "secondary-btn small";
-                    enableButton.textContent = tool.enabled ? "Disable" : "Enable";
-                    enableButton.addEventListener("click", () => queueToolPolicyPlan(tool.name, tool.enabled ? "disable" : "enable", Boolean(tool.require_confirm)));
-                    actions.appendChild(enableButton);
-
-                    const confirmButton = document.createElement("button");
-                    confirmButton.type = "button";
-                    confirmButton.className = "secondary-btn small";
-                    confirmButton.textContent = `Require Confirm：${tool.require_confirm ? "ON" : "OFF"}`;
-                    confirmButton.addEventListener("click", () => queueToolPolicyPlan(tool.name, "require_confirm", !tool.require_confirm));
-                    actions.appendChild(confirmButton);
-                  }
-                  card.appendChild(actions);
-                  groupItem.appendChild(card);
-                });
-                nodeItem.appendChild(groupItem);
-              });
-            elements.toolsList.appendChild(nodeItem);
-          });
+          .map(([typeKey, groups]) => {
+            const meta = TOOL_TYPE_META[typeKey] || TOOL_TYPE_META.unknown;
+            return `
+              <section class="tool-cluster">
+                <header class="tool-cluster__header">
+                  <div class="tool-cluster__title">
+                    <span class="tool-cluster__icon" aria-hidden="true">${meta.icon}</span>
+                    <div>
+                      <h4>${escapeHtml(meta.label)}</h4>
+                      <p>${groups.size} groups / ${Array.from(groups.values()).flat().length} tools</p>
+                    </div>
+                  </div>
+                  <span class="pill pill--${meta.tone}">${escapeHtml(meta.label)}</span>
+                </header>
+                <div class="tool-group-stack">
+                  ${Array.from(groups.entries())
+                    .sort(([a], [b]) => a.localeCompare(b))
+                    .map(([groupLabel, groupedTools]) => {
+                      const sampleMethods = groupedTools
+                        .slice(0, 4)
+                        .map((tool) => `<span class="tool-group__method-pill">${escapeHtml(extractToolMethodName(tool.name))}</span>`)
+                        .join("");
+                      return `
+                        <details class="tool-group" open>
+                          <summary class="tool-group__summary">
+                            <span class="tool-group__icon" aria-hidden="true">${meta.icon}</span>
+                            <span class="tool-group__identity">
+                              <strong>${escapeHtml(groupLabel)}</strong>
+                              <span>${escapeHtml(meta.label)} catalog group</span>
+                            </span>
+                            <span class="tool-group__method-list">${sampleMethods}</span>
+                            <span class="tool-group__count">${groupedTools.length}</span>
+                          </summary>
+                          <div class="tool-group__body">
+                            ${groupedTools
+                              .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")))
+                              .map((tool) => {
+                                const risk = String(tool.risk || "unknown").toLowerCase();
+                                const allowPaths = (tool.allowed_paths || []).join(", ") || "workspace";
+                                const rawName = String(tool.name || "");
+                                const separator = rawName.includes(":") ? ":" : ".";
+                                const rawParts = rawName.split(separator);
+                                const methodPrefix = rawParts.length > 1 ? `${rawParts.slice(0, -1).join(separator)}${separator}` : "";
+                                return `
+                                  <details class="tool-method">
+                                    <summary class="tool-method__summary">
+                                      <span class="tool-method__name">
+                                        ${methodPrefix ? `<span class="tool-method__prefix">${escapeHtml(methodPrefix)}</span>` : ""}
+                                        <strong>${escapeHtml(extractToolMethodName(rawName))}</strong>
+                                      </span>
+                                      <span class="risk-chip risk-chip--${escapeHtml(risk)}">risk: ${escapeHtml(risk)}</span>
+                                    </summary>
+                                    <div class="tool-method__body">
+                                      <div class="tool-method__info-grid">
+                                        <article class="tool-method__info-card">
+                                          <span class="tool-method__info-label">類型</span>
+                                          <strong>${escapeHtml(meta.label)}</strong>
+                                        </article>
+                                        <article class="tool-method__info-card">
+                                          <span class="tool-method__info-label">版本</span>
+                                          <strong>${escapeHtml(String(tool.version || "unknown"))}</strong>
+                                        </article>
+                                        <article class="tool-method__info-card">
+                                          <span class="tool-method__info-label">Allowed Paths</span>
+                                          <strong>${escapeHtml(allowPaths)}</strong>
+                                        </article>
+                                        <article class="tool-method__info-card">
+                                          <span class="tool-method__info-label">最近使用</span>
+                                          <strong>${escapeHtml(formatRecentUsage(tool.recent_usage))}</strong>
+                                        </article>
+                                      </div>
+                                      <p class="tool-method__policy"><strong>預設策略：</strong>${escapeHtml(String(tool.policy_decision || "deny").toUpperCase())}</p>
+                                      <p class="tool-method__policy">${escapeHtml(tool.policy_reason || "未命中 allow 規則，預設拒絕")}</p>
+                                      <div class="tool-method__schema-stack">
+                                        <details class="tool-method__schema-panel">
+                                          <summary>inputs schema</summary>
+                                          ${renderSchema(tool.input_schema)}
+                                        </details>
+                                        <details class="tool-method__schema-panel">
+                                          <summary>outputs schema</summary>
+                                          ${renderSchema(tool.output_schema)}
+                                        </details>
+                                      </div>
+                                      <div class="tool-card__actions">
+                                        ${policyEditable
+                                          ? `
+                                            <button
+                                              type="button"
+                                              class="btn btn--secondary secondary-btn small"
+                                              data-tool-action="toggle-enabled"
+                                              data-tool-name="${escapeHtml(tool.name)}"
+                                              data-tool-enabled="${tool.enabled ? "true" : "false"}"
+                                              data-tool-require-confirm="${tool.require_confirm ? "true" : "false"}"
+                                            >${tool.enabled ? "Disable" : "Enable"}</button>
+                                            <button
+                                              type="button"
+                                              class="btn btn--ghost secondary-btn small"
+                                              data-tool-action="toggle-confirm"
+                                              data-tool-name="${escapeHtml(tool.name)}"
+                                              data-tool-enabled="${tool.enabled ? "true" : "false"}"
+                                              data-tool-require-confirm="${tool.require_confirm ? "true" : "false"}"
+                                            >Require Confirm：${tool.require_confirm ? "ON" : "OFF"}</button>
+                                          `
+                                          : `<span class="tool-method__readonly">目前策略為唯讀模式</span>`}
+                                      </div>
+                                    </div>
+                                  </details>
+                                `;
+                              })
+                              .join("")}
+                          </div>
+                        </details>
+                      `;
+                    })
+                    .join("")}
+                </div>
+              </section>
+            `;
+          })
+          .join("");
       }
 
       function renderSkillsList(skills = [], collisions = []) {
-        elements.skillsList.innerHTML = "";
-        elements.skillsCollisions.innerHTML = "";
-        if (collisions.length) {
-          collisions.forEach((item) => {
-            const tip = document.createElement("p");
-            tip.className = "collision-tip";
-            tip.textContent = `⚠️ ${item.name}：${item.message}`;
-            elements.skillsCollisions.appendChild(tip);
-          });
-        }
-        if (!skills.length) {
-          elements.skillsList.innerHTML = '<p class="empty-context">尚未找到 skills。</p>';
+        const query = toolsSkillsUi.search.trim().toLowerCase();
+        const filteredSkills = skills.filter((skill) => {
+          const source = String(skill.source || "unknown");
+          const sourceMatches = toolsSkillsUi.skillsSource === "all" || source === toolsSkillsUi.skillsSource;
+          const searchMatches = !query || getSkillSearchText(skill).includes(query);
+          return sourceMatches && searchMatches;
+        });
+
+        elements.skillsListMeta.textContent = filteredSkills.length
+          ? `顯示 ${filteredSkills.length} / ${skills.length} 個 skills`
+          : `0 / ${skills.length} 個 skills 符合篩選`;
+        elements.skillsList.classList.toggle("skills-list--grid", toolsSkillsUi.skillsView === "grid");
+        elements.skillsList.classList.toggle("skills-list--list", toolsSkillsUi.skillsView === "list");
+        elements.skillsViewGrid.classList.toggle("is-active", toolsSkillsUi.skillsView === "grid");
+        elements.skillsViewList.classList.toggle("is-active", toolsSkillsUi.skillsView === "list");
+        elements.skillsViewGrid.setAttribute("aria-pressed", String(toolsSkillsUi.skillsView === "grid"));
+        elements.skillsViewList.setAttribute("aria-pressed", String(toolsSkillsUi.skillsView === "list"));
+
+        elements.skillsCollisions.innerHTML = collisions.length
+          ? collisions
+            .map((item) => `
+              <article class="collision-tip">
+                <strong>${escapeHtml(item.name)}</strong>
+                <span>${escapeHtml(item.message)}</span>
+              </article>
+            `)
+            .join("")
+          : "";
+
+        if (!filteredSkills.length) {
+          elements.skillsList.innerHTML = renderEmptyCatalog("找不到符合條件的 skill", "請調整搜尋關鍵字、來源篩選，或確認是否已執行 skills scan。");
           return;
         }
-        elements.skillTriggerSelect.innerHTML = "";
-        const rootItem = document.createElement("details");
-        rootItem.className = "tree-node tree-node--root";
-        rootItem.open = true;
-        const rootSummary = document.createElement("summary");
-        rootSummary.textContent = `skills（${skills.length}）`;
-        rootItem.appendChild(rootSummary);
-        skills.forEach((skill) => {
-          const card = document.createElement("article");
-          card.className = "skill-card";
-          const frontmatter = skill.frontmatter || {};
-          card.innerHTML = `
-            <header><strong>${escapeHtml(skill.name || "(未命名)")}</strong><span>${escapeHtml(skill.source || "unknown")}</span></header>
-            <p>${escapeHtml(frontmatter.description || skill.description || "無描述")}</p>
-            <p class="skill-source">來源：${escapeHtml(skill.path || "")}</p>
-            <pre>${escapeHtml(JSON.stringify({ name: frontmatter.name || skill.name, description: frontmatter.description || "" }, null, 2))}</pre>
-          `;
-          rootItem.appendChild(card);
 
-          const option = document.createElement("option");
-          option.value = skill.name || "";
-          option.textContent = `${skill.name || "(未命名)"}（${skill.source || "unknown"}）`;
-          elements.skillTriggerSelect.appendChild(option);
-        });
-        elements.skillsList.appendChild(rootItem);
+        elements.skillsList.innerHTML = filteredSkills
+          .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")))
+          .map((skill) => {
+            const frontmatter = skill.frontmatter || {};
+            const source = String(skill.source || "unknown");
+            const definition = {
+              name: frontmatter.name || skill.name,
+              description: frontmatter.description || skill.description || "",
+              source,
+              path: skill.path || "",
+            };
+            return `
+              <details class="skill-card skill-card--${escapeHtml(toolsSkillsUi.skillsView)}" data-skill-source="${escapeHtml(source)}">
+                <summary class="skill-card__summary">
+                  <span class="skill-card__icon" aria-hidden="true">school</span>
+                  <span class="skill-card__body">
+                    <span class="skill-card__title-row">
+                      <strong>${escapeHtml(skill.name || "(未命名)")}</strong>
+                      <span class="skill-card__source">${escapeHtml(source)}</span>
+                    </span>
+                    <span class="skill-card__desc">${escapeHtml(frontmatter.description || skill.description || "無描述")}</span>
+                    <span class="skill-card__path">${escapeHtml(skill.path || "")}</span>
+                  </span>
+                </summary>
+                <div class="skill-card__detail">
+                  <div class="skill-card__detail-grid">
+                    <article class="skill-card__detail-card">
+                      <span class="tool-method__info-label">來源</span>
+                      <strong>${escapeHtml(source)}</strong>
+                    </article>
+                    <article class="skill-card__detail-card">
+                      <span class="tool-method__info-label">觸發名稱</span>
+                      <strong>${escapeHtml(skill.name || "(未命名)")}</strong>
+                    </article>
+                  </div>
+                  ${renderSchema(definition)}
+                </div>
+              </details>
+            `;
+          })
+          .join("");
+      }
+
+      function updateSkillsPreviewMeta() {
+        const selectedOption = elements.skillTriggerSelect.selectedOptions?.[0];
+        elements.skillsPreviewMeta.textContent = selectedOption
+          ? `目前選擇：${selectedOption.textContent}`
+          : "請先選一個 skill。";
       }
 
       function showToast(message, duration = 9000, type = "info") {
@@ -2470,6 +2816,62 @@ appStore.patch({ bootstrappedAt: Date.now() });
       });
 
 
+      elements.toolsSkillsSearch?.addEventListener("input", (event) => {
+        toolsSkillsUi.search = event.target.value || "";
+        renderToolsSkillsPage();
+      });
+      elements.toolsSkillsTabList?.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-target-panel]");
+        if (!button) return;
+        const nextTab = button.id === "tools-skills-tab-skills" ? "skills" : "tools";
+        setToolsSkillsTab(nextTab);
+      });
+      elements.toolsSkillsTabList?.addEventListener("keydown", (event) => {
+        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+          return;
+        }
+        event.preventDefault();
+        const currentIndex = TAB_SEQUENCE.indexOf(toolsSkillsUi.activeTab);
+        let nextIndex = currentIndex;
+        if (event.key === "Home") nextIndex = 0;
+        if (event.key === "End") nextIndex = TAB_SEQUENCE.length - 1;
+        if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + TAB_SEQUENCE.length) % TAB_SEQUENCE.length;
+        if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % TAB_SEQUENCE.length;
+        setToolsSkillsTab(TAB_SEQUENCE[nextIndex], { focus: true });
+      });
+      elements.toolsFilterChips?.addEventListener("click", (event) => {
+        const chip = event.target.closest("[data-tools-filter]");
+        if (!chip) return;
+        toolsSkillsUi.toolsFilter = chip.dataset.toolsFilter || "all";
+        renderToolsSkillsPage();
+      });
+      elements.skillsSourceFilters?.addEventListener("click", (event) => {
+        const chip = event.target.closest("[data-skills-source]");
+        if (!chip) return;
+        toolsSkillsUi.skillsSource = chip.dataset.skillsSource || "all";
+        renderToolsSkillsPage();
+      });
+      elements.skillsViewToggle?.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-skills-view]");
+        if (!button) return;
+        toolsSkillsUi.skillsView = button.dataset.skillsView === "list" ? "list" : "grid";
+        renderToolsSkillsPage();
+      });
+      elements.toolsList?.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-tool-action]");
+        if (!button) return;
+        const toolName = button.dataset.toolName || "";
+        const enabled = button.dataset.toolEnabled === "true";
+        const requireConfirm = button.dataset.toolRequireConfirm === "true";
+        if (!toolName) return;
+        if (button.dataset.toolAction === "toggle-enabled") {
+          queueToolPolicyPlan(toolName, enabled ? "disable" : "enable", requireConfirm);
+          return;
+        }
+        if (button.dataset.toolAction === "toggle-confirm") {
+          queueToolPolicyPlan(toolName, "require_confirm", !requireConfirm);
+        }
+      });
       elements.toolsSkillsRefresh.addEventListener("click", loadToolsSkillsPage);
       elements.configRefresh.addEventListener("click", loadConfigPage);
       elements.configSearch.addEventListener("input", renderConfigTable);
@@ -2492,11 +2894,13 @@ appStore.patch({ bootstrappedAt: Date.now() });
         try {
           const payload = await services.admin.getSkillTriggerPreview(skillName, state.projectId || "");
           elements.skillInjectionPreview.textContent = JSON.stringify(payload, null, 2);
+          elements.skillsPreviewMeta.textContent = `最近預覽：${skillName}`;
           showToast("已產生 skill 注入預覽。");
         } catch (error) {
           showToast(`技能預覽失敗：${error.message}`);
         }
       });
+      elements.skillTriggerSelect?.addEventListener("change", updateSkillsPreviewMeta);
 
       elements.logsTabLogs?.addEventListener("click", () => setLogsEventsPanel("logs"));
       elements.logsTabEvents?.addEventListener("click", () => setLogsEventsPanel("events"));
