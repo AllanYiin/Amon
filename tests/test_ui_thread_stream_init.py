@@ -39,7 +39,7 @@ class UIChatStreamInitTests(unittest.TestCase):
                     available_skills=None,
                     stream_handler=None,
                     run_id=None,
-                    chat_id=None,
+                    thread_id=None,
                     conversation_history=None,
                     request_id=None,
                 ):
@@ -121,7 +121,7 @@ class UIChatStreamInitTests(unittest.TestCase):
                     available_skills=None,
                     stream_handler=None,
                     run_id=None,
-                    chat_id=None,
+                    thread_id=None,
                     conversation_history=None,
                     request_id=None,
                 ):
@@ -195,7 +195,7 @@ class UIChatStreamInitTests(unittest.TestCase):
                     available_skills=None,
                     stream_handler=None,
                     run_id=None,
-                    chat_id=None,
+                    thread_id=None,
                     conversation_history=None,
                     request_id=None,
                 ):

@@ -15,7 +15,7 @@ from amon.ui_server import AmonUIHandler
 from http.server import ThreadingHTTPServer
 
 
-class ChatSessionEndpointBehaviorTests(unittest.TestCase):
+class ThreadSessionEndpointBehaviorTests(unittest.TestCase):
     def test_thread_endpoints_use_active_thread_instead_of_latest(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = str(Path(temp_dir) / "data")

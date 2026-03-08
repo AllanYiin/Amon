@@ -24,10 +24,10 @@ rg -n "PlanGraph|compile_plan_to_exec_graph|taskgraph3\.engine_runtime\.GraphRun
 python -m compileall src tests
 python -m unittest discover -s tests -p "test_*.py"
 python -m unittest \
-  tests.test_chat_continuation_guard \
-  tests.test_chat_continuation_flow \
-  tests.test_ui_chat_stream_init \
-  tests.test_chat_session_store
+  tests.test_thread_continuation_guard \
+  tests.test_thread_continuation_flow \
+  tests.test_ui_thread_stream_init \
+  tests.test_thread_store
 pytest
 ```
 

@@ -36,19 +36,22 @@ export function createRunsService({ api }) {
         body: JSON.stringify({ project_id: projectId, run_id: runId }),
       });
     },
-    async ensureChatSession(projectId, chatId = null) {
+    async ensureThreadSession(projectId, threadId = null) {
       const payload = { project_id: projectId };
-      if (chatId) payload.chat_id = chatId;
-      return api.request("/chat/sessions", {
+      if (threadId) payload.thread_id = threadId;
+      return api.request(`/projects/${encodeURIComponent(projectId)}/threads`, {
         method: "POST",
         body: JSON.stringify(payload),
       });
     },
-    async getProjectHistory(projectId, chatId = "") {
-      const query = String(chatId || "").trim()
-        ? `?chat_id=${encodeURIComponent(String(chatId).trim())}`
-        : "";
-      return api.request(`/projects/${encodeURIComponent(projectId)}/chat-history${query}`);
+    async getProjectHistory(projectId, threadId = "") {
+      const normalizedThreadId = String(threadId || "").trim();
+      if (!normalizedThreadId) {
+        return api.request(`/projects/${encodeURIComponent(projectId)}/threads`);
+      }
+      return api.request(
+        `/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(normalizedThreadId)}/history`,
+      );
     },
   };
 }

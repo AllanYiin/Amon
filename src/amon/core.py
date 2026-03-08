@@ -553,7 +553,7 @@ class AmonCore:
         conversation_history: list[dict[str, str]] | None = None,
         run_id: str | None = None,
         node_id: str | None = None,
-        chat_id: str | None = None,
+        thread_id: str | None = None,
     ) -> str:
         config = self.load_config(project_path)
         project_id, _ = self.resolve_project_identity(project_path)
@@ -677,7 +677,7 @@ class AmonCore:
             project_path=project_path,
             run_id=run_id,
             node_id=node_id,
-            chat_id=chat_id,
+            thread_id=thread_id,
             mode=mode,
         )
         return response_text
@@ -802,7 +802,7 @@ class AmonCore:
         skill_names: list[str] | None = None,
         run_id: str | None = None,
         conversation_history: list[dict[str, str]] | None = None,
-        chat_id: str | None = None,
+        thread_id: str | None = None,
         request_id: str | None = None,
     ) -> tuple[TaskGraph3RunResult, str]:
         if not project_path:
@@ -817,15 +817,15 @@ class AmonCore:
                 mode="single",
             )
             variables: dict[str, Any] = {"conversation_history": conversation_history or []}
-            if chat_id:
-                variables["chat_id"] = chat_id
+            if thread_id:
+                variables["thread_id"] = thread_id
             result = self.run_graph(
                 project_path=project_path,
                 graph_path=graph_path,
                 variables=variables,
                 stream_handler=stream_handler,
                 run_id=run_id,
-                chat_id=chat_id,
+                thread_id=thread_id,
                 request_id=request_id,
             )
             response = self._load_graph_primary_output(result.run_dir)
@@ -839,7 +839,7 @@ class AmonCore:
         skill_names: list[str] | None = None,
         stream_handler=None,
         run_id: str | None = None,
-        chat_id: str | None = None,
+        thread_id: str | None = None,
         request_id: str | None = None,
     ) -> str:
         if not project_path:
@@ -876,7 +876,7 @@ class AmonCore:
                 },
                 mode="self_critique",
             )
-            self.run_graph(project_path=project_path, graph_path=graph_path, stream_handler=stream_handler, run_id=run_id, chat_id=chat_id, request_id=request_id)
+            self.run_graph(project_path=project_path, graph_path=graph_path, stream_handler=stream_handler, run_id=run_id, thread_id=thread_id, request_id=request_id)
             log_event(
                 {
                     "level": "INFO",
@@ -895,7 +895,7 @@ class AmonCore:
         skill_names: list[str] | None = None,
         stream_handler=None,
         run_id: str | None = None,
-        chat_id: str | None = None,
+        thread_id: str | None = None,
         request_id: str | None = None,
     ) -> str:
         if not project_path:
@@ -934,7 +934,7 @@ class AmonCore:
                 },
                 mode="team",
             )
-            self.run_graph(project_path=project_path, graph_path=graph_path, stream_handler=stream_handler, run_id=run_id, chat_id=chat_id, request_id=request_id)
+            self.run_graph(project_path=project_path, graph_path=graph_path, stream_handler=stream_handler, run_id=run_id, thread_id=thread_id, request_id=request_id)
             tasks_dir = project_path / "tasks"
             tasks_dir.mkdir(parents=True, exist_ok=True)
             self._sync_team_tasks(project_path, tasks_dir, docs_dir)
@@ -1033,7 +1033,7 @@ class AmonCore:
         available_skills: list[dict[str, Any]] | None = None,
         stream_handler=None,
         run_id: str | None = None,
-        chat_id: str | None = None,
+        thread_id: str | None = None,
         conversation_history: list[dict[str, str]] | None = None,
         request_id: str | None = None,
     ) -> tuple[TaskGraph3RunResult, str]:
@@ -1136,7 +1136,7 @@ class AmonCore:
                 graph_path=graph_path,
                 stream_handler=stream_handler,
                 run_id=run_id,
-                chat_id=chat_id,
+                thread_id=thread_id,
                 request_id=request_id,
             ),
         )
@@ -1160,7 +1160,7 @@ class AmonCore:
         available_skills: list[dict[str, Any]] | None = None,
         stream_handler=None,
         run_id: str | None = None,
-        chat_id: str | None = None,
+        thread_id: str | None = None,
         conversation_history: list[dict[str, str]] | None = None,
         request_id: str | None = None,
     ) -> tuple[TaskGraph3RunResult, str]:
@@ -1174,7 +1174,7 @@ class AmonCore:
             available_skills=available_skills,
             stream_handler=stream_handler,
             run_id=run_id,
-            chat_id=chat_id,
+            thread_id=thread_id,
             conversation_history=conversation_history,
             request_id=request_id,
         )
@@ -1659,7 +1659,7 @@ class AmonCore:
         stream_handler=None,
         run_id: str | None = None,
         request_id: str | None = None,
-        chat_id: str | None = None,
+        thread_id: str | None = None,
     ) -> TaskGraph3RunResult:
         if not project_path:
             raise ValueError("執行 graph 需要指定專案")
@@ -1685,7 +1685,7 @@ class AmonCore:
             variables=runtime_vars,
             stream_handler=stream_handler,
             request_id=request_id,
-            chat_id=chat_id,
+            thread_id=thread_id,
         )
         result = runtime.run(node_runner.run_task)
         return result
@@ -5709,7 +5709,7 @@ class AmonCore:
         project_path: Path | None = None,
         run_id: str | None = None,
         node_id: str | None = None,
-        chat_id: str | None = None,
+        thread_id: str | None = None,
         mode: str | None = None,
     ) -> None:
         if not config.get("billing", {}).get("enabled", True):
@@ -5735,7 +5735,7 @@ class AmonCore:
             "project_path": str(project_path) if project_path else None,
             "run_id": run_id,
             "node_id": node_id,
-            "chat_id": chat_id,
+            "thread_id": thread_id,
             "mode": mode or "interactive",
             "ts": datetime.now().isoformat(timespec="seconds"),
         }
@@ -5751,7 +5751,7 @@ class AmonCore:
             "ts": payload.get("ts") or datetime.now().isoformat(timespec="seconds"),
             "project_id": payload.get("project_id"),
             "run_id": payload.get("run_id"),
-            "chat_id": payload.get("chat_id"),
+            "thread_id": payload.get("thread_id"),
             "node_id": payload.get("node_id"),
             "provider": payload.get("provider"),
             "model": payload.get("model"),

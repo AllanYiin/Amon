@@ -18,7 +18,7 @@ from http.server import ThreadingHTTPServer
 
 
 class ChatContinuationFlowTests(unittest.TestCase):
-    def test_stream_without_chat_id_reuses_active_session_and_persists_assistant(self) -> None:
+    def test_stream_without_thread_id_reuses_active_session_and_persists_assistant(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"
             os.environ["AMON_HOME"] = str(data_dir)
@@ -41,7 +41,7 @@ class ChatContinuationFlowTests(unittest.TestCase):
                     available_skills=None,
                     stream_handler=None,
                     run_id=None,
-                    chat_id=None,
+                    thread_id=None,
                     conversation_history=None,
                     request_id=None,
                 ):

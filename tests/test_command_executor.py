@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from amon.chat.session_store import create_chat_session
+from amon.chat.thread_store import create_thread_session
 from amon.commands.executor import CommandPlan, execute
 from amon.core import AmonCore
 
@@ -26,12 +26,12 @@ class CommandExecutorTests(unittest.TestCase):
 
     def test_projects_list_returns_result(self) -> None:
         record = self.core.create_project("測試專案")
-        chat_id = create_chat_session(record.project_id)
+        thread_id = create_thread_session(record.project_id)
         plan = CommandPlan(
             name="projects.list",
             args={},
             project_id=record.project_id,
-            chat_id=chat_id,
+            thread_id=thread_id,
         )
 
         result = execute(plan, confirmed=True)
@@ -42,12 +42,12 @@ class CommandExecutorTests(unittest.TestCase):
 
     def test_projects_delete_requires_confirm(self) -> None:
         record = self.core.create_project("待刪除專案")
-        chat_id = create_chat_session(record.project_id)
+        thread_id = create_thread_session(record.project_id)
         plan = CommandPlan(
             name="projects.delete",
             args={"project_id": record.project_id},
             project_id=record.project_id,
-            chat_id=chat_id,
+            thread_id=thread_id,
         )
 
         result = execute(plan, confirmed=False)
@@ -58,7 +58,7 @@ class CommandExecutorTests(unittest.TestCase):
 
     def test_schedules_add_updates_schedule_file(self) -> None:
         record = self.core.create_project("排程專案")
-        chat_id = create_chat_session(record.project_id)
+        thread_id = create_thread_session(record.project_id)
         plan = CommandPlan(
             name="schedules.add",
             args={
@@ -67,7 +67,7 @@ class CommandExecutorTests(unittest.TestCase):
                 "vars": {"name": "測試"},
             },
             project_id=record.project_id,
-            chat_id=chat_id,
+            thread_id=thread_id,
         )
 
         result = execute(plan, confirmed=True)
@@ -80,7 +80,7 @@ class CommandExecutorTests(unittest.TestCase):
 
     def test_jobs_start_updates_state_file(self) -> None:
         record = self.core.create_project("任務專案")
-        chat_id = create_chat_session(record.project_id)
+        thread_id = create_thread_session(record.project_id)
         jobs_dir = self.core.data_dir / "jobs"
         jobs_dir.mkdir(parents=True, exist_ok=True)
         job_id = "sample-job"
@@ -90,7 +90,7 @@ class CommandExecutorTests(unittest.TestCase):
             name="jobs.start",
             args={"job_id": job_id},
             project_id=record.project_id,
-            chat_id=chat_id,
+            thread_id=thread_id,
         )
 
         try:
@@ -110,19 +110,19 @@ class CommandExecutorTests(unittest.TestCase):
                     name="jobs.stop",
                     args={"job_id": job_id},
                     project_id=record.project_id,
-                    chat_id=chat_id,
+                    thread_id=thread_id,
                 ),
                 confirmed=True,
             )
 
     def test_graph_patch_writes_audit_and_emits_event(self) -> None:
         record = self.core.create_project("圖補丁專案")
-        chat_id = create_chat_session(record.project_id)
+        thread_id = create_thread_session(record.project_id)
         plan = CommandPlan(
             name="graph.patch",
             args={"message": "請將節點 A 連到節點 B"},
             project_id=record.project_id,
-            chat_id=chat_id,
+            thread_id=thread_id,
         )
 
         result = execute(plan, confirmed=True)
@@ -137,7 +137,7 @@ class CommandExecutorTests(unittest.TestCase):
         self.assertEqual(audit_records[0]["request_id"], result["result"]["request_id"])
         self.assertTrue(audit_records[0]["requested_at"])
         self.assertEqual(audit_records[0]["project_id"], record.project_id)
-        self.assertEqual(audit_records[0]["chat_id"], chat_id)
+        self.assertEqual(audit_records[0]["thread_id"], thread_id)
         self.assertEqual(audit_records[0]["message"], "請將節點 A 連到節點 B")
 
         events_path = self.core.data_dir / "events" / "events.jsonl"
@@ -147,7 +147,7 @@ class CommandExecutorTests(unittest.TestCase):
         self.assertEqual(len(graph_patch_events), 1)
         self.assertEqual(graph_patch_events[0]["project_id"], record.project_id)
         self.assertEqual(graph_patch_events[0]["payload"]["request_id"], result["result"]["request_id"])
-        self.assertEqual(graph_patch_events[0]["payload"]["chat_id"], chat_id)
+        self.assertEqual(graph_patch_events[0]["payload"]["thread_id"], thread_id)
 
 
 if __name__ == "__main__":

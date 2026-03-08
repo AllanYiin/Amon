@@ -14,12 +14,12 @@ from amon.fs.safety import validate_identifier
 
 def save_attachment(
     project_path: str | Path,
-    chat_id: str,
+    thread_id: str,
     source_file_path: str | Path,
     target_name: str | None = None,
 ) -> dict[str, Any]:
-    """Save an attachment into docs/inbox/<chat_id>/ and update manifest."""
-    validate_identifier(chat_id, "chat_id")
+    """Save an attachment into docs/inbox/<thread_id>/ and update manifest."""
+    validate_identifier(thread_id, "thread_id")
 
     resolved_project = Path(project_path).expanduser().resolve()
     source_path = Path(source_file_path).expanduser().resolve()
@@ -27,7 +27,7 @@ def save_attachment(
         raise ValueError("source_file_path 必須是存在的檔案")
 
     filename = _validate_filename(target_name or source_path.name)
-    inbox_dir = resolved_project / "docs" / "inbox" / chat_id
+    inbox_dir = resolved_project / "docs" / "inbox" / thread_id
     inbox_dir.mkdir(parents=True, exist_ok=True)
 
     target_path = inbox_dir / filename
@@ -39,24 +39,24 @@ def save_attachment(
     entry = {
         "filename": filename,
         "original_name": source_path.name,
-        "path": f"docs/inbox/{chat_id}/{filename}",
+        "path": f"docs/inbox/{thread_id}/{filename}",
         "sha256": file_sha256,
         "size": file_size,
         "ts": timestamp,
     }
 
     manifest_path = inbox_dir / "manifest.json"
-    manifest = _load_manifest(manifest_path, chat_id)
+    manifest = _load_manifest(manifest_path, thread_id)
     manifest["entries"].append(entry)
     manifest["updated_at"] = timestamp
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     return manifest
 
 
-def _load_manifest(manifest_path: Path, chat_id: str) -> dict[str, Any]:
+def _load_manifest(manifest_path: Path, thread_id: str) -> dict[str, Any]:
     if not manifest_path.exists():
         return {
-            "chat_id": chat_id,
+            "thread_id": thread_id,
             "entries": [],
             "updated_at": None,
         }
@@ -67,7 +67,7 @@ def _load_manifest(manifest_path: Path, chat_id: str) -> dict[str, Any]:
     entries = payload.get("entries")
     if not isinstance(entries, list):
         raise ValueError("manifest.json entries 格式錯誤")
-    payload.setdefault("chat_id", chat_id)
+    payload.setdefault("thread_id", thread_id)
     payload.setdefault("updated_at", None)
     return payload
 

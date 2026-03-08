@@ -309,7 +309,7 @@ class UIEventStreamClientTests(unittest.TestCase):
                   if (this.id === 1) {
                     const notice = this.listeners.get('notice');
                     if (notice) {
-                      notice({ data: JSON.stringify({ project_id: 'proj-1', chat_id: 'chat-1' }), lastEventId: 'evt-1' });
+                      notice({ data: JSON.stringify({ project_id: 'proj-1', thread_id: 'chat-1' }), lastEventId: 'evt-1' });
                     }
                     if (typeof this.onerror === 'function') {
                       this.onerror(new Error('network drop'));
@@ -335,7 +335,7 @@ class UIEventStreamClientTests(unittest.TestCase):
               sseUrlBuilder: (params, lastEventId) => {
                 const query = new URLSearchParams({ message: params.message || '' });
                 if (params.project_id) query.set('project_id', params.project_id);
-                if (params.chat_id) query.set('chat_id', params.chat_id);
+                if (params.thread_id) query.set('thread_id', params.thread_id);
                 if (lastEventId) query.set('last_event_id', lastEventId);
                 return `/v1/chat/stream?${query.toString()}`;
               },
@@ -350,8 +350,8 @@ class UIEventStreamClientTests(unittest.TestCase):
               if (!urls[1].includes('project_id=proj-1')) {
                 throw new Error(`reconnect request missing project_id: ${urls[1]}`);
               }
-              if (!urls[1].includes('chat_id=chat-1')) {
-                throw new Error(`reconnect request missing chat_id: ${urls[1]}`);
+              if (!urls[1].includes('thread_id=chat-1')) {
+                throw new Error(`reconnect request missing thread_id: ${urls[1]}`);
               }
               process.exit(0);
             }, 40);

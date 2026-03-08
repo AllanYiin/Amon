@@ -50,7 +50,7 @@ def _build_payload(source: dict[str, Any]) -> dict[str, Any]:
     payload.setdefault("project_id", None)
     payload.setdefault("session_id", None)
     payload.setdefault("run_id", None)
-    payload.setdefault("chat_id", None)
+    payload.setdefault("thread_id", None)
     return payload
 
 

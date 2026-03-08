@@ -275,8 +275,8 @@
         if (payload.project_id) {
           this.params = { ...(this.params || {}), project_id: payload.project_id };
         }
-        if (payload.chat_id) {
-          this.params = { ...(this.params || {}), chat_id: payload.chat_id };
+        if (payload.thread_id) {
+          this.params = { ...(this.params || {}), thread_id: payload.thread_id };
         }
       }
       if (eventId) {

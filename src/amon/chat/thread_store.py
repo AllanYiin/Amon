@@ -24,39 +24,39 @@ MAX_ASSISTANT_TURN_CHARS = 240
 _RECENT_MESSAGES_MAX = 6
 
 
-def create_chat_session(project_id: str) -> str:
+def create_thread_session(project_id: str) -> str:
     validate_project_id(project_id)
     _migrate_legacy_sessions_if_needed(project_id)
 
-    chat_id = uuid.uuid4().hex
-    thread_dir = _thread_dir_path(project_id, chat_id)
+    thread_id = uuid.uuid4().hex
+    thread_dir = _thread_dir_path(project_id, thread_id)
 
     try:
         thread_dir.mkdir(parents=True, exist_ok=True)
-        _thread_events_path(project_id, chat_id).touch(exist_ok=True)
-        _write_thread_rollup(project_id, _new_rollup(project_id, chat_id))
-        _upsert_thread_index(project_id, chat_id, _new_rollup(project_id, chat_id))
-        _write_project_state(project_id, {"schema_version": 1, "active_thread_id": chat_id})
+        _thread_events_path(project_id, thread_id).touch(exist_ok=True)
+        _write_thread_rollup(project_id, _new_rollup(project_id, thread_id))
+        _upsert_thread_index(project_id, thread_id, _new_rollup(project_id, thread_id))
+        _write_project_state(project_id, {"schema_version": 1, "active_thread_id": thread_id})
     except OSError as exc:
         log_event(
             {
-                "event": "chat_session_create_failed",
+                "event": "thread_session_create_failed",
                 "level": "ERROR",
                 "project_id": project_id,
-                "session_id": chat_id,
+                "session_id": thread_id,
                 "error": str(exc),
             }
         )
         raise
 
-    log_event({"event": "chat_session_created", "project_id": project_id, "session_id": chat_id})
-    return chat_id
+    log_event({"event": "thread_session_created", "project_id": project_id, "session_id": thread_id})
+    return thread_id
 
 
-def append_event(chat_id: str, event: dict[str, Any]) -> None:
-    if not chat_id:
-        raise ValueError("chat_id 不可為空")
-    validate_identifier(chat_id, "chat_id")
+def append_event(thread_id: str, event: dict[str, Any]) -> None:
+    if not thread_id:
+        raise ValueError("thread_id 不可為空")
+    validate_identifier(thread_id, "thread_id")
     if not isinstance(event, dict):
         raise ValueError("event 需為 dict")
 
@@ -71,21 +71,21 @@ def append_event(chat_id: str, event: dict[str, Any]) -> None:
 
     payload = dict(event)
     payload.setdefault("ts", _now_iso())
-    payload["chat_id"] = chat_id
+    payload["thread_id"] = thread_id
 
-    session_path = _thread_events_path(payload["project_id"], chat_id)
+    session_path = _thread_events_path(payload["project_id"], thread_id)
 
     try:
         append_jsonl(session_path, payload)
-        _refresh_rollup_from_event(payload["project_id"], chat_id, payload)
-        _write_project_state(payload["project_id"], {"schema_version": 1, "active_thread_id": chat_id})
+        _refresh_rollup_from_event(payload["project_id"], thread_id, payload)
+        _write_project_state(payload["project_id"], {"schema_version": 1, "active_thread_id": thread_id})
     except OSError as exc:
         log_event(
             {
-                "event": "chat_session_append_failed",
+                "event": "thread_session_append_failed",
                 "level": "ERROR",
                 "project_id": payload["project_id"],
-                "session_id": chat_id,
+                "session_id": thread_id,
                 "type": payload.get("type"),
                 "error": str(exc),
             }
@@ -93,12 +93,12 @@ def append_event(chat_id: str, event: dict[str, Any]) -> None:
         raise
 
     if payload.get("type") not in NOISY_EVENT_TYPES:
-        log_details = _build_chat_session_log_details(payload)
+        log_details = _build_thread_session_log_details(payload)
         log_event(
             {
-                "event": "chat_session_event",
+                "event": "thread_session_event",
                 "project_id": payload["project_id"],
-                "session_id": chat_id,
+                "session_id": thread_id,
                 "type": payload.get("type"),
                 "run_id": payload.get("run_id"),
                 **log_details,
@@ -106,7 +106,7 @@ def append_event(chat_id: str, event: dict[str, Any]) -> None:
         )
 
 
-def _build_chat_session_log_details(payload: dict[str, Any]) -> dict[str, Any]:
+def _build_thread_session_log_details(payload: dict[str, Any]) -> dict[str, Any]:
     event_type = str(payload.get("type") or "")
     details: dict[str, Any] = {}
 
@@ -145,57 +145,57 @@ def _summarize_command_result(raw_text: str) -> str:
     return f"command_result:{status}"
 
 
-def load_latest_chat_id(project_id: str) -> str | None:
-    """Return active chat session id for a project."""
+def load_latest_thread_id(project_id: str) -> str | None:
+    """Return active thread id for a project."""
     validate_project_id(project_id)
     _migrate_legacy_sessions_if_needed(project_id)
     state = _load_project_state(project_id)
-    active_chat_id = str(state.get("active_thread_id") or "").strip()
-    if not active_chat_id:
+    active_thread_id = str(state.get("active_thread_id") or "").strip()
+    if not active_thread_id:
         return None
-    if chat_session_exists(project_id, active_chat_id):
-        return active_chat_id
+    if thread_session_exists(project_id, active_thread_id):
+        return active_thread_id
     return None
 
 
-def chat_session_exists(project_id: str, chat_id: str) -> bool:
-    """Return True when the chat session file exists for the given project/chat pair."""
+def thread_session_exists(project_id: str, thread_id: str) -> bool:
+    """Return True when the thread file exists for the given project/chat pair."""
     validate_project_id(project_id)
-    if not chat_id:
+    if not thread_id:
         return False
-    validate_identifier(chat_id, "chat_id")
+    validate_identifier(thread_id, "thread_id")
     _migrate_legacy_sessions_if_needed(project_id)
-    return _thread_events_path(project_id, chat_id).exists()
+    return _thread_events_path(project_id, thread_id).exists()
 
 
-def ensure_chat_session(project_id: str, chat_id: str | None = None) -> tuple[str, str]:
-    """Ensure a usable chat session and return (chat_id, source)."""
+def ensure_thread_session(project_id: str, thread_id: str | None = None) -> tuple[str, str]:
+    """Ensure a usable thread and return (thread_id, source)."""
     validate_project_id(project_id)
     _migrate_legacy_sessions_if_needed(project_id)
-    incoming_chat_id = (chat_id or "").strip()
+    incoming_thread_id = (thread_id or "").strip()
 
-    if incoming_chat_id and chat_session_exists(project_id, incoming_chat_id):
-        _write_project_state(project_id, {"schema_version": 1, "active_thread_id": incoming_chat_id})
-        return incoming_chat_id, "incoming"
+    if incoming_thread_id and thread_session_exists(project_id, incoming_thread_id):
+        _write_project_state(project_id, {"schema_version": 1, "active_thread_id": incoming_thread_id})
+        return incoming_thread_id, "incoming"
 
-    active_chat_id = load_latest_chat_id(project_id)
-    if active_chat_id:
-        return active_chat_id, "active"
+    active_thread_id = load_latest_thread_id(project_id)
+    if active_thread_id:
+        return active_thread_id, "active"
 
-    return create_chat_session(project_id), "new"
+    return create_thread_session(project_id), "new"
 
 
-def load_recent_dialogue(project_id: str, chat_id: str, limit: int = 12) -> list[dict[str, str]]:
+def load_recent_dialogue(project_id: str, thread_id: str, limit: int = 12) -> list[dict[str, str]]:
     """Load recent user/assistant dialogue turns for contextual continuity."""
-    if not chat_id:
+    if not thread_id:
         return []
-    validate_identifier(chat_id, "chat_id")
+    validate_identifier(thread_id, "thread_id")
     if limit <= 0:
         return []
     validate_project_id(project_id)
     _migrate_legacy_sessions_if_needed(project_id)
 
-    session_path = _thread_events_path(project_id, chat_id)
+    session_path = _thread_events_path(project_id, thread_id)
     if not session_path.exists():
         return []
 
@@ -211,10 +211,10 @@ def load_recent_dialogue(project_id: str, chat_id: str, limit: int = 12) -> list
     except OSError as exc:
         log_event(
             {
-                "event": "chat_session_read_failed",
+                "event": "thread_session_read_failed",
                 "level": "WARNING",
                 "project_id": project_id,
-                "session_id": chat_id,
+                "session_id": thread_id,
                 "error": str(exc),
             }
         )
@@ -222,15 +222,15 @@ def load_recent_dialogue(project_id: str, chat_id: str, limit: int = 12) -> list
     return dialogue[-limit:]
 
 
-def load_latest_run_context(project_id: str, chat_id: str) -> dict[str, str | None]:
-    """Load the latest run_id and assistant reply text from a chat session."""
-    if not chat_id:
+def load_latest_run_context(project_id: str, thread_id: str) -> dict[str, str | None]:
+    """Load the latest run_id and assistant reply text from a thread."""
+    if not thread_id:
         return {"run_id": None, "last_assistant_text": None}
-    validate_identifier(chat_id, "chat_id")
+    validate_identifier(thread_id, "thread_id")
     validate_project_id(project_id)
     _migrate_legacy_sessions_if_needed(project_id)
 
-    session_path = _thread_events_path(project_id, chat_id)
+    session_path = _thread_events_path(project_id, thread_id)
     if not session_path.exists():
         return {"run_id": None, "last_assistant_text": None}
 
@@ -248,10 +248,10 @@ def load_latest_run_context(project_id: str, chat_id: str) -> dict[str, str | No
     except OSError as exc:
         log_event(
             {
-                "event": "chat_session_read_failed",
+                "event": "thread_session_read_failed",
                 "level": "WARNING",
                 "project_id": project_id,
-                "session_id": chat_id,
+                "session_id": thread_id,
                 "error": str(exc),
             }
         )
@@ -395,32 +395,32 @@ def _write_project_state(project_id: str, payload: dict[str, Any]) -> None:
     atomic_write_text(_project_state_path(project_id), json.dumps(merged, ensure_ascii=False, indent=2) + "\n")
 
 
-def _load_rollup(project_id: str, chat_id: str) -> dict[str, Any]:
-    path = _thread_rollup_path(project_id, chat_id)
+def _load_rollup(project_id: str, thread_id: str) -> dict[str, Any]:
+    path = _thread_rollup_path(project_id, thread_id)
     if not path.exists():
-        return _new_rollup(project_id, chat_id)
+        return _new_rollup(project_id, thread_id)
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, json.JSONDecodeError):
-        return _new_rollup(project_id, chat_id)
+        return _new_rollup(project_id, thread_id)
     if not isinstance(payload, dict):
-        return _new_rollup(project_id, chat_id)
+        return _new_rollup(project_id, thread_id)
     return payload
 
 
 def _write_thread_rollup(project_id: str, payload: dict[str, Any]) -> None:
-    chat_id = str(payload.get("thread_id") or "").strip()
-    if not chat_id:
+    thread_id = str(payload.get("thread_id") or "").strip()
+    if not thread_id:
         return
-    atomic_write_text(_thread_rollup_path(project_id, chat_id), json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+    atomic_write_text(_thread_rollup_path(project_id, thread_id), json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
 
 
-def _refresh_rollup_from_event(project_id: str, chat_id: str, event: dict[str, Any]) -> None:
-    rollup = _load_rollup(project_id, chat_id)
+def _refresh_rollup_from_event(project_id: str, thread_id: str, event: dict[str, Any]) -> None:
+    rollup = _load_rollup(project_id, thread_id)
     now_iso = str(event.get("ts") or _now_iso())
     rollup["schema_version"] = 1
     rollup["project_id"] = project_id
-    rollup["thread_id"] = chat_id
+    rollup["thread_id"] = thread_id
     rollup["updated_at"] = now_iso
     if not str(rollup.get("created_at") or "").strip():
         rollup["created_at"] = now_iso
@@ -449,7 +449,7 @@ def _refresh_rollup_from_event(project_id: str, chat_id: str, event: dict[str, A
     if "summary" not in rollup:
         rollup["summary"] = ""
     _write_thread_rollup(project_id, rollup)
-    _upsert_thread_index(project_id, chat_id, rollup)
+    _upsert_thread_index(project_id, thread_id, rollup)
 
 
 def _append_recent_message(rollup: dict[str, Any], item: dict[str, str]) -> None:
@@ -460,12 +460,12 @@ def _append_recent_message(rollup: dict[str, Any], item: dict[str, str]) -> None
     rollup["recent_messages"] = recent_messages[-_RECENT_MESSAGES_MAX:]
 
 
-def _new_rollup(project_id: str, chat_id: str) -> dict[str, Any]:
+def _new_rollup(project_id: str, thread_id: str) -> dict[str, Any]:
     now_iso = _now_iso()
     return {
         "schema_version": 1,
         "project_id": project_id,
-        "thread_id": chat_id,
+        "thread_id": thread_id,
         "title": "",
         "summary": "",
         "created_at": now_iso,
@@ -479,7 +479,7 @@ def _new_rollup(project_id: str, chat_id: str) -> dict[str, Any]:
     }
 
 
-def _upsert_thread_index(project_id: str, chat_id: str, rollup: dict[str, Any]) -> None:
+def _upsert_thread_index(project_id: str, thread_id: str, rollup: dict[str, Any]) -> None:
     path = _threads_index_path(project_id)
     index_payload = {"schema_version": 1, "project_id": project_id, "threads": []}
     if path.exists():
@@ -497,10 +497,10 @@ def _upsert_thread_index(project_id: str, chat_id: str, rollup: dict[str, Any]) 
 
     updated = False
     for item in normalized_threads:
-        if str(item.get("thread_id") or "") == chat_id:
+        if str(item.get("thread_id") or "") == thread_id:
             item.update(
                 {
-                    "thread_id": chat_id,
+                    "thread_id": thread_id,
                     "title": str(rollup.get("title") or ""),
                     "created_at": str(rollup.get("created_at") or ""),
                     "updated_at": str(rollup.get("updated_at") or ""),
@@ -511,7 +511,7 @@ def _upsert_thread_index(project_id: str, chat_id: str, rollup: dict[str, Any]) 
     if not updated:
         normalized_threads.append(
             {
-                "thread_id": chat_id,
+                "thread_id": thread_id,
                 "title": str(rollup.get("title") or ""),
                 "created_at": str(rollup.get("created_at") or ""),
                 "updated_at": str(rollup.get("updated_at") or ""),
@@ -548,7 +548,7 @@ def _migrate_legacy_sessions_if_needed(project_id: str) -> None:
         latest_legacy = max(legacy_files, key=lambda path: path.stat().st_mtime)
         for legacy_file in legacy_files:
             thread_id = legacy_file.stem
-            validate_identifier(thread_id, "chat_id")
+            validate_identifier(thread_id, "thread_id")
             thread_dir = _thread_dir_path(project_id, thread_id)
             thread_dir.mkdir(parents=True, exist_ok=True)
             events_path = _thread_events_path(project_id, thread_id)
@@ -575,8 +575,8 @@ def _migrate_legacy_sessions_if_needed(project_id: str) -> None:
     )
 
 
-def _build_rollup_from_events_file(project_id: str, chat_id: str, events_path: Path) -> dict[str, Any]:
-    rollup = _new_rollup(project_id, chat_id)
+def _build_rollup_from_events_file(project_id: str, thread_id: str, events_path: Path) -> dict[str, Any]:
+    rollup = _new_rollup(project_id, thread_id)
     try:
         for raw_line in events_path.read_text(encoding="utf-8").splitlines():
             line = raw_line.strip()
@@ -631,20 +631,20 @@ def _threads_index_path(project_id: str) -> Path:
     return _resolve_project_path(project_id) / ".amon" / "threads" / "index.json"
 
 
-def _thread_dir_path(project_id: str, chat_id: str) -> Path:
-    return _resolve_project_path(project_id) / ".amon" / "threads" / chat_id
+def _thread_dir_path(project_id: str, thread_id: str) -> Path:
+    return _resolve_project_path(project_id) / ".amon" / "threads" / thread_id
 
 
-def _thread_events_path(project_id: str, chat_id: str) -> Path:
-    return _thread_dir_path(project_id, chat_id) / "events.jsonl"
+def _thread_events_path(project_id: str, thread_id: str) -> Path:
+    return _thread_dir_path(project_id, thread_id) / "events.jsonl"
 
 
-def _thread_rollup_path(project_id: str, chat_id: str) -> Path:
-    return _thread_dir_path(project_id, chat_id) / "rollup.json"
+def _thread_rollup_path(project_id: str, thread_id: str) -> Path:
+    return _thread_dir_path(project_id, thread_id) / "rollup.json"
 
 
-def _chat_session_path(project_id: str, chat_id: str) -> Path:
-    return _thread_events_path(project_id, chat_id)
+def _thread_session_path(project_id: str, thread_id: str) -> Path:
+    return _thread_events_path(project_id, thread_id)
 
 
 def _resolve_project_path(project_id: str) -> Path:

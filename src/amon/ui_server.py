@@ -30,12 +30,12 @@ from amon.chat.router import route_intent
 from amon.chat.execution_mode import decide_execution_mode
 from amon.chat.router_llm import should_continue_run_with_llm
 from amon.chat.router_types import RouterResult
-from amon.chat.session_store import (
+from amon.chat.thread_store import (
     append_event,
-    chat_session_exists,
-    create_chat_session,
-    ensure_chat_session,
-    load_latest_chat_id,
+    thread_session_exists,
+    create_thread_session,
+    ensure_thread_session,
+    load_latest_thread_id,
     load_latest_run_context,
 )
 from amon.commands.executor import CommandPlan, execute
@@ -1081,15 +1081,15 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 return
             scope = str(payload.get("scope") or "project").strip().lower() or "project"
             project_id = str(payload.get("project_id") or "").strip()
-            chat_id = str(payload.get("chat_id") or "").strip()
+            thread_id = str(payload.get("thread_id") or "").strip()
             if scope not in {"project", "chat"}:
                 self._send_json(400, {"message": "scope 僅允許 project 或 chat"})
                 return
             if not project_id:
                 self._send_json(400, {"message": "請提供 project_id"})
                 return
-            if scope == "chat" and not chat_id:
-                self._send_json(400, {"message": "scope=chat 時請提供 chat_id"})
+            if scope == "chat" and not thread_id:
+                self._send_json(400, {"message": "scope=chat 時請提供 thread_id"})
                 return
             try:
                 project_path = self.core.get_project_path(project_id)
@@ -1098,13 +1098,13 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     if context_path.exists():
                         context_path.unlink()
                 elif scope == "chat":
-                    session_path = self._chat_session_file(project_path, chat_id)
+                    session_path = self._thread_session_file(project_path, thread_id)
                     if session_path.exists():
                         session_path.unlink()
-                    legacy_session_path = project_path / "sessions" / "chat" / f"{chat_id}.jsonl"
+                    legacy_session_path = project_path / "sessions" / "chat" / f"{thread_id}.jsonl"
                     if legacy_session_path.exists():
                         legacy_session_path.unlink()
-                self._send_json(200, {"status": "ok", "scope": scope, "chat_id": chat_id or None})
+                self._send_json(200, {"status": "ok", "scope": scope, "thread_id": thread_id or None})
             except ValueError as exc:
                 self._send_json(400, {"message": str(exc)})
             except Exception as exc:  # noqa: BLE001
@@ -1178,7 +1178,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     "message_length": len(message),
                     "duration_ms": duration_ms,
                     "project_id": str(payload.get("project_id", "")).strip() or None,
-                    "chat_id": str(payload.get("chat_id", "")).strip() or None,
+                    "thread_id": str(payload.get("thread_id", "")).strip() or None,
                     "route": str(payload.get("route", "")).strip() or None,
                     "source": str(payload.get("source", "ui")).strip() or "ui",
                     "metadata": metadata,
@@ -1311,7 +1311,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 self._send_json(400, {"message": "請提供 project_id"})
                 return
             try:
-                thread_id = create_chat_session(project_id)
+                thread_id = create_thread_session(project_id)
             except Exception as exc:  # noqa: BLE001
                 self._handle_error(exc, status=500)
                 return
@@ -1327,11 +1327,11 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 self._send_json(400, {"message": "請提供 project_id、thread_id"})
                 return
             try:
-                resolved_thread_id, thread_id_source = ensure_chat_session(project_id, thread_id)
+                resolved_thread_id, thread_id_source = ensure_thread_session(project_id, thread_id)
             except Exception as exc:  # noqa: BLE001
                 self._handle_error(exc, status=500)
                 return
-            if resolved_thread_id != thread_id or not chat_session_exists(project_id, thread_id):
+            if resolved_thread_id != thread_id or not thread_session_exists(project_id, thread_id):
                 self._send_json(404, {"message": "找不到 thread_id"})
                 return
             self._send_json(200, {"project_id": project_id, "active_thread_id": resolved_thread_id, "thread_id_source": thread_id_source})
@@ -1363,7 +1363,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             if not confirmed:
                 self._send_json(200, {"status": "cancelled"})
                 return
-            plan = CommandPlan(name=command, args=args, project_id=project_id, chat_id=thread_id)
+            plan = CommandPlan(name=command, args=args, project_id=project_id, thread_id=thread_id)
             result = execute(plan, confirmed=True)
             append_event(
                 thread_id,
@@ -1942,11 +1942,11 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     send_event("done", {"status": "project_required"})
                     return
             incoming_thread_id = thread_id
-            turn_bundle = assemble_chat_turn(project_id=project_id, chat_id=thread_id, message=message)
-            thread_id = turn_bundle.chat_id
-            chat_id = thread_id
+            turn_bundle = assemble_chat_turn(project_id=project_id, thread_id=thread_id, message=message)
+            thread_id = turn_bundle.thread_id
+            thread_id = thread_id
             history = turn_bundle.history
-            should_emit_bootstrap_notices = turn_bundle.chat_id_source == "new"
+            should_emit_bootstrap_notices = turn_bundle.thread_id_source == "new"
             run_context = turn_bundle.run_context
             if should_emit_bootstrap_notices and not sent_initial_notice:
                 send_event("notice", {"text": "Amon：已收到你的需求，正在判斷意圖與專案。"})
@@ -1956,9 +1956,9 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     "event": "ui_chat_stream_context",
                     "project_id": project_id,
                     "incoming_thread_id": incoming_thread_id,
-                    "effective_thread_id": chat_id,
+                    "effective_thread_id": thread_id,
                     "history_count": len(history),
-                    "thread_id_source": turn_bundle.chat_id_source,
+                    "thread_id_source": turn_bundle.thread_id_source,
                 }
             )
             router_result = route_intent(
@@ -1973,14 +1973,14 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         "level": "INFO",
                         "event": "ui_chat_force_continuation",
                         "project_id": project_id,
-                        "thread_id": chat_id,
+                        "thread_id": thread_id,
                         "original_router_type": router_result.type,
                     }
                 )
                 router_result = RouterResult(type="chat_response", confidence=1.0, reason="short_continuation")
-            append_event(chat_id, {"type": "user", "text": message, "project_id": project_id})
+            append_event(thread_id, {"type": "user", "text": message, "project_id": project_id})
             append_event(
-                chat_id,
+                thread_id,
                 {
                     "type": "router",
                     "text": router_result.type,
@@ -1992,7 +1992,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 active_project = self.core.get_project(project_id) if project_id else None
                 if _is_duplicate_project_create(active_project=active_project, command_name=command_name, args=args):
                     append_event(
-                        chat_id,
+                        thread_id,
                         {
                             "type": "notice",
                             "text": "skip_duplicate_projects_create",
@@ -2011,7 +2011,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         {
                             "status": "ok",
                             "project_id": active_project.project_id,
-                            "thread_id": chat_id,
+                            "thread_id": thread_id,
                         },
                     )
                     return
@@ -2019,11 +2019,11 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     name=command_name,
                     args=args,
                     project_id=project_id,
-                    chat_id=chat_id,
+                    thread_id=thread_id,
                     metadata={"plan_type": router_result.type},
                 )
                 append_event(
-                    chat_id,
+                    thread_id,
                     {
                         "type": "plan_created",
                         "text": command_name,
@@ -2032,7 +2032,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 )
                 result = execute(plan, confirmed=False)
                 append_event(
-                    chat_id,
+                    thread_id,
                     {
                         "type": "command_result",
                         "text": json.dumps(result, ensure_ascii=False),
@@ -2043,7 +2043,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 if result.get("status") == "confirm_required":
                     plan_card = result.get("plan_card") or ""
                     append_event(
-                        chat_id,
+                        thread_id,
                         {
                             "type": "plan_card",
                             "text": plan_card,
@@ -2058,16 +2058,16 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                             "command": command_name,
                             "args": args,
                             "project_id": project_id,
-                            "thread_id": chat_id,
+                            "thread_id": thread_id,
                         },
                     )
                     send_event(
                         "done",
-                        {"status": "confirm_required", "thread_id": chat_id, "project_id": project_id},
+                        {"status": "confirm_required", "thread_id": thread_id, "project_id": project_id},
                     )
                     return
                 send_event("result", result)
-                send_event("done", {"status": "ok", "thread_id": chat_id, "project_id": project_id})
+                send_event("done", {"status": "ok", "thread_id": thread_id, "project_id": project_id})
                 return
             if router_result.type == "chat_response":
                 if should_emit_bootstrap_notices:
@@ -2100,7 +2100,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                             return
                         send_event("reasoning", {"text": reasoning_text}, run_id=active_run_id)
                         append_event(
-                            chat_id,
+                            thread_id,
                             {
                                 "type": "assistant_reasoning",
                                 "text": reasoning_text,
@@ -2115,7 +2115,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     streamed_text_buffer.append(token)
                     send_event("token", {"text": token}, run_id=active_run_id)
                     append_event(
-                        chat_id,
+                        thread_id,
                         {
                             "type": "assistant_chunk",
                             "text": token,
@@ -2134,7 +2134,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         project_path=self.core.get_project_path(project_id),
                         stream_handler=stream_handler,
                         run_id=active_run_id,
-                        chat_id=chat_id,
+                        thread_id=thread_id,
                         request_id=request_id,
                     )
                 elif execution_mode == "team":
@@ -2145,7 +2145,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         project_path=self.core.get_project_path(project_id),
                         stream_handler=stream_handler,
                         run_id=active_run_id,
-                        chat_id=chat_id,
+                        thread_id=thread_id,
                         request_id=request_id,
                     )
                 else:
@@ -2158,7 +2158,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         project_id=project_id,
                         stream_handler=stream_handler,
                         run_id=active_run_id,
-                        chat_id=chat_id,
+                        thread_id=thread_id,
                         conversation_history=history,
                         request_id=request_id,
                     )
@@ -2172,7 +2172,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                                 "kind": "planner_disabled_fallback",
                                 "message": f"Amon：{fallback_reason}。{fallback_hint}",
                                 "project_id": project_id,
-                                "thread_id": chat_id,
+                                "thread_id": thread_id,
                             },
                             run_id=active_run_id,
                         )
@@ -2209,18 +2209,18 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                                 "event": "ui_chat_stream_artifact_ingest_failed",
                                 "message": str(ingest_error),
                                 "project_id": normalize_project_id(project_id),
-                                "thread_id": chat_id or None,
+                                "thread_id": thread_id or None,
                             }
                         )
-                append_event(chat_id, assistant_payload)
+                append_event(thread_id, assistant_payload)
                 done_payload: dict[str, Any] = {
                     "status": "ok",
-                    "thread_id": chat_id,
+                    "thread_id": thread_id,
                     "project_id": project_id,
                     "run_id": active_run_id,
                     "execution_mode": execution_mode,
                     "history_count": len(history),
-                    "thread_id_source": turn_bundle.chat_id_source,
+                    "thread_id_source": turn_bundle.thread_id_source,
                 }
                 if execution_mode == "graph":
                     route = getattr(plan_result, "execution_route", "planner")
@@ -2250,19 +2250,19 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         "updated": int(artifact_ingest_summary.get("updated", 0)),
                         "errors": int(artifact_ingest_summary.get("errors", 0)),
                     }
-                if project_id and active_run_id and chat_id:
-                    self._write_run_thread_metadata(project_id=project_id, run_id=active_run_id, thread_id=chat_id)
+                if project_id and active_run_id and thread_id:
+                    self._write_run_thread_metadata(project_id=project_id, run_id=active_run_id, thread_id=thread_id)
                 send_event("done", done_payload, run_id=active_run_id)
                 return
             send_event(
                 "notice",
                 {
                     "text": "Amon：已收到你的訊息，但目前無法判斷可執行的意圖。請改用更明確的任務描述，我會立即繼續處理。",
-                    "thread_id": chat_id,
+                    "thread_id": thread_id,
                     "project_id": project_id,
                 },
             )
-            send_event("done", {"status": "unsupported", "thread_id": chat_id, "project_id": project_id})
+            send_event("done", {"status": "unsupported", "thread_id": thread_id, "project_id": project_id})
         except ClientDisconnectedError:
             log_event(
                 {
@@ -2270,7 +2270,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     "event": "ui_client_disconnected",
                     "client": self.client_address[0] if self.client_address else "unknown",
                     "project_id": normalize_project_id(project_id),
-                    "thread_id": chat_id or None,
+                    "thread_id": thread_id or None,
                     "request_id": request_id,
                 }
             )
@@ -2283,14 +2283,14 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     "message": str(exc),
                     "stack": traceback.format_exc(),
                     "project_id": normalize_project_id(project_id),
-                    "thread_id": chat_id or None,
+                    "thread_id": thread_id or None,
                 }
             )
             error_text = str(exc)
             is_timeout = "timeout" in error_text.lower()
-            if chat_id and project_id:
+            if thread_id and project_id:
                 assistant_summary = "回覆生成較久，系統先回報目前狀態；你可以稍後重試或縮小任務範圍。" if is_timeout else f"執行失敗：{error_text}"
-                append_event(chat_id, {"type": "assistant", "text": assistant_summary, "project_id": project_id})
+                append_event(thread_id, {"type": "assistant", "text": assistant_summary, "project_id": project_id})
             if is_timeout:
                 warning_kind = "inactivity_timeout" if "inactivity" in error_text.lower() else "soft_timeout"
                 send_event(
@@ -2298,14 +2298,14 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     {
                         "message": "回覆生成較久，仍在處理中；你可以稍後重試，或把任務拆小一點。",
                         "kind": warning_kind,
-                        "thread_id": chat_id,
+                        "thread_id": thread_id,
                         "project_id": project_id,
                     },
                 )
-                send_event("done", {"status": "warning", "thread_id": chat_id, "project_id": project_id, "warning_kind": warning_kind})
+                send_event("done", {"status": "warning", "thread_id": thread_id, "project_id": project_id, "warning_kind": warning_kind})
             else:
-                send_event("error", {"message": error_text, "thread_id": chat_id, "project_id": project_id})
-                send_event("done", {"status": "failed", "thread_id": chat_id, "project_id": project_id})
+                send_event("error", {"message": error_text, "thread_id": thread_id, "project_id": project_id})
+                send_event("done", {"status": "failed", "thread_id": thread_id, "project_id": project_id})
 
     def _list_projects_for_ui(self, *, include_deleted: bool = False) -> list[dict[str, Any]]:
         records = self.core.list_projects(include_deleted=include_deleted)
@@ -2334,7 +2334,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
     def _build_project_threads(self, project_id: str) -> dict[str, Any]:
         project_path = self.core.get_project_path(project_id)
         threads_dir = project_path / ".amon" / "threads"
-        active_thread_id = str(load_latest_chat_id(project_id) or "").strip() or None
+        active_thread_id = str(load_latest_thread_id(project_id) or "").strip() or None
         items: list[dict[str, Any]] = []
         index_path = threads_dir / "index.json"
         if index_path.exists():
@@ -2365,7 +2365,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         requested_thread_id = str(thread_id or "").strip() or None
         if requested_thread_id:
             return requested_thread_id
-        return str(load_latest_chat_id(project_id) or "").strip() or None
+        return str(load_latest_thread_id(project_id) or "").strip() or None
 
     def _build_project_thread_history(self, project_id: str, thread_id: str | None = None) -> dict[str, Any]:
         project_path = self.core.get_project_path(project_id)
@@ -2376,14 +2376,14 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         session_path = threads_dir / selected_thread_id / "events.jsonl"
         if not session_path.exists() or not session_path.is_file():
             return {"project_id": project_id, "thread_id": selected_thread_id, "messages": []}
-        selected_messages = self._read_chat_session_messages(project_path, session_path)
+        selected_messages = self._read_thread_session_messages(project_path, session_path)
         return {"project_id": project_id, "thread_id": selected_thread_id, "messages": selected_messages[-60:]}
 
-    def _chat_messages_cache_path(self, project_path: Path, chat_id: str) -> Path:
-        safe_chat_id = re.sub(r"[^0-9A-Za-z_-]", "_", str(chat_id or "")).strip("_") or "default"
-        return project_path / ".amon" / "context" / "chat_messages" / f"{safe_chat_id}.json"
+    def _chat_messages_cache_path(self, project_path: Path, thread_id: str) -> Path:
+        safe_thread_id = re.sub(r"[^0-9A-Za-z_-]", "_", str(thread_id or "")).strip("_") or "default"
+        return project_path / ".amon" / "context" / "chat_messages" / f"{safe_thread_id}.json"
 
-    def _read_chat_session_messages(self, project_path: Path, session_path: Path) -> list[dict[str, Any]]:
+    def _read_thread_session_messages(self, project_path: Path, session_path: Path) -> list[dict[str, Any]]:
         try:
             session_stat = session_path.stat()
         except OSError:
@@ -2428,7 +2428,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     }
                 )
         except OSError as exc:
-            self.logger.warning("讀取 chat session 失敗：%s", exc)
+            self.logger.warning("讀取 thread 失敗：%s", exc)
             return []
 
         cache_payload = {
@@ -2642,11 +2642,11 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         return project_path / ".amon" / "context" / "project_context.md"
 
     @staticmethod
-    def _chat_session_file(project_path: Path, chat_id: str) -> Path:
-        normalized_chat_id = str(chat_id or "").strip()
-        if not normalized_chat_id or "/" in normalized_chat_id or "\\" in normalized_chat_id or ".." in normalized_chat_id:
-            raise ValueError("chat_id 格式不合法")
-        return project_path / ".amon" / "threads" / normalized_chat_id / "events.jsonl"
+    def _thread_session_file(project_path: Path, thread_id: str) -> Path:
+        normalized_thread_id = str(thread_id or "").strip()
+        if not normalized_thread_id or "/" in normalized_thread_id or "\\" in normalized_thread_id or ".." in normalized_thread_id:
+            raise ValueError("thread_id 格式不合法")
+        return project_path / ".amon" / "threads" / normalized_thread_id / "events.jsonl"
 
     def _read_project_context(self, project_path: Path) -> str:
         context_path = self._project_context_file(project_path)
@@ -3023,7 +3023,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             row.setdefault("run_id", "unknown")
             row.setdefault("node_id", "unknown")
             row.setdefault("agent", "unknown")
-            row.setdefault("chat_id", None)
+            row.setdefault("thread_id", None)
             row.setdefault("ts", "")
             try:
                 row["prompt_tokens"] = max(int(row.get("prompt_tokens") or 0), 0)

@@ -8,9 +8,9 @@ from typing import Callable
 from amon.chat.continuation import assemble_chat_turn
 from amon.chat.project_bootstrap import bootstrap_project_if_needed
 from amon.chat.router import RouterResult, route_intent
-from amon.chat.session_store import (
+from amon.chat.thread_store import (
     append_event,
-    create_chat_session,
+    create_thread_session,
 )
 from amon.commands.executor import CommandPlan, execute
 from amon.core import AmonCore
@@ -25,12 +25,12 @@ def run_chat_repl(
     engine: str = "taskgraph3",
 ) -> str:
     core.ensure_base_structure()
-    chat_id: str | None = None
+    thread_id: str | None = None
     project_path = None
     if project_id:
         project_path = core.get_project_path(project_id)
-        chat_id = create_chat_session(project_id)
-        output_func(f"已建立 chat session：{chat_id}")
+        thread_id = create_thread_session(project_id)
+        output_func(f"已建立 thread：{thread_id}")
     else:
         output_func("未指定專案，將在第一個任務指令時自動建立專案。")
 
@@ -46,8 +46,8 @@ def run_chat_repl(
             continue
 
         if message.lower() in {"exit", "quit", "/exit", "/quit"}:
-            if chat_id and project_id:
-                append_event(chat_id, {"type": "system", "text": "對話已結束", "project_id": project_id})
+            if thread_id and project_id:
+                append_event(thread_id, {"type": "system", "text": "對話已結束", "project_id": project_id})
             output_func("已結束對話。")
             break
 
@@ -68,14 +68,14 @@ def run_chat_repl(
             if created_project:
                 project_id = created_project.project_id
                 project_path = core.get_project_path(project_id)
-                chat_id = create_chat_session(project_id)
+                thread_id = create_thread_session(project_id)
                 output_func(f"已建立專案：{created_project.name} ({project_id})")
-                output_func(f"已建立 chat session：{chat_id}")
+                output_func(f"已建立 thread：{thread_id}")
                 router_result = route_intent(message, project_id=project_id, run_id=last_run_id)
             turn_bundle = None
             if project_id:
-                turn_bundle = assemble_chat_turn(project_id=project_id, chat_id=chat_id, message=message)
-                chat_id = turn_bundle.chat_id
+                turn_bundle = assemble_chat_turn(project_id=project_id, thread_id=thread_id, message=message)
+                thread_id = turn_bundle.thread_id
                 if not is_slash_command:
                     router_result = route_intent(
                         message,
@@ -85,11 +85,11 @@ def run_chat_repl(
                     )
                     if turn_bundle.short_continuation and router_result.type != "chat_response":
                         router_result = RouterResult(type="chat_response", confidence=1.0, reason="short_continuation")
-            if chat_id and project_id:
-                append_event(chat_id, {"type": "user", "text": message, "project_id": project_id})
-            if chat_id and project_id:
+            if thread_id and project_id:
+                append_event(thread_id, {"type": "user", "text": message, "project_id": project_id})
+            if thread_id and project_id:
                 append_event(
-                    chat_id,
+                    thread_id,
                     {
                         "type": "router",
                         "text": router_result.type,
@@ -97,13 +97,13 @@ def run_chat_repl(
                     },
                 )
             if router_result.type in {"command_plan", "graph_patch_plan"}:
-                if not (project_id and chat_id):
+                if not (project_id and thread_id):
                     output_func("請先建立或指定專案。")
                     continue
                 _handle_plan_message(
                     core,
                     project_id,
-                    chat_id,
+                    thread_id,
                     message,
                     router_result.type,
                     input_func,
@@ -111,7 +111,7 @@ def run_chat_repl(
                 )
                 continue
             if router_result.type == "chat_response":
-                if not project_path or not (project_id and chat_id):
+                if not project_path or not (project_id and thread_id):
                     output_func("請先建立或指定專案。")
                     continue
                 output_func("Amon：")
@@ -121,27 +121,27 @@ def run_chat_repl(
                     project_path=project_path,
                     project_id=project_id,
                 )
-                append_event(chat_id, {"type": "assistant", "text": response, "project_id": project_id})
+                append_event(thread_id, {"type": "assistant", "text": response, "project_id": project_id})
                 continue
             output_func("目前尚未支援此類型的操作。")
-            if chat_id and project_id:
+            if thread_id and project_id:
                 append_event(
-                    chat_id,
+                    thread_id,
                     {"type": "system", "text": "尚未支援此類型", "project_id": project_id},
                 )
         except Exception as exc:  # noqa: BLE001
             core.logger.error("Chat 處理失敗：%s", exc, exc_info=True)
             output_func("處理失敗，請查看 logs/amon.log。")
-            if chat_id and project_id:
-                append_event(chat_id, {"type": "error", "text": str(exc), "project_id": project_id})
+            if thread_id and project_id:
+                append_event(thread_id, {"type": "error", "text": str(exc), "project_id": project_id})
 
-    return chat_id or ""
+    return thread_id or ""
 
 
 def _handle_plan_message(
     core: AmonCore,
     project_id: str,
-    chat_id: str,
+    thread_id: str,
     message: str,
     plan_type: str,
     input_func: Callable[[str], str],
@@ -152,11 +152,11 @@ def _handle_plan_message(
         name=command_name,
         args=args,
         project_id=project_id,
-        chat_id=chat_id,
+        thread_id=thread_id,
         metadata={"plan_type": plan_type},
     )
     append_event(
-        chat_id,
+        thread_id,
         {
             "type": "plan_created",
             "text": command_name,
@@ -165,7 +165,7 @@ def _handle_plan_message(
     )
     result = execute(plan, confirmed=False)
     append_event(
-        chat_id,
+        thread_id,
         {
             "type": "command_result",
             "text": json.dumps(result, ensure_ascii=False),
@@ -176,7 +176,7 @@ def _handle_plan_message(
     if result.get("status") == "confirm_required":
         plan_card = result.get("plan_card") or make_change_plan([])
         append_event(
-            chat_id,
+            thread_id,
             {
                 "type": "plan_card",
                 "text": plan_card,
@@ -187,7 +187,7 @@ def _handle_plan_message(
         output_func(plan_card)
         confirmed = _prompt_confirm(input_func, output_func)
         append_event(
-            chat_id,
+            thread_id,
             {
                 "type": "plan_confirm",
                 "text": "confirmed" if confirmed else "cancelled",
@@ -200,7 +200,7 @@ def _handle_plan_message(
             return
         result = execute(plan, confirmed=True)
         append_event(
-            chat_id,
+            thread_id,
             {
                 "type": "command_result",
                 "text": json.dumps(result, ensure_ascii=False),

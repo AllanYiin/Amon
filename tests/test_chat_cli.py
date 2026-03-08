@@ -24,7 +24,7 @@ class ChatCliTests(unittest.TestCase):
                 input_func = Mock(side_effect=lambda prompt="": next(input_iter))
                 output_func = Mock()
 
-                chat_id = run_chat_repl(core, record.project_id, input_func=input_func, output_func=output_func)
+                thread_id = run_chat_repl(core, record.project_id, input_func=input_func, output_func=output_func)
             finally:
                 os.environ.pop("AMON_HOME", None)
 
@@ -34,7 +34,7 @@ class ChatCliTests(unittest.TestCase):
                 / record.project_id
                 / ".amon"
                 / "threads"
-                / chat_id
+                / thread_id
                 / "events.jsonl"
             )
             self.assertTrue(session_path.exists())

@@ -6,7 +6,7 @@
 ## 1. 範圍與非範圍
 
 ### 1.1 本次範圍（僅規劃）
-- 鎖定 hard cutover 目標：最終不保留 `chat_id`、`/v1/chat/*`、chat 命名相容層。
+- 鎖定 hard cutover 目標：最終不保留 `thread_id`、`/v1/chat/*`、chat 命名相容層。
 - 鎖定分階段策略與每階段 hot files。
 - 鎖定 storage / API / UI state 的目標 schema 與 migration 路徑。
 - 鎖定 deterministic 測試改寫順序（不依賴外部網路）。
@@ -136,7 +136,7 @@
 ## Phase 2：命名切換（chat -> thread）
 - 目標：對外 API、內部 state、storage 命名切為 thread。
 - 做法：依 hot files 分區替換（backend API layer -> domain/service -> UI state -> tests），不做全 repo 一鍵替換。
-- 終態：移除 chat endpoint 與 chat_id 命名相容層。
+- 終態：移除 chat endpoint 與 thread_id 命名相容層。
 
 ## Phase 3：收斂與清除（legacy 移除）
 - 目標：刪除殘留 chat 名稱/路徑/測試 fixture。
@@ -149,7 +149,7 @@
 ### Phase 1 hot files（invariant 修復）
 
 #### Backend
-- `src/amon/chat/session_store.py`
+- `src/amon/chat/thread_store.py`
 - `src/amon/chat/continuation.py`
 - `src/amon/ui_server.py`
 
@@ -161,18 +161,18 @@
 - `src/amon/ui/event_stream_client.js`
 
 #### Tests（deterministic）
-- `tests/test_chat_session_store.py`
-- `tests/test_chat_session_endpoint_behavior.py`
-- `tests/test_chat_continuation_guard.py`
-- `tests/test_chat_continuation_flow.py`
-- `tests/test_ui_chat_stream_init.py`
+- `tests/test_chat_thread_store.py`
+- `tests/test_thread_endpoint_behavior.py`
+- `tests/test_thread_continuation_guard.py`
+- `tests/test_thread_continuation_flow.py`
+- `tests/test_ui_thread_stream_init.py`
 - `tests/test_ui_async_api.py`（僅 thread ownership/restore 相關案例）
 
 ### Phase 2 hot files（命名切換）
 
 #### Backend/API
 - `src/amon/ui_server.py`（路由與 request/response schema）
-- `src/amon/chat/session_store.py`（`chat_id` -> `thread_id`）
+- `src/amon/chat/thread_store.py`（`thread_id` -> `thread_id`）
 - `src/amon/chat/attachments.py`
 - `src/amon/chat/continuation.py`
 - `src/amon/commands/executor.py`（plan payload 欄位）
@@ -215,7 +215,7 @@
    - 驗證 stream token carry 的 `thread_id` 與後續 event apply 一致。
 
 6. **Legacy 防線測試**
-   - anti-legacy 檢查禁止新增 `chat_id`/`/v1/chat`。
+   - anti-legacy 檢查禁止新增 `thread_id`/`/v1/chat`。
 
 ---
 
