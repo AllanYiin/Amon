@@ -27,7 +27,7 @@ export const CHAT_VIEW = {
     logViewInitDebug("chat", {
       project_id: appState.projectId || null,
       run_id: appState.graphRunId || null,
-      chat_id: appState.chatId || null,
+      thread_id: appState.activeThreadId || null,
       node_states_count: Object.keys(appState.graphNodeStates || {}).length,
     });
 
@@ -276,13 +276,13 @@ export const CHAT_VIEW = {
       let streamToken = null;
       if (messageLength > 1800) {
         try {
-          const response = await fetch("/v1/chat/stream/init", {
+          const response = await fetch("/v1/threads/stream/init", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               message: finalMessage,
               project_id: appState.projectId,
-              chat_id: appState.chatId,
+              thread_id: appState.activeThreadId,
             }),
           });
           if (!response.ok) {
@@ -312,9 +312,9 @@ export const CHAT_VIEW = {
             query.set("message", params.message);
           }
           if (params.project_id) query.set("project_id", params.project_id);
-          if (params.chat_id) query.set("chat_id", params.chat_id);
+          if (params.thread_id) query.set("thread_id", params.thread_id);
           if (lastEventId) query.set("last_event_id", lastEventId);
-          return `/v1/chat/stream?${query.toString()}`;
+          return `/v1/threads/stream?${query.toString()}`;
         },
         wsUrlBuilder: (params, lastEventId) => {
           const protocol = window.location.protocol === "https:" ? "wss" : "ws";
@@ -325,9 +325,9 @@ export const CHAT_VIEW = {
             query.set("message", params.message);
           }
           if (params.project_id) query.set("project_id", params.project_id);
-          if (params.chat_id) query.set("chat_id", params.chat_id);
+          if (params.thread_id) query.set("thread_id", params.thread_id);
           if (lastEventId) query.set("last_event_id", lastEventId);
-          return `${protocol}://${window.location.host}/v1/chat/ws?${query.toString()}`;
+          return `${protocol}://${window.location.host}/v1/threads/stream?${query.toString()}`;
         },
         onStatusChange: ({ status, transport }) => updateDaemonStatus(status, transport),
         onEvent: async (eventType, data) => {
@@ -423,7 +423,7 @@ export const CHAT_VIEW = {
         message: streamToken ? "" : finalMessage,
         stream_token: streamToken,
         project_id: appState.projectId,
-        chat_id: appState.chatId,
+        thread_id: appState.activeThreadId,
       });
     };
 
