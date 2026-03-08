@@ -176,6 +176,16 @@
 9. RWD：手機寬度主要流程不破版。
 10. A11y：鍵盤可操作主要控制（nav/tab/modal/copy）。
 
+### Thread restore / ownership 專屬回歸（Phase 6 必跑）
+
+1. 建立 `Project A`，在 A 建立並進入 `thread alpha`。
+2. 在 A 再建立 `thread beta`，確認 sidebar active thread 為 beta。
+3. 切換到 `Project B` 後再切回 A，active thread 應回到 server 記錄值（不可跳回 alpha 或新建 thread）。
+4. Browser reload 後，A 的 active thread 仍為同一條。
+5. 重啟 `amon ui` 後，再次打開 A，active thread 仍為同一條。
+6. `context / graph / artifacts / latest run` 必須全部跟隨當前 selected thread，不可落到 project 最新 run。
+7. stream 完成事件中的 `thread_id` / `run_id` 必須與 sidebar active thread 一致。
+
 ---
 
 ## 風險與設計取捨
