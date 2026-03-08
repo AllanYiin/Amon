@@ -370,6 +370,66 @@ body {
   outline-offset: 2px;
 }
 
+.thread-tree {
+  margin-top: 14px;
+  border-top: 1px solid var(--c-border);
+  padding-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.thread-tree__header {
+  display: grid;
+  gap: 6px;
+}
+
+.thread-tree__caption {
+  margin: 0;
+  font-size: 11px;
+  color: var(--c-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.thread-tree__body {
+  display: grid;
+  gap: 8px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.thread-tree__empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--c-text-muted);
+}
+
+.thread-row {
+  width: 100%;
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  text-align: left;
+  background: var(--c-surface-1);
+  display: grid;
+  gap: 4px;
+}
+
+.thread-row__title {
+  font-size: 12px;
+  color: var(--c-text);
+}
+
+.thread-row__meta {
+  font-size: 11px;
+  color: var(--c-text-muted);
+}
+
+.thread-row.is-active {
+  border-color: color-mix(in srgb, var(--c-primary) 50%, var(--c-border));
+  background: color-mix(in srgb, var(--c-primary) 14%, var(--c-surface-1));
+}
+
 .shell-main {
   display: grid;
   gap: 16px;
@@ -3507,6 +3567,10 @@ body.is-resizing-context-panel {
   margin: 0;
 }
 
+.ui-shell.is-sidebar-collapsed .thread-tree {
+  display: none;
+}
+
 .logs-list,
 .config-table-wrap,
 .docs-tree__viewport {
@@ -3611,6 +3675,10 @@ body.is-resizing-context-panel {
   .ui-shell.is-sidebar-collapsed .shell-nav__item {
     font-size: 11px;
     min-height: 0;
+  }
+
+  .thread-tree {
+    display: none;
   }
 
   .chat-input {

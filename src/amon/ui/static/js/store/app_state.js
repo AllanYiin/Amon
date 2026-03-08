@@ -1,6 +1,7 @@
 export function createInitialUiState(createUiEventStore) {
   return {
     activeThreadId: null,
+    activeThreadByProject: {},
     projectId: null,
     threadList: [],
     threadsByProject: {},
