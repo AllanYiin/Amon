@@ -26,7 +26,7 @@ export const GRAPH_VIEW = {
     logViewInitDebug("graph", {
       project_id: ctx.appState?.projectId || getProjectId(ctx) || null,
       run_id: ctx.appState?.graphRunId || null,
-      chat_id: ctx.appState?.chatId || null,
+      thread_id: ctx.appState?.activeThreadId || null,
       node_states_count: Object.keys(ctx.appState?.graphNodeStates || {}).length,
     });
 

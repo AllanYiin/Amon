@@ -1,8 +1,10 @@
 export function createInitialUiState(createUiEventStore) {
   return {
-    chatId: null,
+    activeThreadId: null,
     projectId: null,
-    projectChatSessions: {},
+    threadList: [],
+    threadsByProject: {},
+    pendingProjectLoadToken: 0,
     plan: null,
     streaming: false,
     attachments: [],

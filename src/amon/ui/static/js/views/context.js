@@ -15,15 +15,15 @@ function getProjectId(ctx) {
 }
 
 function getChatId(ctx) {
-  return String(ctx.appState?.chatId || "").trim();
+  return String(ctx.appState?.activeThreadId || "").trim();
 }
 
-function updateChatClearAvailability(rootEl, chatId = "") {
+function updateChatClearAvailability(rootEl, activeThreadId = "") {
   const clearChatButton = rootEl?.querySelector("#context-clear-chat");
   if (!(clearChatButton instanceof HTMLButtonElement)) return;
-  const enabled = Boolean(String(chatId || "").trim());
+  const enabled = Boolean(String(activeThreadId || "").trim());
   clearChatButton.disabled = !enabled;
-  clearChatButton.title = enabled ? "清空目前聊天 Context" : "目前沒有可用 chat_id，無法清空本次對話 Context。";
+  clearChatButton.title = enabled ? "清空目前 thread Context" : "目前沒有可用 thread_id，無法清空本次對話 Context。";
 }
 
 function dispatchContext(ctx, payload = {}) {
@@ -48,8 +48,8 @@ function updateDraftMeta(rootEl, text) {
   meta.textContent = text;
 }
 
-async function fetchContextStats(ctx, projectId, chatId = "") {
-  const normalizedChatId = String(chatId || "").trim();
+async function fetchContextStats(ctx, projectId, activeThreadId = "") {
+  const normalizedChatId = String(activeThreadId || "").trim();
   // 保留 baseline 呼叫簽名，避免回歸測試因 refactor 誤判。
   if (!normalizedChatId) {
     return ctx.services.context.getContextStats(projectId);
@@ -57,13 +57,13 @@ async function fetchContextStats(ctx, projectId, chatId = "") {
   return ctx.services.context.getContextStats(projectId, normalizedChatId);
 }
 
-async function refreshContextStats(ctx, rootEl, projectId, chatId = "") {
+async function refreshContextStats(ctx, rootEl, projectId, activeThreadId = "") {
   if (!projectId) {
     setDashboardUnavailable(rootEl);
     return null;
   }
   try {
-    const statsPayload = await fetchContextStats(ctx, projectId, chatId);
+    const statsPayload = await fetchContextStats(ctx, projectId, activeThreadId);
     renderContextStats(rootEl, statsPayload);
     return statsPayload;
   } catch (error) {
@@ -192,13 +192,13 @@ async function clearDraft(ctx, rootEl, editor, scope) {
   if (!confirmed) return;
   try {
     const projectId = getProjectId(ctx);
-    const chatId = getChatId(ctx);
-    if (scope === "chat" && !chatId) {
-      ctx.ui.toast?.show("目前沒有可用的 chat_id，無法清空本次對話 Context。", { type: "warning", duration: 9000 });
-      updateChatClearAvailability(rootEl, chatId);
+    const activeThreadId = getChatId(ctx);
+    if (scope === "chat" && !activeThreadId) {
+      ctx.ui.toast?.show("目前沒有可用的 thread_id，無法清空本次對話 Context。", { type: "warning", duration: 9000 });
+      updateChatClearAvailability(rootEl, activeThreadId);
       return;
     }
-    await ctx.services.context.clearContext(scope, { projectId, chatId });
+    await ctx.services.context.clearContext(scope, { projectId, threadId: activeThreadId });
     if (editor) editor.value = "";
     dispatchContext(ctx, { context: "", clearedScope: scope, clearedAt: Date.now() });
     updateDraftMeta(rootEl, scope === "project" ? "已清空專案 Context 草稿。" : "已清空本次對話 Context 草稿。");
@@ -251,7 +251,7 @@ export const CONTEXT_VIEW = {
     logViewInitDebug("context", {
       project_id: ctx.appState?.projectId || getProjectId(ctx) || null,
       run_id: ctx.appState?.graphRunId || null,
-      chat_id: ctx.appState?.chatId || null,
+      thread_id: ctx.appState?.activeThreadId || null,
       node_states_count: Object.keys(ctx.appState?.graphNodeStates || {}).length,
     });
     const editor = rootEl.querySelector("#context-draft-input");

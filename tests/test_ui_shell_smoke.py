@@ -219,30 +219,41 @@ class UIShellSmokeTests(unittest.TestCase):
         ]:
             self.assertTrue(Path(module_path).exists(), module_path)
 
-    def test_project_switch_restores_last_chat_session_and_requests_history_with_chat_id(self) -> None:
+    def test_project_switch_uses_server_active_thread_and_hydration_token_guard(self) -> None:
         bootstrap_js = Path("src/amon/ui/static/js/bootstrap.js").read_text(encoding="utf-8")
-        runs_service_js = Path("src/amon/ui/static/js/domain/runsService.js").read_text(encoding="utf-8")
+        thread_service_js = Path("src/amon/ui/static/js/domain/threadService.js").read_text(encoding="utf-8")
         app_state_js = Path("src/amon/ui/static/js/store/app_state.js").read_text(encoding="utf-8")
 
-        self.assertIn("projectChatSessions: {}", app_state_js)
-        self.assertIn('projectChatSessions: "amon.ui.projectChatSessions"', bootstrap_js)
-        self.assertIn("function loadProjectChatSessions()", bootstrap_js)
-        self.assertIn("function rememberProjectChatSession(projectId, chatId)", bootstrap_js)
-        self.assertIn("state.projectChatSessions = {", bootstrap_js)
-        self.assertIn("rememberProjectChatSession(previousProjectId, state.chatId);", bootstrap_js)
-        self.assertIn("state.chatId = nextProjectId ? (state.projectChatSessions[nextProjectId] || null) : null;", bootstrap_js)
-        self.assertIn('const preferredChatId = String(state.projectChatSessions?.[state.projectId] || state.chatId || "").trim();', bootstrap_js)
-        self.assertIn('services.runs.getProjectHistory(state.projectId, preferredChatId || "")', bootstrap_js)
-        self.assertIn('CHAT_VIEW.__chatStopStream?.();', bootstrap_js)
-        self.assertIn('function normalizeHistoryTimestamp(ts = "") {', bootstrap_js)
-        self.assertIn('if (typeof CHAT_VIEW.__chatAppendMessage === "function") {', bootstrap_js)
-        self.assertIn('CHAT_VIEW.__chatAppendMessage(role, normalizedText, { timestampText });', bootstrap_js)
-        self.assertIn('const eventProjectId = String(data.project_id || "").trim();', bootstrap_js)
-        self.assertIn('if (eventProjectId && !activeProjectId) {', bootstrap_js)
-        self.assertIn('const shouldApplyToActiveProject = !eventProjectId || eventProjectId === latestActiveProjectId;', bootstrap_js)
-        self.assertIn('if (shouldApplyToActiveProject && eventChatId) {', bootstrap_js)
-        self.assertIn('async getProjectHistory(projectId, chatId = "")', runs_service_js)
-        self.assertIn("`?chat_id=${encodeURIComponent(String(chatId).trim())}`", runs_service_js)
+        self.assertIn("activeThreadId: null", app_state_js)
+        self.assertIn("threadList: []", app_state_js)
+        self.assertIn("threadsByProject: {}", app_state_js)
+        self.assertIn("pendingProjectLoadToken: 0", app_state_js)
+        self.assertNotIn("projectChatSessions", app_state_js)
+        self.assertNotIn('amon.ui.projectChatSessions', bootstrap_js)
+
+        self.assertIn("function beginProjectHydration()", bootstrap_js)
+        self.assertIn("function isCurrentProjectHydrationToken(token)", bootstrap_js)
+        self.assertIn("await loadThreadList(token);", bootstrap_js)
+        self.assertIn("await loadProjectHistory(token);", bootstrap_js)
+        self.assertIn("await ensureActiveThread(token);", bootstrap_js)
+        self.assertIn("await loadContext(token);", bootstrap_js)
+        self.assertIn("if (!isCurrentProjectHydrationToken(token)) return;", bootstrap_js)
+        self.assertIn("state.activeThreadId = payload.thread_id || null;", bootstrap_js)
+        self.assertIn("state.activeThreadId = payload.active_thread_id || payload.thread_id || null;", bootstrap_js)
+
+        self.assertIn("async listProjectThreads(projectId)", thread_service_js)
+        self.assertIn("/active-thread", thread_service_js)
+        self.assertIn('async getProjectThreadHistory(projectId, threadId = "")', thread_service_js)
+        self.assertIn("/threads/", thread_service_js)
+
+
+    def test_chat_view_stream_paths_use_thread_endpoints(self) -> None:
+        chat_view_js = Path("src/amon/ui/static/js/views/chat.js").read_text(encoding="utf-8")
+        self.assertIn('"/v1/threads/stream/init"', chat_view_js)
+        self.assertIn('return `/v1/threads/stream?${query.toString()}`;', chat_view_js)
+        self.assertIn('query.set("thread_id", params.thread_id);', chat_view_js)
+        self.assertIn('thread_id: appState.activeThreadId', chat_view_js)
+        self.assertNotIn('/v1/chat/stream', chat_view_js)
 
     def test_ui_server_exposes_graph_history_and_billing_series_endpoints(self) -> None:
         server_py = Path("src/amon/ui_server.py").read_text(encoding="utf-8")

@@ -52,7 +52,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
           source: entry.source || "ui",
           route: window.location.hash || "#/chat",
           project_id: String(state.projectId || "").trim() || null,
-          chat_id: String(state.chatId || "").trim() || null,
+          thread_id: String(state.activeThreadId || "").trim() || null,
           metadata: entry.metadata || {},
         };
         try {
@@ -73,37 +73,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
         contextCollapsed: "amon.ui.contextPanelCollapsed",
         contextWidth: "amon.ui.contextPanelWidth",
         contextDraftPrefix: "amon.ui.contextDraft:",
-        projectChatSessions: "amon.ui.projectChatSessions",
       };
-
-      function loadProjectChatSessions() {
-        try {
-          const raw = readStorage(STORAGE_KEYS.projectChatSessions);
-          if (!raw) return {};
-          const parsed = JSON.parse(raw);
-          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-          return Object.fromEntries(
-            Object.entries(parsed)
-              .filter(([projectId, chatId]) => String(projectId || "").trim() && String(chatId || "").trim())
-              .map(([projectId, chatId]) => [String(projectId).trim(), String(chatId).trim()])
-          );
-        } catch (_error) {
-          return {};
-        }
-      }
-
-      function persistProjectChatSessions() {
-        writeStorage(STORAGE_KEYS.projectChatSessions, JSON.stringify(state.projectChatSessions || {}));
-      }
-
-      function rememberProjectChatSession(projectId, chatId) {
-        const normalizedProjectId = String(projectId || "").trim();
-        const normalizedChatId = String(chatId || "").trim();
-        if (!normalizedProjectId || !normalizedChatId) return;
-        if ((state.projectChatSessions[normalizedProjectId] || "") === normalizedChatId) return;
-        state.projectChatSessions[normalizedProjectId] = normalizedChatId;
-        persistProjectChatSessions();
-      }
 
       function getContextDraftStorageKey(projectIdOverride = undefined) {
         const resolvedProjectId = projectIdOverride === undefined ? state.projectId : projectIdOverride;
@@ -112,18 +82,13 @@ appStore.patch({ bootstrappedAt: Date.now() });
           return `${STORAGE_KEYS.contextDraftPrefix}project:${normalizedProjectId}`;
         }
 
-        const normalizedChatId = String(state.chatId || "").trim();
-        if (normalizedChatId) {
-          return `${STORAGE_KEYS.contextDraftPrefix}chat:${normalizedChatId}`;
+        const normalizedThreadId = String(state.activeThreadId || "").trim();
+        if (normalizedThreadId) {
+          return `${STORAGE_KEYS.contextDraftPrefix}thread:${normalizedThreadId}`;
         }
 
         return `${STORAGE_KEYS.contextDraftPrefix}default`;
       }
-
-      state.projectChatSessions = {
-        ...(state.projectChatSessions || {}),
-        ...loadProjectChatSessions(),
-      };
 
       const isMobileViewport = window.innerWidth < 768;
       appStore.patch({
@@ -1285,8 +1250,8 @@ appStore.patch({ bootstrappedAt: Date.now() });
           showToast("請先選擇專案後再下載對話紀錄。", 9000, "warning");
           return;
         }
-        const payload = await services.runs.getProjectHistory(state.projectId);
-        const fileName = `chat-history-${state.projectId}.json`;
+        const payload = await services.threads.getProjectThreadHistory(state.projectId, state.activeThreadId || "");
+        const fileName = `thread-history-${state.projectId}.json`;
         const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
         const url = URL.createObjectURL(blob);
         const anchor = document.createElement("a");
@@ -1298,18 +1263,25 @@ appStore.patch({ bootstrappedAt: Date.now() });
         URL.revokeObjectURL(url);
       }
 
-      async function loadProjectHistory() {
+      function beginProjectHydration() {
+        state.pendingProjectLoadToken += 1;
+        return state.pendingProjectLoadToken;
+      }
+
+      function isCurrentProjectHydrationToken(token) {
+        return token === state.pendingProjectLoadToken;
+      }
+
+      async function loadProjectHistory(token = state.pendingProjectLoadToken) {
+        if (!isCurrentProjectHydrationToken(token)) return;
         elements.timeline.innerHTML = "";
         if (!state.projectId) {
           appendTimelineStatus("目前為無專案模式。輸入任務後會自動建立新專案並切換。");
           return;
         }
-        const preferredChatId = String(state.projectChatSessions?.[state.projectId] || state.chatId || "").trim();
-        const payload = await services.runs.getProjectHistory(state.projectId, preferredChatId || "");
-        state.chatId = payload.chat_id || null;
-        if (state.projectId && state.chatId) {
-          rememberProjectChatSession(state.projectId, state.chatId);
-        }
+        const payload = await services.threads.getProjectThreadHistory(state.projectId, state.activeThreadId || "");
+        if (!isCurrentProjectHydrationToken(token)) return;
+        state.activeThreadId = payload.thread_id || null;
         const messages = Array.isArray(payload.messages) ? payload.messages : [];
         if (!messages.length) {
           appendTimelineStatus("目前尚無歷史對話。請直接輸入需求開始。");
@@ -1388,11 +1360,8 @@ appStore.patch({ bootstrappedAt: Date.now() });
       function setProjectState(projectId) {
         const nextProjectId = projectId || null;
         if (state.projectId !== nextProjectId) {
-          const previousProjectId = state.projectId;
-          if (previousProjectId && state.chatId) {
-            rememberProjectChatSession(previousProjectId, state.chatId);
-          }
-          state.chatId = nextProjectId ? (state.projectChatSessions[nextProjectId] || null) : null;
+          state.activeThreadId = null;
+          state.threadList = [];
         }
         state.projectId = nextProjectId;
         const layoutState = appStore.getState().layout || {};
@@ -1415,7 +1384,8 @@ appStore.patch({ bootstrappedAt: Date.now() });
         syncContextHeader();
         refreshContextDraftUi();
         if (!state.projectId) {
-          state.chatId = null;
+          state.activeThreadId = null;
+          state.threadList = [];
           elements.timeline.innerHTML = "";
           renderArtifactsInspector([]);
           elements.graphPreview.innerHTML = "<p class=\"empty-context\">請先在上方選擇專案。</p>";
@@ -1607,26 +1577,38 @@ appStore.patch({ bootstrappedAt: Date.now() });
         elements.refreshContext.disabled = !state.projectId;
       }
 
-      async function ensureChatSession() {
-        if (!state.projectId) return;
-        const existingChatId = String(state.chatId || "").trim();
-        if (existingChatId) {
-          rememberProjectChatSession(state.projectId, existingChatId);
+      async function ensureActiveThread(token = state.pendingProjectLoadToken) {
+        if (!state.projectId || !isCurrentProjectHydrationToken(token)) return;
+        const existingThreadId = String(state.activeThreadId || "").trim();
+        if (existingThreadId) {
           return;
         }
-        const payload = await services.runs.ensureChatSession(state.projectId, existingChatId || null);
-        state.chatId = payload.chat_id;
-        if (state.projectId && state.chatId) {
-          rememberProjectChatSession(state.projectId, state.chatId);
-        }
+        const payload = await services.threads.createProjectThread(state.projectId);
+        if (!isCurrentProjectHydrationToken(token)) return;
+        state.activeThreadId = payload.active_thread_id || payload.thread_id || null;
       }
 
-      async function loadContext() {
+      async function loadThreadList(token = state.pendingProjectLoadToken) {
+        if (!state.projectId || !isCurrentProjectHydrationToken(token)) {
+          state.threadList = [];
+          return;
+        }
+        const payload = await services.threads.listProjectThreads(state.projectId);
+        if (!isCurrentProjectHydrationToken(token)) return;
+        const threads = Array.isArray(payload.threads) ? payload.threads : [];
+        const activeThreadId = String(payload.active_thread_id || "").trim() || null;
+        state.threadList = threads;
+        state.threadsByProject[state.projectId] = threads;
+        state.activeThreadId = activeThreadId || state.activeThreadId || null;
+      }
+
+      async function loadContext(token = state.pendingProjectLoadToken) {
         if (!state.projectId) {
           showToast("請先選擇專案。");
           return;
         }
-        const payload = await services.context.getContext(state.projectId, state.chatId || "");
+        const payload = await services.threads.getProjectThreadContext(state.projectId, state.activeThreadId || "");
+        if (!isCurrentProjectHydrationToken(token)) return;
         state.graph = payload.graph || { nodes: [], edges: [] };
         state.graphRunId = payload.run_id || null;
         state.graphNodeStates = payload.node_states || {};
@@ -1994,7 +1976,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
         if (!data) return;
         let projectChanged = false;
         const eventProjectId = String(data.project_id || "").trim();
-        const eventChatId = String(data.chat_id || "").trim();
+        const eventThreadId = String(data.thread_id || "").trim();
         const activeProjectId = String(state.projectId || "").trim();
 
         // 僅在「無專案模式」下，才讓事件自動切換專案，避免切換專案後被舊串流事件覆寫。
@@ -2003,17 +1985,10 @@ appStore.patch({ bootstrappedAt: Date.now() });
           projectChanged = true;
         }
 
-        if (eventProjectId && eventChatId) {
-          rememberProjectChatSession(eventProjectId, eventChatId);
-        }
-
         const latestActiveProjectId = String(state.projectId || "").trim();
         const shouldApplyToActiveProject = !eventProjectId || eventProjectId === latestActiveProjectId;
-        if (shouldApplyToActiveProject && eventChatId) {
-          state.chatId = eventChatId;
-        }
-        if (latestActiveProjectId && state.chatId) {
-          rememberProjectChatSession(latestActiveProjectId, state.chatId);
+        if (shouldApplyToActiveProject && eventThreadId) {
+          state.activeThreadId = eventThreadId;
         }
         if (shouldApplyToActiveProject && Array.isArray(data.artifacts)) {
           state.runArtifacts = data.artifacts.filter((artifact) => !isConversationArtifact(artifact));
@@ -2027,12 +2002,12 @@ appStore.patch({ bootstrappedAt: Date.now() });
       async function confirmPlan(confirmed) {
         if (!state.plan) return;
         try {
-          const path = state.plan.confirm_api || "/chat/plan/confirm";
+          const path = state.plan.confirm_api || "/threads/plan/confirm";
           const payload =
-            path === "/chat/plan/confirm"
+            path === "/threads/plan/confirm"
               ? await services.admin.confirmPlan(path, {
                   project_id: state.projectId,
-                  chat_id: state.chatId,
+                  thread_id: state.activeThreadId,
                   command: state.plan.command,
                   args: state.plan.args || {},
                   confirmed,
@@ -2049,7 +2024,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
           if (state.projectId) {
             await loadContext();
           }
-          if (path !== "/chat/plan/confirm") {
+          if (path !== "/threads/plan/confirm") {
             await loadToolsSkillsPage();
           }
         } catch (error) {
@@ -2409,24 +2384,39 @@ appStore.patch({ bootstrappedAt: Date.now() });
       });
 
       async function hydrateSelectedProject() {
+        const token = beginProjectHydration();
         try {
-          await loadProjectHistory();
+          await loadThreadList(token);
         } catch (error) {
-          showToast(`載入歷史對話失敗：${error.message}`, 9000, "warning");
-        }
-
-        if (!state.projectId) return;
-
-        try {
-          await ensureChatSession();
-        } catch (error) {
-          showToast(`建立對話工作階段失敗：${error.message}`, 9000, "warning");
+          if (isCurrentProjectHydrationToken(token)) {
+            showToast(`載入 thread 清單失敗：${error.message}`, 9000, "warning");
+          }
         }
 
         try {
-          await loadContext();
+          await loadProjectHistory(token);
         } catch (error) {
-          showToast(`載入專案上下文失敗：${error.message}`, 9000, "warning");
+          if (isCurrentProjectHydrationToken(token)) {
+            showToast(`載入歷史對話失敗：${error.message}`, 9000, "warning");
+          }
+        }
+
+        if (!state.projectId || !isCurrentProjectHydrationToken(token)) return;
+
+        try {
+          await ensureActiveThread(token);
+        } catch (error) {
+          if (isCurrentProjectHydrationToken(token)) {
+            showToast(`建立對話工作階段失敗：${error.message}`, 9000, "warning");
+          }
+        }
+
+        try {
+          await loadContext(token);
+        } catch (error) {
+          if (isCurrentProjectHydrationToken(token)) {
+            showToast(`載入專案上下文失敗：${error.message}`, 9000, "warning");
+          }
         }
       }
 

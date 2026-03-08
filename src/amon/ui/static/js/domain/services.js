@@ -5,6 +5,7 @@ import { createBillingService } from "./billingService.js";
 import { createContextService } from "./contextService.js";
 import { createLogsService } from "./logsService.js";
 import { createGraphService } from "./graphService.js";
+import { createThreadService } from "./threadService.js";
 
 function withReadableErrors(serviceName, service) {
   return Object.fromEntries(
@@ -35,5 +36,6 @@ export function createServices({ api }) {
     context: withReadableErrors("context", createContextService({ api })),
     logs: withReadableErrors("logs", createLogsService({ api })),
     graph: withReadableErrors("graph", createGraphService({ api })),
+    threads: withReadableErrors("threads", createThreadService({ api })),
   };
 }
