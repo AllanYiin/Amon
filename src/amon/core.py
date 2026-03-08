@@ -1037,10 +1037,22 @@ class AmonCore:
         conversation_history: list[dict[str, str]] | None = None,
         request_id: str | None = None,
     ) -> tuple[TaskGraph3RunResult, str]:
+        planning_stream_closed = False
+
         def _emit_planning_progress(text: str) -> None:
+            nonlocal planning_stream_closed
             if not callable(stream_handler):
                 return
-            stream_handler(encode_reasoning_chunk(text))
+            if planning_stream_closed:
+                return
+            try:
+                stream_handler(encode_reasoning_chunk(text))
+            except (ConnectionAbortedError, BrokenPipeError):
+                planning_stream_closed = True
+                self.logger.info("planning progress stream closed: client disconnected")
+            except Exception:
+                planning_stream_closed = True
+                self.logger.exception("planning progress stream failed unexpectedly")
 
         def _run_with_heartbeat(step_name: str, action, *, interval_s: float = 3.0):
             if not callable(stream_handler):
@@ -1051,6 +1063,9 @@ class AmonCore:
 
             def _heartbeat() -> None:
                 while not done_event.wait(interval_s):
+                    if planning_stream_closed:
+                        done_event.set()
+                        break
                     elapsed_s = int(time.monotonic() - started_at)
                     _emit_planning_progress(f"{step_name}，已等待 {elapsed_s} 秒…")
 

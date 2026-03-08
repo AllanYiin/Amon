@@ -1,5 +1,6 @@
 import os
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -199,6 +200,48 @@ class CoreStreamHandlerTests(unittest.TestCase):
                 self.assertIn("任務計畫已產生，正在準備執行圖…", reasoning_chunks)
                 self.assertIn("執行圖準備完成，開始執行任務…", reasoning_chunks)
                 self.assertIn("任務已執行完成，正在整理結果…", reasoning_chunks)
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+    def test_run_graph_stream_heartbeat_stops_on_client_disconnect(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("plan-exec-disconnect")
+                project_path = Path(project.path)
+                fake_result = SimpleNamespace(run_id="run-plan", run_dir=project_path / ".amon" / "runs" / "run-plan")
+
+                call_count = {"value": 0}
+                first_signal = threading.Event()
+
+                def flaky_stream_handler(_token: str) -> None:
+                    call_count["value"] += 1
+                    if call_count["value"] == 1:
+                        first_signal.set()
+                        return
+                    raise ConnectionAbortedError("chat stream client disconnected")
+
+                def slow_plan(*_args, **_kwargs):
+                    first_signal.wait(timeout=1)
+                    import time
+
+                    time.sleep(3.3)
+                    return self._fake_v3_plan()
+
+                with patch.object(core, "generate_plan_docs", side_effect=slow_plan) as mock_generate, patch.object(core, "run_graph", return_value=fake_result), patch.object(
+                    core, "_load_graph_primary_output", return_value="plan response"
+                ):
+                    core.run_graph_stream(
+                        "請完成任務",
+                        project_path=project_path,
+                        project_id=project.project_id,
+                        stream_handler=flaky_stream_handler,
+                    )
+
+                self.assertTrue(mock_generate.called)
+                self.assertEqual(call_count["value"], 2)
             finally:
                 os.environ.pop("AMON_HOME", None)
 
