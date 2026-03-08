@@ -7,22 +7,26 @@
 
 ---
 
-## TaskGraph v3 過渡狀態聲明（避免誤導）
+## TaskGraph v3 單一路徑聲明（正式）
 
-本規格中的 TaskGraph v3 目標架構目前仍在 cutover 過程中，尚未宣告完成。現況仍存在下列舊路徑/命名：
+本規格已對齊 repo 現況：TaskGraph v3 為唯一正式執行模型。
 
-- `PlanGraph`
-- `compile_plan_to_exec_graph`
-- `taskgraph3.engine_runtime.GraphRuntime`
-- `plan_execute` 命名與相關測試
-- CLI step5/step6 相容殘留
+### 正式執行模型
 
-終態定義：
+1. `docs/plan.json` 為正式 graph fixture，格式固定 `taskgraph.v3`。
+2. production runtime 僅接受 v3 graph payload。
+3. run bundle 契約維持：`state.json`、`events.jsonl`、`graph.resolved.json`。
+4. 不支援 node type 需 fail-fast，不得靜默略過。
 
-1. `docs/plan.json` 必須為 `taskgraph.v3`。
-2. `TaskGraph3Runtime` 是唯一 production runtime。
-3. legacy/v2 只保留 migrate/import，不可作為主執行路徑。
-詳見 `docs/migration_v3.md` 與 `docs/refactor/taskgraph_v3_cutover.md`。
+### 匯入/轉換工具（非主路徑）
+
+- `graph.v2` 與 `graph.legacy` 只可透過 migrate/import 工具轉入 v3。
+- 轉換完成後必須以 v3 檔案執行，不得直接以舊格式執行。
+
+### 歷史背景
+
+- 舊術語（例如舊 runtime/舊命名）只允許出現在 migration 或歷史文件。
+- 正式執行說明文件（README / SPEC / TEST_GUIDE / DEVELOPMENT）以 v3 語彙為準。
 
 ## 一、技術可行性分析（Feasibility）
 

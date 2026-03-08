@@ -1,176 +1,53 @@
-# Graph Debug 手動驗收與排查指南
+# Graph Debug 手動驗收與排查指南（TaskGraph v3）
 
-> 目的：提供 Graph 頁面（Mermaid + svg-pan-zoom）的手動驗收流程、常見失敗排查方式，以及本地 vendor 載入策略的驗證方式。
+## 1) 驗收目標
 
-## 本地 vendor 版本與來源
+確認 Graph UI 與 v3 run bundle 一致：
 
-- `src/amon/ui/static/vendor/mermaid/mermaid.esm.min.mjs`
-  - 來源：npm `mermaid@10.9.1` 套件 tarball（`package/dist/mermaid.esm.min.mjs`）。
-- `src/amon/ui/static/vendor/svg-pan-zoom/svg-pan-zoom.min.js`
-  - 來源：repo 既有 vendor（對應 `svg-pan-zoom@3.6.1`，與 fallback 版本一致）。
+1. 能渲染 `graph_mermaid`。
+2. node list / node drawer / SVG node 狀態一致。
+3. `run.update` / `node.update` 事件可更新 UI。
 
-## 手動驗收步驟（至少 8 步）
+## 2) 標準檢查步驟
 
-1. **啟動 UI Server**
-   - 在 repo root 執行：
-     ```bash
-     amon ui --port 8000
-     ```
-   - 確認終端機顯示服務啟動成功，並可存取 `http://localhost:8000`。
+1. 開啟 `#/graph` 並選擇一個 run。
+2. 確認 graph API payload 含 `run_id`、`nodes`、`graph_mermaid`、`node_states`。
+3. 驗證 Mermaid 成功渲染為 SVG。
+4. 點擊 node list 任一節點，drawer 顯示 `type/status/inputs/outputs/events`。
+5. 點擊 SVG 對應節點，drawer 應切換到同一 node。
+6. 觸發 SSE 更新後，list 與 SVG `node-status--*` class 應同步。
 
-2. **開啟 Graph 頁**
-   - 進入 `http://localhost:8000`。
-   - 從 UI 導航到 Graph 頁（或直接前往 `#/graph`）。
+## 3) 常見失敗排查
 
-3. **確認 Mermaid 是否載入**
-   - 打開 DevTools Console，輸入：
-     ```js
-     window.__mermaid
-     ```
-   - 預期：回傳 `object`（不是 `undefined` / `null`）。
+### A. `graph_mermaid` 缺失
 
-4. **確認 svg-pan-zoom 是否載入**
-   - 在 Console 輸入：
-     ```js
-     window.svgPanZoom
-     ```
-   - 預期：回傳 `function`（不是 `undefined`）。
+- 現象：無圖、僅顯示空態。
+- 檢查：後端 run bundle 是否真的帶 `graph_mermaid`。
+- 處理：修正資料來源，不做 legacy graph fallback。
 
-5. **確認 Graph 是否渲染成功**
-   - 在 Console 輸入：
-     ```js
-     document.querySelector('#graph-preview svg')
-     ```
-   - 預期：回傳 `SVGSVGElement`，代表 `#graph-preview` 內有 `svg`。
+### B. Mermaid 載入失敗
 
-6. **確認節點可點擊（開啟 drawer）**
-   - 在圖上點擊任一節點（通常為 `g.node`）。
-   - 預期：節點詳細資訊 drawer（側欄）開啟，內容切換到該節點。
+- 現象：`window.__mermaid` 不存在或 `render` 失敗。
+- 檢查：Console + Network；優先確認本地 vendor 載入。
+- 處理：修正前端資源/版本，不引入 CDN-only 依賴。
 
-7. **確認節點狀態 class 有套用**
-   - 在 Elements 面板選取任一 `g.node`，檢查 class。
-   - 預期：class 內包含 `node-status--*`（例如 `node-status--running` / `node-status--done` / `node-status--failed`）。
+### C. SVG 有圖但 node 互動失效
 
-8. **確認增量更新（狀態刷新不閃爍）**
-   - 觸發一次 run，讓節點狀態更新。
-   - 預期：
-     - 節點狀態 class 有更新。
-     - 圖面不應整張重建造成明顯閃爍。
+- 現象：點 SVG 沒反應。
+- 檢查：selector 與事件綁定是否對應目前 Mermaid DOM。
+- 處理：讓 SVG node click 與 list click 共用同一選點邏輯。
 
-9. **補充驗收：縮放/平移不影響點擊**
-   - 嘗試滾輪縮放與拖曳平移後，再點擊節點。
-   - 預期：縮放/平移正常，節點仍可點擊並開啟 drawer。
+## 4) Mermaid（v3）最小範例
 
-10. **確認 Network 不再依賴 jsdelivr（本地 vendor 驗證）**
-    - DevTools → Network，清空紀錄後重新整理頁面。
-    - 在 Filter 輸入：`jsdelivr`。
-    - 預期：
-      - 正常情況下，**不會**出現 `mermaid` / `svg-pan-zoom` 的 `cdn.jsdelivr.net` 請求。
-      - 僅在本地 vendor 檔案遺失或載入失敗時，才會看到 Mermaid CDN fallback 請求。
+```mermaid
+graph TD
+  n1[agent_task: 需求分析] --> n2[tool_call: 蒐集資料]
+  n2 --> n3[write_file: docs/report.md]
+  n3 --> n4[join: 完成]
+```
 
-## 常見失敗排查
+## 5) 文件分層
 
-### 分支對照（Graph 頁 UI 訊息）
-
-| 分支 | 觸發條件 | UI 文案 | 建議排查 |
-| --- | --- | --- | --- |
-| A | `graph_mermaid` 為空或缺失 | `此 Run 尚無流程圖資料` + `請先查看下方 graph-code 區塊是否有內容。` | 確認該 Run 是否真的有產生 graph payload；比對 graph-code 與後端回傳欄位。 |
-| B | `graph_mermaid` 有值，但 `window.__mermaid` 不存在/不可 render | `Mermaid 未載入（可能離線或資源被擋）` + `請嘗試重新整理頁面後再試一次。` | 檢查 CDN/網路阻擋、Console 與 Network 錯誤，並先重新整理。 |
-| C | `window.__mermaid.render(...)` throw error | `流程圖渲染失敗` + `錯誤摘要：<error.message>` | 驗證 mermaid 文法，從 Console 追蹤 parser/render error。 |
-| D | SVG 渲染成功但找不到 `g.node` 或無法綁定節點 | `流程圖已渲染但無法識別節點` + `可能是 Mermaid 版本差異，請比對 g.node 結構。` | 檢查 SVG 結構與 class 命名，確認 Mermaid 版本與 selector 相容性。 |
-
-> 設計重點：即使進入 B/C/D，Node 清單與 Node drawer 仍可操作，使用者可以先從清單點擊節點查看 detail。
-
-### 1) CDN 被擋或離線，導致 `window.__mermaid` 不存在
-
-**症狀**
-- `window.__mermaid === undefined`
-- Network/Console 出現 `ERR_BLOCKED_BY_CLIENT`、`net::ERR_INTERNET_DISCONNECTED`、`Failed to load module script`
-
-**排查步驟**
-1. DevTools → Network 重新整理頁面。
-2. 篩選 `mermaid` / `jsdelivr`，確認回應狀態是否為 `200`。
-3. 檢查公司防火牆、代理、AdBlock 是否阻擋 CDN。
-4. 若可行，切換可連外網路再重試。
-
-**建議處置**
-- 驗收環境先將 `cdn.jsdelivr.net` 納入白名單。
-- 以同網段其他機器交叉確認是否為網路策略問題。
-- Graph UI 會顯示「Mermaid 未載入（可能離線或資源被擋）」並提供重新整理按鈕。
-
-### 2) Mermaid `render` 丟錯（如何抓錯誤）
-
-**症狀**
-- `window.__mermaid` 存在，但圖未渲染。
-- Console 出現 Mermaid parser/render error。
-
-**排查步驟**
-1. Console 開啟 **Preserve log**，重新觸發渲染。
-2. 搜尋關鍵字：`mermaid`、`parse`、`render`。
-3. 暫時掛上全域錯誤監聽，擷取訊息：
-   ```js
-   window.addEventListener('error', (e) => {
-     if (String(e?.message || '').toLowerCase().includes('mermaid')) {
-       console.error('[graph-debug] mermaid error:', e.error || e.message);
-     }
-   });
-   ```
-4. 檢查輸入的 mermaid 文法（例如未閉合、錯誤箭頭語法、特殊字元未處理）。
-
-**快速重現（DoD 建議）**
-- 可在測試 payload 中提供非法語法：
-  ```text
-  flowchart TD
-  A-->
-  ```
-- 預期 Graph UI 顯示「流程圖渲染失敗」與錯誤摘要。
-
-### 3) SVG 有出現但沒有 `g.node`（Mermaid 版本差異）
-
-**症狀**
-- `document.querySelector('#graph-preview svg')` 有值。
-- `document.querySelectorAll('#graph-preview g.node').length === 0`。
-
-**排查步驟**
-1. 在 Elements 展開 `#graph-preview svg`，確認實際節點 DOM 結構。
-2. 用較寬鬆 selector 檢查（例如 `#graph-preview g`）判斷是否 class 命名改變。
-3. 比對目前 Mermaid 版本與既有事件綁定邏輯是否一致。
-
-**處置方向**
-- 讓節點選擇器更具相容性（避免只綁 `g.node` 單一 class 假設）。
-- 升版 Mermaid 時同步更新回歸測試。
-- Graph UI 會保留已渲染 SVG，並在上方顯示「流程圖已渲染但無法識別節點」警示。
-
-## `index.html` 載入策略（本地優先、CDN fallback）
-
-> 目前 `src/amon/ui/index.html` 採用本地 vendor 優先載入：
-> - svg-pan-zoom：先載入本地 `static/vendor/svg-pan-zoom/svg-pan-zoom.min.js`，缺失時才 fallback CDN。
-> - Mermaid：先 dynamic import 本地 `static/vendor/mermaid/mermaid.esm.min.mjs`，失敗才 fallback CDN。
-
-### 風險點
-
-1. **可用性風險（Availability）**
-   - 外網受限、DNS 異常、CDN 故障時，Graph 功能可能直接失效。
-
-2. **版本漂移風險（Version Drift）**
-   - 即使固定版本，升級或跨環境仍可能造成 DOM 結構改變，影響 `g.node` 選擇與事件綁定。
-
-3. **供應鏈風險（Supply Chain）**
-   - 前端關鍵依賴由第三方 CDN 提供，需承擔來源可用性與內容一致性風險。
-
-4. **除錯與重現成本上升**
-   - 問題可能只在特定網路條件出現，導致本機、CI、驗收環境不一致。
-
-### 預期修正方向
-
-1. **改為本地資產或建置產物鎖版**
-   - Mermaid / svg-pan-zoom 改由 repo 內建置流程提供，避免 runtime 直接依賴 CDN。
-
-2. **保留清楚的降級訊息**
-   - 若圖形庫載入失敗，UI 顯示可操作的錯誤訊息與排查步驟，不可靜默失敗。
-
-3. **建立相容性回歸測試**
-   - 針對 `#graph-preview svg`、節點點擊、`node-status--*` class 套用建立穩定測試。
-
-4. **統一環境依賴來源**
-   - 本機/CI/驗收盡量使用一致資產來源，降低「某環境才壞」的風險。
+- 正式執行模型：本文件 + README + SPEC。
+- 匯入/轉換工具：`docs/migration_v3.md`。
+- 歷史背景：`docs/refactor/*`。

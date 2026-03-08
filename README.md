@@ -105,17 +105,22 @@ amon eval --suite basic
 # 系統診斷
 amon doctor
 
-# Graph 執行與模板（僅支援 taskgraph.v3）
+# Graph 執行與模板（TaskGraph v3 單一路徑）
 
-> 過渡說明（重要）：TaskGraph v3 cutover **尚未完成**。repo 內仍可見 `PlanGraph`、`compile_plan_to_exec_graph`、`taskgraph3.engine_runtime.GraphRuntime`、`plan_execute` 命名與 CLI step5/step6 相容殘留。
-> 目標終態為：`docs/plan.json` 固定 `taskgraph.v3`，且 `TaskGraph3Runtime` 為唯一 production runtime；legacy/v2 僅保留 migrate/import 工具用途，不再走主執行路徑。詳見 `docs/migration_v3.md`。
-amon graph run --project <project_id> --graph ./graph.v3.json
+> 目前正式執行模型為 **TaskGraph v3**。`docs/plan.json` 即正式 v3 graph fixture（`version = taskgraph.v3`）。
+> 其中 `graph.v2` / `graph.legacy` 只保留給 migrate/import 工具，不可作為主執行路徑。詳見 `docs/migration_v3.md`。
+
+# 直接執行 v3 graph
+amon graph run --project <project_id> --graph ./docs/plan.json
+
+# 由既有 run 產生 template，並做參數化
 amon graph template create --project <project_id> --run <run_id>
 amon graph template parametrize --template <template_id> --path "$.nodes[0].prompt" --var_name topic
 
-# （歷史相容）舊格式轉換為 v3
+# （匯入/轉換工具）舊格式轉 v3 後再執行
 amon graph migrate --source legacy --input ./graph.legacy.json --output ./graph.v3.json
 amon graph migrate --source v2 --input ./graph.v2.json --output ./graph.v3.json
+amon graph run --project <project_id> --graph ./graph.v3.json
 
 # Hooks / Schedules / Jobs
 amon hooks list
