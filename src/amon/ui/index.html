@@ -686,9 +686,9 @@
           <section class="main-card card tools-skills-page" id="tools-skills-page" hidden>
             <header class="tools-skills-page__header">
               <div>
-                <p class="tools-skills-page__eyebrow">Agent Catalog</p>
-                <h2>工具與技能</h2>
-                <p class="subtitle">沿用對話頁的字體、間距與卡片語言，把工具階層、skills 來源、策略說明與注入預覽收斂到同一個目錄視圖。</p>
+                <p class="tools-skills-page__eyebrow">Agent Configuration</p>
+                <h2>Tools &amp; <em>Skills</em></h2>
+                <p class="subtitle">管理工具與技能清單；高風險權限變更仍維持先產生 Plan Card，再由你決定是否確認。</p>
               </div>
               <div class="tools-skills-page__header-actions">
                 <p class="tools-skills-page__timestamp" id="tools-skills-last-sync">尚未同步</p>
@@ -698,11 +698,12 @@
 
             <section class="tools-skills-surface card" aria-label="工具與技能概覽">
               <div class="tools-skills-toolbar">
-                <label class="field-label tools-skills-toolbar__search">
-                  Catalog Search
-                  <input type="search" id="tools-skills-search" placeholder="搜尋工具名稱、schema 欄位、skill 描述或來源路徑" />
+                <label class="tools-skills-toolbar__search" for="tools-skills-search">
+                  <span class="tools-skills-toolbar__search-icon" aria-hidden="true">search</span>
+                  <input type="search" id="tools-skills-search" placeholder="搜尋工具名稱、技能說明或來源路徑…" />
                 </label>
-                <div class="tools-skills-main-tabs" id="tools-skills-tablist" role="tablist" aria-label="Tools 與 Skills 分頁">
+              </div>
+              <div class="tools-skills-main-tabs" id="tools-skills-tablist" role="tablist" aria-label="Tools 與 Skills 分頁">
                   <button
                     type="button"
                     class="tools-skills-main-tab is-active"
@@ -713,7 +714,9 @@
                     tabindex="0"
                     data-target-panel="tools-panel"
                   >
-                    <span class="tools-skills-main-tab__icon" aria-hidden="true">build</span>
+                    <span class="tools-skills-main-tab__icon-wrap" aria-hidden="true">
+                      <span class="tools-skills-main-tab__icon">build</span>
+                    </span>
                     <span>工具</span>
                     <span class="tools-skills-main-tab__count" id="tools-skills-tools-count">0</span>
                   </button>
@@ -727,27 +730,28 @@
                     tabindex="-1"
                     data-target-panel="skills-panel"
                   >
-                    <span class="tools-skills-main-tab__icon" aria-hidden="true">school</span>
+                    <span class="tools-skills-main-tab__icon-wrap" aria-hidden="true">
+                      <span class="tools-skills-main-tab__icon">school</span>
+                    </span>
                     <span>技能</span>
                     <span class="tools-skills-main-tab__count" id="tools-skills-skills-count">0</span>
                   </button>
-                </div>
               </div>
               <div class="tools-skills-kpis" aria-label="目錄摘要">
                 <article class="tools-skills-kpi">
-                  <span class="tools-skills-kpi__label">可用工具</span>
+                  <span class="tools-skills-kpi__label">工具總數</span>
                   <strong id="tools-skills-summary-tools">0</strong>
-                  <small>目前可見工具數</small>
+                  <small>目前 catalog 內可見項目</small>
                 </article>
                 <article class="tools-skills-kpi">
                   <span class="tools-skills-kpi__label">受保護項</span>
                   <strong id="tools-skills-summary-guarded">0</strong>
-                  <small>需要拒絕或確認</small>
+                  <small>預設拒絕或需確認</small>
                 </article>
                 <article class="tools-skills-kpi">
                   <span class="tools-skills-kpi__label">已安裝技能</span>
                   <strong id="tools-skills-summary-skills">0</strong>
-                  <small>global + project</small>
+                  <small>global 與 project 合計</small>
                 </article>
                 <article class="tools-skills-kpi">
                   <span class="tools-skills-kpi__label">覆寫衝突</span>
@@ -763,7 +767,7 @@
                   <div class="tools-skills-panel__header">
                     <div>
                       <h3>工具目錄</h3>
-                      <p class="subtitle">依工具類型與來源分組；展開後可直接檢視 schema 與權限說明。</p>
+                      <p class="subtitle">依命名空間展開工具；可直接查看 schema、風險標記與權限策略。</p>
                     </div>
                     <p class="tools-skills-panel__meta" id="tools-list-meta">尚未載入 tools。</p>
                   </div>
@@ -775,7 +779,7 @@
                   <div class="tools-skills-panel__header">
                     <div>
                       <h3>技能庫</h3>
-                      <p class="subtitle">查看來源、說明與覆寫情況；展開卡片可閱讀可注入的 skill 定義摘要。</p>
+                      <p class="subtitle">查看來源、摘要與覆寫情況；展開卡片可閱讀 skill 定義與注入摘要。</p>
                     </div>
                     <p class="tools-skills-panel__meta" id="skills-list-meta">尚未載入 skills。</p>
                   </div>

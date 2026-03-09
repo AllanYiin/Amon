@@ -53,8 +53,8 @@ appStore.patch({ bootstrappedAt: Date.now() });
       };
       const TOOL_TYPE_META = {
         mcp: { label: "MCP", icon: "lan", tone: "info" },
-        "built-in": { label: "Built-in", icon: "build_circle", tone: "neutral" },
-        forged: { label: "Forged", icon: "extension", tone: "warn" },
+        "built-in": { label: "System", icon: "build_circle", tone: "neutral" },
+        forged: { label: "Custom", icon: "extension", tone: "warn" },
         unknown: { label: "Unknown", icon: "help", tone: "neutral" },
       };
       const TAB_SEQUENCE = ["tools", "skills"];
@@ -74,13 +74,12 @@ appStore.patch({ bootstrappedAt: Date.now() });
 
       function extractToolGroupName(tool) {
         const rawName = String(tool?.name || "");
-        const normalizedType = normalizeToolType(tool?.type);
         if (!rawName) return "default";
         if (rawName.includes(":")) {
           return rawName.split(":")[0] || "default";
         }
-        if (normalizedType === "built-in") {
-          return "built-in";
+        if (rawName.includes(".")) {
+          return rawName.split(".")[0] || "default";
         }
         return "default";
       }
@@ -1161,6 +1160,12 @@ appStore.patch({ bootstrappedAt: Date.now() });
         return "school";
       }
 
+      function formatToolGroupSubtitle(typeKey, toolCount) {
+        const meta = TOOL_TYPE_META[typeKey] || TOOL_TYPE_META.unknown;
+        const suffix = toolCount === 1 ? "method" : "methods";
+        return `${meta.label} namespace · ${toolCount} ${suffix}`;
+      }
+
       function renderSchema(schema) {
         return `<pre class="tools-codeblock">${escapeHtml(JSON.stringify(schema || {}, null, 2))}</pre>`;
       }
@@ -1251,11 +1256,16 @@ appStore.patch({ bootstrappedAt: Date.now() });
 
         filteredTools.forEach((tool) => {
           const typeKey = normalizeToolType(tool.type);
-          const groupKey = extractToolGroupName(tool);
-          if (!groupMap.has(typeKey)) groupMap.set(typeKey, new Map());
-          const bucket = groupMap.get(typeKey);
-          if (!bucket.has(groupKey)) bucket.set(groupKey, []);
-          bucket.get(groupKey).push(tool);
+          const groupLabel = extractToolGroupName(tool);
+          const compositeKey = `${typeKey}::${groupLabel}`;
+          if (!groupMap.has(compositeKey)) {
+            groupMap.set(compositeKey, {
+              typeKey,
+              groupLabel,
+              tools: [],
+            });
+          }
+          groupMap.get(compositeKey).tools.push(tool);
         });
 
         elements.toolsListMeta.textContent = filteredTools.length
@@ -1267,134 +1277,121 @@ appStore.patch({ bootstrappedAt: Date.now() });
           return;
         }
 
-        elements.toolsList.innerHTML = Array.from(groupMap.entries())
-          .sort(([a], [b]) => a.localeCompare(b))
-          .map(([typeKey, groups]) => {
+        elements.toolsList.innerHTML = Array.from(groupMap.values())
+          .sort((a, b) => `${a.groupLabel}.${a.typeKey}`.localeCompare(`${b.groupLabel}.${b.typeKey}`))
+          .map(({ typeKey, groupLabel, tools: groupedTools }) => {
             const meta = TOOL_TYPE_META[typeKey] || TOOL_TYPE_META.unknown;
-            const groupedTools = Array.from(groups.values()).flat();
+            const sampleMethods = groupedTools
+              .slice(0, 4)
+              .map((tool) => `<span class="tool-group__method-pill">${escapeHtml(extractToolMethodName(tool.name))}</span>`)
+              .join("");
             return `
-              <section class="tool-cluster">
-                <header class="tool-cluster__header">
-                  <div class="tool-cluster__title">
-                    <span class="tool-cluster__icon" aria-hidden="true">${meta.icon}</span>
-                    <div>
-                      <h4>${escapeHtml(meta.label)}</h4>
-                      <p>${groups.size} 個群組，${groupedTools.length} 個方法</p>
-                    </div>
-                  </div>
-                  <span class="pill pill--${meta.tone}">${escapeHtml(meta.label)}</span>
-                </header>
-                <div class="tool-group-stack">
-                  ${Array.from(groups.entries())
-                    .sort(([a], [b]) => a.localeCompare(b))
-                    .map(([groupLabel, groupedTools]) => {
-                      const sampleMethods = groupedTools
-                        .slice(0, 4)
-                        .map((tool) => `<span class="tool-group__method-pill">${escapeHtml(extractToolMethodName(tool.name))}</span>`)
-                        .join("");
+              <details class="tool-group" open data-tool-group-type="${escapeHtml(typeKey)}">
+                <summary class="tool-group__summary">
+                  <span class="tool-group__summary-main">
+                    <span class="tool-group__icon" aria-hidden="true">${meta.icon}</span>
+                    <span class="tool-group__identity">
+                      <strong>${escapeHtml(groupLabel)}</strong>
+                      <span>${escapeHtml(formatToolGroupSubtitle(typeKey, groupedTools.length))}</span>
+                      <span class="tool-group__method-list">${sampleMethods}</span>
+                    </span>
+                  </span>
+                  <span class="tool-group__summary-meta">
+                    <span class="tool-group__scope tool-group__scope--${escapeHtml(meta.tone)}">${escapeHtml(meta.label)}</span>
+                    <span class="tool-group__count">${groupedTools.length}</span>
+                  </span>
+                </summary>
+                <div class="tool-group__body">
+                  ${groupedTools
+                    .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")))
+                    .map((tool) => {
+                      const risk = String(tool.risk || "unknown").toLowerCase();
+                      const allowPaths = (tool.allowed_paths || []).join(", ") || "workspace";
+                      const rawName = String(tool.name || "");
+                      const separator = rawName.includes(":") ? ":" : ".";
+                      const rawParts = rawName.split(separator);
+                      const methodPrefix = rawParts.length > 1 ? `${rawParts.slice(0, -1).join(separator)}${separator}` : "";
                       return `
-                        <details class="tool-group" open>
-                          <summary class="tool-group__summary">
-                            <span class="tool-group__icon" aria-hidden="true">${meta.icon}</span>
-                            <span class="tool-group__identity">
-                              <strong>${escapeHtml(groupLabel)}</strong>
-                              <span>${escapeHtml(meta.label)} 命名空間</span>
+                        <details class="tool-method">
+                          <summary class="tool-method__summary">
+                            <span class="tool-method__summary-main">
+                              <span class="tool-method__name">
+                                ${methodPrefix ? `<span class="tool-method__prefix">${escapeHtml(methodPrefix)}</span>` : ""}
+                                <strong>${escapeHtml(extractToolMethodName(rawName))}</strong>
+                              </span>
                             </span>
-                            <span class="tool-group__method-list">${sampleMethods}</span>
-                            <span class="tool-group__count">${groupedTools.length}</span>
+                            <span class="tool-method__summary-meta">
+                              <span class="risk-chip risk-chip--${escapeHtml(risk)}">risk: ${escapeHtml(risk)}</span>
+                            </span>
                           </summary>
-                          <div class="tool-group__body">
-                            ${groupedTools
-                              .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")))
-                              .map((tool) => {
-                                const risk = String(tool.risk || "unknown").toLowerCase();
-                                const allowPaths = (tool.allowed_paths || []).join(", ") || "workspace";
-                                const rawName = String(tool.name || "");
-                                const separator = rawName.includes(":") ? ":" : ".";
-                                const rawParts = rawName.split(separator);
-                                const methodPrefix = rawParts.length > 1 ? `${rawParts.slice(0, -1).join(separator)}${separator}` : "";
-                                return `
-                                  <details class="tool-method">
-                                    <summary class="tool-method__summary">
-                                      <span class="tool-method__name">
-                                        ${methodPrefix ? `<span class="tool-method__prefix">${escapeHtml(methodPrefix)}</span>` : ""}
-                                        <strong>${escapeHtml(extractToolMethodName(rawName))}</strong>
-                                      </span>
-                                      <span class="risk-chip risk-chip--${escapeHtml(risk)}">風險 ${escapeHtml(risk)}</span>
-                                    </summary>
-                                    <div class="tool-method__body">
-                                      <div class="tool-method__info-grid">
-                                        <article class="tool-method__info-card">
-                                          <span class="tool-method__info-label">類型</span>
-                                          <strong>${escapeHtml(meta.label)}</strong>
-                                        </article>
-                                        <article class="tool-method__info-card">
-                                          <span class="tool-method__info-label">版本</span>
-                                          <strong>${escapeHtml(String(tool.version || "unknown"))}</strong>
-                                        </article>
-                                        <article class="tool-method__info-card">
-                                          <span class="tool-method__info-label">允許路徑</span>
-                                          <strong>${escapeHtml(allowPaths)}</strong>
-                                        </article>
-                                        <article class="tool-method__info-card">
-                                          <span class="tool-method__info-label">最近使用</span>
-                                          <strong>${escapeHtml(formatRecentUsage(tool.recent_usage))}</strong>
-                                        </article>
-                                        <article class="tool-method__info-card">
-                                          <span class="tool-method__info-label">啟用狀態</span>
-                                          <strong>${escapeHtml(formatToggleStateLabel(Boolean(tool.enabled)))}</strong>
-                                        </article>
-                                        <article class="tool-method__info-card">
-                                          <span class="tool-method__info-label">執行門檻</span>
-                                          <strong>${escapeHtml(formatRequireConfirmLabel(Boolean(tool.require_confirm)))}</strong>
-                                        </article>
-                                      </div>
-                                      <p class="tool-method__policy"><strong>預設策略：</strong>${escapeHtml(formatPolicyDecisionLabel(tool.policy_decision))}</p>
-                                      <p class="tool-method__policy">${escapeHtml(tool.policy_reason || "未命中 allow 規則，預設拒絕")}</p>
-                                      <div class="tool-method__schema-stack">
-                                        <details class="tool-method__schema-panel">
-                                          <summary>輸入 schema</summary>
-                                          ${renderSchema(tool.input_schema)}
-                                        </details>
-                                        <details class="tool-method__schema-panel">
-                                          <summary>輸出 schema</summary>
-                                          ${renderSchema(tool.output_schema)}
-                                        </details>
-                                      </div>
-                                      <div class="tool-card__actions">
-                                        ${policyEditable
-                                          ? `
-                                            <button
-                                              type="button"
-                                              class="btn btn--secondary secondary-btn small"
-                                              data-tool-action="toggle-enabled"
-                                              data-tool-name="${escapeHtml(tool.name)}"
-                                              data-tool-enabled="${tool.enabled ? "true" : "false"}"
-                                              data-tool-require-confirm="${tool.require_confirm ? "true" : "false"}"
-                                            >${tool.enabled ? "停用" : "啟用"}</button>
-                                            <button
-                                              type="button"
-                                              class="btn btn--ghost secondary-btn small"
-                                              data-tool-action="toggle-confirm"
-                                              data-tool-name="${escapeHtml(tool.name)}"
-                                              data-tool-enabled="${tool.enabled ? "true" : "false"}"
-                                              data-tool-require-confirm="${tool.require_confirm ? "true" : "false"}"
-                                            >執行前確認：${tool.require_confirm ? "開" : "關"}</button>
-                                          `
-                                          : `<span class="tool-method__readonly">目前策略為唯讀模式</span>`}
-                                      </div>
-                                    </div>
-                                  </details>
-                                `;
-                              })
-                              .join("")}
+                          <div class="tool-method__body">
+                            <div class="tool-method__info-grid">
+                              <article class="tool-method__info-card">
+                                <span class="tool-method__info-label">類型</span>
+                                <strong>${escapeHtml(meta.label)}</strong>
+                              </article>
+                              <article class="tool-method__info-card">
+                                <span class="tool-method__info-label">版本</span>
+                                <strong>${escapeHtml(String(tool.version || "unknown"))}</strong>
+                              </article>
+                              <article class="tool-method__info-card">
+                                <span class="tool-method__info-label">允許路徑</span>
+                                <strong>${escapeHtml(allowPaths)}</strong>
+                              </article>
+                              <article class="tool-method__info-card">
+                                <span class="tool-method__info-label">最近使用</span>
+                                <strong>${escapeHtml(formatRecentUsage(tool.recent_usage))}</strong>
+                              </article>
+                              <article class="tool-method__info-card">
+                                <span class="tool-method__info-label">啟用狀態</span>
+                                <strong>${escapeHtml(formatToggleStateLabel(Boolean(tool.enabled)))}</strong>
+                              </article>
+                              <article class="tool-method__info-card">
+                                <span class="tool-method__info-label">執行門檻</span>
+                                <strong>${escapeHtml(formatRequireConfirmLabel(Boolean(tool.require_confirm)))}</strong>
+                              </article>
+                            </div>
+                            <p class="tool-method__policy-note"><strong>策略說明：</strong>${escapeHtml(tool.policy_reason || "未命中 allow 規則，預設拒絕")}</p>
+                            <p class="tool-method__policy"><strong>預設策略：</strong>${escapeHtml(formatPolicyDecisionLabel(tool.policy_decision))}</p>
+                            <div class="tool-method__schema-stack">
+                              <details class="tool-method__schema-panel">
+                                <summary>輸入 schema</summary>
+                                ${renderSchema(tool.input_schema)}
+                              </details>
+                              <details class="tool-method__schema-panel">
+                                <summary>輸出 schema</summary>
+                                ${renderSchema(tool.output_schema)}
+                              </details>
+                            </div>
+                            <div class="tool-card__actions">
+                              ${policyEditable
+                                ? `
+                                  <button
+                                    type="button"
+                                    class="btn btn--secondary secondary-btn small"
+                                    data-tool-action="toggle-enabled"
+                                    data-tool-name="${escapeHtml(tool.name)}"
+                                    data-tool-enabled="${tool.enabled ? "true" : "false"}"
+                                    data-tool-require-confirm="${tool.require_confirm ? "true" : "false"}"
+                                  >${tool.enabled ? "停用" : "啟用"}</button>
+                                  <button
+                                    type="button"
+                                    class="btn btn--ghost secondary-btn small"
+                                    data-tool-action="toggle-confirm"
+                                    data-tool-name="${escapeHtml(tool.name)}"
+                                    data-tool-enabled="${tool.enabled ? "true" : "false"}"
+                                    data-tool-require-confirm="${tool.require_confirm ? "true" : "false"}"
+                                  >執行前確認：${tool.require_confirm ? "開" : "關"}</button>
+                                `
+                                : `<span class="tool-method__readonly">目前策略為唯讀模式</span>`}
+                            </div>
                           </div>
                         </details>
                       `;
                     })
                     .join("")}
                 </div>
-              </section>
+              </details>
             `;
           })
           .join("");
@@ -1451,14 +1448,16 @@ appStore.patch({ bootstrappedAt: Date.now() });
             return `
               <details class="skill-card skill-card--${escapeHtml(toolsSkillsUi.skillsView)}" data-skill-source="${escapeHtml(source)}">
                 <summary class="skill-card__summary">
-                  <span class="skill-card__icon" aria-hidden="true">${getSkillSourceIcon(source)}</span>
-                  <span class="skill-card__body">
-                    <span class="skill-card__title-row">
-                      <strong>${escapeHtml(skill.name || "(未命名)")}</strong>
-                      <span class="skill-card__source">${escapeHtml(sourceLabel)}</span>
+                  <span class="skill-card__summary-main">
+                    <span class="skill-card__icon" aria-hidden="true">${getSkillSourceIcon(source)}</span>
+                    <span class="skill-card__body">
+                      <span class="skill-card__title-row">
+                        <strong>${escapeHtml(skill.name || "(未命名)")}</strong>
+                        <span class="skill-card__source">${escapeHtml(source)}</span>
+                      </span>
+                      <span class="skill-card__desc">${escapeHtml(description)}</span>
+                      <span class="skill-card__path">${escapeHtml(skill.path || "")}</span>
                     </span>
-                    <span class="skill-card__desc">${escapeHtml(description)}</span>
-                    <span class="skill-card__path">${escapeHtml(skill.path || "")}</span>
                   </span>
                 </summary>
                 <div class="skill-card__detail">
@@ -1481,10 +1480,10 @@ appStore.patch({ bootstrappedAt: Date.now() });
                     </article>
                   </div>
                   <p class="skill-card__detail-copy">${escapeHtml(description)}</p>
-                  <details class="tool-method__schema-panel">
-                    <summary>skill 定義摘要</summary>
+                  <div class="skill-card__definition">
+                    <span class="tool-method__info-label">Skill Definition</span>
                     ${renderSchema(definition)}
-                  </details>
+                  </div>
                 </div>
               </details>
             `;
