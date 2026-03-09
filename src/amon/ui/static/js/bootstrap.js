@@ -48,6 +48,9 @@ appStore.patch({ bootstrappedAt: Date.now() });
         skillsSource: "all",
         skillsView: "grid",
       };
+      const projectTreeUi = {
+        expandedProjectIds: new Set(),
+      };
       const TOOL_TYPE_META = {
         mcp: { label: "MCP", icon: "lan", tone: "info" },
         "built-in": { label: "Built-in", icon: "build_circle", tone: "neutral" },
@@ -125,6 +128,45 @@ appStore.patch({ bootstrappedAt: Date.now() });
           .filter((value) => Number.isFinite(value));
         if (!values.length) return "";
         return Math.max(...values);
+      }
+
+      function rememberExpandedProject(projectId) {
+        const normalized = String(projectId || "").trim();
+        if (!normalized) return;
+        projectTreeUi.expandedProjectIds.add(normalized);
+      }
+
+      function getKnownProjects() {
+        const layoutProjects = appStore.getState().layout?.projects || [];
+        const normalizedProjects = layoutProjects.map(normalizeProjectRecord).filter(Boolean);
+        const activeProjectId = String(state.projectId || "").trim();
+        if (activeProjectId && !normalizedProjects.some((project) => project.project_id === activeProjectId)) {
+          normalizedProjects.unshift({
+            project_id: activeProjectId,
+            name: "新專案",
+          });
+        }
+        return normalizedProjects;
+      }
+
+      function getProjectLabel(projectId = state.projectId) {
+        const normalizedProjectId = String(projectId || "").trim();
+        if (!normalizedProjectId) return "無專案";
+        return getKnownProjects().find((project) => project.project_id === normalizedProjectId)?.name || normalizedProjectId;
+      }
+
+      function toProjectDomId(projectId = "") {
+        return String(projectId || "")
+          .trim()
+          .replace(/[^A-Za-z0-9_-]+/g, "-") || "project";
+      }
+
+      async function activateProject(projectId) {
+        CHAT_VIEW.__chatStopStream?.();
+        setProjectState(projectId);
+        await refreshUiPreferences(state.projectId);
+        await hydrateSelectedProject();
+        await loadShellViewDependencies(state.shellView);
       }
 
       function buildToolFilterOptions(tools = []) {
@@ -1786,6 +1828,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
           },
         });
         elements.refreshContext.disabled = !state.projectId;
+        rememberExpandedProject(state.projectId);
         if (state.projectId && !elements.projectSelect.querySelector(`option[value="${CSS.escape(state.projectId)}"]`)) {
           const dynamicOption = document.createElement("option");
           dynamicOption.value = state.projectId;
@@ -1812,7 +1855,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
       }
 
       function syncContextHeader() {
-        const selected = elements.projectSelect.selectedOptions[0]?.textContent || "未指定專案";
+        const selected = getProjectLabel();
         elements.contextProject.textContent = `目前專案：${selected}`;
         elements.chatProjectLabel.textContent = `目前專案：${selected}`;
         if (elements.sidebarProjectName) {
@@ -1995,6 +2038,27 @@ appStore.patch({ bootstrappedAt: Date.now() });
         return parsed.toLocaleString("zh-TW", { hour12: false });
       }
 
+      function renderProjectSelectOptions(projects = []) {
+        if (!elements.projectSelect) return;
+        const currentValue = String(state.projectId || "").trim();
+        elements.projectSelect.innerHTML = "";
+
+        const emptyOption = document.createElement("option");
+        emptyOption.value = "";
+        emptyOption.textContent = "無專案";
+        elements.projectSelect.appendChild(emptyOption);
+
+        projects.forEach((project) => {
+          const option = document.createElement("option");
+          option.value = String(project.project_id || "").trim();
+          option.textContent = String(project.name || project.project_id || "未命名專案");
+          option.title = `ID: ${option.value}`;
+          elements.projectSelect.appendChild(option);
+        });
+
+        elements.projectSelect.value = currentValue || "";
+      }
+
       function sortThreadsForDisplay(threads = []) {
         return [...threads].sort((a, b) => {
           const updatedDiff = toSortableTimestamp(b.updated_at) - toSortableTimestamp(a.updated_at);
@@ -2008,32 +2072,102 @@ appStore.patch({ bootstrappedAt: Date.now() });
       function renderThreadList() {
         if (!elements.threadList) return;
         elements.createThreadBtn.disabled = !state.projectId;
-        if (!state.projectId) {
-          elements.threadList.innerHTML = '<p class="thread-tree__empty">請先選擇 Project。</p>';
+        const activeProjectId = String(state.projectId || "").trim();
+        const projects = getKnownProjects();
+        if (!projects.length) {
+          elements.threadList.innerHTML = '<p class="thread-tree__empty">目前尚無專案。</p>';
           return;
         }
-        const threads = sortThreadsForDisplay(state.threadList || []);
-        if (!threads.length) {
-          elements.threadList.innerHTML = '<p class="thread-tree__empty">目前尚無 Threads。</p>';
-          return;
-        }
-        const activeThreadId = String(state.activeThreadId || "").trim();
         const fragment = document.createDocumentFragment();
-        threads.forEach((thread) => {
-          const threadId = String(thread.thread_id || "").trim();
-          if (!threadId) return;
-          const row = document.createElement("button");
-          row.type = "button";
-          row.className = "thread-row";
-          row.dataset.threadId = threadId;
-          const isActive = threadId === activeThreadId;
-          row.classList.toggle("is-active", isActive);
-          row.innerHTML = `
-            <strong class="thread-row__title">${escapeHtml(String(thread.title || threadId))}</strong>
-            <span class="thread-row__meta">${isActive ? "Active" : ""} ${formatThreadUpdatedAt(thread.updated_at)}</span>
+        projects.forEach((project) => {
+          const projectId = String(project.project_id || "").trim();
+          if (!projectId) return;
+          const isActiveProject = projectId === activeProjectId;
+          const isExpanded = isActiveProject || projectTreeUi.expandedProjectIds.has(projectId);
+          const branch = document.createElement("section");
+          const branchDomId = `project-threads-${toProjectDomId(projectId)}`;
+          const cachedThreads = sortThreadsForDisplay(
+            isActiveProject ? state.threadList || [] : state.threadsByProject[projectId] || []
+          );
+          const hasCachedThreads = cachedThreads.length > 0;
+          const branchMeta = isActiveProject
+            ? `目前專案${hasCachedThreads ? ` · ${cachedThreads.length} 個對話串` : ""}`
+            : hasCachedThreads
+              ? `${cachedThreads.length} 個對話串`
+              : "切換後顯示對話串";
+
+          branch.className = "project-branch";
+          branch.classList.toggle("is-active", isActiveProject);
+          branch.classList.toggle("is-expanded", isExpanded);
+
+          const toggle = document.createElement("button");
+          toggle.type = "button";
+          toggle.className = "project-branch__toggle";
+          toggle.dataset.projectId = projectId;
+          toggle.setAttribute("aria-expanded", String(isExpanded));
+          toggle.setAttribute("aria-controls", branchDomId);
+          toggle.innerHTML = `
+            <span class="project-branch__toggle-main">
+              <span class="project-branch__chevron" aria-hidden="true">▶</span>
+              <span class="project-branch__folder" aria-hidden="true">folder</span>
+              <span class="project-branch__title-group">
+                <strong class="project-branch__title">${escapeHtml(String(project.name || projectId))}</strong>
+                <span class="project-branch__meta">${escapeHtml(branchMeta)}</span>
+              </span>
+            </span>
+            ${isActiveProject ? '<span class="project-branch__badge">目前</span>' : ""}
           `;
-          row.addEventListener("click", () => void selectActiveThread(threadId));
-          fragment.appendChild(row);
+          toggle.addEventListener("click", async () => {
+            if (!isActiveProject) {
+              rememberExpandedProject(projectId);
+              renderThreadList();
+              await activateProject(projectId);
+              return;
+            }
+            if (projectTreeUi.expandedProjectIds.has(projectId)) {
+              projectTreeUi.expandedProjectIds.delete(projectId);
+            } else {
+              rememberExpandedProject(projectId);
+            }
+            renderThreadList();
+          });
+          branch.appendChild(toggle);
+
+          const threadGroup = document.createElement("div");
+          threadGroup.className = "project-branch__threads";
+          threadGroup.id = branchDomId;
+          threadGroup.hidden = !isExpanded;
+          threadGroup.setAttribute("role", "group");
+
+          if (isExpanded) {
+            if (!cachedThreads.length) {
+              const empty = document.createElement("p");
+              empty.className = "thread-tree__empty";
+              empty.textContent = isActiveProject ? "目前尚無對話串。" : "切換此專案後顯示對話串。";
+              threadGroup.appendChild(empty);
+            } else {
+              const activeThreadId = String(state.activeThreadId || "").trim();
+              cachedThreads.forEach((thread) => {
+                const threadId = String(thread.thread_id || "").trim();
+                if (!threadId) return;
+                const row = document.createElement("button");
+                row.type = "button";
+                row.className = "thread-row";
+                row.dataset.threadId = threadId;
+                const isActiveThread = isActiveProject && threadId === activeThreadId;
+                row.classList.toggle("is-active", isActiveThread);
+                row.innerHTML = `
+                  <strong class="thread-row__title">${escapeHtml(String(thread.title || threadId))}</strong>
+                  <span class="thread-row__meta">${isActiveThread ? "目前對話 · " : ""}${escapeHtml(formatThreadUpdatedAt(thread.updated_at))}</span>
+                `;
+                row.addEventListener("click", () => void selectActiveThread(threadId));
+                threadGroup.appendChild(row);
+              });
+            }
+          }
+
+          branch.appendChild(threadGroup);
+          fragment.appendChild(branch);
         });
         elements.threadList.innerHTML = "";
         elements.threadList.appendChild(fragment);
@@ -2066,7 +2200,9 @@ appStore.patch({ bootstrappedAt: Date.now() });
             projectId: state.projectId,
           },
         });
+        renderProjectSelectOptions(projects);
         syncContextHeader();
+        renderThreadList();
         if (!projects.length) {
           showToast("尚無專案，請在聊天輸入：建立專案 <名稱>");
         }
@@ -3023,11 +3159,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
 
       elements.projectSelect.addEventListener("change", async (event) => {
         const selectedProject = event.target.value;
-        CHAT_VIEW.__chatStopStream?.();
-        setProjectState(selectedProject);
-        await refreshUiPreferences(state.projectId);
-        await hydrateSelectedProject();
-        await loadShellViewDependencies(state.shellView);
+        await activateProject(selectedProject);
       });
 
       elements.createThreadBtn?.addEventListener("click", async () => {

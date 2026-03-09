@@ -5,6 +5,13 @@ export function createMessageRenderer({ timelineEl, renderMarkdown }) {
     pendingAssistantMessage: null,
   };
 
+  function stickToBottom() {
+    if (!timelineEl) return;
+    window.requestAnimationFrame(() => {
+      timelineEl.scrollTop = timelineEl.scrollHeight;
+    });
+  }
+
   function createArtifactPreview({ filename, previewText, onOpen }) {
     if (!filename && !previewText) return null;
     const card = document.createElement("section");
@@ -109,7 +116,7 @@ export function createMessageRenderer({ timelineEl, renderMarkdown }) {
     message.appendChild(footer);
 
     timelineEl.appendChild(message);
-    timelineEl.scrollTop = timelineEl.scrollHeight;
+    stickToBottom();
     return { message, bubble, bubbleBody, headerStatusEl, footerStatusEl };
   }
 
@@ -118,7 +125,7 @@ export function createMessageRenderer({ timelineEl, renderMarkdown }) {
     item.className = "timeline-status";
     item.textContent = message;
     timelineEl.appendChild(item);
-    timelineEl.scrollTop = timelineEl.scrollHeight;
+    stickToBottom();
   }
 
   function applyTokenChunk(text = "") {
@@ -129,7 +136,7 @@ export function createMessageRenderer({ timelineEl, renderMarkdown }) {
     state.pendingAssistantMessage.bubble.dataset.buffer = `${state.pendingAssistantMessage.bubble.dataset.buffer || ""}${text}`;
     state.pendingAssistantMessage.bubble.classList.remove("is-typing");
     state.pendingAssistantMessage.bubbleBody.innerHTML = renderMarkdown(state.pendingAssistantMessage.bubble.dataset.buffer);
-    timelineEl.scrollTop = timelineEl.scrollHeight;
+    stickToBottom();
   }
 
   function getPendingBuffer() {

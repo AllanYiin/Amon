@@ -49,25 +49,23 @@
             <p class="shell-sidebar__eyebrow">Workspace</p>
             <h2>Amon UI</h2>
           </div>
-          <section class="shell-project-panel" aria-label="專案切換">
-            <label class="field-label shell-project-panel__field">
-              <span data-i18n="topbar.project">專案</span>
-              <select id="project-select"></select>
-            </label>
-          </section>
           <section class="thread-tree" id="thread-tree" aria-label="Project Threads">
             <header class="thread-tree__header">
-              <p class="thread-tree__caption">Threads</p>
-              <strong id="sidebar-project-name">未選擇專案</strong>
+              <div class="thread-tree__heading">
+                <p class="thread-tree__caption">Projects</p>
+                <strong id="sidebar-project-name">無專案</strong>
+              </div>
               <button type="button" class="btn btn--secondary secondary-btn small" id="create-thread-btn">新 Thread</button>
             </header>
-            <div class="thread-tree__body" id="thread-list" role="list" aria-label="Threads"></div>
+            <select id="project-select" hidden aria-hidden="true" tabindex="-1"></select>
+            <div class="thread-tree__body" id="thread-list" role="tree" aria-label="專案與對話串"></div>
           </section>
         </aside>
 
         <section class="shell-main">
           <header class="shell-topbar" aria-label="工作列" data-i18n-attr="aria-label:a11y.topbar">
             <div class="shell-topbar__group">
+              <span class="shell-brand">Amon UI</span>
               <span class="shell-status shell-status--run pill pill--neutral" id="shell-run-status" title="尚未有 Run" data-i18n="status.run.idle" data-i18n-attr="title:tooltip.runIdle">尚未有 Run</span>
               <span class="shell-status shell-status--daemon pill pill--neutral" id="shell-daemon-status" title="尚未連線 daemon" data-i18n="status.daemon.idle" data-i18n-attr="title:tooltip.daemonIdle">尚未連線</span>
               <span class="shell-status shell-status--budget pill pill--neutral" id="shell-budget-status">Budget：NT$ 0 / NT$ 5,000</span>
