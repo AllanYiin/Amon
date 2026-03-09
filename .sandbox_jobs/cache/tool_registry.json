@@ -1,0 +1,284 @@
+{
+  "tools": [
+    {
+      "name": "builtin:artifacts.preview_diff",
+      "version": "builtin",
+      "path": "builtin://artifacts.preview_diff",
+      "scope": "builtin",
+      "kind": "builtin",
+      "project_id": null,
+      "status": "active",
+      "registered_at": "2026-03-09T20:14:20"
+    },
+    {
+      "name": "builtin:artifacts.write_file",
+      "version": "builtin",
+      "path": "builtin://artifacts.write_file",
+      "scope": "builtin",
+      "kind": "builtin",
+      "project_id": null,
+      "status": "active",
+      "registered_at": "2026-03-09T20:14:20"
+    },
+    {
+      "name": "builtin:artifacts.write_text",
+      "version": "builtin",
+      "path": "builtin://artifacts.write_text",
+      "scope": "builtin",
+      "kind": "builtin",
+      "project_id": null,
+      "status": "active",
+      "registered_at": "2026-03-09T20:14:20"
+    },
+    {
+      "name": "builtin:audit.export",
+      "version": "builtin",
+      "path": "builtin://audit.export",
+      "scope": "builtin",
+      "kind": "builtin",
+      "project_id": null,
+      "status": "active",
+      "registered_at": "2026-03-09T20:14:20"
+    },
+    {
+      "name": "builtin:audit.log_query",
+      "version": "builtin",
+      "path": "builtin://audit.log_query",
+      "scope": "builtin",
+      "kind": "builtin",
+      "project_id": null,
+      "status": "active",
+      "registered_at": "2026-03-09T20:14:20"
+    },
+    {
+      "name": "builtin:filesystem.delete",
+      "version": "builtin",
+      "path": "builtin://filesystem.delete",
+      "scope": "builtin",
+      "kind": "builtin",
+      "project_id": null,
+      "status": "active",
+      "registered_at": "2026-03-09T20:14:20"
+    },
+    {
+      "name": "builtin:filesystem.glob",
+      "version": "builtin",
+      "path": "builtin://filesystem.glob",
+      "scope": "builtin",
+      "kind": "builtin",
+      "project_id": null,
+      "status": "active",
+      "registered_at": "2026-03-09T20:14:20"
+    },
+    {
+      "name": "builtin:filesystem.grep",
+      "version": "builtin",
+      "path": "builtin://filesystem.grep",
+      "scope": "builtin",
+      "kind": "builtin",
+      "project_id": null,
+      "status": "active",
+      "registered_at": "2026-03-09T20:14:20"
+    },
+    {
+      "name": "builtin:filesystem.list",
+      "version": "builtin",
+      "path": "builtin://filesystem.list",
+      "scope": "builtin",
+      "kind": "builtin",
+      "project_id": null,
+      "status": "active",
+      "registered_at": "2026-03-09T20:14:20"
+    },
+    {
+      "name": "builtin:filesystem.patch",
+      "version": "builtin",
+      "path": "builtin://filesystem.patch",
+      "scope": "builtin",
+      "kind": "builtin",
+      "project_id": null,
+      "status": "active",
+      "registered_at": "2026-03-09T20:14:20"
+    },
+    {
+      "name": "builtin:filesystem.read",
+      "version": "builtin",
+      "path": "builtin://filesystem.read",
+      "scope": "builtin",
+      "kind": "builtin",
+      "project_id": null,
+      "status": "active",
+      "registered_at": "2026-03-09T20:14:20"
+    },
+    {
+      "name": "builtin:filesystem.write",
+      "version": "builtin",
+      "path": "builtin://filesystem.write",
+      "scope": "builtin",
+      "kind": "builtin",
+      "project_id": null,
+      "status": "active",
+      "registered_at": "2026-03-09T20:14:20"
+    },
+    {
+      "name": "builtin:memory.delete",
+      "version": "builtin",
+      "path": "builtin://memory.delete",
+      "scope": "builtin",
+      "kind": "builtin",
+      "project_id": null,
+      "status": "active",
+      "registered_at": "2026-03-09T20:14:20"
+    },
+    {
+      "name": "builtin:memory.get",
+      "version": "builtin",
+      "path": "builtin://memory.get",
+      "scope": "builtin",
+      "kind": "builtin",
+      "project_id": null,
+      "status": "active",
+      "registered_at": "2026-03-09T20:14:20"
+    },
+    {
+      "name": "builtin:memory.put",
+      "version": "builtin",
+      "path": "builtin://memory.put",
+      "scope": "builtin",
+      "kind": "builtin",
+      "project_id": null,
+      "status": "active",
+      "registered_at": "2026-03-09T20:14:20"
+    },
+    {
+      "name": "builtin:memory.search",
+      "version": "builtin",
+      "path": "builtin://memory.search",
+      "scope": "builtin",
+      "kind": "builtin",
+      "project_id": null,
+      "status": "active",
+      "registered_at": "2026-03-09T20:14:20"
+    },
+    {
+      "name": "builtin:process.exec",
+      "version": "builtin",
+      "path": "builtin://process.exec",
+      "scope": "builtin",
+      "kind": "builtin",
+      "project_id": null,
+      "status": "active",
+      "registered_at": "2026-03-09T20:14:20"
+    },
+    {
+      "name": "builtin:process.kill",
+      "version": "builtin",
+      "path": "builtin://process.kill",
+      "scope": "builtin",
+      "kind": "builtin",
+      "project_id": null,
+      "status": "active",
+      "registered_at": "2026-03-09T20:14:20"
+    },
+    {
+      "name": "builtin:process.spawn",
+      "version": "builtin",
+      "path": "builtin://process.spawn",
+      "scope": "builtin",
+      "kind": "builtin",
+      "project_id": null,
+      "status": "active",
+      "registered_at": "2026-03-09T20:14:20"
+    },
+    {
+      "name": "builtin:process.status",
+      "version": "builtin",
+      "path": "builtin://process.status",
+      "scope": "builtin",
+      "kind": "builtin",
+      "project_id": null,
+      "status": "active",
+      "registered_at": "2026-03-09T20:14:20"
+    },
+    {
+      "name": "builtin:sandbox.run",
+      "version": "builtin",
+      "path": "builtin://sandbox.run",
+      "scope": "builtin",
+      "kind": "builtin",
+      "project_id": null,
+      "status": "active",
+      "registered_at": "2026-03-09T20:14:20"
+    },
+    {
+      "name": "builtin:terminal.exec",
+      "version": "builtin",
+      "path": "builtin://terminal.exec",
+      "scope": "builtin",
+      "kind": "builtin",
+      "project_id": null,
+      "status": "active",
+      "registered_at": "2026-03-09T20:14:20"
+    },
+    {
+      "name": "builtin:terminal.session.exec",
+      "version": "builtin",
+      "path": "builtin://terminal.session.exec",
+      "scope": "builtin",
+      "kind": "builtin",
+      "project_id": null,
+      "status": "active",
+      "registered_at": "2026-03-09T20:14:20"
+    },
+    {
+      "name": "builtin:terminal.session.start",
+      "version": "builtin",
+      "path": "builtin://terminal.session.start",
+      "scope": "builtin",
+      "kind": "builtin",
+      "project_id": null,
+      "status": "active",
+      "registered_at": "2026-03-09T20:14:20"
+    },
+    {
+      "name": "builtin:terminal.session.stop",
+      "version": "builtin",
+      "path": "builtin://terminal.session.stop",
+      "scope": "builtin",
+      "kind": "builtin",
+      "project_id": null,
+      "status": "active",
+      "registered_at": "2026-03-09T20:14:20"
+    },
+    {
+      "name": "builtin:web.better_search",
+      "version": "builtin",
+      "path": "builtin://web.better_search",
+      "scope": "builtin",
+      "kind": "builtin",
+      "project_id": null,
+      "status": "active",
+      "registered_at": "2026-03-09T20:14:20"
+    },
+    {
+      "name": "builtin:web.fetch",
+      "version": "builtin",
+      "path": "builtin://web.fetch",
+      "scope": "builtin",
+      "kind": "builtin",
+      "project_id": null,
+      "status": "active",
+      "registered_at": "2026-03-09T20:14:20"
+    },
+    {
+      "name": "builtin:web.search",
+      "version": "builtin",
+      "path": "builtin://web.search",
+      "scope": "builtin",
+      "kind": "builtin",
+      "project_id": null,
+      "status": "active",
+      "registered_at": "2026-03-09T20:14:20"
+    }
+  ]
+}

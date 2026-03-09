@@ -1,0 +1,8 @@
+amon:
+  data_dir: D:\PycharmProjects\Amon\.sandbox_jobs
+paths:
+  skills_dir: D:\PycharmProjects\Amon\.sandbox_jobs\skills
+  python_env: D:\PycharmProjects\Amon\.sandbox_jobs\python_env
+  node_env: D:\PycharmProjects\Amon\.sandbox_jobs\node_env
+skills:
+  global_dir: D:\PycharmProjects\Amon\.sandbox_jobs\skills

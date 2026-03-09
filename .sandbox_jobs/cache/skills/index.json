@@ -1,0 +1,176 @@
+{
+  "skills": [
+    {
+      "name": "automation-scheduler",
+      "description": "建立定期任務（每日晨報、每週回顧）。當使用者需要設定自動化的、定期執行的任務時使用。",
+      "path": "D:\\PycharmProjects\\Amon\\.sandbox_jobs\\skills\\automation-scheduler.skill",
+      "source": "global",
+      "updated_at": "2026-02-09T12:11:30.079001+00:00",
+      "frontmatter": {
+        "name": "automation-scheduler",
+        "description": "建立定期任務（每日晨報、每週回顧）。當使用者需要設定自動化的、定期執行的任務時使用。"
+      },
+      "entry_path": "automation-scheduler/SKILL.md"
+    },
+    {
+      "name": "data-analysis",
+      "description": "對 CSV/Parquet/JSON 資料進行分析。當使用者需要進行資料分析、統計計算、趨勢識別或資料視覺化時使用。",
+      "path": "D:\\PycharmProjects\\Amon\\.sandbox_jobs\\skills\\data-analysis.skill",
+      "source": "global",
+      "updated_at": "2026-02-09T12:11:21.488843+00:00",
+      "frontmatter": {
+        "name": "data-analysis",
+        "description": "對 CSV/Parquet/JSON 資料進行分析。當使用者需要進行資料分析、統計計算、趨勢識別或資料視覺化時使用。"
+      },
+      "entry_path": "data-analysis/SKILL.md"
+    },
+    {
+      "name": "document-workflows",
+      "description": "輸出 doc/報告（markdown/docx）。當使用者需要生成、編輯或導出文件時使用。",
+      "path": "D:\\PycharmProjects\\Amon\\.sandbox_jobs\\skills\\document-workflows.skill",
+      "source": "global",
+      "updated_at": "2026-02-09T12:11:32.501859+00:00",
+      "frontmatter": {
+        "name": "document-workflows",
+        "description": "輸出 doc/報告（markdown/docx）。當使用者需要生成、編輯或導出文件時使用。"
+      },
+      "entry_path": "document-workflows/SKILL.md"
+    },
+    {
+      "name": "incident-triage",
+      "description": "log/錯誤快速定位（搭配 filesystem.grep、audit.log_query）。當使用者遇到系統問題或錯誤時，快速診斷和定位問題。",
+      "path": "D:\\PycharmProjects\\Amon\\.sandbox_jobs\\skills\\incident-triage.skill",
+      "source": "global",
+      "updated_at": "2026-02-09T12:11:37.958222+00:00",
+      "frontmatter": {
+        "name": "incident-triage",
+        "description": "log/錯誤快速定位（搭配 filesystem.grep、audit.log_query）。當使用者遇到系統問題或錯誤時，快速診斷和定位問題。"
+      },
+      "entry_path": "incident-triage/SKILL.md"
+    },
+    {
+      "name": "mcp-integration-debug",
+      "description": "MCP server 連不上、tools/list/call 出錯時的診斷和除錯。當使用者遇到 MCP 相關的技術問題時使用。",
+      "path": "D:\\PycharmProjects\\Amon\\.sandbox_jobs\\skills\\mcp-integration-debug.skill",
+      "source": "global",
+      "updated_at": "2026-02-09T12:11:26.757455+00:00",
+      "frontmatter": {
+        "name": "mcp-integration-debug",
+        "description": "MCP server 連不上、tools/list/call 出錯時的診斷和除錯。當使用者遇到 MCP 相關的技術問題時使用。"
+      },
+      "entry_path": "mcp-integration-debug/SKILL.md"
+    },
+    {
+      "name": "mcp-integration-debug",
+      "description": "Debug MCP tool connectivity and permission issues.",
+      "path": "D:\\PycharmProjects\\Amon\\.claude\\skills\\mcp-integration-debug\\SKILL.md",
+      "source": "project",
+      "updated_at": "2026-02-09T12:09:30.829953+00:00",
+      "frontmatter": {
+        "name": "mcp-integration-debug",
+        "description": "Debug MCP tool connectivity and permission issues.",
+        "owner": "amon",
+        "version": "1.0.0"
+      }
+    },
+    {
+      "name": "mermaid-diagram",
+      "description": "製作 Mermaid 圖表的完整指引，含中文文字支援的最佳實踐，以及需求導向的圖表選擇指引。當使用者要求「畫流程圖」「畫序列圖」「畫甘特圖」「畫心智圖」「畫 ER 圖」「畫類別圖」「畫狀態圖」「畫圓餅圖」「畫時間軸」「畫四象限圖」「畫 Mermaid」「用 mermaid 畫」「產生圖表」「架構圖」「系統圖」「資料視覺化」時觸發。遇到不確定要用哪種圖表的情況，先查 references/use-case-guide.md 再決定圖表類型。凡是圖表內含有中文，必須先查閱本 skill 的 Chinese 相容規則再產出。",
+      "path": "D:\\PycharmProjects\\Amon\\.sandbox_jobs\\skills\\mermaid-diagram.skill",
+      "source": "global",
+      "updated_at": "2026-03-01T05:59:36+00:00",
+      "frontmatter": {
+        "name": "mermaid-diagram",
+        "description": "製作 Mermaid 圖表的完整指引，含中文文字支援的最佳實踐，以及需求導向的圖表選擇指引。當使用者要求「畫流程圖」「畫序列圖」「畫甘特圖」「畫心智圖」「畫 ER 圖」「畫類別圖」「畫狀態圖」「畫圓餅圖」「畫時間軸」「畫四象限圖」「畫 Mermaid」「用 mermaid 畫」「產生圖表」「架構圖」「系統圖」「資料視覺化」時觸發。遇到不確定要用哪種圖表的情況，先查 references/use-case-guide.md 再決定圖表類型。凡是圖表內含有中文，必須先查閱本 skill 的 Chinese 相容規則再產出。",
+        "license": "MIT",
+        "metadata": {
+          "author": "user",
+          "version": "1.0.0",
+          "tags": [
+            "mermaid",
+            "diagram",
+            "chart",
+            "flowchart",
+            "sequence",
+            "chinese"
+          ]
+        }
+      },
+      "entry_path": "mermaid-diagram/SKILL.md"
+    },
+    {
+      "name": "repo-code-review",
+      "description": "對指定的程式碼檔案或目錄進行審查，找出潛在的錯誤、提出重構建議。當使用者要 review code、找 bug、提出 refactor 建議時使用。",
+      "path": "D:\\PycharmProjects\\Amon\\.sandbox_jobs\\skills\\repo-code-review.skill",
+      "source": "global",
+      "updated_at": "2026-02-09T12:11:13.577929+00:00",
+      "frontmatter": {
+        "name": "repo-code-review",
+        "description": "對指定的程式碼檔案或目錄進行審查，找出潛在的錯誤、提出重構建議。當使用者要 review code、找 bug、提出 refactor 建議時使用。"
+      },
+      "entry_path": "repo-code-review/SKILL.md"
+    },
+    {
+      "name": "repo-code-review",
+      "description": "Provide a focused code review checklist for repository changes.",
+      "path": "D:\\PycharmProjects\\Amon\\.claude\\skills\\repo-code-review\\SKILL.md",
+      "source": "project",
+      "updated_at": "2026-02-09T12:09:30.830952+00:00",
+      "frontmatter": {
+        "name": "repo-code-review",
+        "description": "Provide a focused code review checklist for repository changes.",
+        "owner": "amon",
+        "version": "1.0.0"
+      }
+    },
+    {
+      "name": "research-brief",
+      "description": "網頁/文件摘要、研究整理。當使用者需要對某個主題進行研究、收集資訊並生成摘要時使用。",
+      "path": "D:\\PycharmProjects\\Amon\\.sandbox_jobs\\skills\\research-brief.skill",
+      "source": "global",
+      "updated_at": "2026-02-09T12:11:23.958731+00:00",
+      "frontmatter": {
+        "name": "research-brief",
+        "description": "網頁/文件摘要、研究整理。當使用者需要對某個主題進行研究、收集資訊並生成摘要時使用。"
+      },
+      "entry_path": "research-brief/SKILL.md"
+    },
+    {
+      "name": "spec-to-tasks",
+      "description": "將一份需求規格拆成可執行任務（含驗收條件）。當使用者提供產品需求、功能規格或使用者故事時，將其分解成具體的開發任務。",
+      "path": "D:\\PycharmProjects\\Amon\\.sandbox_jobs\\skills\\spec-to-tasks.skill",
+      "source": "global",
+      "updated_at": "2026-02-09T12:11:18.841807+00:00",
+      "frontmatter": {
+        "name": "spec-to-tasks",
+        "description": "將一份需求規格拆成可執行任務（含驗收條件）。當使用者提供產品需求、功能規格或使用者故事時，將其分解成具體的開發任務。"
+      },
+      "entry_path": "spec-to-tasks/SKILL.md"
+    },
+    {
+      "name": "spec-to-tasks",
+      "description": "Convert specs into actionable implementation tasks.",
+      "path": "D:\\PycharmProjects\\Amon\\.claude\\skills\\spec-to-tasks\\SKILL.md",
+      "source": "project",
+      "updated_at": "2026-02-09T12:09:30.830952+00:00",
+      "frontmatter": {
+        "name": "spec-to-tasks",
+        "description": "Convert specs into actionable implementation tasks.",
+        "owner": "amon",
+        "version": "1.0.0"
+      }
+    },
+    {
+      "name": "spreadsheet-workflows",
+      "description": "報表 xlsx（整理、公式、檢核）。當使用者需要建立、編輯或分析 Excel 試算表時使用。",
+      "path": "D:\\PycharmProjects\\Amon\\.sandbox_jobs\\skills\\spreadsheet-workflows.skill",
+      "source": "global",
+      "updated_at": "2026-02-09T12:11:36.321501+00:00",
+      "frontmatter": {
+        "name": "spreadsheet-workflows",
+        "description": "報表 xlsx（整理、公式、檢核）。當使用者需要建立、編輯或分析 Excel 試算表時使用。"
+      },
+      "entry_path": "spreadsheet-workflows/SKILL.md"
+    }
+  ]
+}
