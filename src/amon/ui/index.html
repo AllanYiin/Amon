@@ -52,10 +52,10 @@
           <section class="thread-tree" id="thread-tree" aria-label="Project Threads">
             <header class="thread-tree__header">
               <div class="thread-tree__heading">
-                <p class="thread-tree__caption">Projects</p>
+                <p class="thread-tree__caption">對話串</p>
                 <strong id="sidebar-project-name">無專案</strong>
               </div>
-              <button type="button" class="btn btn--secondary secondary-btn small" id="create-thread-btn">新 Thread</button>
+              <button type="button" class="btn btn--secondary secondary-btn small" id="create-thread-btn">新增對話串</button>
             </header>
             <select id="project-select" hidden aria-hidden="true" tabindex="-1"></select>
             <div class="thread-tree__body" id="thread-list" role="tree" aria-label="專案與對話串"></div>
@@ -88,9 +88,10 @@
           </nav>
 
           <div class="layout chat-layout" id="chat-layout">
-            <section class="main-card card chat-panel">
+            <section class="main-card card chat-panel amon-ref-page amon-ref-page--chat">
           <header class="chat-header">
-            <div>
+            <div class="chat-header__copy">
+              <p class="page-eyebrow">Workspace Conversation</p>
               <h1>Amon Chat</h1>
               <p class="subtitle">請用自然語言操作專案與任務（支援 streaming）。</p>
             </div>
@@ -236,9 +237,10 @@
           </div>
 
 
-          <section class="main-card card bill-page" id="bill-page" hidden>
+          <section class="main-card card bill-page amon-ref-page amon-ref-page--billing" id="bill-page" hidden>
             <header class="bill-page__header">
               <div>
+                <p class="page-eyebrow">Usage Overview</p>
                 <h2>Billing &amp; Usage</h2>
                 <p class="subtitle">費用與用量概覽（依既有 Billing API 即時更新）。</p>
               </div>
@@ -424,9 +426,10 @@
             </article>
           </section>
 
-          <section class="main-card card logs-events-page" id="logs-events-page" hidden>
+          <section class="main-card card logs-events-page amon-ref-page amon-ref-page--logs" id="logs-events-page" hidden>
             <header class="logs-events-page__header">
               <div>
+                <p class="page-eyebrow">Observability</p>
                 <h2>Logs &amp; Events</h2>
                 <p class="subtitle">依來源與條件檢視 log/event，並支援下載與 drilldown。</p>
               </div>
@@ -437,43 +440,47 @@
             </header>
 
             <section class="logs-panel" id="logs-panel" data-panel="logs">
-              <h3>Logs</h3>
-              <div class="logs-toolbar">
-                <label class="field-label">來源
-                  <select id="logs-source">
-                    <option value="amon">amon</option>
-                    <option value="project">project</option>
-                    <option value="billing">billing</option>
-                  </select>
-                </label>
-                <label class="field-label">起始時間<input type="datetime-local" id="logs-time-from" /></label>
-                <label class="field-label">結束時間<input type="datetime-local" id="logs-time-to" /></label>
-                <label class="field-label">搜尋<input type="search" id="logs-search" placeholder="關鍵字或 ID" /></label>
-                <label class="field-label">project<input type="text" id="logs-filter-project" placeholder="project_id" /></label>
-                <label class="field-label">run<input type="text" id="logs-filter-run" placeholder="run_id" /></label>
-                <label class="field-label">node<input type="text" id="logs-filter-node" placeholder="node_id" /></label>
-                <label class="field-label">severity
-                  <select id="logs-filter-severity">
-                    <option value="">全部</option>
-                    <option value="INFO">INFO</option>
-                    <option value="WARNING">WARNING</option>
-                    <option value="ERROR">ERROR</option>
-                  </select>
-                </label>
-                <label class="field-label">component<input type="text" id="logs-filter-component" placeholder="component / event" /></label>
-                <button type="button" class="btn btn--secondary secondary-btn" id="logs-refresh">查詢</button>
-                <button type="button" class="btn btn--secondary secondary-btn" id="logs-download">下載</button>
+              <div class="logs-filter-card">
+                <h3>Logs</h3>
+                <div class="logs-toolbar">
+                  <label class="field-label">來源
+                    <select id="logs-source">
+                      <option value="amon">amon</option>
+                      <option value="project">project</option>
+                      <option value="billing">billing</option>
+                    </select>
+                  </label>
+                  <label class="field-label">起始時間<input type="datetime-local" id="logs-time-from" /></label>
+                  <label class="field-label">結束時間<input type="datetime-local" id="logs-time-to" /></label>
+                  <label class="field-label">搜尋<input type="search" id="logs-search" placeholder="關鍵字或 ID" /></label>
+                  <label class="field-label">project<input type="text" id="logs-filter-project" placeholder="project_id" /></label>
+                  <label class="field-label">run<input type="text" id="logs-filter-run" placeholder="run_id" /></label>
+                  <label class="field-label">node<input type="text" id="logs-filter-node" placeholder="node_id" /></label>
+                  <label class="field-label">severity
+                    <select id="logs-filter-severity">
+                      <option value="">全部</option>
+                      <option value="INFO">INFO</option>
+                      <option value="WARNING">WARNING</option>
+                      <option value="ERROR">ERROR</option>
+                    </select>
+                  </label>
+                  <label class="field-label">component<input type="text" id="logs-filter-component" placeholder="component / event" /></label>
+                  <button type="button" class="btn btn--secondary secondary-btn" id="logs-refresh">查詢</button>
+                  <button type="button" class="btn btn--secondary secondary-btn" id="logs-download">下載</button>
+                </div>
+                <div class="logs-severity-chips" id="logs-severity-chips" role="group" aria-label="Severity 篩選">
+                  <button type="button" class="chip is-active" data-severity="">All</button>
+                  <button type="button" class="chip" data-severity="INFO">Info</button>
+                  <button type="button" class="chip" data-severity="WARNING">Warn</button>
+                  <button type="button" class="chip" data-severity="ERROR">Error</button>
+                  <button type="button" class="chip" data-severity="DEBUG">Debug</button>
+                </div>
               </div>
-              <div class="logs-severity-chips" id="logs-severity-chips" role="group" aria-label="Severity 篩選">
-                <button type="button" class="chip is-active" data-severity="">All</button>
-                <button type="button" class="chip" data-severity="INFO">Info</button>
-                <button type="button" class="chip" data-severity="WARNING">Warn</button>
-                <button type="button" class="chip" data-severity="ERROR">Error</button>
-                <button type="button" class="chip" data-severity="DEBUG">Debug</button>
-              </div>
-              <div id="logs-summary" class="logs-summary">尚未載入。</div>
-              <div class="logs-panel-actions">
-                <button type="button" class="btn btn--secondary secondary-btn" id="logs-copy-visible">複製目前結果</button>
+              <div class="logs-summary-row">
+                <div id="logs-summary" class="logs-summary">尚未載入。</div>
+                <div class="logs-panel-actions">
+                  <button type="button" class="btn btn--secondary secondary-btn" id="logs-copy-visible">複製目前結果</button>
+                </div>
               </div>
               <div id="logs-list" class="logs-list logs-timeline list-row-group"></div>
               <div class="pager" id="logs-pager">
@@ -484,20 +491,24 @@
             </section>
 
             <section class="events-panel" id="events-panel" data-panel="events" hidden>
-              <h3>Events</h3>
-              <div class="logs-toolbar">
-                <label class="field-label">搜尋<input type="search" id="events-search" placeholder="關鍵字或 ID" /></label>
-                <label class="field-label">type<input type="text" id="events-filter-type" placeholder="event type" /></label>
-                <label class="field-label">起始時間<input type="datetime-local" id="events-time-from" /></label>
-                <label class="field-label">結束時間<input type="datetime-local" id="events-time-to" /></label>
-                <label class="field-label">project<input type="text" id="events-filter-project" placeholder="project_id" /></label>
-                <label class="field-label">run<input type="text" id="events-filter-run" placeholder="run_id" /></label>
-                <label class="field-label">node<input type="text" id="events-filter-node" placeholder="node_id" /></label>
-                <button type="button" class="btn btn--secondary secondary-btn" id="events-refresh">查詢</button>
+              <div class="logs-filter-card">
+                <h3>Events</h3>
+                <div class="logs-toolbar">
+                  <label class="field-label">搜尋<input type="search" id="events-search" placeholder="關鍵字或 ID" /></label>
+                  <label class="field-label">type<input type="text" id="events-filter-type" placeholder="event type" /></label>
+                  <label class="field-label">起始時間<input type="datetime-local" id="events-time-from" /></label>
+                  <label class="field-label">結束時間<input type="datetime-local" id="events-time-to" /></label>
+                  <label class="field-label">project<input type="text" id="events-filter-project" placeholder="project_id" /></label>
+                  <label class="field-label">run<input type="text" id="events-filter-run" placeholder="run_id" /></label>
+                  <label class="field-label">node<input type="text" id="events-filter-node" placeholder="node_id" /></label>
+                  <button type="button" class="btn btn--secondary secondary-btn" id="events-refresh">查詢</button>
+                </div>
               </div>
-              <div id="events-summary" class="logs-summary">尚未載入。</div>
-              <div class="logs-panel-actions">
-                <button type="button" class="btn btn--secondary secondary-btn" id="events-copy-visible">複製目前結果</button>
+              <div class="logs-summary-row">
+                <div id="events-summary" class="logs-summary">尚未載入。</div>
+                <div class="logs-panel-actions">
+                  <button type="button" class="btn btn--secondary secondary-btn" id="events-copy-visible">複製目前結果</button>
+                </div>
               </div>
               <div id="events-list" class="logs-list logs-timeline list-row-group"></div>
               <div class="pager" id="events-pager">
@@ -508,9 +519,10 @@
             </section>
           </section>
 
-          <section class="main-card card context-page" id="context-page" hidden>
+          <section class="main-card card context-page amon-ref-page amon-ref-page--context" id="context-page" hidden>
             <header class="context-page__header">
               <div>
+                <p class="page-eyebrow">Token Budget</p>
                 <h2>上下文</h2>
                 <p class="subtitle">上下文類別統計（含 system prompt、tools definition、skills、tool use、chat history）。</p>
               </div>
@@ -612,9 +624,10 @@
             </footer>
           </section>
 
-          <section class="main-card card graph-page" id="graph-page" hidden>
+          <section class="main-card card graph-page amon-ref-page amon-ref-page--graph" id="graph-page" hidden>
             <header class="graph-page__header">
               <div>
+                <p class="page-eyebrow">Execution Flow</p>
                 <h2>Graph</h2>
                 <p class="subtitle">流程圖主視圖（支援切換歷史 Run）。</p>
               </div>
@@ -627,32 +640,39 @@
                 <button type="button" class="btn btn--secondary secondary-btn" id="copy-run-id" disabled data-i18n="button.copyRunId" data-i18n-attr="aria-label:button.copyRunIdAria">複製 Run ID</button>
               </div>
             </header>
-            <div class="graph-toolbar">
-              <div class="graph-run-meta-wrap">
-                <span id="graph-run-meta" class="graph-run-meta">尚未偵測到 Run</span>
+            <div class="graph-workspace">
+              <div class="graph-canvas-shell">
+                <div class="graph-toolbar">
+                  <div class="graph-run-meta-wrap">
+                    <span id="graph-run-meta" class="graph-run-meta">尚未偵測到 Run</span>
+                  </div>
+                  <div class="graph-toolbar__actions">
+                    <button type="button" class="btn btn--secondary secondary-btn" id="graph-copy-mermaid">複製 Mermaid</button>
+                    <button type="button" class="btn btn--secondary secondary-btn" id="graph-export-svg">匯出 SVG</button>
+                    <button type="button" class="btn btn--secondary secondary-btn" id="graph-create-template">Create template</button>
+                  </div>
+                </div>
+                <section class="graph-stage">
+                  <div id="graph-preview" class="graph-preview"></div>
+                </section>
               </div>
-              <div class="graph-toolbar__actions">
-                <button type="button" class="btn btn--secondary secondary-btn" id="graph-copy-mermaid">複製 Mermaid</button>
-                <button type="button" class="btn btn--secondary secondary-btn" id="graph-export-svg">匯出 SVG</button>
-                <button type="button" class="btn btn--secondary secondary-btn" id="graph-create-template">Create template</button>
+              <div class="graph-side-stack">
+                <section class="graph-node-panel card">
+                  <header class="graph-node-panel__header">
+                    <h3>Nodes</h3>
+                    <p class="subtitle">點選節點可開啟詳細資訊。</p>
+                  </header>
+                  <ul id="graph-node-list" class="graph-node-list list-row-group"></ul>
+                </section>
+                <pre id="graph-code" class="graph-code codeblock"></pre>
               </div>
             </div>
-            <section class="graph-stage">
-              <div id="graph-preview" class="graph-preview"></div>
-            </section>
-            <section class="graph-node-panel card">
-              <header class="graph-node-panel__header">
-                <h3>Nodes</h3>
-                <p class="subtitle">點選節點可開啟詳細資訊。</p>
-              </header>
-              <ul id="graph-node-list" class="graph-node-list list-row-group"></ul>
-            </section>
-            <pre id="graph-code" class="graph-code codeblock"></pre>
           </section>
 
-          <section class="main-card card docs-page" id="docs-page" hidden>
+          <section class="main-card card docs-page amon-ref-page amon-ref-page--docs" id="docs-page" hidden>
             <header class="docs-page__header">
               <div>
+                <p class="page-eyebrow">Run Documents</p>
                 <h2>Docs</h2>
                 <p class="subtitle">依 run/task 檢視文件，預覽 markdown，並插入 Chat 引用。</p>
               </div>
