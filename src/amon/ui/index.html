@@ -705,24 +705,46 @@
 
           <section class="main-card card tools-skills-page" id="tools-skills-page" hidden>
             <header class="tools-skills-page__header">
-              <div>
+              <div class="tools-skills-page__header-copy">
                 <p class="tools-skills-page__eyebrow">Agent Configuration</p>
-                <h2>Tools &amp; <em>Skills</em></h2>
+                <h2>Tools &amp; Skills</h2>
                 <p class="subtitle">管理工具與技能清單；高風險權限變更仍維持先產生 Plan Card，再由你決定是否確認。</p>
               </div>
               <div class="tools-skills-page__header-actions">
-                <p class="tools-skills-page__timestamp" id="tools-skills-last-sync">尚未同步</p>
-                <button type="button" class="btn btn--secondary secondary-btn" id="tools-skills-refresh">重新整理</button>
-              </div>
-            </header>
-
-            <section class="tools-skills-surface card" aria-label="工具與技能概覽">
-              <div class="tools-skills-toolbar">
+                <div class="tools-skills-page__status-row">
+                  <p class="tools-skills-page__timestamp" id="tools-skills-last-sync">尚未同步</p>
+                  <button type="button" class="btn btn--secondary secondary-btn" id="tools-skills-refresh">重新整理</button>
+                </div>
                 <label class="tools-skills-toolbar__search" for="tools-skills-search">
                   <span class="tools-skills-toolbar__search-icon" aria-hidden="true">search</span>
                   <input type="search" id="tools-skills-search" placeholder="搜尋工具名稱、技能說明或來源路徑…" />
                 </label>
+                <div class="tools-skills-kpis" aria-label="目錄摘要">
+                  <article class="tools-skills-kpi">
+                    <span class="tools-skills-kpi__label">工具總數</span>
+                    <strong id="tools-skills-summary-tools">0</strong>
+                    <small>目前 catalog 內可見項目</small>
+                  </article>
+                  <article class="tools-skills-kpi">
+                    <span class="tools-skills-kpi__label">受保護項</span>
+                    <strong id="tools-skills-summary-guarded">0</strong>
+                    <small>預設拒絕或需確認</small>
+                  </article>
+                  <article class="tools-skills-kpi">
+                    <span class="tools-skills-kpi__label">已安裝技能</span>
+                    <strong id="tools-skills-summary-skills">0</strong>
+                    <small>global 與 project 合計</small>
+                  </article>
+                  <article class="tools-skills-kpi">
+                    <span class="tools-skills-kpi__label">覆寫衝突</span>
+                    <strong id="tools-skills-summary-overrides">0</strong>
+                    <small>project override global</small>
+                  </article>
+                </div>
               </div>
+            </header>
+
+            <section class="tools-skills-surface card" aria-label="工具與技能概覽">
               <div class="tools-skills-main-tabs" id="tools-skills-tablist" role="tablist" aria-label="Tools 與 Skills 分頁">
                   <button
                     type="button"
@@ -756,28 +778,6 @@
                     <span>技能</span>
                     <span class="tools-skills-main-tab__count" id="tools-skills-skills-count">0</span>
                   </button>
-              </div>
-              <div class="tools-skills-kpis" aria-label="目錄摘要">
-                <article class="tools-skills-kpi">
-                  <span class="tools-skills-kpi__label">工具總數</span>
-                  <strong id="tools-skills-summary-tools">0</strong>
-                  <small>目前 catalog 內可見項目</small>
-                </article>
-                <article class="tools-skills-kpi">
-                  <span class="tools-skills-kpi__label">受保護項</span>
-                  <strong id="tools-skills-summary-guarded">0</strong>
-                  <small>預設拒絕或需確認</small>
-                </article>
-                <article class="tools-skills-kpi">
-                  <span class="tools-skills-kpi__label">已安裝技能</span>
-                  <strong id="tools-skills-summary-skills">0</strong>
-                  <small>global 與 project 合計</small>
-                </article>
-                <article class="tools-skills-kpi">
-                  <span class="tools-skills-kpi__label">覆寫衝突</span>
-                  <strong id="tools-skills-summary-overrides">0</strong>
-                  <small>project override global</small>
-                </article>
               </div>
             </section>
 

@@ -20,7 +20,7 @@ export function createShellLayoutController({ elements, state, storage, storageK
     const collapsed = readStorage(storageKeys.contextCollapsed) === "1";
     elements.uiShell?.classList.toggle("is-context-collapsed", collapsed);
     const storedWidth = Number(readStorage(storageKeys.contextWidth));
-    applyContextPanelWidth(Number.isFinite(storedWidth) && storedWidth > 0 ? storedWidth : 320);
+    applyContextPanelWidth(Number.isFinite(storedWidth) && storedWidth > 0 ? storedWidth : 288);
     syncContextPanelToggle();
   }
 
