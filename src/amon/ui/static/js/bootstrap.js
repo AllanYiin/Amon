@@ -1087,6 +1087,38 @@ appStore.patch({ bootstrappedAt: Date.now() });
         return `${dt.toLocaleString("zh-TW", { hour12: false })} (${usage.decision || "unknown"})`;
       }
 
+      function formatPolicyDecisionLabel(decision) {
+        const normalized = String(decision || "deny").trim().toLowerCase();
+        if (normalized === "allow") return "允許";
+        if (normalized === "ask") return "需確認";
+        if (normalized === "deny") return "拒絕";
+        return normalized || "未知";
+      }
+
+      function formatToggleStateLabel(enabled) {
+        return enabled ? "已啟用" : "已停用";
+      }
+
+      function formatRequireConfirmLabel(requireConfirm) {
+        return requireConfirm ? "需要確認" : "可直接執行";
+      }
+
+      function normalizeSkillSourceLabel(source) {
+        const normalized = String(source || "unknown").trim().toLowerCase();
+        if (normalized === "project") return "專案";
+        if (normalized === "global") return "全域";
+        if (normalized === "builtin" || normalized === "built-in") return "內建";
+        return source || "unknown";
+      }
+
+      function getSkillSourceIcon(source) {
+        const normalized = String(source || "unknown").trim().toLowerCase();
+        if (normalized === "project") return "folder_managed";
+        if (normalized === "global") return "public";
+        if (normalized === "builtin" || normalized === "built-in") return "deployed_code";
+        return "school";
+      }
+
       function renderSchema(schema) {
         return `<pre class="tools-codeblock">${escapeHtml(JSON.stringify(schema || {}, null, 2))}</pre>`;
       }
@@ -1197,6 +1229,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
           .sort(([a], [b]) => a.localeCompare(b))
           .map(([typeKey, groups]) => {
             const meta = TOOL_TYPE_META[typeKey] || TOOL_TYPE_META.unknown;
+            const groupedTools = Array.from(groups.values()).flat();
             return `
               <section class="tool-cluster">
                 <header class="tool-cluster__header">
@@ -1204,7 +1237,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
                     <span class="tool-cluster__icon" aria-hidden="true">${meta.icon}</span>
                     <div>
                       <h4>${escapeHtml(meta.label)}</h4>
-                      <p>${groups.size} groups / ${Array.from(groups.values()).flat().length} tools</p>
+                      <p>${groups.size} 個群組，${groupedTools.length} 個方法</p>
                     </div>
                   </div>
                   <span class="pill pill--${meta.tone}">${escapeHtml(meta.label)}</span>
@@ -1223,7 +1256,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
                             <span class="tool-group__icon" aria-hidden="true">${meta.icon}</span>
                             <span class="tool-group__identity">
                               <strong>${escapeHtml(groupLabel)}</strong>
-                              <span>${escapeHtml(meta.label)} catalog group</span>
+                              <span>${escapeHtml(meta.label)} 命名空間</span>
                             </span>
                             <span class="tool-group__method-list">${sampleMethods}</span>
                             <span class="tool-group__count">${groupedTools.length}</span>
@@ -1245,7 +1278,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
                                         ${methodPrefix ? `<span class="tool-method__prefix">${escapeHtml(methodPrefix)}</span>` : ""}
                                         <strong>${escapeHtml(extractToolMethodName(rawName))}</strong>
                                       </span>
-                                      <span class="risk-chip risk-chip--${escapeHtml(risk)}">risk: ${escapeHtml(risk)}</span>
+                                      <span class="risk-chip risk-chip--${escapeHtml(risk)}">風險 ${escapeHtml(risk)}</span>
                                     </summary>
                                     <div class="tool-method__body">
                                       <div class="tool-method__info-grid">
@@ -1258,23 +1291,31 @@ appStore.patch({ bootstrappedAt: Date.now() });
                                           <strong>${escapeHtml(String(tool.version || "unknown"))}</strong>
                                         </article>
                                         <article class="tool-method__info-card">
-                                          <span class="tool-method__info-label">Allowed Paths</span>
+                                          <span class="tool-method__info-label">允許路徑</span>
                                           <strong>${escapeHtml(allowPaths)}</strong>
                                         </article>
                                         <article class="tool-method__info-card">
                                           <span class="tool-method__info-label">最近使用</span>
                                           <strong>${escapeHtml(formatRecentUsage(tool.recent_usage))}</strong>
                                         </article>
+                                        <article class="tool-method__info-card">
+                                          <span class="tool-method__info-label">啟用狀態</span>
+                                          <strong>${escapeHtml(formatToggleStateLabel(Boolean(tool.enabled)))}</strong>
+                                        </article>
+                                        <article class="tool-method__info-card">
+                                          <span class="tool-method__info-label">執行門檻</span>
+                                          <strong>${escapeHtml(formatRequireConfirmLabel(Boolean(tool.require_confirm)))}</strong>
+                                        </article>
                                       </div>
-                                      <p class="tool-method__policy"><strong>預設策略：</strong>${escapeHtml(String(tool.policy_decision || "deny").toUpperCase())}</p>
+                                      <p class="tool-method__policy"><strong>預設策略：</strong>${escapeHtml(formatPolicyDecisionLabel(tool.policy_decision))}</p>
                                       <p class="tool-method__policy">${escapeHtml(tool.policy_reason || "未命中 allow 規則，預設拒絕")}</p>
                                       <div class="tool-method__schema-stack">
                                         <details class="tool-method__schema-panel">
-                                          <summary>inputs schema</summary>
+                                          <summary>輸入 schema</summary>
                                           ${renderSchema(tool.input_schema)}
                                         </details>
                                         <details class="tool-method__schema-panel">
-                                          <summary>outputs schema</summary>
+                                          <summary>輸出 schema</summary>
                                           ${renderSchema(tool.output_schema)}
                                         </details>
                                       </div>
@@ -1288,7 +1329,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
                                               data-tool-name="${escapeHtml(tool.name)}"
                                               data-tool-enabled="${tool.enabled ? "true" : "false"}"
                                               data-tool-require-confirm="${tool.require_confirm ? "true" : "false"}"
-                                            >${tool.enabled ? "Disable" : "Enable"}</button>
+                                            >${tool.enabled ? "停用" : "啟用"}</button>
                                             <button
                                               type="button"
                                               class="btn btn--ghost secondary-btn small"
@@ -1296,7 +1337,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
                                               data-tool-name="${escapeHtml(tool.name)}"
                                               data-tool-enabled="${tool.enabled ? "true" : "false"}"
                                               data-tool-require-confirm="${tool.require_confirm ? "true" : "false"}"
-                                            >Require Confirm：${tool.require_confirm ? "ON" : "OFF"}</button>
+                                            >執行前確認：${tool.require_confirm ? "開" : "關"}</button>
                                           `
                                           : `<span class="tool-method__readonly">目前策略為唯讀模式</span>`}
                                       </div>
@@ -1357,22 +1398,24 @@ appStore.patch({ bootstrappedAt: Date.now() });
           .map((skill) => {
             const frontmatter = skill.frontmatter || {};
             const source = String(skill.source || "unknown");
+            const sourceLabel = normalizeSkillSourceLabel(source);
+            const description = frontmatter.description || skill.description || "無描述";
             const definition = {
               name: frontmatter.name || skill.name,
-              description: frontmatter.description || skill.description || "",
+              description,
               source,
               path: skill.path || "",
             };
             return `
               <details class="skill-card skill-card--${escapeHtml(toolsSkillsUi.skillsView)}" data-skill-source="${escapeHtml(source)}">
                 <summary class="skill-card__summary">
-                  <span class="skill-card__icon" aria-hidden="true">school</span>
+                  <span class="skill-card__icon" aria-hidden="true">${getSkillSourceIcon(source)}</span>
                   <span class="skill-card__body">
                     <span class="skill-card__title-row">
                       <strong>${escapeHtml(skill.name || "(未命名)")}</strong>
-                      <span class="skill-card__source">${escapeHtml(source)}</span>
+                      <span class="skill-card__source">${escapeHtml(sourceLabel)}</span>
                     </span>
-                    <span class="skill-card__desc">${escapeHtml(frontmatter.description || skill.description || "無描述")}</span>
+                    <span class="skill-card__desc">${escapeHtml(description)}</span>
                     <span class="skill-card__path">${escapeHtml(skill.path || "")}</span>
                   </span>
                 </summary>
@@ -1380,14 +1423,26 @@ appStore.patch({ bootstrappedAt: Date.now() });
                   <div class="skill-card__detail-grid">
                     <article class="skill-card__detail-card">
                       <span class="tool-method__info-label">來源</span>
-                      <strong>${escapeHtml(source)}</strong>
+                      <strong>${escapeHtml(sourceLabel)}</strong>
                     </article>
                     <article class="skill-card__detail-card">
                       <span class="tool-method__info-label">觸發名稱</span>
                       <strong>${escapeHtml(skill.name || "(未命名)")}</strong>
                     </article>
+                    <article class="skill-card__detail-card">
+                      <span class="tool-method__info-label">Frontmatter 名稱</span>
+                      <strong>${escapeHtml(frontmatter.name || skill.name || "(未命名)")}</strong>
+                    </article>
+                    <article class="skill-card__detail-card">
+                      <span class="tool-method__info-label">檔案位置</span>
+                      <strong class="skill-card__path-value">${escapeHtml(skill.path || "未提供")}</strong>
+                    </article>
                   </div>
-                  ${renderSchema(definition)}
+                  <p class="skill-card__detail-copy">${escapeHtml(description)}</p>
+                  <details class="tool-method__schema-panel">
+                    <summary>skill 定義摘要</summary>
+                    ${renderSchema(definition)}
+                  </details>
                 </div>
               </details>
             `;
