@@ -15,6 +15,13 @@ export function createRunsService({ api }) {
       const payload = await api.request("/projects");
       return payload.projects || [];
     },
+    async createProject(name) {
+      const payload = await api.request("/projects", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      });
+      return payload.project || payload;
+    },
     async listRuns(projectId) {
       const query = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
       const payload = await api.request(`/runs${query}`);

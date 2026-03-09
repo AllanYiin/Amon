@@ -82,6 +82,7 @@ export function collectElements(doc = document) {
     shellNavItems: doc.querySelectorAll(".shell-nav__link"),
     sidebarProjectName: doc.getElementById("sidebar-project-name"),
     threadList: doc.getElementById("thread-list"),
+    createProjectBtn: doc.getElementById("create-project-btn"),
     createThreadBtn: doc.getElementById("create-thread-btn"),
     toolsSkillsPage: doc.getElementById("tools-skills-page"),
     billPage: doc.getElementById("bill-page"),

@@ -276,10 +276,10 @@ body {
 }
 
 .shell-sidebar {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(249, 248, 245, 0.99));
+  background: rgba(255, 255, 255, 0.98);
   border: 1px solid var(--c-border);
-  border-radius: 28px;
-  padding: 18px;
+  border-radius: 16px;
+  padding: 16px;
   position: sticky;
   top: 16px;
   align-self: start;
@@ -415,18 +415,18 @@ body {
 
 .thread-tree {
   display: grid;
-  gap: 14px;
+  gap: 12px;
   min-height: 0;
 }
 
 .thread-tree__header {
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .thread-tree__heading {
   display: grid;
-  gap: 6px;
+  gap: 4px;
 }
 
 .thread-tree__caption {
@@ -443,17 +443,25 @@ body {
   letter-spacing: -0.02em;
 }
 
+.thread-tree__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
 .thread-tree__header .btn {
   width: 100%;
   justify-content: center;
-  min-height: 40px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.8);
+  min-height: 36px;
+  padding-inline: 10px;
+  border-radius: 10px;
+  background: var(--c-surface-1);
+  box-shadow: none;
 }
 
 .thread-tree__body {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   min-height: 260px;
   max-height: calc(100vh - 236px);
   overflow: auto;
@@ -464,31 +472,31 @@ body {
   margin: 0;
   font-size: 12px;
   color: var(--c-text-muted);
-  padding: 10px 12px;
-  border-radius: 14px;
+  padding: 8px 10px;
+  border-radius: 8px;
   border: 1px dashed color-mix(in srgb, var(--c-border-strong) 70%, transparent);
-  background: color-mix(in srgb, var(--c-surface-1) 72%, var(--c-surface-2));
+  background: var(--c-surface-1);
 }
 
 .project-branch {
   border: 1px solid var(--c-border);
-  border-radius: 20px;
-  background: color-mix(in srgb, var(--c-surface-1) 96%, transparent);
-  padding: 8px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.76);
+  border-radius: 10px;
+  background: var(--c-surface-1);
+  padding: 6px;
+  box-shadow: none;
 }
 
 .project-branch.is-active {
   border-color: color-mix(in srgb, var(--c-primary) 26%, var(--c-border));
-  background: color-mix(in srgb, var(--c-surface-1) 78%, var(--c-highlight));
+  background: color-mix(in srgb, var(--c-surface-1) 82%, var(--c-highlight));
 }
 
 .project-branch__toggle {
   width: 100%;
   border: 0;
   background: transparent;
-  border-radius: 16px;
-  padding: 8px 10px;
+  border-radius: 8px;
+  padding: 7px 8px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -507,7 +515,7 @@ body {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .project-branch__chevron,
@@ -534,7 +542,7 @@ body {
 .project-branch__title-group {
   min-width: 0;
   display: grid;
-  gap: 2px;
+  gap: 1px;
 }
 
 .project-branch__title {
@@ -556,7 +564,7 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 3px 9px;
+  padding: 2px 7px;
   border-radius: 999px;
   background: var(--c-info-soft);
   border: 1px solid var(--c-info-border);
@@ -568,10 +576,10 @@ body {
 
 .project-branch__threads {
   display: grid;
-  gap: 6px;
-  margin-top: 4px;
-  margin-left: 18px;
-  padding: 4px 0 0 18px;
+  gap: 4px;
+  margin-top: 2px;
+  margin-left: 14px;
+  padding: 2px 0 0 14px;
   border-left: 1px solid color-mix(in srgb, var(--c-border-strong) 52%, transparent);
 }
 
@@ -579,8 +587,8 @@ body {
   width: 100%;
   position: relative;
   border: 1px solid transparent;
-  border-radius: 14px;
-  padding: 9px 12px 9px 18px;
+  border-radius: 8px;
+  padding: 7px 10px 7px 16px;
   text-align: left;
   background: transparent;
   display: grid;
@@ -591,10 +599,10 @@ body {
 .thread-row::before {
   content: "";
   position: absolute;
-  top: 15px;
+  top: 12px;
   left: 6px;
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--c-primary) 56%, var(--c-border));
   opacity: 0.56;
@@ -2707,9 +2715,9 @@ body.is-resizing-context-panel {
 
 .tools-skills-page__header {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(360px, 0.95fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: flex-start;
-  gap: 20px;
+  gap: 18px;
 }
 
 .tools-skills-page__header-copy {
@@ -2748,16 +2756,55 @@ body.is-resizing-context-panel {
 
 .tools-skills-page__header-actions {
   display: grid;
-  gap: 12px;
+  grid-template-columns: minmax(220px, 320px) auto;
+  grid-template-areas:
+    "status status"
+    "search kpis";
+  gap: 8px 12px;
   align-content: start;
+  justify-content: end;
+  justify-items: end;
 }
 
 .tools-skills-page__status-row {
+  grid-area: status;
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.tools-skills-page__header-actions .tools-skills-toolbar__search {
+  grid-area: search;
+  width: min(100%, 320px);
+}
+
+.tools-skills-page__header-actions .tools-skills-kpis {
+  grid-area: kpis;
+  grid-template-columns: repeat(4, minmax(78px, auto));
+  gap: 8px;
+}
+
+.tools-skills-page__header-actions .tools-skills-kpi {
+  min-width: 0;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+.tools-skills-page__header-actions .tools-skills-kpi__label {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.tools-skills-page__header-actions .tools-skills-kpi strong {
+  font-size: 1.2rem;
+}
+
+.tools-skills-page__header-actions .tools-skills-kpi small {
+  display: none;
 }
 
 .tools-skills-page__timestamp,
@@ -3507,6 +3554,10 @@ body.is-resizing-context-panel {
     grid-template-columns: 1fr;
   }
 
+  .tools-skills-page__header-actions {
+    grid-template-columns: minmax(220px, 320px) auto;
+  }
+
   .tools-skills-layout {
     grid-template-columns: 1fr;
   }
@@ -3525,11 +3576,25 @@ body.is-resizing-context-panel {
   }
 
   .tools-skills-page__header-actions {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "status"
+      "search"
+      "kpis";
+    justify-items: stretch;
     gap: 10px;
   }
 
   .tools-skills-page__status-row {
     justify-content: space-between;
+  }
+
+  .tools-skills-page__header-actions .tools-skills-toolbar__search {
+    width: 100%;
+  }
+
+  .tools-skills-page__header-actions .tools-skills-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .tools-skills-main-tabs {
@@ -4635,12 +4700,10 @@ body.is-resizing-context-panel {
 }
 
 .shell-sidebar {
-  border-radius: 24px;
+  border-radius: 16px;
   padding: 16px;
   gap: 14px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 246, 241, 0.98)),
-    radial-gradient(circle at top left, color-mix(in srgb, var(--c-primary) 7%, transparent), transparent 34%);
+  background: rgba(255, 255, 255, 0.98);
 }
 
 .shell-sidebar__header {
@@ -4657,12 +4720,11 @@ body.is-resizing-context-panel {
 }
 
 .thread-tree__header .btn {
-  min-height: 42px;
-  border-radius: 14px;
-  border-color: color-mix(in srgb, var(--c-primary) 26%, var(--c-border));
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--c-primary) 10%, white), rgba(255, 255, 255, 0.95));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
+  min-height: 36px;
+  border-radius: 10px;
+  border-color: var(--c-border);
+  background: var(--c-surface-1);
+  box-shadow: none;
 }
 
 .thread-tree__body {
@@ -5143,6 +5205,7 @@ body.is-resizing-context-panel {
 
 .ui-shell.is-sidebar-collapsed .thread-tree__caption,
 .ui-shell.is-sidebar-collapsed .thread-tree__header strong,
+.ui-shell.is-sidebar-collapsed .thread-tree__actions,
 .ui-shell.is-sidebar-collapsed .project-branch__meta,
 .ui-shell.is-sidebar-collapsed .project-branch__badge,
 .ui-shell.is-sidebar-collapsed .thread-row__meta {

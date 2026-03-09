@@ -137,7 +137,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
 
       function getKnownProjects() {
         const layoutProjects = appStore.getState().layout?.projects || [];
-        const normalizedProjects = layoutProjects.map(normalizeProjectRecord).filter(Boolean);
+        const normalizedProjects = sortProjectsForDisplay(layoutProjects.map(normalizeProjectRecord).filter(Boolean));
         const activeProjectId = String(state.projectId || "").trim();
         if (activeProjectId && !normalizedProjects.some((project) => project.project_id === activeProjectId)) {
           normalizedProjects.unshift({
@@ -2008,7 +2008,19 @@ appStore.patch({ bootstrappedAt: Date.now() });
           ...project,
           project_id: projectId,
           name: project.name || project.title || projectId,
+          created_at: String(project.created_at || "").trim(),
+          updated_at: String(project.updated_at || "").trim(),
         };
+      }
+
+      function sortProjectsForDisplay(projects = []) {
+        return [...projects].sort((a, b) => {
+          const updatedDiff = toSortableTimestamp(b.updated_at) - toSortableTimestamp(a.updated_at);
+          if (updatedDiff !== 0) return updatedDiff;
+          const createdDiff = toSortableTimestamp(b.created_at) - toSortableTimestamp(a.created_at);
+          if (createdDiff !== 0) return createdDiff;
+          return String(a.name || a.project_id || "").localeCompare(String(b.name || b.project_id || ""));
+        });
       }
 
       function normalizeThreadRecord(thread = {}) {
@@ -2047,7 +2059,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
         emptyOption.textContent = "無專案";
         elements.projectSelect.appendChild(emptyOption);
 
-        projects.forEach((project) => {
+        sortProjectsForDisplay(projects).forEach((project) => {
           const option = document.createElement("option");
           option.value = String(project.project_id || "").trim();
           option.textContent = String(project.name || project.project_id || "未命名專案");
@@ -2093,7 +2105,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
             ? `目前專案${hasCachedThreads ? ` · ${cachedThreads.length} 個對話串` : ""}`
             : hasCachedThreads
               ? `${cachedThreads.length} 個對話串`
-              : "切換後顯示對話串";
+              : "";
 
           branch.className = "project-branch";
           branch.classList.toggle("is-active", isActiveProject);
@@ -2111,7 +2123,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
               <span class="project-branch__folder" aria-hidden="true">folder</span>
               <span class="project-branch__title-group">
                 <strong class="project-branch__title">${escapeHtml(String(project.name || projectId))}</strong>
-                <span class="project-branch__meta">${escapeHtml(branchMeta)}</span>
+                ${branchMeta ? `<span class="project-branch__meta">${escapeHtml(branchMeta)}</span>` : ""}
               </span>
             </span>
             ${isActiveProject ? '<span class="project-branch__badge">目前</span>' : ""}
@@ -3159,6 +3171,26 @@ appStore.patch({ bootstrappedAt: Date.now() });
       elements.projectSelect.addEventListener("change", async (event) => {
         const selectedProject = event.target.value;
         await activateProject(selectedProject);
+      });
+
+      elements.createProjectBtn?.addEventListener("click", async () => {
+        const name = window.prompt("請輸入專案名稱");
+        if (name === null) return;
+        const normalizedName = String(name || "").trim();
+        if (!normalizedName) {
+          showToast("專案名稱不可為空。", 7000, "warning");
+          return;
+        }
+        try {
+          const project = normalizeProjectRecord(await services.runs.createProject(normalizedName));
+          await loadProjects();
+          if (project?.project_id) {
+            await activateProject(project.project_id);
+          }
+          showToast(`已建立專案：${normalizedName}`, 7000, "success");
+        } catch (error) {
+          showToast(`建立專案失敗：${error.message}`, 9000, "warning");
+        }
       });
 
       elements.createThreadBtn?.addEventListener("click", async () => {
