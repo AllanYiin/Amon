@@ -1,34 +1,29 @@
 export function createInputBar({ formEl, inputEl, attachmentsEl, previewEl, onSubmit }) {
+  let selectedFiles = [];
+
   function renderAttachmentPreview(files = []) {
     previewEl.innerHTML = "";
     if (!files.length) return;
-    files.forEach((file) => {
+    files.forEach((file, index) => {
       const item = document.createElement("div");
       item.className = "attachment-item";
-      const info = document.createElement("div");
+
+      const info = document.createElement("span");
       info.className = "attachment-info";
       info.textContent = `${file.name} (${Math.round(file.size / 1024)} KB)`;
 
-      if (file.type.startsWith("image/")) {
-        const img = document.createElement("img");
-        img.alt = file.name;
-        img.src = URL.createObjectURL(file);
-        img.onload = () => URL.revokeObjectURL(img.src);
-        item.appendChild(img);
-      } else if (file.type.startsWith("video/")) {
-        const video = document.createElement("video");
-        video.src = URL.createObjectURL(file);
-        video.controls = true;
-        video.onloadeddata = () => URL.revokeObjectURL(video.src);
-        item.appendChild(video);
-      } else if (file.type === "application/pdf") {
-        const embed = document.createElement("embed");
-        embed.src = URL.createObjectURL(file);
-        embed.type = "application/pdf";
-        embed.onload = () => URL.revokeObjectURL(embed.src);
-        item.appendChild(embed);
-      }
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "attachment-item__remove";
+      removeBtn.setAttribute("aria-label", `移除附件 ${file.name}`);
+      removeBtn.textContent = "close";
+      removeBtn.addEventListener("click", () => {
+        selectedFiles = selectedFiles.filter((_, fileIndex) => fileIndex !== index);
+        renderAttachmentPreview(selectedFiles);
+      });
+
       item.appendChild(info);
+      item.appendChild(removeBtn);
       previewEl.appendChild(item);
     });
   }
@@ -43,9 +38,10 @@ export function createInputBar({ formEl, inputEl, attachmentsEl, previewEl, onSu
       event.preventDefault();
       const message = inputEl.value.trim();
       if (!message) return;
-      const files = Array.from(attachmentsEl.files || []);
+      const files = [...selectedFiles];
       inputEl.value = "";
       attachmentsEl.value = "";
+      selectedFiles = [];
       renderAttachmentPreview([]);
       onSubmit(message, files);
     };
@@ -53,7 +49,11 @@ export function createInputBar({ formEl, inputEl, attachmentsEl, previewEl, onSu
     handlers.push(() => formEl.removeEventListener("submit", onFormSubmit));
 
     const onAttachChange = (event) => {
-      renderAttachmentPreview(Array.from(event.target.files || []));
+      const incomingFiles = Array.from(event.target.files || []);
+      if (!incomingFiles.length) return;
+      selectedFiles = [...selectedFiles, ...incomingFiles];
+      attachmentsEl.value = "";
+      renderAttachmentPreview(selectedFiles);
     };
     attachmentsEl.addEventListener("change", onAttachChange);
     handlers.push(() => attachmentsEl.removeEventListener("change", onAttachChange));

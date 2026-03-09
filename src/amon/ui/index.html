@@ -94,13 +94,14 @@
             <section class="main-card card chat-panel amon-ref-page amon-ref-page--chat">
           <header class="chat-header">
             <div class="chat-header__copy">
-              <p class="page-eyebrow">Workspace Conversation</p>
               <h1>Amon Chat</h1>
               <p class="subtitle">請用自然語言操作專案與任務（支援 streaming）。</p>
             </div>
             <div class="chat-controls">
               <span class="chat-project-label" id="chat-project-label">目前專案：未指定專案</span>
-              <button class="btn btn--secondary secondary-btn" id="refresh-context">刷新上下文</button>
+              <button class="chat-icon-btn" id="refresh-context" type="button" aria-label="刷新上下文" title="刷新上下文">
+                <span aria-hidden="true">refresh</span>
+              </button>
             </div>
           </header>
 
@@ -137,16 +138,22 @@
           <form id="chat-form" class="chat-input">
             <div class="chat-input__main">
               <textarea id="chat-input" rows="4" placeholder="輸入你的需求，例如：建立專案 Amon Demo" data-i18n-attr="placeholder:placeholder.chatInput"></textarea>
-              <div class="chat-input__toolbar">
-                <label class="file-btn chip">
-                  加入附件
-                  <input id="chat-attachments" type="file" multiple accept="image/*,video/*,.pdf" />
-                </label>
-                <span class="chat-input__hint">支援圖片、PDF、影片；附件會以文字摘要送出。</span>
-              </div>
               <div id="attachment-preview" class="attachment-preview"></div>
+              <div class="chat-input__toolbar">
+                <div class="chat-input__toolbar-left">
+                  <label class="chat-icon-btn chat-icon-btn--attach" title="加入附件">
+                    <span aria-hidden="true">attach_file</span>
+                    <span class="sr-only">加入附件</span>
+                    <input id="chat-attachments" type="file" multiple accept="image/*,video/*,.pdf" />
+                  </label>
+                  <span class="chat-input__hint">支援圖片、PDF、影片。</span>
+                </div>
+                <button type="submit" class="chat-send-btn">
+                  <span aria-hidden="true">send</span>
+                  <span>送出</span>
+                </button>
+              </div>
             </div>
-            <button type="submit" class="btn btn--primary primary-btn">送出</button>
           </form>
         </section>
             <div class="context-resizer" id="context-resizer" role="separator" aria-label="調整右側面板寬度" aria-orientation="vertical"></div>
