@@ -47,6 +47,8 @@ export const CHAT_VIEW = {
       inputEl: elements.chatInput,
       attachmentsEl: elements.chatAttachments,
       previewEl: elements.attachmentPreview,
+      sendButtonEl: elements.chatSend,
+      cancelButtonEl: elements.chatCancel,
       onSubmit: (message, files) => {
         void startStream(message, files);
       },
@@ -62,7 +64,7 @@ export const CHAT_VIEW = {
 
     const setStreamStatus = (text = "") => {
       if (!elements.chatStreamStatus) return;
-      elements.chatStreamStatus.textContent = String(text || "").trim() || "處理中…";
+      elements.chatStreamStatus.textContent = String(text || "").trim();
     };
 
     const setStreaming = (active) => {
@@ -74,7 +76,7 @@ export const CHAT_VIEW = {
       if (!active) {
         setStreamStatus("");
       }
-      inputBar.setDisabled(false);
+      inputBar.setDisabled(active);
     };
 
     const activateArtifactsTab = ({ collapsed = false } = {}) => {
@@ -245,6 +247,16 @@ export const CHAT_VIEW = {
       messageRenderer.finalizeAssistantBubble();
     };
 
+    const cancelStream = () => {
+      if (!appState.streaming && !streamAbortController && !appState.streamClient) {
+        return;
+      }
+      stopStream();
+      messageRenderer.appendTimelineStatus("已取消目前執行。");
+      ctx.chatDeps.updateThinking({ status: "idle", brief: "已取消目前執行" });
+      ui.toast?.show("已取消目前執行。", { type: "info", duration: 4000 });
+    };
+
     const startStream = async (message, attachments = []) => {
       stopStream();
       streamCompleted = false;
@@ -279,6 +291,7 @@ export const CHAT_VIEW = {
           const response = await fetch("/v1/threads/stream/init", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
+            signal: streamAbortController.signal,
             body: JSON.stringify({
               message: finalMessage,
               project_id: appState.projectId,
@@ -294,6 +307,10 @@ export const CHAT_VIEW = {
             throw new Error("stream token missing");
           }
         } catch (error) {
+          if (streamAbortController?.signal.aborted || error?.name === "AbortError") {
+            stopStream();
+            return;
+          }
           ui.toast?.show("訊息較長，初始化串流失敗，請稍後重試。", { type: "danger", duration: 9000 });
           stopStream();
           return;
@@ -428,8 +445,12 @@ export const CHAT_VIEW = {
     };
 
     const unbindInput = inputBar.bind();
+    const onCancelStream = () => cancelStream();
+    elements.chatCancel?.addEventListener("click", onCancelStream);
+    setStreaming(Boolean(appState.streaming && appState.streamClient));
     this.__chatCleanup = () => {
       unbindInput?.();
+      elements.chatCancel?.removeEventListener("click", onCancelStream);
       stopStream();
       inlinePreviewUrls.forEach((url) => revokeInlinePreviewUrl(url));
       inlinePreviewUrls.clear();

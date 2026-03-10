@@ -7,6 +7,8 @@ export function collectElements(doc = document) {
     chatInput: doc.getElementById("chat-input"),
     chatAttachments: doc.getElementById("chat-attachments"),
     attachmentPreview: doc.getElementById("attachment-preview"),
+    chatSend: doc.getElementById("chat-send"),
+    chatCancel: doc.getElementById("chat-cancel"),
     toast: doc.getElementById("toast"),
     confirmModal: doc.getElementById("confirm-modal"),
     planCard: doc.getElementById("plan-card"),

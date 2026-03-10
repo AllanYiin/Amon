@@ -107,7 +107,7 @@
 
           <section id="timeline" class="chat-timeline"></section>
 
-          <div class="progress-bar" id="stream-progress" aria-hidden="true">
+          <div class="progress-bar" id="stream-progress" aria-hidden="true" hidden>
             <span></span>
           </div>
           <p class="stream-status" id="chat-stream-status" aria-live="polite" hidden>正在等待任務開始…</p>
@@ -148,10 +148,15 @@
                   </label>
                   <span class="chat-input__hint">支援圖片、PDF、影片。</span>
                 </div>
-                <button type="submit" class="chat-send-btn">
-                  <span aria-hidden="true">send</span>
-                  <span>送出</span>
-                </button>
+                <div class="chat-input__toolbar-actions">
+                  <button type="button" class="chat-cancel-btn" id="chat-cancel" hidden>
+                    <span>取消</span>
+                  </button>
+                  <button type="submit" class="chat-send-btn" id="chat-send">
+                    <span aria-hidden="true">send</span>
+                    <span>送出</span>
+                  </button>
+                </div>
               </div>
             </div>
           </form>

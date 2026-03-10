@@ -1,5 +1,20 @@
-export function createInputBar({ formEl, inputEl, attachmentsEl, previewEl, onSubmit }) {
+export function createInputBar({ formEl, inputEl, attachmentsEl, previewEl, sendButtonEl, cancelButtonEl, onSubmit }) {
   let selectedFiles = [];
+  let busy = false;
+
+  function syncActionState() {
+    formEl.classList.toggle("is-busy", busy);
+    inputEl.disabled = busy;
+    attachmentsEl.disabled = busy;
+    if (sendButtonEl) {
+      sendButtonEl.hidden = busy;
+      sendButtonEl.disabled = busy;
+    }
+    if (cancelButtonEl) {
+      cancelButtonEl.hidden = !busy;
+      cancelButtonEl.disabled = !busy;
+    }
+  }
 
   function renderAttachmentPreview(files = []) {
     previewEl.innerHTML = "";
@@ -29,13 +44,16 @@ export function createInputBar({ formEl, inputEl, attachmentsEl, previewEl, onSu
   }
 
   function setDisabled(disabled) {
-    inputEl.disabled = disabled;
+    busy = Boolean(disabled);
+    syncActionState();
   }
 
   function bind() {
     const handlers = [];
+    syncActionState();
     const onFormSubmit = (event) => {
       event.preventDefault();
+      if (busy) return;
       const message = inputEl.value.trim();
       if (!message) return;
       const files = [...selectedFiles];
