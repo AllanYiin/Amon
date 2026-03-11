@@ -1218,6 +1218,11 @@ class AmonCore:
         )
         return response
 
+    def run_graph_stream(self, prompt: str, **kwargs):
+        """Backward-compatible alias for the legacy streaming entrypoint."""
+
+        return self.run_plan_execute_stream(prompt, **kwargs)
+
     @staticmethod
     def _coerce_config_bool(value: Any) -> bool:
         if isinstance(value, bool):
