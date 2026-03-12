@@ -36,6 +36,7 @@ from .fs.trash import trash_move, trash_restore
 from .events import emit_event
 from .logging import log_billing, log_event
 from .logging_utils import setup_logger
+from .legacy_graph_runtime import LegacyGraphRuntime
 from .mcp_client import MCPClientError, MCPServerConfig, MCPStdioClient
 from .planning import generate_plan_with_llm
 from .models import ProviderError, build_provider, decode_reasoning_chunk, encode_reasoning_chunk
@@ -1688,11 +1689,24 @@ class AmonCore:
             raise ValueError("Unsupported graph format\nRun migrator: amon graph migrate ...")
 
         effective_run_id = run_id or uuid.uuid4().hex
-        graph = self._to_taskgraph3_definition(graph_payload)
-        runtime = TaskGraph3Runtime(project_path=project_path, graph=graph, run_id=effective_run_id)
         runtime_vars = dict(graph_payload.get("variables", {})) if isinstance(graph_payload.get("variables"), dict) else {}
         if variables:
             runtime_vars.update(variables)
+        if self._uses_legacy_graph_runtime(graph_payload):
+            runtime = LegacyGraphRuntime(
+                core=self,
+                project_path=project_path,
+                graph_payload=graph_payload,
+                variables=runtime_vars,
+                stream_handler=stream_handler,
+                run_id=effective_run_id,
+                request_id=request_id,
+                thread_id=thread_id,
+            )
+            return runtime.run()
+
+        graph = self._to_taskgraph3_definition(graph_payload)
+        runtime = TaskGraph3Runtime(project_path=project_path, graph=graph, run_id=effective_run_id)
         node_runner = AmonNodeRunner(
             core=self,
             project_path=project_path,
@@ -1704,6 +1718,13 @@ class AmonCore:
         )
         result = runtime.run(node_runner.run_task)
         return result
+
+    @staticmethod
+    def _uses_legacy_graph_runtime(payload: dict[str, Any]) -> bool:
+        nodes = payload.get("nodes")
+        if not isinstance(nodes, list):
+            return False
+        return any(isinstance(node, dict) and str(node.get("type") or "").strip() for node in nodes)
 
     def _to_taskgraph3_definition(self, payload: dict[str, Any]) -> GraphDefinition:
         nodes_payload = payload.get("nodes") if isinstance(payload.get("nodes"), list) else []
