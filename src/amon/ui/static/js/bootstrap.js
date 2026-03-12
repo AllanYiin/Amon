@@ -436,6 +436,9 @@ appStore.patch({ bootstrappedAt: Date.now() });
         mountedViews.forEach((viewId) => {
           if (viewId === activeView) return;
           const viewDef = SHELL_VIEW_HANDLERS[viewId];
+          if (state.streaming && viewDef?.persistWhileStreaming) {
+            return;
+          }
           if (viewDef && typeof viewDef.unmount === "function") {
             viewDef.unmount();
           }

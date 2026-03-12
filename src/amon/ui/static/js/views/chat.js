@@ -21,6 +21,7 @@ function buildAttachmentSummary(attachments) {
 export const CHAT_VIEW = {
   id: "chat",
   route: "/chat",
+  persistWhileStreaming: true,
   mount(ctx) {
     const { elements, appState, store, t, ui } = ctx;
     if (!elements?.timeline || !elements?.chatForm || !EventStreamClient) return;

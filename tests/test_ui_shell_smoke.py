@@ -273,7 +273,12 @@ class UIShellSmokeTests(unittest.TestCase):
         self.assertIn('return `/v1/threads/stream?${query.toString()}`;', chat_view_js)
         self.assertIn('query.set("thread_id", params.thread_id);', chat_view_js)
         self.assertIn('thread_id: appState.activeThreadId', chat_view_js)
+        self.assertIn("persistWhileStreaming: true", chat_view_js)
         self.assertNotIn('/v1/chat/stream', chat_view_js)
+
+    def test_bootstrap_keeps_chat_view_mounted_while_streaming(self) -> None:
+        bootstrap_js = Path("src/amon/ui/static/js/bootstrap.js").read_text(encoding="utf-8")
+        self.assertIn("if (state.streaming && viewDef?.persistWhileStreaming)", bootstrap_js)
 
     def test_ui_server_exposes_graph_history_and_billing_series_endpoints(self) -> None:
         server_py = Path("src/amon/ui_server.py").read_text(encoding="utf-8")
