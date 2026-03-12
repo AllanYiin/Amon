@@ -13,31 +13,12 @@
     <script src="static/vendor/marked/marked.min.js"></script>
     <script src="static/vendor/highlight.js/highlight.min.js"></script>
     <script src="static/vendor/svg-pan-zoom/svg-pan-zoom.min.js"></script>
-    <script src="static/vendor/mermaid/mermaid.min.js"></script>
     <script src="static/vendor/chart.js/chart.umd.min.js"></script>
     <script>
       (function ensureSvgPanZoom() {
         if (!window.svgPanZoom) {
           console.error("[ui] svg-pan-zoom local vendor script is unavailable.");
         }
-      })();
-    </script>
-    <script>
-      (function initMermaid() {
-        function configureMermaid(candidate) {
-          if (!candidate || typeof candidate.initialize !== "function") {
-            return false;
-          }
-          candidate.initialize({ startOnLoad: false, theme: "neutral" });
-          window.__mermaid = candidate;
-          return true;
-        }
-
-        if (configureMermaid(window.mermaid)) {
-          return;
-        }
-
-        console.error("[ui] Mermaid local vendor script is unavailable.");
       })();
     </script>
   </head>
@@ -644,7 +625,7 @@
               <div>
                 <p class="page-eyebrow">Execution Flow</p>
                 <h2>Graph</h2>
-                <p class="subtitle">流程圖主視圖（支援切換歷史 Run）。</p>
+                <p class="subtitle">自製流程圖主視圖（支援切換歷史 Run 與即時狀態）。</p>
               </div>
               <div class="graph-page__controls">
                 <label class="field-label">
@@ -662,7 +643,7 @@
                     <span id="graph-run-meta" class="graph-run-meta">尚未偵測到 Run</span>
                   </div>
                   <div class="graph-toolbar__actions">
-                    <button type="button" class="btn btn--secondary secondary-btn" id="graph-copy-mermaid">複製 Mermaid</button>
+                    <button type="button" class="btn btn--secondary secondary-btn" id="graph-copy-mermaid">複製 Graph JSON</button>
                     <button type="button" class="btn btn--secondary secondary-btn" id="graph-export-svg">匯出 SVG</button>
                     <button type="button" class="btn btn--secondary secondary-btn" id="graph-create-template">Create template</button>
                   </div>

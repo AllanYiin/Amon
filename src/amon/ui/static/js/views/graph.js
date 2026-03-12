@@ -1,7 +1,7 @@
 import { logUiDebug, logViewInitDebug } from "../utils/debug.js";
-import { buildGraphRuntimeViewModel, getGraphStatusClassList } from "../domain/graphRuntimeAdapter.js";
+import { buildGraphRuntimeViewModel } from "../domain/graphRuntimeAdapter.js";
 import { copyText } from "../utils/clipboard.js";
-import { buildExportableSvg, downloadTextFile } from "../utils/download.js";
+import { downloadTextFile } from "../utils/download.js";
 
 function getProjectId(ctx) {
   return ctx.store?.getState?.()?.layout?.projectId || "";
@@ -14,6 +14,280 @@ function formatJson(value) {
   } catch {
     return String(value);
   }
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function escapeXml(value) {
+  return escapeHtml(value);
+}
+
+function createSvgElement(tagName, attributes = {}) {
+  const element = document.createElementNS("http://www.w3.org/2000/svg", tagName);
+  Object.entries(attributes).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    element.setAttribute(key, String(value));
+  });
+  return element;
+}
+
+function formatNodeIndex(order) {
+  return String(Number(order) + 1).padStart(2, "0");
+}
+
+function getNodeMetaTokens(nodeVm) {
+  const tokens = [];
+  if (nodeVm.id) tokens.push(nodeVm.id);
+  if (nodeVm.typeLabel) tokens.push(nodeVm.typeLabel);
+  if (nodeVm.executorLabel) tokens.push(nodeVm.executorLabel);
+  return tokens;
+}
+
+function resolveEdgeTone(sourceNode, targetNode) {
+  if (!sourceNode || !targetNode) return "idle";
+  if (targetNode.isFailed || sourceNode.isFailed) return "failed";
+  if (targetNode.isCurrent || sourceNode.isCurrent) return "active";
+  if (targetNode.isNext || targetNode.isQueued) return "ready";
+  if (sourceNode.isCompleted && targetNode.isCompleted) return "complete";
+  return "idle";
+}
+
+function buildEdgePath(sourceBox, targetBox) {
+  const startX = sourceBox.x + sourceBox.width;
+  const startY = sourceBox.y + sourceBox.height / 2;
+  const endX = targetBox.x;
+  const endY = targetBox.y + targetBox.height / 2;
+  const deltaX = Math.max(72, (endX - startX) * 0.5);
+  return `M ${startX} ${startY} C ${startX + deltaX} ${startY}, ${endX - deltaX} ${endY}, ${endX} ${endY}`;
+}
+
+function buildEdgeLabelPosition(sourceBox, targetBox) {
+  const startX = sourceBox.x + sourceBox.width;
+  const startY = sourceBox.y + sourceBox.height / 2;
+  const endX = targetBox.x;
+  const endY = targetBox.y + targetBox.height / 2;
+  return {
+    x: startX + (endX - startX) * 0.5,
+    y: startY + (endY - startY) * 0.5 - 8,
+  };
+}
+
+function createGraphLayout(viewModel) {
+  const nodes = Array.isArray(viewModel?.nodes) ? [...viewModel.nodes].sort((left, right) => left.order - right.order) : [];
+  const edges = Array.isArray(viewModel?.edges) ? viewModel.edges : [];
+  const nodeWidth = 272;
+  const nodeHeight = 188;
+  const columnGap = 320;
+  const rowGap = 48;
+  const paddingX = 48;
+  const paddingY = 40;
+  const levelOrder = [...new Set(nodes.map((node) => Number(node.level) || 0))].sort((left, right) => left - right);
+  const rowIndexByNode = new Map();
+  const layoutNodes = [];
+  const columns = [];
+  let maxBottom = 0;
+
+  levelOrder.forEach((level, columnIndex) => {
+    const columnNodes = nodes
+      .filter((node) => Number(node.level) === level)
+      .sort((left, right) => {
+        const leftAverage = left.predecessorIds?.length
+          ? left.predecessorIds.reduce((sum, nodeId) => sum + (rowIndexByNode.get(nodeId) ?? 0), 0) / left.predecessorIds.length
+          : left.order;
+        const rightAverage = right.predecessorIds?.length
+          ? right.predecessorIds.reduce((sum, nodeId) => sum + (rowIndexByNode.get(nodeId) ?? 0), 0) / right.predecessorIds.length
+          : right.order;
+        if (leftAverage !== rightAverage) return leftAverage - rightAverage;
+        return left.order - right.order;
+      });
+    const x = paddingX + columnIndex * columnGap;
+    const columnTop = paddingY - 18;
+    const columnHeight = Math.max(160, columnNodes.length * (nodeHeight + rowGap) - rowGap + 36);
+    const label = columnNodes.length > 1 ? `Parallel ×${columnNodes.length}` : `Stage ${String(columnIndex + 1).padStart(2, "0")}`;
+    columns.push({
+      level,
+      x: x - 14,
+      y: columnTop,
+      width: nodeWidth + 28,
+      height: columnHeight,
+      label,
+      count: columnNodes.length,
+    });
+    columnNodes.forEach((nodeVm, rowIndex) => {
+      rowIndexByNode.set(nodeVm.id, rowIndex);
+      const y = paddingY + rowIndex * (nodeHeight + rowGap);
+      maxBottom = Math.max(maxBottom, y + nodeHeight);
+      layoutNodes.push({
+        ...nodeVm,
+        box: { x, y, width: nodeWidth, height: nodeHeight },
+      });
+    });
+  });
+
+  const nodeById = new Map(layoutNodes.map((node) => [node.id, node]));
+  const layoutEdges = edges
+    .map((edge) => {
+      const sourceNode = nodeById.get(edge.from);
+      const targetNode = nodeById.get(edge.to);
+      if (!sourceNode || !targetNode) return null;
+      return {
+        ...edge,
+        sourceNode,
+        targetNode,
+        tone: resolveEdgeTone(sourceNode, targetNode),
+        path: buildEdgePath(sourceNode.box, targetNode.box),
+        labelPosition: buildEdgeLabelPosition(sourceNode.box, targetNode.box),
+      };
+    })
+    .filter(Boolean);
+
+  const width = Math.max(720, paddingX * 2 + Math.max(0, levelOrder.length - 1) * columnGap + nodeWidth);
+  const height = Math.max(320, maxBottom + paddingY);
+
+  return {
+    width,
+    height,
+    nodes: layoutNodes,
+    edges: layoutEdges,
+    columns,
+  };
+}
+
+function buildGraphCanvasSvg(layoutModel) {
+  if (!layoutModel) return "";
+  const defs = `
+    <defs>
+      <marker id="graph-arrow-idle" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"></path>
+      </marker>
+      <marker id="graph-arrow-active" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb"></path>
+      </marker>
+      <marker id="graph-arrow-ready" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#d97706"></path>
+      </marker>
+      <marker id="graph-arrow-complete" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#059669"></path>
+      </marker>
+      <marker id="graph-arrow-failed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#dc2626"></path>
+      </marker>
+    </defs>
+  `;
+  const columnMarkup = layoutModel.columns.map((column) => `
+    <g>
+      <rect x="${column.x}" y="${column.y}" width="${column.width}" height="${column.height}" rx="26" fill="rgba(255,255,255,0.72)" stroke="rgba(148,163,184,0.28)" stroke-dasharray="${column.count > 1 ? "8 6" : "0"}"></rect>
+      <text x="${column.x + 18}" y="${column.y + 28}" font-size="12" font-weight="700" fill="#64748b" letter-spacing="1.6">${escapeXml(column.label)}</text>
+    </g>
+  `).join("");
+
+  const edgeColors = {
+    idle: "#94a3b8",
+    active: "#2563eb",
+    ready: "#d97706",
+    complete: "#059669",
+    failed: "#dc2626",
+  };
+
+  const edgeMarkup = layoutModel.edges.map((edge) => {
+    const color = edgeColors[edge.tone] || edgeColors.idle;
+    const labelText = edge.label ? `
+      <text x="${edge.labelPosition.x}" y="${edge.labelPosition.y}" font-size="11" font-weight="600" fill="${color}" text-anchor="middle">${escapeXml(edge.label)}</text>
+    ` : "";
+    return `
+      <g>
+        <path d="${edge.path}" fill="none" stroke="${color}" stroke-width="${edge.tone === "active" ? 3 : 2}" opacity="${edge.tone === "idle" ? "0.62" : "1"}" marker-end="url(#graph-arrow-${edge.tone})"></path>
+        ${labelText}
+      </g>
+    `;
+  }).join("");
+
+  const nodeMarkup = layoutModel.nodes.map((node) => {
+    const x = node.box.x;
+    const y = node.box.y;
+    const width = node.box.width;
+    const height = node.box.height;
+    const statusColors = {
+      current: { fill: "#eff6ff", stroke: "#2563eb", text: "#1d4ed8" },
+      next: { fill: "#fffbeb", stroke: "#d97706", text: "#b45309" },
+      queued: { fill: "#fff7ed", stroke: "#fb923c", text: "#c2410c" },
+      completed: { fill: "#ecfdf5", stroke: "#059669", text: "#047857" },
+      failed: { fill: "#fef2f2", stroke: "#dc2626", text: "#b91c1c" },
+      blocked: { fill: "#f8fafc", stroke: "#94a3b8", text: "#475569" },
+      unknown: { fill: "#f8fafc", stroke: "#94a3b8", text: "#475569" },
+      idle: { fill: "#ffffff", stroke: "#cbd5e1", text: "#475569" },
+    };
+    const palette = statusColors[node.flowRole] || statusColors.idle;
+    const summary = node.displaySummary ? `<text x="${x + 20}" y="${y + 76}" font-size="12" fill="#475569">${escapeXml(node.displaySummary)}</text>` : "";
+    const meta = getNodeMetaTokens(node).slice(0, 3).join(" · ");
+    const progressMarkup = node.progress != null ? `
+      <rect x="${x + 20}" y="${y + height - 28}" width="${width - 40}" height="6" rx="999" fill="rgba(148,163,184,0.2)"></rect>
+      <rect x="${x + 20}" y="${y + height - 28}" width="${((width - 40) * node.progress) / 100}" height="6" rx="999" fill="#2563eb"></rect>
+    ` : "";
+    return `
+      <g>
+        <rect x="${x}" y="${y}" width="${width}" height="${height}" rx="24" fill="${palette.fill}" stroke="${palette.stroke}" stroke-width="${node.isCurrent || node.isNext ? 2.5 : 1.4}"></rect>
+        <text x="${x + 20}" y="${y + 28}" font-size="11" font-weight="700" fill="#64748b">${escapeXml(formatNodeIndex(node.order))}</text>
+        <text x="${x + 20}" y="${y + 52}" font-size="17" font-weight="700" fill="#0f172a">${escapeXml(node.displayTitle)}</text>
+        ${summary}
+        <text x="${x + 20}" y="${y + height - 52}" font-size="11" font-weight="600" fill="#64748b">${escapeXml(meta)}</text>
+        <rect x="${x + 20}" y="${y + height - 46}" width="72" height="24" rx="999" fill="${palette.fill}" stroke="${palette.stroke}" stroke-width="1.2"></rect>
+        <text x="${x + 56}" y="${y + height - 30}" font-size="11" font-weight="700" fill="${palette.text}" text-anchor="middle">${escapeXml(node.statusUi.label)}</text>
+        ${progressMarkup}
+      </g>
+    `;
+  }).join("");
+
+  return `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${layoutModel.width}" height="${layoutModel.height}" viewBox="0 0 ${layoutModel.width} ${layoutModel.height}" role="img" aria-label="Amon execution flow">
+      <rect width="100%" height="100%" rx="32" fill="#f8fafc"></rect>
+      ${defs}
+      ${columnMarkup}
+      ${edgeMarkup}
+      ${nodeMarkup}
+    </svg>
+  `.trim();
+}
+
+function buildNodeCardMarkup(nodeVm) {
+  const progressMarkup = nodeVm.progress == null
+    ? ""
+    : `
+      <div class="graph-flow-node__progress" aria-hidden="true">
+        <span style="width:${Math.round(nodeVm.progress)}%"></span>
+      </div>
+    `;
+  const summaryMarkup = nodeVm.displaySummary
+    ? `<p class="graph-flow-node__summary">${escapeHtml(nodeVm.displaySummary)}</p>`
+    : "";
+  const metaMarkup = getNodeMetaTokens(nodeVm)
+    .slice(0, 3)
+    .map((token) => `<span class="graph-flow-node__meta-chip">${escapeHtml(token)}</span>`)
+    .join("");
+  return `
+    <span class="graph-flow-node__chrome">
+      <span class="graph-flow-node__head">
+        <span class="graph-flow-node__icon material-symbols-rounded" aria-hidden="true">${escapeHtml(nodeVm.iconName || "account_tree")}</span>
+        <span class="graph-flow-node__head-copy">
+          <span class="graph-flow-node__order">STEP ${escapeHtml(formatNodeIndex(nodeVm.order))}</span>
+          <strong class="graph-flow-node__title">${escapeHtml(nodeVm.displayTitle || nodeVm.id || "(unknown node)")}</strong>
+        </span>
+      </span>
+      ${summaryMarkup}
+      <span class="graph-flow-node__meta">${metaMarkup}</span>
+      <span class="graph-flow-node__footer">
+        <span class="node-status ${escapeHtml(nodeVm.statusUi.cssClass)}">${escapeHtml(nodeVm.statusUi.label)}</span>
+        ${progressMarkup}
+      </span>
+    </span>
+  `;
 }
 
 /** @type {import('./contracts.js').ViewContract} */
@@ -36,7 +310,7 @@ export const GRAPH_VIEW = {
     const runMetaEl = rootEl.querySelector("#graph-run-meta");
     const runSelectEl = rootEl.querySelector("#graph-run-select");
     const refreshEl = rootEl.querySelector("#graph-history-refresh");
-    const copyMermaidEl = rootEl.querySelector("#graph-copy-mermaid");
+    const copyGraphEl = rootEl.querySelector("#graph-copy-mermaid");
     const exportSvgEl = rootEl.querySelector("#graph-export-svg");
     const copyRunIdEl = ctx.elements?.copyRunId;
     const drawerEl = ctx.elements?.graphNodeDrawer;
@@ -48,13 +322,15 @@ export const GRAPH_VIEW = {
     const drawerEventsEl = ctx.elements?.graphNodeEvents;
 
     const local = {
-      graph: null,
-      panZoom: null,
       runId: "",
       viewModel: null,
       selectedNodeId: "",
+      autoFocusNodeId: "",
       nodeDetails: new Map(),
-      svgNodeGroups: new Map(),
+      layoutModel: null,
+      exportableSvg: "",
+      canvasNodeEls: new Map(),
+      listNodeEls: new Map(),
       unsubscribeLiveUpdates: null,
       refreshTimer: null,
       pendingRefreshKind: null,
@@ -62,7 +338,6 @@ export const GRAPH_VIEW = {
     };
 
     const REFRESH_THROTTLE_MS = 450;
-    const STATUS_CLASS_LIST = getGraphStatusClassList();
 
     function closeGraphNodeDrawer() {
       if (!drawerEl) return;
@@ -72,19 +347,6 @@ export const GRAPH_VIEW = {
     function openGraphNodeDrawer() {
       if (!drawerEl) return;
       drawerEl.hidden = false;
-    }
-
-    function updateSelectedState() {
-      const selectedNodeId = String(local.selectedNodeId || "").trim();
-      listEl.querySelectorAll("[data-node-id]").forEach((buttonEl) => {
-        const isSelected = buttonEl.getAttribute("data-node-id") === selectedNodeId;
-        buttonEl.classList.toggle("is-selected", isSelected);
-        buttonEl.setAttribute("aria-pressed", isSelected ? "true" : "false");
-      });
-      local.svgNodeGroups.forEach((groups, nodeId) => {
-        const isSelected = nodeId === selectedNodeId;
-        groups.forEach((group) => group.classList.toggle("graph-node--selected", isSelected));
-      });
     }
 
     function renderGraphNodeDrawer(nodeDetail = null) {
@@ -130,6 +392,24 @@ export const GRAPH_VIEW = {
           drawerEventsEl.appendChild(li);
         });
       }
+    }
+
+    function updateSelectedState() {
+      local.listNodeEls.forEach((buttonEl, nodeId) => {
+        const isSelected = nodeId === local.selectedNodeId;
+        const isAutoFocus = nodeId === local.autoFocusNodeId;
+        buttonEl.classList.toggle("is-selected", isSelected);
+        buttonEl.classList.toggle("is-auto-focus", isAutoFocus);
+        buttonEl.setAttribute("aria-pressed", isSelected ? "true" : "false");
+      });
+      local.canvasNodeEls.forEach((buttonEl, nodeId) => {
+        const isSelected = nodeId === local.selectedNodeId;
+        const isAutoFocus = nodeId === local.autoFocusNodeId;
+        buttonEl.classList.toggle("is-selected", isSelected);
+        buttonEl.classList.toggle("is-auto-focus", isAutoFocus);
+        buttonEl.setAttribute("aria-pressed", isSelected ? "true" : "false");
+        buttonEl.setAttribute("aria-current", isAutoFocus ? "step" : "false");
+      });
     }
 
     async function selectNode(nodeId, options = {}) {
@@ -247,102 +527,11 @@ export const GRAPH_VIEW = {
       local.refreshInFlight = false;
     }
 
-    function buildLabelToNodeIds(viewModel) {
-      const map = new Map();
-      (viewModel?.nodes || []).forEach((nodeVm) => {
-        const graphNode = nodeVm?.graphNode || {};
-        const keys = new Set([
-          nodeVm.id,
-          graphNode.id,
-          graphNode.label,
-          graphNode.name,
-          graphNode.title,
-          graphNode.display_name,
-        ]
-          .map((value) => String(value || "").trim())
-          .filter(Boolean));
-        keys.forEach((key) => {
-          const existing = map.get(key) || [];
-          if (!existing.includes(nodeVm.id)) existing.push(nodeVm.id);
-          map.set(key, existing);
-        });
-      });
-      return map;
-    }
-
-    function resolveNodeIdFromSvgGroup(groupEl, viewModel, labelMap) {
-      const rawCandidates = [
-        groupEl?.dataset?.nodeId,
-        groupEl?.dataset?.id,
-        groupEl?.getAttribute?.("data-node-id"),
-        groupEl?.getAttribute?.("data-id"),
-        groupEl?.id,
-        groupEl?.querySelector?.("title")?.textContent,
-      ];
-      const nodeIds = new Set((viewModel?.nodes || []).map((node) => node.id));
-      for (const candidate of rawCandidates) {
-        const normalized = String(candidate || "").trim();
-        if (normalized && nodeIds.has(normalized)) return normalized;
-      }
-      const label = String(groupEl?.querySelector?.(".nodeLabel")?.textContent || "").trim();
-      if (!label) return "";
-      const matchedIds = labelMap.get(label) || [];
-      if (matchedIds.length > 1) {
-        logUiDebug("graph.svg-node-ambiguous-label", { label, node_ids: matchedIds });
-      }
-      return matchedIds[0] || "";
-    }
-
-    function bindMermaidNodeClick() {
-      local.svgNodeGroups = new Map();
-      const svgRoot = previewEl.querySelector("svg");
-      if (!svgRoot || !local.viewModel) return { groupCount: 0, boundCount: 0 };
-      const labelMap = buildLabelToNodeIds(local.viewModel);
-      const groups = svgRoot.querySelectorAll("g.node");
-      let boundCount = 0;
-      groups.forEach((group) => {
-        const nodeId = resolveNodeIdFromSvgGroup(group, local.viewModel, labelMap);
-        if (!nodeId) return;
-        const vmNode = local.viewModel.nodes.find((node) => node.id === nodeId);
-        if (vmNode?.statusUi?.mermaidClass) {
-          group.classList.add(vmNode.statusUi.mermaidClass);
-        }
-        const list = local.svgNodeGroups.get(nodeId) || [];
-        list.push(group);
-        local.svgNodeGroups.set(nodeId, list);
-        group.style.cursor = "pointer";
-        group.setAttribute("role", "button");
-        group.setAttribute("tabindex", "0");
-        group.setAttribute("aria-label", `開啟 ${nodeId} 節點詳細資訊`);
-        group.addEventListener("pointerdown", (event) => {
-          group.dataset.downX = String(event.clientX);
-          group.dataset.downY = String(event.clientY);
-        });
-        group.addEventListener("click", (event) => {
-          event.stopPropagation();
-          const downX = Number(group.dataset.downX || event.clientX);
-          const downY = Number(group.dataset.downY || event.clientY);
-          const moved = Math.hypot(event.clientX - downX, event.clientY - downY);
-          if (moved > 6) return;
-          void selectNode(nodeId);
-        });
-        group.addEventListener("keydown", (event) => {
-          if (event.key !== "Enter" && event.key !== " ") return;
-          event.preventDefault();
-          void selectNode(nodeId);
-        });
-        boundCount += 1;
-      });
-      updateSelectedState();
-      return { groupCount: groups.length, boundCount };
-    }
-
     function renderGraphPreviewNotice({
       message,
       detail = "",
       refreshable = false,
       level = "empty",
-      keepSvg = false,
     }) {
       const noticeEl = document.createElement("p");
       noticeEl.className = `graph-empty-state graph-empty-state--${level}`;
@@ -365,58 +554,130 @@ export const GRAPH_VIEW = {
         });
         noticeEl.appendChild(buttonEl);
       }
-      if (keepSvg) {
-        previewEl.insertAdjacentElement("afterbegin", noticeEl);
-      } else {
-        previewEl.innerHTML = "";
-        previewEl.appendChild(noticeEl);
-      }
+      previewEl.replaceChildren(noticeEl);
+      local.layoutModel = null;
+      local.exportableSvg = "";
+      local.canvasNodeEls.clear();
     }
 
-    function summarizeRenderError(error) {
-      const rawMessage = error instanceof Error ? error.message : String(error || "unknown error");
-      return rawMessage.length > 220 ? `${rawMessage.slice(0, 220)}…` : rawMessage;
-    }
-
-    function updateGraphNodeStatusDom(viewModel) {
-      const nodesById = new Map((viewModel?.nodes || []).map((node) => [node.id, node]));
-      listEl.querySelectorAll("[data-node-id]").forEach((buttonEl) => {
-        const nodeId = String(buttonEl.getAttribute("data-node-id") || "").trim();
-        const nodeVm = nodesById.get(nodeId);
-        if (!nodeVm) return;
-        const statusEl = buttonEl.querySelector(".node-status");
-        if (!(statusEl instanceof HTMLElement)) return;
-        statusEl.className = `node-status ${nodeVm.statusUi.cssClass}`;
-        statusEl.textContent = nodeVm.statusUi.label;
-      });
-      local.svgNodeGroups.forEach((groups, nodeId) => {
-        const nodeVm = nodesById.get(nodeId);
-        groups.forEach((group) => {
-          group.classList.remove(...STATUS_CLASS_LIST);
-          group.classList.add(nodeVm?.statusUi?.mermaidClass || "node-status--unknown");
-        });
-      });
+    function syncAutoFocus(viewModel) {
+      const nextAutoFocusNodeId = String(viewModel?.preferredFocusNodeId || "").trim();
+      const changed = nextAutoFocusNodeId && nextAutoFocusNodeId !== local.autoFocusNodeId;
+      local.autoFocusNodeId = nextAutoFocusNodeId;
       updateSelectedState();
+      if (!changed) return;
+      const nodeEl = local.canvasNodeEls.get(nextAutoFocusNodeId);
+      nodeEl?.scrollIntoView?.({ behavior: "smooth", block: "center", inline: "center" });
     }
 
-    async function renderGraph(payload, nodeStates = null, options = {}) {
-      const { allowIncrementalUpdate = false } = options;
+    function renderGraphCanvas(viewModel) {
+      const layoutModel = createGraphLayout(viewModel);
+      local.layoutModel = layoutModel;
+      local.exportableSvg = buildGraphCanvasSvg(layoutModel);
+      local.canvasNodeEls.clear();
+
+      const canvasEl = document.createElement("div");
+      canvasEl.className = "graph-flow-canvas";
+      canvasEl.style.width = `${layoutModel.width}px`;
+      canvasEl.style.height = `${layoutModel.height}px`;
+
+      const svgEl = createSvgElement("svg", {
+        class: "graph-flow-svg",
+        viewBox: `0 0 ${layoutModel.width} ${layoutModel.height}`,
+        width: layoutModel.width,
+        height: layoutModel.height,
+        "aria-hidden": "true",
+      });
+
+      const defsEl = createSvgElement("defs");
+      [
+        ["idle", "#94a3b8"],
+        ["active", "#2563eb"],
+        ["ready", "#d97706"],
+        ["complete", "#059669"],
+        ["failed", "#dc2626"],
+      ].forEach(([name, color]) => {
+        const markerEl = createSvgElement("marker", {
+          id: `graph-flow-arrow-${name}`,
+          viewBox: "0 0 10 10",
+          refX: "9",
+          refY: "5",
+          markerWidth: "8",
+          markerHeight: "8",
+          orient: "auto-start-reverse",
+        });
+        markerEl.appendChild(createSvgElement("path", { d: "M 0 0 L 10 5 L 0 10 z", fill: color }));
+        defsEl.appendChild(markerEl);
+      });
+      svgEl.appendChild(defsEl);
+
+      layoutModel.edges.forEach((edge) => {
+        const groupEl = createSvgElement("g", { class: `graph-flow-edge graph-flow-edge--${edge.tone}` });
+        groupEl.appendChild(createSvgElement("path", {
+          d: edge.path,
+          class: "graph-flow-edge__path",
+          "marker-end": `url(#graph-flow-arrow-${edge.tone})`,
+        }));
+        if (edge.label) {
+          const labelEl = createSvgElement("text", {
+            x: edge.labelPosition.x,
+            y: edge.labelPosition.y,
+            class: "graph-flow-edge__label",
+            "text-anchor": "middle",
+          });
+          labelEl.textContent = edge.label;
+          groupEl.appendChild(labelEl);
+        }
+        svgEl.appendChild(groupEl);
+      });
+
+      const columnLayerEl = document.createElement("div");
+      columnLayerEl.className = "graph-flow-columns";
+      layoutModel.columns.forEach((column) => {
+        const columnEl = document.createElement("div");
+        columnEl.className = "graph-flow-column";
+        columnEl.style.left = `${column.x}px`;
+        columnEl.style.top = `${column.y}px`;
+        columnEl.style.width = `${column.width}px`;
+        columnEl.style.height = `${column.height}px`;
+        columnEl.innerHTML = `<span class="graph-flow-column__label">${escapeHtml(column.label)}</span>`;
+        columnLayerEl.appendChild(columnEl);
+      });
+
+      const nodeLayerEl = document.createElement("div");
+      nodeLayerEl.className = "graph-flow-nodes";
+      layoutModel.nodes.forEach((nodeVm) => {
+        const nodeId = nodeVm.id;
+        const nodeEl = document.createElement("button");
+        nodeEl.type = "button";
+        nodeEl.className = `graph-flow-node graph-flow-node--${nodeVm.flowRole}`;
+        nodeEl.dataset.nodeId = nodeId;
+        nodeEl.style.left = `${nodeVm.box.x}px`;
+        nodeEl.style.top = `${nodeVm.box.y}px`;
+        nodeEl.style.width = `${nodeVm.box.width}px`;
+        nodeEl.style.height = `${nodeVm.box.height}px`;
+        nodeEl.setAttribute("aria-label", `查看 ${nodeVm.displayTitle || nodeId} 節點詳細資訊`);
+        nodeEl.innerHTML = buildNodeCardMarkup(nodeVm);
+        nodeEl.addEventListener("click", (event) => {
+          event.stopPropagation();
+          void selectNode(nodeId);
+        });
+        local.canvasNodeEls.set(nodeId, nodeEl);
+        nodeLayerEl.appendChild(nodeEl);
+      });
+
+      canvasEl.appendChild(svgEl);
+      canvasEl.appendChild(columnLayerEl);
+      canvasEl.appendChild(nodeLayerEl);
+      previewEl.replaceChildren(canvasEl);
+      syncAutoFocus(viewModel);
+    }
+
+    async function renderGraph(payload) {
       const viewModel = buildGraphRuntimeViewModel({
         graphPayload: payload,
-        nodeStates,
         runMeta: { run_id: local.runId, run_status: payload?.run_status },
       });
-      const canIncrementalUpdate = allowIncrementalUpdate
-        && !!local.viewModel
-        && local.viewModel.graphMermaid === viewModel.graphMermaid
-        && local.svgNodeGroups.size > 0;
-
-      if (canIncrementalUpdate) {
-        local.viewModel = viewModel;
-        updateGraphNodeStatusDom(viewModel);
-        return;
-      }
-
       local.viewModel = viewModel;
       if (viewModel.diagnostics.length) {
         logUiDebug("graph.view-model", {
@@ -425,107 +686,48 @@ export const GRAPH_VIEW = {
           node_count: viewModel.nodes.length,
         });
       }
-      const graph = viewModel.graph || {};
-      local.graph = graph;
-      codeEl.textContent = viewModel.graphMermaid || "";
+
+      codeEl.textContent = formatJson(viewModel.graph || {});
       listEl.innerHTML = "";
-      const nodes = Array.isArray(viewModel?.nodes) ? viewModel.nodes : [];
-      if (!nodes.length) {
+      local.listNodeEls.clear();
+
+      if (!viewModel.nodes.length) {
         listEl.innerHTML = '<li><p class="graph-empty-state">目前沒有可顯示的節點資料。</p></li>';
+        renderGraphPreviewNotice({
+          message: "此 Run 尚無可視化節點資料",
+          detail: "請確認 graph.resolved.json 是否已有 nodes / edges。",
+        });
+        renderGraphNodeDrawer(null);
+        return;
       }
-      nodes.forEach((nodeVm) => {
-        const node = nodeVm?.graphNode || {};
-        const progressValue = Number.isFinite(Number(node?.progress)) ? Math.max(0, Math.min(100, Number(node.progress))) : null;
-        const progressMeta = progressValue === null ? "" : `<span>${Math.round(progressValue)}%</span>`;
-        const progressBlock = progressValue === null
-          ? ""
-          : `<div class="graph-node-item__progress" aria-label="Node progress"><span style="--graph-progress:${progressValue}%;"></span></div>`;
+
+      viewModel.nodes.forEach((nodeVm) => {
         const li = document.createElement("li");
         li.className = "graph-node-item";
-        li.innerHTML = `
-          <button type="button" class="graph-node-item__button list-row" data-node-id="${nodeVm.id}">
-            <span class="graph-node-item__content">
-              <strong class="graph-node-item__title">${nodeVm.id || "(unknown node)"}</strong>
-              <span class="graph-node-item__meta">${progressMeta}${progressBlock}</span>
-            </span>
-            <span class="node-status ${nodeVm.statusUi.cssClass}">${nodeVm.statusUi.label}</span>
-          </button>
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = `graph-node-item__button graph-node-item__button--${nodeVm.flowRole} list-row`;
+        btn.dataset.nodeId = nodeVm.id;
+        btn.innerHTML = `
+          <span class="graph-node-item__content">
+            <strong class="graph-node-item__title">${escapeHtml(formatNodeIndex(nodeVm.order))} · ${escapeHtml(nodeVm.displayTitle || nodeVm.id || "(unknown node)")}</strong>
+            <span class="graph-node-item__meta">${escapeHtml(getNodeMetaTokens(nodeVm).slice(0, 3).join(" · "))}</span>
+          </span>
+          <span class="node-status ${escapeHtml(nodeVm.statusUi.cssClass)}">${escapeHtml(nodeVm.statusUi.label)}</span>
         `;
+        li.appendChild(btn);
         listEl.appendChild(li);
+        local.listNodeEls.set(nodeVm.id, btn);
       });
 
-      previewEl.innerHTML = "";
-      local.panZoom?.destroy?.();
-      local.panZoom = null;
-
-      const graphMermaid = String(viewModel.graphMermaid || "").trim();
-      // A) graph_mermaid 為空/缺失
-      if (!graphMermaid) {
-        renderGraphPreviewNotice({
-          message: "此 Run 尚無流程圖資料",
-          detail: "請先查看下方 graph-code 區塊是否有內容。",
-        });
-      // B) graph_mermaid 有值，但 Mermaid library 未載入
-      } else if (!window.__mermaid || typeof window.__mermaid.render !== "function") {
-        logUiDebug("graph.mermaid-missing", {
-          scenario: "B",
-          run_id: local.runId,
-          has_graph_mermaid: true,
-          mermaid_type: typeof window.__mermaid,
-        });
-        console.error("[graph] Mermaid library not loaded.", { run_id: local.runId });
-        renderGraphPreviewNotice({
-          message: "Mermaid 未載入（可能離線或資源被擋）",
-          detail: "請嘗試重新整理頁面後再試一次。",
-          refreshable: true,
-          level: "warning",
-        });
+      renderGraphCanvas(viewModel);
+      if (local.selectedNodeId && !viewModel.nodes.some((node) => node.id === local.selectedNodeId)) {
+        local.selectedNodeId = "";
+        renderGraphNodeDrawer(null);
+        closeGraphNodeDrawer();
       } else {
-        try {
-          // C) Mermaid render throw error
-          const { svg } = await window.__mermaid.render(`graph-preview-${Date.now()}`, graphMermaid);
-          previewEl.innerHTML = svg;
-          const svgEl = previewEl.querySelector("svg");
-          if (svgEl && window.svgPanZoom) {
-            local.panZoom = window.svgPanZoom(svgEl, { controlIconsEnabled: true, fit: true, center: true });
-          }
-          const { groupCount, boundCount } = bindMermaidNodeClick();
-          // D) 渲染成功但找不到可識別節點
-          if (groupCount === 0 || boundCount === 0) {
-            logUiDebug("graph.mermaid-node-structure-unexpected", {
-              scenario: "D",
-              run_id: local.runId,
-              group_count: groupCount,
-              bound_count: boundCount,
-            });
-            console.error("[graph] Mermaid SVG rendered but no recognizable nodes.", {
-              run_id: local.runId,
-              group_count: groupCount,
-              bound_count: boundCount,
-            });
-            renderGraphPreviewNotice({
-              message: "流程圖已渲染但無法識別節點",
-              detail: "可能是 Mermaid 版本差異，請比對 g.node 結構。",
-              level: "warning",
-              keepSvg: true,
-            });
-          }
-        } catch (error) {
-          const errorMessage = summarizeRenderError(error);
-          logUiDebug("graph.mermaid-render-failed", {
-            scenario: "C",
-            run_id: local.runId,
-            error_message: errorMessage,
-          });
-          console.error("[graph] Mermaid render failed.", { run_id: local.runId, error_message: errorMessage });
-          renderGraphPreviewNotice({
-            message: "流程圖渲染失敗",
-            detail: `錯誤摘要：${errorMessage}`,
-            level: "danger",
-          });
-        }
+        updateSelectedState();
       }
-      updateSelectedState();
     }
 
     async function loadRuns(options = {}) {
@@ -579,6 +781,9 @@ export const GRAPH_VIEW = {
         codeEl.textContent = "";
         listEl.innerHTML = "";
         local.selectedNodeId = "";
+        local.autoFocusNodeId = "";
+        local.layoutModel = null;
+        local.exportableSvg = "";
         renderGraphNodeDrawer(null);
         closeGraphNodeDrawer();
         return;
@@ -596,8 +801,7 @@ export const GRAPH_VIEW = {
           copyRunIdEl.disabled = false;
           copyRunIdEl.dataset.runId = runId;
         }
-        const fallbackNodeStates = ctx.appState?.graphRunId === runId ? (ctx.appState?.graphNodeStates || null) : null;
-        await renderGraph(graphPayload || {}, fallbackNodeStates, { allowIncrementalUpdate: preserveSelection });
+        await renderGraph(graphPayload || {});
         if (shouldKeepSelection && local.viewModel?.nodes?.some((node) => node.id === previousSelectedNodeId)) {
           local.selectedNodeId = previousSelectedNodeId;
           updateSelectedState();
@@ -658,33 +862,27 @@ export const GRAPH_VIEW = {
       closeGraphNodeDrawer();
     };
 
-    const onCopyMermaid = async () => {
-      const mermaidCode = String(codeEl?.textContent || "").trim();
-      if (!mermaidCode) {
-        ctx.ui.toast?.show("無 Mermaid 內容", { type: "warning", duration: 12000 });
+    const onCopyGraphSource = async () => {
+      const graphSource = String(codeEl?.textContent || "").trim();
+      if (!graphSource) {
+        ctx.ui.toast?.show("無 Graph JSON 內容", { type: "warning", duration: 12000 });
         return;
       }
-      await copyText(mermaidCode, {
+      await copyText(graphSource, {
         toast: (message, options) => ctx.ui.toast?.show(message, options),
-        successMessage: "Mermaid 已複製到剪貼簿",
-        errorMessage: "複製 Mermaid 失敗，請手動複製",
+        successMessage: "Graph JSON 已複製到剪貼簿",
+        errorMessage: "複製 Graph JSON 失敗，請手動複製",
       });
     };
 
     const onExportSvg = () => {
-      const svgEl = previewEl?.querySelector("svg");
-      if (!(svgEl instanceof SVGElement)) {
-        ctx.ui.toast?.show("尚未完成渲染", { type: "warning", duration: 12000 });
-        return;
-      }
-      const svgContent = buildExportableSvg(svgEl);
-      if (!svgContent) {
+      if (!local.exportableSvg) {
         ctx.ui.toast?.show("尚未完成渲染", { type: "warning", duration: 12000 });
         return;
       }
       const runId = String(local.runId || "").trim();
       const fallback = new Date().toISOString().replace(/[:.]/g, "-");
-      const ok = downloadTextFile(`graph-${runId || fallback}.svg`, svgContent, "image/svg+xml;charset=utf-8");
+      const ok = downloadTextFile(`graph-${runId || fallback}.svg`, local.exportableSvg, "image/svg+xml;charset=utf-8");
       if (!ok) {
         ctx.ui.toast?.show("SVG 匯出失敗，請稍後再試", { type: "danger", duration: 12000 });
         return;
@@ -695,7 +893,7 @@ export const GRAPH_VIEW = {
     listEl.addEventListener("click", onListClick);
     runSelectEl?.addEventListener("change", onRunChange);
     refreshEl?.addEventListener("click", () => void load());
-    copyMermaidEl?.addEventListener("click", onCopyMermaid);
+    copyGraphEl?.addEventListener("click", onCopyGraphSource);
     exportSvgEl?.addEventListener("click", onExportSvg);
     drawerCloseEl?.addEventListener("click", onDrawerClose);
     document.addEventListener("keydown", onDocumentKeyDown);
@@ -707,13 +905,11 @@ export const GRAPH_VIEW = {
       listEl.removeEventListener("click", onListClick);
       runSelectEl?.removeEventListener("change", onRunChange);
       drawerCloseEl?.removeEventListener("click", onDrawerClose);
-      copyMermaidEl?.removeEventListener("click", onCopyMermaid);
+      copyGraphEl?.removeEventListener("click", onCopyGraphSource);
       exportSvgEl?.removeEventListener("click", onExportSvg);
       document.removeEventListener("keydown", onDocumentKeyDown);
       document.removeEventListener("click", onDocumentClick);
       unsubscribeGraphLiveUpdates();
-      local.panZoom?.destroy?.();
-      local.panZoom = null;
       closeGraphNodeDrawer();
     };
     GRAPH_VIEW.__graphLoad = load;

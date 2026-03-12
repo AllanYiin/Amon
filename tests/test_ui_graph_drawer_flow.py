@@ -3,11 +3,11 @@ import unittest
 
 
 class GraphDrawerFlowContractTests(unittest.TestCase):
-    def test_graph_view_wires_single_select_node_path_for_list_and_svg(self) -> None:
+    def test_graph_view_wires_single_select_node_path_for_list_and_canvas(self) -> None:
         graph_js = Path("src/amon/ui/static/js/views/graph.js").read_text(encoding="utf-8")
         self.assertIn("async function selectNode(nodeId, options = {})", graph_js)
         self.assertIn("void selectNode(node.dataset.nodeId || \"\")", graph_js)
-        self.assertIn("bindMermaidNodeClick", graph_js)
+        self.assertIn("function renderGraphCanvas(viewModel)", graph_js)
         self.assertIn("void selectNode(nodeId)", graph_js)
 
     def test_graph_view_supports_drawer_open_close_controls(self) -> None:
@@ -27,11 +27,11 @@ class GraphDrawerFlowContractTests(unittest.TestCase):
         self.assertIn("ctx.bus?.on?.(\"stream:event\"", graph_js)
 
 
-    def test_graph_view_has_incremental_status_refresh_path(self) -> None:
+    def test_graph_view_has_auto_focus_and_exportable_svg_path(self) -> None:
         graph_js = Path("src/amon/ui/static/js/views/graph.js").read_text(encoding="utf-8")
-        self.assertIn("function updateGraphNodeStatusDom(viewModel)", graph_js)
-        self.assertIn("allowIncrementalUpdate", graph_js)
-        self.assertIn("local.viewModel.graphMermaid === viewModel.graphMermaid", graph_js)
+        self.assertIn("function syncAutoFocus(viewModel)", graph_js)
+        self.assertIn("function buildGraphCanvasSvg(layoutModel)", graph_js)
+        self.assertIn("preferredFocusNodeId", graph_js)
 
     def test_bootstrap_uses_adapter_status_label_without_private_mapping(self) -> None:
         bootstrap_js = Path("src/amon/ui/static/js/bootstrap.js").read_text(encoding="utf-8")

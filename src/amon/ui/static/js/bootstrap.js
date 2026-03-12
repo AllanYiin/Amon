@@ -2519,25 +2519,10 @@ appStore.patch({ bootstrappedAt: Date.now() });
           state.graphPanZoom.destroy();
           state.graphPanZoom = null;
         }
-        if (!code) return;
-        try {
-          const { svg } = await window.__mermaid.render(`graphPreview-${Date.now()}`, code);
-          elements.graphPreview.innerHTML = svg;
-          const svgEl = elements.graphPreview.querySelector("svg");
-          if (svgEl && window.svgPanZoom) {
-            state.graphPanZoom = svgPanZoom(svgEl, {
-              controlIconsEnabled: true,
-              fit: true,
-              center: true,
-              zoomScaleSensitivity: 0.35,
-              minZoom: 0.5,
-              maxZoom: 6,
-            });
-          }
-          decorateMermaidNodes();
-        } catch (error) {
-          elements.graphPreview.innerHTML = "<p>Mermaid 渲染失敗，請檢查 graph。</p>";
-        }
+        const nodeCount = Array.isArray(state.graph?.nodes) ? state.graph.nodes.length : 0;
+        const edgeCount = Array.isArray(state.graph?.edges) ? state.graph.edges.length : 0;
+        if (!code && nodeCount === 0) return;
+        elements.graphPreview.innerHTML = `<p class="graph-empty-state">Graph 已同步：${nodeCount} 個節點、${edgeCount} 條連線。請切到「流程圖」頁查看互動式視圖。</p>`;
       }
 
       function buildCurrentRuntimeViewModel() {

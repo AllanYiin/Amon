@@ -9,18 +9,13 @@ from pathlib import Path
 
 
 class IndexHtmlVendorSmokeTests(unittest.TestCase):
-    def test_mermaid_and_svg_pan_zoom_use_local_vendor_assets_without_jsdelivr(self) -> None:
+    def test_graph_page_uses_local_svg_pan_zoom_but_no_longer_loads_mermaid(self) -> None:
         index_html = Path("src/amon/ui/index.html").read_text(encoding="utf-8")
 
-        self.assertIn('src="static/vendor/mermaid/mermaid.min.js"', index_html)
         self.assertIn('src="static/vendor/svg-pan-zoom/svg-pan-zoom.min.js"', index_html)
+        self.assertNotIn('src="static/vendor/mermaid/mermaid.min.js"', index_html)
         self.assertNotIn("cdn.jsdelivr.net/npm/mermaid", index_html)
         self.assertNotIn("cdn.jsdelivr.net/npm/svg-pan-zoom", index_html)
-
-    def test_vendor_mermaid_build_is_umd_bundle(self) -> None:
-        mermaid_vendor_js = Path("src/amon/ui/static/vendor/mermaid/mermaid.min.js").read_text(encoding="utf-8")
-        self.assertIn("JM.mermaid=Ag()", mermaid_vendor_js)
-        self.assertNotIn('import {', mermaid_vendor_js)
 
     def test_vendor_svg_pan_zoom_build_exports_svgPanZoom_without_svgjs_global(self) -> None:
         svg_pan_zoom_vendor_js = Path("src/amon/ui/static/vendor/svg-pan-zoom/svg-pan-zoom.min.js").read_text(encoding="utf-8")
@@ -29,60 +24,30 @@ class IndexHtmlVendorSmokeTests(unittest.TestCase):
 
 
 @unittest.skipIf(shutil.which("node") is None, "node is required for graph frontend smoke tests")
-class GraphViewMermaidMissingSmokeTests(unittest.TestCase):
-    def test_graph_mermaid_missing_branch_renders_expected_notice_text(self) -> None:
+class GraphViewCustomFlowSmokeTests(unittest.TestCase):
+    def test_graph_view_uses_custom_canvas_renderer_instead_of_mermaid(self) -> None:
         graph_js = Path("src/amon/ui/static/js/views/graph.js").read_text(encoding="utf-8")
-        self.assertIn('!window.__mermaid || typeof window.__mermaid.render !== "function"', graph_js)
-        self.assertIn('message: "Mermaid 未載入（可能離線或資源被擋）"', graph_js)
+        self.assertIn("function createGraphLayout(viewModel)", graph_js)
+        self.assertIn("function renderGraphCanvas(viewModel)", graph_js)
+        self.assertIn("function buildGraphCanvasSvg(layoutModel)", graph_js)
+        self.assertNotIn("__mermaid", graph_js)
 
         script = textwrap.dedent(
             """
-            class FakeElement {
-              constructor() {
-                this.children = [];
-                this.textContent = "";
-                this.className = "";
-                this.dataset = {};
-              }
-              appendChild(child) {
-                this.children.push(child);
-                return child;
-              }
-              collectText() {
-                let text = this.textContent || "";
-                for (const child of this.children) {
-                  if (typeof child.collectText === "function") text += child.collectText();
-                }
-                return text;
-              }
+            function buildEdgePath(sourceBox, targetBox) {
+              const startX = sourceBox.x + sourceBox.width;
+              const startY = sourceBox.y + sourceBox.height / 2;
+              const endX = targetBox.x;
+              const endY = targetBox.y + targetBox.height / 2;
+              const deltaX = Math.max(72, (endX - startX) * 0.5);
+              return `M ${startX} ${startY} C ${startX + deltaX} ${startY}, ${endX - deltaX} ${endY}, ${endX} ${endY}`;
             }
 
-            const previewEl = new FakeElement();
-            const document = { createElement: () => new FakeElement() };
-            const window = { __mermaid: undefined };
-
-            function renderGraphPreviewNotice({ message, detail = "" }) {
-              const noticeEl = document.createElement("p");
-              noticeEl.className = "graph-empty-state graph-empty-state--warning";
-              const messageEl = document.createElement("span");
-              messageEl.textContent = message;
-              noticeEl.appendChild(messageEl);
-              if (detail) {
-                const detailEl = document.createElement("small");
-                detailEl.textContent = detail;
-                noticeEl.appendChild(detailEl);
-              }
-              previewEl.appendChild(noticeEl);
-            }
-
-            if (!window.__mermaid || typeof window.__mermaid?.render !== "function") {
-              renderGraphPreviewNotice({
-                message: "Mermaid 未載入（可能離線或資源被擋）",
-                detail: "請嘗試重新整理頁面後再試一次。",
-              });
-            }
-
-            console.log(JSON.stringify({ previewText: previewEl.collectText() }));
+            const d = buildEdgePath(
+              { x: 40, y: 60, width: 272, height: 188 },
+              { x: 360, y: 60, width: 272, height: 188 }
+            );
+            console.log(JSON.stringify({ d }));
             """
         )
         completed = subprocess.run(
@@ -90,9 +55,11 @@ class GraphViewMermaidMissingSmokeTests(unittest.TestCase):
             check=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
         payload = json.loads(completed.stdout)
-        self.assertIn("Mermaid 未載入", payload["previewText"])
+        self.assertIn("M 312 154", payload["d"])
+        self.assertIn("C", payload["d"])
 
     def test_graph_view_does_not_store_cleanup_on_undefined_this(self) -> None:
         graph_js = Path("src/amon/ui/static/js/views/graph.js").read_text(encoding="utf-8")

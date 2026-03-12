@@ -16,6 +16,7 @@ class TaskGraphV3AdapterTests(unittest.TestCase):
             check=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
         return json.loads(completed.stdout)
 
@@ -75,4 +76,51 @@ class TaskGraphV3AdapterTests(unittest.TestCase):
         payload = self._run_adapter_script(script)
         self.assertIn("node_states_missing", payload["diagnostics"])
         self.assertEqual(payload["statuses"], ["unknown", "running"])
+
+    def test_marks_next_runnable_node_and_focus_target(self) -> None:
+        module_uri = (Path("src/amon/ui/static/js/domain/graphRuntimeAdapter.js").resolve().as_uri())
+        script = textwrap.dedent(
+          f"""
+          import {{ buildGraphRuntimeViewModel }} from "{module_uri}";
+          const vm = buildGraphRuntimeViewModel({{
+            graphPayload: {{
+              graph: {{
+                nodes: [
+                  {{ id: "n1", title: "Start" }},
+                  {{ id: "n2", title: "Planner" }},
+                  {{ id: "n3", title: "Writer" }}
+                ],
+                edges: [
+                  {{ from: "n1", to: "n2", kind: "next", edge_type: "CONTROL" }},
+                  {{ from: "n2", to: "n3", kind: "next", edge_type: "CONTROL" }}
+                ]
+              }}
+            }},
+            nodeStates: {{
+              n1: {{ status: "done" }},
+              n2: {{ status: "pending" }},
+              n3: {{ status: "pending" }}
+            }}
+          }});
+          console.log(JSON.stringify({{
+            preferredFocusNodeId: vm.preferredFocusNodeId,
+            nodes: vm.nodes.map((item) => ({{
+              id: item.id,
+              isNext: item.isNext,
+              isBlocked: item.isBlocked,
+              level: item.level
+            }}))
+          }}));
+          """
+        )
+        payload = self._run_adapter_script(script)
+        self.assertEqual(payload["preferredFocusNodeId"], "n2")
+        self.assertEqual(
+            payload["nodes"],
+            [
+                {"id": "n1", "isNext": False, "isBlocked": False, "level": 0},
+                {"id": "n2", "isNext": True, "isBlocked": False, "level": 1},
+                {"id": "n3", "isNext": False, "isBlocked": True, "level": 2},
+            ],
+        )
 
