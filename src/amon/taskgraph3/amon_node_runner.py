@@ -56,6 +56,7 @@ class AmonNodeRunner:
             project_path=self.project_path,
             model=agent.model,
             stream_handler=self.stream_handler,
+            allowed_tools=agent.allowed_tools,
             run_id=self.run_id,
             node_id=node.id,
             thread_id=self.thread_id,

@@ -12,6 +12,7 @@ class RouterResult:
     confidence: float = 0.0
     api: str | None = None
     args: dict[str, Any] = field(default_factory=dict)
+    execution_mode: str | None = None
     requires_confirm: bool = False
     reason: str | None = None
 
@@ -21,6 +22,7 @@ class RouterResult:
             "confidence": self.confidence,
             "api": self.api,
             "args": self.args,
+            "execution_mode": self.execution_mode,
             "requires_confirm": self.requires_confirm,
             "reason": self.reason,
         }

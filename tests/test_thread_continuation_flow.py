@@ -40,6 +40,7 @@ class ChatContinuationFlowTests(unittest.TestCase):
                     available_tools=None,
                     available_skills=None,
                     stream_handler=None,
+                    todo_handler=None,
                     run_id=None,
                     thread_id=None,
                     conversation_history=None,

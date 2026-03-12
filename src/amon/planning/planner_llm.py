@@ -130,6 +130,8 @@ def _planner_system_prompt(*, is_repair: bool) -> str:
     return (
         "你是 LLM Planner。"
         "你必須只輸出符合 TaskGraph v3 GraphDefinition 的 JSON，不得輸出 markdown、code fence、說明文字。"
+        "所有流程第一個 TASK 必須是概念對齊，先抽取關鍵概念並安排上網查證。"
+        "每個 TASK 都要最小化可用工具；若 executor=agent，請在 agent.allowedTools 僅列出該節點真正需要的工具。"
         "每個高階 task 都應該是 TASK node 並含 taskSpec，executor 可用 agent/tool。"
         "expected_artifacts 要映射到 taskSpec.artifacts 並建立對應 ARTIFACT node + DATA/EMITS edge。"
         "所有欄位型別必須正確，version 固定使用 taskgraph.v3。"
@@ -146,7 +148,12 @@ def _graph_schema_definition() -> dict[str, Any]:
                 "title": "string",
                 "taskSpec": {
                     "executor": "agent|tool",
-                    "agent": {"prompt": "string", "instructions": "string", "model": "string|null"},
+                    "agent": {
+                        "prompt": "string",
+                        "instructions": "string",
+                        "model": "string|null",
+                        "allowedTools": ["string"],
+                    },
                     "tool": {
                         "tools": [{"name": "string", "args": {}, "whenToUse": "string"}],
                         "skills": ["string"],

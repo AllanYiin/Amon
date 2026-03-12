@@ -80,7 +80,12 @@ def _looks_like_path_key(key: str) -> bool:
 
 
 def _reject(result: RouterResult, reason: str) -> RouterResult:
-    return RouterResult(type="chat_response", confidence=result.confidence, reason=reason)
+    return RouterResult(
+        type="chat_response",
+        confidence=result.confidence,
+        execution_mode=result.execution_mode,
+        reason=reason,
+    )
 
 
 def _require_confirm(result: RouterResult, reason: str) -> RouterResult:
@@ -89,6 +94,7 @@ def _require_confirm(result: RouterResult, reason: str) -> RouterResult:
         confidence=result.confidence,
         api=result.api,
         args=result.args,
+        execution_mode=result.execution_mode,
         requires_confirm=True,
         reason=reason,
     )

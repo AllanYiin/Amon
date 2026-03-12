@@ -196,7 +196,8 @@ class CoreStreamHandlerTests(unittest.TestCase):
                 self.assertTrue(mock_generate.called)
                 reasoning_chunks = [decode_reasoning_chunk(token)[1] for token in streamed_tokens if decode_reasoning_chunk(token)[0]]
                 self.assertGreaterEqual(len(reasoning_chunks), 4)
-                self.assertIn("正在產生任務計畫…", reasoning_chunks)
+                self.assertIn("正在產生 TODO 初稿…", reasoning_chunks)
+                self.assertIn("TODO 初稿已產生，正在設計詳細任務計畫…", reasoning_chunks)
                 self.assertIn("任務計畫已產生，正在準備執行圖…", reasoning_chunks)
                 self.assertIn("執行圖準備完成，開始執行任務…", reasoning_chunks)
                 self.assertIn("任務已執行完成，正在整理結果…", reasoning_chunks)

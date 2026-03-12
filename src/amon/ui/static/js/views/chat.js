@@ -386,6 +386,17 @@ export const CHAT_VIEW = {
               }
               return;
             }
+            if (eventType === "todo") {
+              const markdown = String(data.markdown || "").trim();
+              if (markdown) {
+                messageRenderer.appendMessage("agent", markdown);
+                messageRenderer.appendTimelineStatus("已產出 TODO 初稿，開始概念對齊與詳細規劃。");
+                if (appState.projectId) {
+                  await ctx.chatDeps.loadContext();
+                }
+              }
+              return;
+            }
             if (eventType === "plan") {
               ctx.chatDeps.showPlanCard(data);
               messageRenderer.appendMessage("agent", "已產生 Plan Card，請確認。");
@@ -421,6 +432,21 @@ export const CHAT_VIEW = {
               const totalMs = Number(phaseMetrics.total_ms || 0);
               if (totalMs > 0) {
                 messageRenderer.appendTimelineStatus(`規劃與執行耗時約 ${(totalMs / 1000).toFixed(1)} 秒。`);
+                const routeMs = Number(phaseMetrics.route_intent_ms || 0);
+                const executionModeMs = Number(phaseMetrics.execution_mode_ms || 0);
+                const segments = [
+                  ["路由", routeMs],
+                  [executionModeMs > 0 && executionModeMs === routeMs ? "模式判斷(併入路由)" : "模式判斷", executionModeMs],
+                  ["TODO 初稿", Number(phaseMetrics.todo_bootstrap_ms || 0)],
+                  ["詳細規劃", Number(phaseMetrics.plan_generation_ms || 0)],
+                  ["編譯圖", Number(phaseMetrics.compile_graph_ms || 0)],
+                  ["執行圖", Number(phaseMetrics.run_graph_ms || 0)],
+                ]
+                  .filter(([, value]) => value > 0)
+                  .map(([label, value]) => `${label} ${(value / 1000).toFixed(1)}s`);
+                if (segments.length) {
+                  messageRenderer.appendTimelineStatus(`耗時拆解：${segments.join("｜")}`);
+                }
               }
               ctx.chatDeps.updateThinking({ status: doneStatus === "ok" ? "done" : doneStatus, brief: doneStatus === "ok" ? "流程已完成" : `流程結束：${doneStatus}` });
               stopStream();

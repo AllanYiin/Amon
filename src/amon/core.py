@@ -45,6 +45,7 @@ from .taskgraph3.amon_node_runner import AmonNodeRunner
 from .taskgraph3.payloads import (
     AgentTaskConfig,
     SandboxRunConfig,
+    TaskDisplayMetadata,
     TaskSpec,
     ToolCallSpec,
     ToolTaskConfig,
@@ -551,6 +552,7 @@ class AmonCore:
         mode: str = "single",
         stream_handler=None,
         skill_names: list[str] | None = None,
+        allowed_tools: list[str] | None = None,
         conversation_history: list[dict[str, str]] | None = None,
         run_id: str | None = None,
         node_id: str | None = None,
@@ -576,6 +578,7 @@ class AmonCore:
             project_path,
             config=config,
             skill_names=skill_names,
+            allowed_tools=allowed_tools,
         )
         user_prompt = prompt
         if prompt.startswith("/"):
@@ -583,7 +586,12 @@ class AmonCore:
         messages = [{"role": "system", "content": system_message}]
         messages.extend(self._normalize_chat_history(conversation_history))
         messages.append({"role": "user", "content": user_prompt or prompt})
-        web_context = self._auto_web_search_context(user_prompt or prompt, project_path=project_path, config=config)
+        web_context = self._auto_web_search_context(
+            user_prompt or prompt,
+            project_path=project_path,
+            config=config,
+            allowed_tools=allowed_tools,
+        )
         if web_context:
             messages.insert(1, {"role": "system", "content": web_context})
         response_text = ""
@@ -709,10 +717,15 @@ class AmonCore:
         *,
         project_path: Path | None,
         config: dict[str, Any],
+        allowed_tools: list[str] | None = None,
     ) -> str:
         enabled = bool(config.get("amon", {}).get("auto_web_search", True))
         if not enabled:
             return ""
+        if allowed_tools is not None:
+            allowed = {str(item).strip() for item in allowed_tools if str(item).strip()}
+            if not allowed.intersection({"web.search", "web.fetch", "web.better_search"}):
+                return ""
         if not self._prompt_requires_web_search(prompt):
             return ""
         try:
@@ -963,15 +976,17 @@ class AmonCore:
         """Generate TaskGraph v3 and materialize docs/plan.json + docs/TODO.md."""
         if available_tools is None:
             available_tools = self.describe_available_tools(project_id=project_id)
+        planning_tools = self._select_planning_tools(message, available_tools)
 
         plan = generate_plan_with_llm(
             message,
             project_id=project_id,
             llm_client=llm_client,
             model=model,
-            available_tools=available_tools,
+            available_tools=planning_tools,
             available_skills=available_skills,
         )
+        plan = self._postprocess_planner_graph(plan, message=message, available_tools=planning_tools)
         docs_dir = project_path / "docs"
         docs_dir.mkdir(parents=True, exist_ok=True)
         plan_json = dumps_graph_definition(plan)
@@ -1022,6 +1037,243 @@ class AmonCore:
             lines.append(f"  - DoD: {dod_summary}")
         return "\n".join(lines) + "\n"
 
+    def _build_quick_todo_markdown(self, objective: str, *, available_tools: list[dict[str, Any]] | None = None) -> str:
+        key_concepts = self._extract_planning_keywords(objective, limit=4)
+        planning_tools = self._select_planning_tools(objective, available_tools or self.describe_available_tools())
+        tool_names = [str(item.get("name") or "") for item in planning_tools[:6] if str(item.get("name") or "").strip()]
+        concept_text = "、".join(key_concepts) if key_concepts else "任務目標、限制條件、輸出格式"
+        tool_text = "、".join(tool_names) if tool_names else "web.search、web.fetch"
+        lines = [
+            f"# TODO Plan: {objective}",
+            "",
+            "- [ ] concept_alignment 概念對齊與關鍵概念查證",
+            f"  - Goal: 先釐清「{concept_text}」的定義、邊界與常見歧義，再開始詳細規劃。",
+            "  - DoD: 產出關鍵概念、查詢方向、資料可信度與後續規劃注意事項。",
+            "- [ ] taskgraph_outline 任務骨架與依賴切分",
+            "  - Goal: 先切出主要任務節點、順序與完成條件。",
+            "  - DoD: 每個節點都有目標、DoD、工具範圍與必要輸出。",
+            "- [ ] taskgraph_detail TaskGraph v3 詳細設計",
+            "  - Goal: 補全節點 prompt、可用工具、邊與執行順序。",
+            "  - DoD: 產出可執行的 taskgraph.v3 JSON。",
+            "- [ ] run_execute 依圖執行與整理回覆",
+            "  - Goal: 按節點執行、更新狀態並彙整結果。",
+            "  - DoD: 回傳最終回覆、產物摘要與耗時分解。",
+            "",
+            f"> 關鍵概念：{concept_text}",
+            f"> 初步工具範圍：{tool_text}",
+            "",
+        ]
+        return "\n".join(lines)
+
+    def _materialize_quick_todo_preview(
+        self,
+        objective: str,
+        *,
+        project_path: Path,
+        project_id: str | None = None,
+        available_tools: list[dict[str, Any]] | None = None,
+    ) -> str:
+        docs_dir = project_path / "docs"
+        docs_dir.mkdir(parents=True, exist_ok=True)
+        todo_markdown = self._build_quick_todo_markdown(objective, available_tools=available_tools)
+        self._atomic_write_text(docs_dir / "TODO.md", todo_markdown)
+        emit_event(
+            {
+                "type": "plan_generated",
+                "scope": "planning",
+                "project_id": project_id or self.resolve_project_identity(project_path)[0],
+                "actor": "system",
+                "payload": {
+                    "objective": objective,
+                    "preview": True,
+                    "output_paths": ["docs/TODO.md"],
+                },
+                "risk": "low",
+            }
+        )
+        return todo_markdown
+
+    def _extract_planning_keywords(self, text: str, *, limit: int = 6) -> list[str]:
+        normalized = unicodedata.normalize("NFKC", str(text or ""))
+        candidates = re.findall(r"[A-Za-z][A-Za-z0-9_.-]{2,}|[\u4e00-\u9fff]{2,8}", normalized)
+        stopwords = {
+            "請幫我",
+            "幫我",
+            "需要",
+            "進行",
+            "產出",
+            "請先",
+            "任務",
+            "流程",
+            "規劃",
+            "設計",
+            "詳細",
+            "完整",
+            "todo",
+            "task",
+            "graph",
+        }
+        results: list[str] = []
+        seen: set[str] = set()
+        for token in candidates:
+            cleaned = token.strip().strip(".,:;()[]{}")
+            lowered = cleaned.lower()
+            if not cleaned or cleaned in stopwords or lowered in seen:
+                continue
+            seen.add(lowered)
+            results.append(cleaned)
+            if len(results) >= limit:
+                break
+        return results
+
+    def _select_planning_tools(self, objective: str, available_tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if not available_tools:
+            return []
+        normalized = unicodedata.normalize("NFKC", str(objective or "")).lower()
+        categories = {
+            "research": {"web.search", "web.fetch", "web.better_search"},
+            "code": {
+                "filesystem.list",
+                "filesystem.read",
+                "filesystem.grep",
+                "filesystem.glob",
+                "filesystem.patch",
+                "filesystem.write",
+                "terminal.exec",
+                "process.exec",
+                "sandbox.run",
+                "artifacts.preview_diff",
+            },
+            "artifacts": {"artifacts.write_text", "artifacts.write_file", "artifacts.preview_diff"},
+            "memory": {"memory.search", "memory.get", "memory.put"},
+            "audit": {"audit.log_query", "audit.export"},
+        }
+        selected = set(categories["research"])
+        if any(token in normalized for token in {"code", "程式", "修改", "修正", "檔案", "bug", "test", "測試", "repo", "專案"}):
+            selected.update(categories["code"])
+        if any(token in normalized for token in {"文件", "報告", "markdown", "文檔", "輸出", "artifact"}):
+            selected.update(categories["artifacts"])
+        if any(token in normalized for token in {"記憶", "記錄", "脈絡", "上下文", "memory"}):
+            selected.update(categories["memory"])
+        if any(token in normalized for token in {"稽核", "審核", "audit", "log", "記錄查詢"}):
+            selected.update(categories["audit"])
+        narrowed = [item for item in available_tools if str(item.get("name") or "") in selected]
+        return narrowed or list(available_tools)
+
+    def _postprocess_planner_graph(
+        self,
+        graph: GraphDefinition,
+        *,
+        message: str,
+        available_tools: list[dict[str, Any]],
+    ) -> GraphDefinition:
+        tool_names = {str(item.get("name") or "") for item in available_tools if str(item.get("name") or "").strip()}
+        nodes = list(graph.nodes)
+        edges = list(graph.edges)
+        incoming_control: dict[str, int] = {node.id: 0 for node in nodes}
+        for edge in edges:
+            if edge.edge_type == "CONTROL":
+                incoming_control[edge.to_node] = incoming_control.get(edge.to_node, 0) + 1
+        root_targets = [
+            node.id
+            for node in nodes
+            if node.id != "concept_alignment"
+            and node.node_type in {"TASK", "GATE", "GROUP"}
+            and incoming_control.get(node.id, 0) == 0
+        ]
+        if not any(node.id == "concept_alignment" for node in nodes):
+            keywords = self._extract_planning_keywords(message, limit=5)
+            keyword_text = "、".join(keywords) if keywords else "任務目標、限制條件、輸出格式"
+            concept_tools = [name for name in ("web.better_search", "web.search", "web.fetch") if name in tool_names]
+            nodes.insert(
+                0,
+                TaskNode(
+                    id="concept_alignment",
+                    title="概念對齊",
+                    task_spec=TaskSpec(
+                        executor="agent",
+                        agent=AgentTaskConfig(
+                            prompt=(
+                                "請先做概念對齊。"
+                                f"先抽取任務中的關鍵概念：{keyword_text}。"
+                                "請用關鍵字策略先搜尋並整理：名詞定義、範圍邊界、易混淆點、目前版本差異、"
+                                "接下來規劃 TaskGraph 時應注意的限制。"
+                                "若資料不足，請明確標記限制與待補證據。"
+                            ),
+                            instructions="輸出請使用繁體中文，並先給概念摘要，再給規劃注意事項。",
+                            allowed_tools=concept_tools,
+                        ),
+                        display=TaskDisplayMetadata(
+                            label="概念對齊",
+                            summary="先查證關鍵概念與限制，避免後續節點設計偏題。",
+                            todo_hint="完成關鍵概念、風險與查詢摘要。",
+                            tags=["concept_alignment", "research"],
+                        ),
+                    ),
+                ),
+            )
+            for target_id in root_targets:
+                edges.append(GraphEdge(from_node="concept_alignment", to_node=target_id, edge_type="CONTROL", kind="next"))
+        for node in nodes:
+            if not isinstance(node, TaskNode) or node.task_spec.executor != "agent" or node.task_spec.agent is None:
+                continue
+            if node.task_spec.agent.allowed_tools:
+                continue
+            node.task_spec.agent.allowed_tools = self._suggest_agent_tools_for_task(
+                " ".join(
+                    filter(
+                        None,
+                        [
+                            node.title,
+                            node.task_spec.agent.prompt or "",
+                            node.task_spec.agent.instructions or "",
+                            node.task_spec.display.summary or "",
+                            node.task_spec.display.todo_hint or "",
+                        ],
+                    )
+                ),
+                available_tools,
+            )
+        return GraphDefinition(
+            version=graph.version,
+            nodes=nodes,
+            edges=edges,
+            runtime_capabilities=graph.runtime_capabilities,
+        )
+
+    def _suggest_agent_tools_for_task(self, text: str, available_tools: list[dict[str, Any]]) -> list[str]:
+        available_names = {str(item.get("name") or "") for item in available_tools if str(item.get("name") or "").strip()}
+        normalized = unicodedata.normalize("NFKC", str(text or "")).lower()
+        selected: list[str] = []
+
+        def _add(*names: str) -> None:
+            for name in names:
+                if name in available_names and name not in selected:
+                    selected.append(name)
+
+        if any(token in normalized for token in {"概念", "查證", "搜尋", "研究", "資料來源", "比較", "最新", "search", "cite"}):
+            _add("web.better_search", "web.search", "web.fetch")
+        if any(token in normalized for token in {"檔案", "程式", "修改", "修正", "讀取", "掃描", "patch", "file", "code", "test", "測試"}):
+            _add(
+                "filesystem.list",
+                "filesystem.read",
+                "filesystem.grep",
+                "filesystem.glob",
+                "filesystem.patch",
+                "filesystem.write",
+                "terminal.exec",
+                "process.exec",
+                "sandbox.run",
+                "artifacts.preview_diff",
+            )
+        if any(token in normalized for token in {"輸出", "文件", "報告", "markdown", "artifact"}):
+            _add("artifacts.write_text", "artifacts.write_file", "artifacts.preview_diff")
+        if any(token in normalized for token in {"記憶", "上下文", "脈絡", "memory"}):
+            _add("memory.search", "memory.get", "memory.put")
+        if any(token in normalized for token in {"審核", "稽核", "audit", "log"}):
+            _add("audit.log_query", "audit.export")
+        return selected
+
     def run_plan_execute_stream(
         self,
         prompt: str,
@@ -1033,6 +1285,7 @@ class AmonCore:
         available_tools: list[dict[str, Any]] | None = None,
         available_skills: list[dict[str, Any]] | None = None,
         stream_handler=None,
+        todo_handler=None,
         run_id: str | None = None,
         thread_id: str | None = None,
         conversation_history: list[dict[str, str]] | None = None,
@@ -1103,15 +1356,34 @@ class AmonCore:
             )
 
         phase_metrics: dict[str, int] = {}
+        overall_started_at = time.monotonic()
+        resolved_project_id = project_id or project_path.name
+        if available_tools is None:
+            available_tools = self.describe_available_tools(project_id=resolved_project_id)
 
-        _emit_planning_progress("正在產生任務計畫…")
+        _emit_planning_progress("正在產生 TODO 初稿…")
+        phase_started_at = time.monotonic()
+        quick_todo_markdown = self._materialize_quick_todo_preview(
+            prompt,
+            project_path=project_path,
+            project_id=resolved_project_id,
+            available_tools=available_tools,
+        )
+        phase_metrics["todo_bootstrap_ms"] = int((time.monotonic() - phase_started_at) * 1000)
+        if callable(todo_handler):
+            try:
+                todo_handler(quick_todo_markdown)
+            except Exception:
+                self.logger.exception("todo preview handler failed unexpectedly")
+
+        _emit_planning_progress("TODO 初稿已產生，正在設計詳細任務計畫…")
         phase_started_at = time.monotonic()
         plan = _run_with_heartbeat(
             "任務計畫產生中",
             lambda: self.generate_plan_docs(
                 prompt,
                 project_path=project_path,
-                project_id=project_id or project_path.name,
+                project_id=resolved_project_id,
                 llm_client=llm_client,
                 model=model,
                 available_tools=available_tools,
@@ -1158,7 +1430,7 @@ class AmonCore:
         )
         phase_metrics["run_graph_ms"] = int((time.monotonic() - phase_started_at) * 1000)
         _emit_planning_progress("任務已執行完成，正在整理結果…")
-        phase_metrics["total_ms"] = sum(phase_metrics.values())
+        phase_metrics["total_ms"] = int((time.monotonic() - overall_started_at) * 1000)
         setattr(result, "phase_metrics", phase_metrics)
         setattr(result, "execution_route", "planner")
         setattr(result, "planner_enabled", True)
@@ -1175,6 +1447,7 @@ class AmonCore:
         available_tools: list[dict[str, Any]] | None = None,
         available_skills: list[dict[str, Any]] | None = None,
         stream_handler=None,
+        todo_handler=None,
         run_id: str | None = None,
         thread_id: str | None = None,
         conversation_history: list[dict[str, str]] | None = None,
@@ -1189,6 +1462,7 @@ class AmonCore:
             available_tools=available_tools,
             available_skills=available_skills,
             stream_handler=stream_handler,
+            todo_handler=todo_handler,
             run_id=run_id,
             thread_id=thread_id,
             conversation_history=conversation_history,
@@ -4043,9 +4317,10 @@ class AmonCore:
         *,
         config: dict[str, Any],
         skill_names: list[str] | None = None,
+        allowed_tools: list[str] | None = None,
     ) -> str:
         system_message = default_system_prompt()
-        tool_context = self._first_party_tool_context(project_path)
+        tool_context = self._first_party_tool_context(project_path, allowed_tools=allowed_tools)
         if tool_context:
             system_message = f"{system_message}\n\n{tool_context}"
         skill_context = self._resolve_skill_context(
@@ -4058,12 +4333,15 @@ class AmonCore:
             system_message = f"{system_message}\n\n{skill_context}"
         return system_message
 
-    def _first_party_tool_context(self, project_path: Path | None) -> str:
+    def _first_party_tool_context(self, project_path: Path | None, *, allowed_tools: list[str] | None = None) -> str:
         from .tooling.builtin import build_registry
 
         workspace_root = project_path or Path.cwd()
         registry = build_registry(workspace_root)
         specs = sorted(registry.list_specs(), key=lambda spec: spec.name)
+        if allowed_tools is not None:
+            allowlist = {str(name).strip() for name in allowed_tools if str(name).strip()}
+            specs = [spec for spec in specs if spec.name in allowlist]
         if not specs:
             return ""
         lines = ["## First-party tools"]

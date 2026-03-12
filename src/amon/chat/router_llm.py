@@ -60,7 +60,7 @@ def route_with_llm(
 
     use_default_client = llm_client is None
     if use_default_client and _cooldown_active(_router_cooldown_until):
-        return RouterResult(type="chat_response", confidence=0.0, reason="路由冷卻中，已切換安全模式")
+        return RouterResult(type="chat_response", confidence=0.0, execution_mode="graph", reason="路由冷卻中，已切換安全模式")
 
     try:
         if use_default_client:
@@ -89,7 +89,7 @@ def route_with_llm(
         logger.warning("LLM router 失敗，改用安全模式：%s", exc)
     except Exception as exc:  # noqa: BLE001
         logger.error("LLM router 未預期錯誤：%s", exc, exc_info=True)
-    return RouterResult(type="chat_response", confidence=0.0, reason="路由失敗，已切換安全模式")
+    return RouterResult(type="chat_response", confidence=0.0, execution_mode="graph", reason="路由失敗，已切換安全模式")
 
 
 def choose_execution_mode_with_llm(
@@ -167,27 +167,41 @@ def _collect_stream(llm_client: LLMClient, messages: list[dict[str, str]], model
 
 def _parse_router_result(raw_text: str) -> RouterResult:
     if not raw_text:
-        return RouterResult(type="chat_response", confidence=0.0, reason="空白回應，已切換安全模式")
+        return RouterResult(type="chat_response", confidence=0.0, execution_mode="graph", reason="空白回應，已切換安全模式")
     cleaned = _strip_code_fences(raw_text)
     try:
         data = json.loads(cleaned)
     except json.JSONDecodeError:
-        return RouterResult(type="chat_response", confidence=0.0, reason="JSON 格式錯誤，已切換安全模式")
+        return RouterResult(type="chat_response", confidence=0.0, execution_mode="graph", reason="JSON 格式錯誤，已切換安全模式")
     if not isinstance(data, dict):
-        return RouterResult(type="chat_response", confidence=0.0, reason="路由格式錯誤，已切換安全模式")
+        return RouterResult(type="chat_response", confidence=0.0, execution_mode="graph", reason="路由格式錯誤，已切換安全模式")
     return _coerce_router_result(data)
 
 
 def _coerce_router_result(data: dict[str, Any]) -> RouterResult:
+    execution_mode = _coerce_execution_mode(data.get("execution_mode"))
+    result_type = str(data.get("type") or "chat_response")
+    if result_type == "chat_response" and execution_mode is None:
+        execution_mode = "graph"
     result = RouterResult(
-        type=str(data.get("type") or "chat_response"),
+        type=result_type,
         confidence=float(data.get("confidence") or 0.0),
         api=data.get("api") if isinstance(data.get("api"), str) else None,
         args=data.get("args") if isinstance(data.get("args"), dict) else {},
+        execution_mode=execution_mode,
         requires_confirm=bool(data.get("requires_confirm") or False),
         reason=data.get("reason") if isinstance(data.get("reason"), str) else None,
     )
     return result
+
+
+def _coerce_execution_mode(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if normalized in {"single", "self_critique", "team", "graph"}:
+        return normalized
+    return None
 
 
 def _strip_code_fences(text: str) -> str:
@@ -207,6 +221,10 @@ def _system_prompt() -> str:
     return (
         "你是路由器，需要判斷使用者訊息的意圖。"
         "請只輸出符合 JSON schema 的單一 JSON 物件，不要輸出 Markdown 或任何說明。"
+        "若 type=chat_response，必須同時輸出 execution_mode。"
+        "execution_mode 僅能是 single、self_critique、team、graph。"
+        "判斷原則：需要多步驟規劃、上網查證、工具串接、檔案/程式修改時優先 graph；"
+        "正式文件反覆審稿用 self_critique；跨角色分工用 team；其餘才是 single。"
         "如果不確定，請以 chat_response 回覆。"
         f"JSON schema 如下：{schema}"
     )
@@ -241,6 +259,7 @@ def _router_schema() -> dict[str, Any]:
             confidence=0.75,
             api="projects.list",
             args={},
+            execution_mode=None,
             requires_confirm=False,
             reason="示例",
         )

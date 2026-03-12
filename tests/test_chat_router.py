@@ -95,6 +95,12 @@ class ChatRouterTests(unittest.TestCase):
 
         self.assertIsNotNone(get_command("projects.list"))
 
+    def test_route_with_llm_returns_execution_mode_for_chat_response(self) -> None:
+        mock = MockLLM('{"type":"chat_response","confidence":0.92,"execution_mode":"team","reason":"需要分工"}')
+        result = route_with_llm("請分工研究", {}, [], llm_client=mock)
+        self.assertEqual(result.type, "chat_response")
+        self.assertEqual(result.execution_mode, "team")
+
     def test_choose_execution_mode_with_llm_uses_model_decision(self) -> None:
         mock = MockLLM('{"mode":"self_critique","confidence":0.84,"rationale":["正式輸出"],"requires_planning":false}')
         mode = choose_execution_mode_with_llm("我要把模型改裝為擴散語言模型", llm_client=mock)

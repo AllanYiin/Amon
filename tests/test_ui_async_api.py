@@ -387,6 +387,7 @@ class UIAsyncAPITests(unittest.TestCase):
                     available_tools=None,
                     available_skills=None,
                     stream_handler=None,
+                    todo_handler=None,
                     run_id=None,
                     thread_id=None,
                     conversation_history=None,
@@ -484,6 +485,7 @@ class UIAsyncAPITests(unittest.TestCase):
                     available_tools=None,
                     available_skills=None,
                     stream_handler=None,
+                    todo_handler=None,
                     run_id=None,
                     thread_id=None,
                     conversation_history=None,
@@ -608,6 +610,7 @@ class UIAsyncAPITests(unittest.TestCase):
                     available_tools=None,
                     available_skills=None,
                     stream_handler=None,
+                    todo_handler=None,
                     run_id=None,
                     thread_id=None,
                     conversation_history=None,
@@ -1695,7 +1698,92 @@ class UIAsyncAPITests(unittest.TestCase):
                 self.assertEqual(done_payload.get("execution_mode"), "graph")
                 self.assertEqual(done_payload.get("execution_route"), "planner")
                 self.assertTrue(done_payload.get("planner_enabled"))
-                self.assertEqual(done_payload.get("phase_metrics", {}).get("total_ms"), 47)
+                self.assertGreaterEqual(int(done_payload.get("phase_metrics", {}).get("total_ms") or 0), 47)
+                self.assertIn("route_intent_ms", done_payload.get("phase_metrics", {}))
+                self.assertIn("execution_mode_ms", done_payload.get("phase_metrics", {}))
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
+    def test_chat_stream_graph_emits_todo_preview_event(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("todo-preview-test")
+
+                handler = partial(
+                    AmonUIHandler,
+                    directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"),
+                    core=core,
+                )
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                def fake_graph_stream(
+                    prompt,
+                    project_path,
+                    project_id=None,
+                    model=None,
+                    llm_client=None,
+                    available_tools=None,
+                    available_skills=None,
+                    stream_handler=None,
+                    todo_handler=None,
+                    run_id=None,
+                    thread_id=None,
+                    conversation_history=None,
+                    request_id=None,
+                ):
+                    if callable(todo_handler):
+                        todo_handler("# TODO Plan: 測試\n\n- [ ] concept_alignment 概念對齊\n")
+                    return (
+                        SimpleNamespace(
+                            run_id="run-plan-preview",
+                            execution_route="planner",
+                            planner_enabled=True,
+                            phase_metrics={"todo_bootstrap_ms": 5, "plan_generation_ms": 11, "compile_graph_ms": 7, "run_graph_ms": 29, "total_ms": 52},
+                        ),
+                        "done",
+                    )
+
+                with patch.object(core, "run_graph_stream", side_effect=fake_graph_stream):
+                    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                    conn.request(
+                        "GET",
+                        f"/v1/threads/stream?project_id={quote(project.project_id)}&message={quote('請規劃並執行')}"
+                    )
+                    resp = conn.getresponse()
+                    self.assertEqual(resp.status, 200)
+
+                    event_type = ""
+                    todo_payload = None
+                    done_payload = None
+                    for _ in range(240):
+                        raw_line = resp.fp.readline()
+                        if not raw_line:
+                            break
+                        decoded = raw_line.decode("utf-8", errors="ignore").strip()
+                        if decoded.startswith("event: "):
+                            event_type = decoded.split(":", 1)[1].strip()
+                        elif decoded.startswith("data: "):
+                            payload = json.loads(decoded.split(": ", 1)[1])
+                            if event_type == "todo":
+                                todo_payload = payload
+                            elif event_type == "done":
+                                done_payload = payload
+                                break
+
+                self.assertIsNotNone(todo_payload)
+                self.assertIn("concept_alignment", str(todo_payload.get("markdown") or ""))
+                self.assertIsNotNone(done_payload)
             finally:
                 if server:
                     server.shutdown()
@@ -1731,6 +1819,7 @@ class UIAsyncAPITests(unittest.TestCase):
                     available_tools=None,
                     available_skills=None,
                     stream_handler=None,
+                    todo_handler=None,
                     run_id=None,
                     thread_id=None,
                     conversation_history=None,

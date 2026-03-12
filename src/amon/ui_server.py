@@ -1961,12 +1961,15 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     "thread_id_source": turn_bundle.thread_id_source,
                 }
             )
+            route_started_at = time.monotonic()
             router_result = route_intent(
                 message,
                 project_id=project_id,
                 run_id=str(run_context.get("run_id") or "") or None,
                 context=turn_bundle.router_context,
             )
+            route_intent_ms = int((time.monotonic() - route_started_at) * 1000)
+            execution_mode_ms = 0
             if turn_bundle.short_continuation and router_result.type != "chat_response":
                 log_event(
                     {
@@ -2072,7 +2075,14 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             if router_result.type == "chat_response":
                 if should_emit_bootstrap_notices:
                     send_event("notice", {"text": "Amon：正在分析需求並進入執行流程。"})
-                execution_mode = decide_execution_mode(message, project_id=project_id, context=turn_bundle.router_context)
+                execution_mode = str(router_result.execution_mode or "").strip().lower()
+                execution_mode_from_router = bool(execution_mode)
+                if not execution_mode:
+                    mode_started_at = time.monotonic()
+                    execution_mode = decide_execution_mode(message, project_id=project_id, context=turn_bundle.router_context)
+                    execution_mode_ms = int((time.monotonic() - mode_started_at) * 1000)
+                else:
+                    execution_mode_ms = route_intent_ms
                 coerced_from_single = execution_mode == "single"
                 if coerced_from_single:
                     log_event(
@@ -2122,6 +2132,19 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                             "project_id": project_id,
                             "run_id": active_run_id or None,
                         },
+                        )
+
+                def todo_handler(markdown: str) -> None:
+                    if not isinstance(markdown, str) or not markdown.strip():
+                        return
+                    send_event(
+                        "todo",
+                        {
+                            "markdown": markdown,
+                            "project_id": project_id,
+                            "thread_id": thread_id,
+                        },
+                        run_id=active_run_id,
                     )
 
                 response_text = ""
@@ -2157,6 +2180,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         project_path=self.core.get_project_path(project_id),
                         project_id=project_id,
                         stream_handler=stream_handler,
+                        todo_handler=todo_handler,
                         run_id=active_run_id,
                         thread_id=thread_id,
                         conversation_history=history,
@@ -2228,7 +2252,13 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     done_payload["planner_enabled"] = bool(getattr(plan_result, "planner_enabled", True))
                     phase_metrics = getattr(plan_result, "phase_metrics", None)
                     if isinstance(phase_metrics, dict) and phase_metrics:
-                        done_payload["phase_metrics"] = phase_metrics
+                        merged_phase_metrics = dict(phase_metrics)
+                        merged_phase_metrics["route_intent_ms"] = route_intent_ms
+                        merged_phase_metrics["execution_mode_ms"] = execution_mode_ms
+                        merged_phase_metrics["total_ms"] = int(phase_metrics.get("total_ms", 0) or 0) + route_intent_ms
+                        if not execution_mode_from_router:
+                            merged_phase_metrics["total_ms"] += execution_mode_ms
+                        done_payload["phase_metrics"] = merged_phase_metrics
                     if route == "single_fallback":
                         done_payload["fallback_reason"] = str(getattr(plan_result, "fallback_reason", "planner disabled -> fallback single"))
                         done_payload["fallback_hint"] = str(getattr(plan_result, "fallback_hint", "請將 amon.planner.enabled 設為 true（可在設定頁切換）"))

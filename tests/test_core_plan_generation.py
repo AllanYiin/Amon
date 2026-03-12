@@ -44,6 +44,10 @@ class CorePlanGenerationTests(unittest.TestCase):
                 self.assertEqual(plan_payload.get("version"), "taskgraph.v3")
                 todo_text = (project_path / "docs" / "TODO.md").read_text(encoding="utf-8")
                 self.assertIn("- [ ] task-1 任務", todo_text)
+                self.assertIn("- [ ] concept_alignment 概念對齊", todo_text)
+                task_nodes = [node for node in plan.nodes if isinstance(node, TaskNode)]
+                self.assertEqual(task_nodes[0].id, "concept_alignment")
+                self.assertIn("web.search", task_nodes[0].task_spec.agent.allowed_tools)
                 self.assertTrue(emit_mock.called)
             finally:
                 os.environ.pop("AMON_HOME", None)
