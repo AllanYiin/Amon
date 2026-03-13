@@ -35,7 +35,7 @@ class ToolingError(RuntimeError):
     """Tooling error."""
 
 
-TOOL_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{1,63}$")
+TOOL_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{1,63}$")
 
 
 def load_tool_spec(tool_dir: Path) -> ToolSpec:
@@ -114,7 +114,7 @@ def _matches_type(value: Any, expected: str) -> bool:
 
 def ensure_tool_name(name: str) -> None:
     if not TOOL_NAME_RE.match(name):
-        raise ToolingError("工具名稱僅允許英數、底線、連字號，且需 2-64 字元")
+        raise ToolingError("工具名稱僅允許英數、點、底線、連字號，且需 2-64 字元")
 
 
 def write_tool_spec(path: Path, payload: dict[str, Any]) -> None:

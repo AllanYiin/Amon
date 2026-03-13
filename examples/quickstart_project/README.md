@@ -18,7 +18,7 @@
 
 ```bash
 python scripts/validate_all_v3_graphs.py
-amon graph migrate --help
+amon graph run --help
 ```
 
 ## 驗收重點

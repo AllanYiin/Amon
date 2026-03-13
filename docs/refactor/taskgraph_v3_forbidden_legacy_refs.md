@@ -4,18 +4,21 @@
 
 - `PlanGraph`
 - `compile_plan_to_exec_graph`
-- `taskgraph3.engine_runtime.GraphRuntime`
+- `legacy_graph_runtime`
+- `taskgraph3.engine_runtime`
+- `taskgraph3.migrate`
+- `graph migrate`
 - `plan_execute`
 - CLI step5 / step6 舊相容邏輯
 
 ## 檢查命令
 
 ```bash
-rg -n "PlanGraph|compile_plan_to_exec_graph|taskgraph3\.engine_runtime\.GraphRuntime|plan_execute|step5|step6" src tests docs
+rg -n "PlanGraph|compile_plan_to_exec_graph|legacy_graph_runtime|taskgraph3\.engine_runtime|taskgraph3\.migrate|graph migrate|plan_execute|step5|step6" src tests docs
 ```
 
 ## 說明
 
-- 現有殘留屬於技術債盤點對象，不等同允許新增。
-- 新功能若必須暫時相容，需在 PR 明確註記為「短期 shim」與移除時程。
-- cutover 完成後，本清單應轉為 CI 強制阻擋。
+- 現況以 TaskGraph v3 為唯一機制，新增 legacy 參考視為回歸。
+- 新功能不得再引入任何 legacy shim。
+- 本清單已屬 CI 阻擋範圍。

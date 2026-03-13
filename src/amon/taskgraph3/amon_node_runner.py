@@ -56,6 +56,7 @@ class AmonNodeRunner:
             prompt,
             project_path=self.project_path,
             model=agent.model,
+            system_prompt=agent.system_prompt,
             stream_handler=self.stream_handler,
             allowed_tools=agent.allowed_tools,
             conversation_history=conversation_history if isinstance(conversation_history, list) else None,
@@ -78,11 +79,21 @@ class AmonNodeRunner:
         assert tool_cfg is not None
         render_ctx = self._render_context(node, context)
         call_results: list[dict[str, Any]] = []
+        primary_path = ""
+        project_id, _ = self.core.resolve_project_identity(self.project_path)
         for spec in tool_cfg.tools:
             payload = self._render_payload(spec.args, render_ctx)
-            result = self.core.run_tool(spec.name, payload)
+            if not primary_path and isinstance(payload, dict) and isinstance(payload.get("path"), str):
+                primary_path = str(payload.get("path") or "")
+            result = self.core.run_tool(spec.name, payload, project_id=project_id, project_path=self.project_path)
+            if bool(result.get("is_error", False)):
+                raise RuntimeError(result.get("text") or f"tool={spec.name} execution failed")
             call_results.append({"name": spec.name, "payload": payload, "result": result})
-        return {"raw_output": json.dumps(call_results, ensure_ascii=False), "tool_calls": call_results}
+        return {
+            "raw_output": json.dumps(call_results, ensure_ascii=False),
+            "tool_calls": call_results,
+            "path": primary_path or None,
+        }
 
     def _run_sandbox(self, node: TaskNode, context: dict[str, Any]) -> dict[str, Any]:
         config = self.core.load_config(self.project_path)

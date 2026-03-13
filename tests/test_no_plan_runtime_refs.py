@@ -9,9 +9,7 @@ RUNTIME_SCOPES = [
     ROOT / "src" / "amon" / "planning" / "compiler.py",
 ]
 
-ALLOWED_FILES = {
-    ROOT / "src" / "amon" / "taskgraph3" / "migrate.py",
-}
+ALLOWED_FILES: set[Path] = set()
 
 
 class NoPlanGraphRuntimeRefsTests(unittest.TestCase):

@@ -17,6 +17,7 @@ from .schema import (
 )
 from .serialize import dumps_graph_definition
 from .runtime import OutputContractError, TaskGraph3RunResult, TaskGraph3Runtime
+from .validate import validate_v3_graph_json
 
 __all__ = [
     "ArtifactNode",
@@ -36,4 +37,5 @@ __all__ = [
     "OutputContractError",
     "TaskGraph3RunResult",
     "TaskGraph3Runtime",
+    "validate_v3_graph_json",
 ]

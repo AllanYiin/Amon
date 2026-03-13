@@ -11,6 +11,7 @@ _BINDING_SOURCES = {"variable", "upstream", "literal"}
 
 @dataclass
 class AgentTaskConfig:
+    system_prompt: str | None = None
     prompt: str | None = None
     instructions: str | None = None
     model: str | None = None
@@ -177,6 +178,7 @@ def task_spec_to_payload(task_spec: TaskSpec) -> dict[str, Any]:
     }
     if task_spec.agent is not None:
         payload["agent"] = {
+            "systemPrompt": task_spec.agent.system_prompt,
             "prompt": task_spec.agent.prompt,
             "instructions": task_spec.agent.instructions,
             "model": task_spec.agent.model,
@@ -207,6 +209,7 @@ def _agent_from_payload(raw: Any) -> AgentTaskConfig | None:
     if not isinstance(raw, dict):
         return None
     return AgentTaskConfig(
+        system_prompt=_optional_str(raw.get("systemPrompt")),
         prompt=_optional_str(raw.get("prompt")),
         instructions=_optional_str(raw.get("instructions")),
         model=_optional_str(raw.get("model")),

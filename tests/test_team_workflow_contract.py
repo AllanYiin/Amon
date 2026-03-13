@@ -8,38 +8,67 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from amon.core import AmonCore
+from amon.graph_presets import TEAM_ROLE_PROTOTYPES
 
 
 class TeamWorkflowContractTests(unittest.TestCase):
-    def test_team_graph_contains_required_contract_nodes(self) -> None:
+    def test_team_graph_contains_required_v3_nodes_and_prompts(self) -> None:
         core = AmonCore()
         graph = core._build_team_graph()
         nodes = {node["id"]: node for node in graph.get("nodes", [])}
 
+        self.assertIn("write_role_prototypes", nodes)
+        tool_call = nodes["write_role_prototypes"]["taskSpec"]["tool"]["tools"][0]
+        self.assertEqual(tool_call["name"], "artifacts.write_text")
+        self.assertEqual(tool_call["args"]["path"], "docs/roles/team_role_prototypes.json")
+
         self.assertIn("pm_todo", nodes)
-        self.assertEqual(nodes["pm_todo"]["output_path"], "docs/TODO.md")
-        self.assertIn("專案經理：", nodes["pm_todo"]["prompt"])
+        self.assertEqual(nodes["pm_todo"]["node_type"], "TASK")
+        self.assertIn("專案經理：", nodes["pm_todo"]["taskSpec"]["agent"]["prompt"])
+        self.assertIn("systemPrompt", nodes["pm_todo"]["taskSpec"]["agent"])
         self.assertIn("pm_log_bootstrap", nodes)
-        self.assertEqual(nodes["pm_log_bootstrap"]["output_path"], "docs/ProjectManager.md")
-        task_map = nodes["tasks_map"]
-        sub_nodes = {node["id"]: node for node in task_map["subgraph"]["nodes"]}
-        self.assertIn("role_factory_request", sub_nodes)
-        self.assertEqual(sub_nodes["role_factory_request"]["output_path"], "docs/tasks/${task_task_id}/role_factory.md")
-        self.assertIn("角色工廠：人設為", sub_nodes["role_factory_request"]["prompt"])
-        self.assertIn("專案成員（${task_role}）：", sub_nodes["member_plan"]["prompt"])
+        self.assertEqual(nodes["write_pm_log"]["taskSpec"]["tool"]["tools"][0]["args"]["path"], "docs/ProjectManager.md")
+
+        task_map = nodes["task_teamwork_map"]
+        self.assertEqual(task_map["execution"], "PARALLEL_MAP")
+        self.assertEqual(
+            task_map["executionConfig"]["itemsFrom"]["fromNode"],
+            "pm_plan",
+        )
+        self.assertEqual(task_map["executionConfig"]["itemsFrom"]["port"], "raw")
+        self.assertEqual(task_map["executionConfig"]["itemsFrom"]["jsonPath"], "tasks")
+        self.assertIn("Role Factory", task_map["taskSpec"]["agent"]["prompt"])
+        self.assertIn("systemPrompt", task_map["taskSpec"]["agent"])
+        self.assertEqual(
+            nodes["materialize_task_artifacts"]["taskSpec"]["tool"]["tools"][0]["args"]["path"],
+            "docs/tasks/${map_item_task_id}/persona.json",
+        )
 
         self.assertIn("audit_committee_role_factory", nodes)
-        self.assertEqual(nodes["audit_committee_role_factory"]["output_path"], "docs/audits/committee_roles.md")
+        self.assertEqual(
+            nodes["write_committee_roles"]["taskSpec"]["tool"]["tools"][0]["args"]["path"],
+            "docs/audits/committee_roles.json",
+        )
         self.assertIn("audit_committee_gate", nodes)
-        self.assertEqual(nodes["audit_committee_gate"]["output_path"], "docs/audits/committee_decision.md")
-        self.assertIn("稽核會：", nodes["audit_committee_gate"]["prompt"])
-        self.assertIn("final_rework_notice", nodes)
-        self.assertIn("專案經理：任務分派為補強", nodes["final_rework_notice"]["prompt"])
+        self.assertEqual(
+            nodes["write_committee_decision"]["taskSpec"]["tool"]["tools"][0]["args"]["path"],
+            "docs/audits/committee_decision.json",
+        )
+        self.assertIn("稽核會", nodes["audit_committee_gate"]["taskSpec"]["agent"]["prompt"])
 
-        synthesis_prompt = nodes["synthesis"]["prompt"]
+        synthesis_prompt = nodes["synthesis"]["taskSpec"]["agent"]["prompt"]
         self.assertIn("# TeamworksGPT", synthesis_prompt)
         self.assertIn("Step0~Step6", synthesis_prompt)
-        self.assertIn("稽核會全員通過", synthesis_prompt)
+        self.assertIn("專案經理：任務分派為補強", synthesis_prompt)
+        self.assertEqual(nodes["write_final"]["taskSpec"]["tool"]["tools"][0]["args"]["path"], "docs/final.md")
+
+    def test_team_role_prototypes_cover_key_roles(self) -> None:
+        roles = {entry["role"] for entry in TEAM_ROLE_PROTOTYPES}
+        self.assertIn("首席產品策略師", roles)
+        self.assertIn("系統架構師", roles)
+        self.assertIn("研究分析師", roles)
+        self.assertIn("全端實作工程師", roles)
+        self.assertIn("風險與品質稽核師", roles)
 
     def test_collect_mnt_data_handover_context_reads_project_docs_files(self) -> None:
         core = AmonCore()

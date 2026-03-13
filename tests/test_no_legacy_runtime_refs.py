@@ -7,8 +7,12 @@ SRC = ROOT / "src"
 
 
 class NoLegacyRuntimeRefsTests(unittest.TestCase):
+    def test_legacy_runtime_compatibility_modules_removed(self) -> None:
+        self.assertFalse((SRC / "amon" / "taskgraph3" / "engine_runtime.py").exists())
+        self.assertFalse((SRC / "amon" / "taskgraph3" / "migrate.py").exists())
+
     def test_no_legacy_graph_runtime_filename_in_tests(self) -> None:
-        legacy_test_path = ROOT / "tests" / "test_no_plan_graph_runtime_refs.py"
+        legacy_test_path = ROOT / "tests" / "test_legacy_graph_runtime.py"
         self.assertFalse(
             legacy_test_path.exists(),
             f"發現 legacy 測試檔名，請改名避免觸發 anti-legacy-graph: {legacy_test_path.relative_to(ROOT)}",
@@ -36,7 +40,7 @@ class NoLegacyRuntimeRefsTests(unittest.TestCase):
 
     def test_no_legacy_graph_runtime_symbol_or_import(self) -> None:
         symbol_matches = self._scan(r"\bGraphRuntime\b")
-        import_matches = self._scan(r"amon\.taskgraph3\.engine_runtime")
+        import_matches = self._scan(r"legacy_graph_runtime|LegacyGraphRuntime|amon\.taskgraph3\.engine_runtime")
         self.assertEqual(symbol_matches, [], f"發現 legacy runtime symbol: {symbol_matches}")
         self.assertEqual(import_matches, [], f"發現 legacy runtime import: {import_matches}")
 

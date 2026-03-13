@@ -48,8 +48,5 @@ else:
     raise SystemExit(f"UI probe failed: {url}")
 PY
 
-echo "[5/6] check graph migrate help"
-amon --data-dir "${AMON_DATA_DIR}" graph migrate --help >/dev/null
-
-echo "[6/6] validate all v3 graph fixtures"
+echo "[5/5] validate all v3 graph fixtures"
 python scripts/validate_all_v3_graphs.py

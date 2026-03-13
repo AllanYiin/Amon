@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from amon.taskgraph3.migrate import validate_v3_graph_json
+from amon.taskgraph3.validate import validate_v3_graph_json
 
 SCAN_ROOTS = (Path("examples"), Path("fixtures"), Path("tests/fixtures"))
 

@@ -4,7 +4,6 @@ import json
 import unittest
 from pathlib import Path
 
-from amon.taskgraph3.migrate import validate_v3_graph_json
 from amon.taskgraph3.payloads import (
     AgentTaskConfig,
     ArtifactOutput,
@@ -16,6 +15,7 @@ from amon.taskgraph3.payloads import (
 )
 from amon.taskgraph3.schema import GraphDefinition, GraphEdge, TaskNode
 from amon.taskgraph3.serialize import dumps_graph_definition
+from amon.taskgraph3.validate import validate_v3_graph_json
 
 
 class TaskGraph3SerializeTests(unittest.TestCase):
@@ -27,7 +27,13 @@ class TaskGraph3SerializeTests(unittest.TestCase):
                     title="分析",
                     task_spec=TaskSpec(
                         executor="agent",
-                        agent=AgentTaskConfig(prompt="summarize", instructions="zh-TW", model="gpt-4.1", allowed_tools=["web.search"]),
+                        agent=AgentTaskConfig(
+                            system_prompt="你是分析師",
+                            prompt="summarize",
+                            instructions="zh-TW",
+                            model="gpt-4.1",
+                            allowed_tools=["web.search"],
+                        ),
                         input_bindings=[InputBinding(source="variable", key="topic", value="taskgraph")],
                         artifacts=[ArtifactOutput(name="summary", media_type="text/markdown", required=True)],
                         display=TaskDisplayMetadata(label="分析任務", summary="產生摘要", todo_hint="先讀資料", tags=["demo"]),
@@ -49,6 +55,7 @@ class TaskGraph3SerializeTests(unittest.TestCase):
         validate_v3_graph_json(payload)
 
         agent = next(item for item in payload["nodes"] if item["id"] == "agent-1")
+        self.assertEqual(agent["taskSpec"]["agent"]["systemPrompt"], "你是分析師")
         self.assertEqual(agent["taskSpec"]["agent"]["model"], "gpt-4.1")
         self.assertEqual(agent["taskSpec"]["agent"]["allowedTools"], ["web.search"])
         self.assertEqual(agent["taskSpec"]["inputBindings"][0]["source"], "variable")

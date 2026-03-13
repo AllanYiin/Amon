@@ -221,10 +221,11 @@ class TaskGraph3Runtime:
         node_runner: Callable[[TaskNode, dict[str, Any]], Any],
     ) -> dict[str, Any]:
         config = node.execution_config or {}
-        items = config.get("items") if isinstance(config.get("items"), list) else []
+        items = self._resolve_parallel_items(node, state, config)
         max_concurrency = int(config.get("maxConcurrency") or 1)
         if max_concurrency <= 0:
             raise ValueError(f"node={node.id} maxConcurrency must be > 0")
+        result_parser = str(config.get("resultParser") or "").strip().lower()
 
         results: dict[int, str] = {}
 
@@ -232,6 +233,7 @@ class TaskGraph3Runtime:
             ctx = dict(state)
             ctx["map_item"] = item
             ctx["map_index"] = index
+            ctx.update(self._expand_map_item_context(item))
             self._acquire_rate_limit(node.id, node.policy.rate_limit)
             normalized = self._normalize_runner_output(node_runner(node, ctx))
             return index, str(normalized.get("raw_output") or "")
@@ -243,6 +245,9 @@ class TaskGraph3Runtime:
                 results[idx] = output
 
         ordered = [results[idx] for idx in range(len(items))]
+        if result_parser == "json":
+            parsed = [self._extract_json(item) if isinstance(item, str) else item for item in ordered]
+            return {"raw_output": json.dumps(parsed, ensure_ascii=False), "items": parsed}
         return {"raw_output": json.dumps(ordered, ensure_ascii=False), "items": ordered}
 
     def _run_recursive(
@@ -317,6 +322,101 @@ class TaskGraph3Runtime:
         if "equals" in stop_condition:
             return raw_output == str(stop_condition.get("equals"))
         return False
+
+    def _resolve_parallel_items(self, node: TaskNode, state: dict[str, Any], config: dict[str, Any]) -> list[Any]:
+        if isinstance(config.get("items"), list):
+            return list(config.get("items") or [])
+        items_from = config.get("itemsFrom")
+        if not isinstance(items_from, dict):
+            return []
+        source = str(items_from.get("source") or "upstream").strip().lower()
+        value: Any = None
+        if source == "upstream":
+            value = self._resolve_upstream_items(
+                state,
+                from_node=str(items_from.get("fromNode") or ""),
+                port=str(items_from.get("port") or "raw"),
+            )
+        elif source == "variable":
+            variables = state.get("variables") if isinstance(state.get("variables"), dict) else {}
+            value = variables.get(str(items_from.get("key") or ""))
+        if isinstance(items_from.get("jsonPath"), str) and items_from.get("jsonPath"):
+            value = self._resolve_json_path(value, str(items_from.get("jsonPath") or ""))
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value
+        raise ValueError(f"node={node.id} itemsFrom 必須解析為 list")
+
+    @staticmethod
+    def _resolve_upstream_items(state: dict[str, Any], *, from_node: str, port: str) -> Any:
+        nodes = state.get("nodes")
+        if not isinstance(nodes, dict):
+            return None
+        upstream_state = nodes.get(from_node)
+        if not isinstance(upstream_state, dict):
+            return None
+        output = upstream_state.get("output")
+        if port == "raw":
+            if isinstance(output, dict):
+                raw_text = output.get("raw") if "raw" in output else output.get("raw_output")
+                if isinstance(raw_text, str):
+                    parsed = TaskGraph3Runtime._parse_json_like(raw_text)
+                    return parsed if parsed is not None else raw_text
+            return output
+        if not isinstance(output, dict):
+            return None
+        ports = output.get("ports")
+        if isinstance(ports, dict):
+            return ports.get(port)
+        return output.get(port)
+
+    @staticmethod
+    def _parse_json_like(raw_text: str) -> Any:
+        try:
+            return json.loads(raw_text)
+        except json.JSONDecodeError:
+            start_positions = [pos for pos in [raw_text.find("{"), raw_text.find("[")] if pos != -1]
+            if not start_positions:
+                return None
+            start = min(start_positions)
+            end = max(raw_text.rfind("}"), raw_text.rfind("]"))
+            if end <= start:
+                return None
+            try:
+                return json.loads(raw_text[start : end + 1])
+            except json.JSONDecodeError:
+                return None
+
+    @staticmethod
+    def _resolve_json_path(value: Any, path: str) -> Any:
+        current = value
+        for segment in [item for item in path.split(".") if item]:
+            if isinstance(current, dict):
+                current = current.get(segment)
+                continue
+            if isinstance(current, list) and segment.isdigit():
+                index = int(segment)
+                if 0 <= index < len(current):
+                    current = current[index]
+                    continue
+            return None
+        return current
+
+    @staticmethod
+    def _expand_map_item_context(item: Any) -> dict[str, Any]:
+        if not isinstance(item, dict):
+            return {}
+        ctx = {"map_item_json": json.dumps(item, ensure_ascii=False)}
+        for key, value in item.items():
+            safe_key = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in str(key)).strip("_")
+            if not safe_key:
+                continue
+            if isinstance(value, (dict, list)):
+                ctx[f"map_item_{safe_key}"] = json.dumps(value, ensure_ascii=False, indent=2)
+            else:
+                ctx[f"map_item_{safe_key}"] = value
+        return ctx
 
     def _compile_control_graph(self, edges: list[GraphEdge]) -> tuple[dict[str, list[str]], dict[str, int]]:
         adjacency: dict[str, list[str]] = {node.id: [] for node in self.graph.nodes}

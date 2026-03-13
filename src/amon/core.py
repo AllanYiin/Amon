@@ -34,9 +34,14 @@ from .fs.atomic import atomic_write_text, file_lock
 from .fs.safety import canonicalize_path, make_change_plan, require_confirm
 from .fs.trash import trash_move, trash_restore
 from .events import emit_event
+from .graph_presets import (
+    build_self_critique_graph_payload,
+    build_single_graph_payload,
+    build_team_graph_payload,
+    team_role_prototypes_json,
+)
 from .logging import log_billing, log_event
 from .logging_utils import setup_logger
-from .legacy_graph_runtime import LegacyGraphRuntime
 from .mcp_client import MCPClientError, MCPServerConfig, MCPStdioClient
 from .planning import generate_plan_with_llm
 from .models import ProviderError, build_provider, decode_reasoning_chunk, encode_reasoning_chunk
@@ -551,6 +556,7 @@ class AmonCore:
         prompt: str,
         project_path: Path | None,
         model: str | None = None,
+        system_prompt: str | None = None,
         mode: str = "single",
         stream_handler=None,
         skill_names: list[str] | None = None,
@@ -575,13 +581,14 @@ class AmonCore:
         provider_cfg = config.get("providers", {}).get(provider_name, {})
         provider_model = model or provider_cfg.get("default_model") or provider_cfg.get("model")
         provider = build_provider(provider_cfg, model=provider_model)
-        system_message = self._build_system_message(
+        base_system_message = self._build_system_message(
             prompt,
             project_path,
             config=config,
             skill_names=skill_names,
             allowed_tools=allowed_tools,
         )
+        system_message = f"{base_system_message}\n\n{system_prompt}" if system_prompt else base_system_message
         user_prompt = prompt
         if prompt.startswith("/"):
             user_prompt = " ".join(prompt.split()[1:]).strip()
@@ -942,11 +949,10 @@ class AmonCore:
                 {
                     "prompt": prompt,
                     "mode": "team",
-                    "tasks_path": "docs/tasks.json",
-                    "audit_force_approve": False,
                     "model": model or "",
                     "skill_names": skill_names or [],
                     "continuation_context": continuation_context,
+                    "team_role_prototypes_json": team_role_prototypes_json(),
                 },
                 mode="team",
             )
@@ -1598,299 +1604,13 @@ class AmonCore:
         return output_path
 
     def _build_single_graph(self) -> dict[str, Any]:
-        return {
-            "nodes": [
-                {
-                    "id": "single_task",
-                    "type": "agent_task",
-                    "prompt": "${prompt}",
-                    "output_path": "docs/single_${run_id}.md",
-                    "store_output": "single_text",
-                }
-            ],
-            "edges": [],
-        }
+        return build_single_graph_payload()
 
     def _build_self_critique_graph(self) -> dict[str, Any]:
-        return {
-            "nodes": [
-                {
-                    "id": "draft",
-                    "type": "agent_task",
-                    "prompt": "任務：${prompt}\n\n請先產出草稿。",
-                    "output_path": "${draft_path}",
-                    "store_output": "draft_text",
-                },
-                {
-                    "id": "reviews_map",
-                    "type": "map",
-                    "items": {"type": "range", "count": 10},
-                    "item_var": "review",
-                    "subgraph": {
-                        "nodes": [
-                            {
-                                "id": "review",
-                                "type": "agent_task",
-                                "prompt": (
-                                    "你是 Reviewer ${item_index}，請嚴格評論草稿並提出具體改善建議。"
-                                    "\n\n草稿：\n${draft_text}\n"
-                                ),
-                                "output_path": "${reviews_dir}/review_${item_index}.md",
-                                "store_output": "review_text",
-                            }
-                        ],
-                        "edges": [],
-                    },
-                    "collect_variable": "reviews_block",
-                    "collect_template": "### Review ${item_index}\n${review_content}",
-                },
-                {
-                    "id": "final",
-                    "type": "agent_task",
-                    "prompt": (
-                        "你是 Writer，請整合草稿與所有 reviews，產出最終版本。"
-                        "\n\n任務：${prompt}\n\n草稿：\n${draft_text}\n\nReviews：\n${reviews_block}\n"
-                    ),
-                    "output_path": "${final_path}",
-                },
-            ],
-            "edges": [
-                {"from": "draft", "to": "reviews_map"},
-                {"from": "reviews_map", "to": "final"},
-            ],
-        }
+        return build_self_critique_graph_payload()
 
     def _build_team_graph(self) -> dict[str, Any]:
-        return {
-            "nodes": [
-                {
-                    "id": "pm_todo",
-                    "type": "agent_task",
-                    "prompt": (
-                        "你是專案經理。請先輸出 TODO.md，拆解任務並標記初始狀態都為 [ ]。"
-                        "必須包含 Step0：檢查專案 docs 資料夾中的遺留文件是否可接續。"
-                        "請使用繁體中文 markdown。"
-                        "輸出格式第一行必須是『專案經理：』，第二行起列出 todo list。"
-                        "若需要等待角色工廠，請加上『(向角色工廠申請人設中)』。"
-                        "\n\n任務：${prompt}\n"
-                        "\n可接續資料摘要：\n${continuation_context}\n"
-                    ),
-                    "output_path": "docs/TODO.md",
-                    "store_output": "todo_markdown",
-                },
-                {
-                    "id": "pm_log_bootstrap",
-                    "type": "agent_task",
-                    "prompt": (
-                        "你是專案經理，請建立 ProjectManager.md 的啟動紀錄，"
-                        "內容要包含決策理由、任務分派策略與風險控管。"
-                        "輸出每段前請標註『專案經理：』。"
-                        "\n\n目前 TODO：\n${todo_markdown}\n"
-                        "\n任務：${prompt}\n"
-                    ),
-                    "output_path": "docs/ProjectManager.md",
-                },
-                {
-                    "id": "pm_plan",
-                    "type": "agent_task",
-                    "prompt": (
-                        "你是 PM，請根據任務拆解為 tasks.json。"
-                        "輸出必須是 JSON，格式："
-                        "{\"tasks\":[{\"task_id\":\"T1\",\"title\":\"...\",\"role\":\"...\",\"description\":\"...\"}]}。"
-                        "\n請依角色工廠規則決定任務類型：單一專業型、自我批評型（10位）、能力小組型（3位）。"
-                        "\n每個 task 請加上 role_assignment_reason 欄位。"
-                        "\n\n任務：${prompt}\n"
-                    ),
-                    "output_path": "docs/team_plan_${run_id}.md",
-                    "store_output": "tasks_payload",
-                },
-                {
-                    "id": "tasks_file",
-                    "type": "write_file",
-                    "path": "${tasks_path}",
-                    "content": "${tasks_payload}",
-                },
-                {
-                    "id": "tasks_map",
-                    "type": "map",
-                    "items": {"type": "json_path", "path": "${tasks_path}", "query": "tasks"},
-                    "item_var": "task",
-                    "subgraph": {
-                        "nodes": [
-                            {
-                                "id": "role_factory_request",
-                                "type": "agent_task",
-                                "prompt": (
-                                    "你是角色工廠，請為下列子任務產生可執行的人設 JSON。"
-                                    "請至少輸出欄位：name、role、focus、instructions、success_metrics。"
-                                    "並在最前面加上一行『角色工廠：人設為...』再接 JSON。"
-                                    "\n\n子任務：${task_title}\n${task_description}\n"
-                                    "候選角色：${task_role}\n"
-                                    "若需要反方觀點，請在 instructions 中加入。"
-                                ),
-                                "output_path": "docs/tasks/${task_task_id}/role_factory.md",
-                                "store_output": "role_factory_payload",
-                            },
-                            {
-                                "id": "persona_file",
-                                "type": "write_file",
-                                "path": "docs/tasks/${task_task_id}/persona.json",
-                                "content": "${role_factory_payload}",
-                            },
-                            {
-                                "id": "member_plan",
-                                "type": "agent_task",
-                                "prompt": (
-                                    "你是 ${task_role}，請依照角色工廠提供的人設提出執行方案。"
-                                    "輸出第一行請標註『專案成員（${task_role}）：』。"
-                                    "人設如下：\n${role_factory_payload}\n"
-                                    "請依 Teamworks 流程，於輸出中明確區分：觀察、判斷理由、資料來源引述、成果與評估指標。"
-                                    "\n\n任務：${task_title}\n${task_description}\n"
-                                ),
-                                "output_path": "docs/tasks/${task_task_id}/plan.md",
-                                "store_output": "member_plan",
-                            },
-                            {
-                                "id": "member_execute",
-                                "type": "agent_task",
-                                "prompt": (
-                                    "請依照以下方案完成任務並輸出結果：\n${member_plan}\n\n"
-                                    "輸出檔案需符合：{任務名稱}_{專案成員角色}.md 的記錄精神，"
-                                    "且需包含可驗證成果。"
-                                    "任務：${task_title}\n${task_description}\n"
-                                ),
-                                "output_path": "docs/tasks/${task_task_id}/result.md",
-                                "store_output": "task_result",
-                            },
-                            {
-                                "id": "audit",
-                                "type": "agent_task",
-                                "prompt": (
-                                    "請審核以下結果，必須回覆是否 APPROVED。若為 REJECTED，"
-                                    "請提供具體未通過理由與補強建議。"
-                                    "\n\n結果：\n${task_result}\n"
-                                ),
-                                "output_path": "docs/audits/${task_task_id}.md",
-                                "store_output": "audit_text",
-                            },
-                            {
-                                "id": "audit_condition",
-                                "type": "condition",
-                                "variable": "audit_text",
-                                "contains": "APPROVED",
-                            },
-                            {
-                                "id": "force_approve",
-                                "type": "condition",
-                                "variable": "audit_force_approve",
-                                "equals": True,
-                            },
-                            {
-                                "id": "audit_json_force_approved",
-                                "type": "write_file",
-                                "path": "docs/audits/${task_task_id}.json",
-                                "content": "{\n  \"status\": \"APPROVED\"\n}\n",
-                            },
-                            {
-                                "id": "audit_json_text_approved",
-                                "type": "write_file",
-                                "path": "docs/audits/${task_task_id}.json",
-                                "content": "{\n  \"status\": \"APPROVED\"\n}\n",
-                            },
-                            {
-                                "id": "audit_json_rejected",
-                                "type": "write_file",
-                                "path": "docs/audits/${task_task_id}.json",
-                                "content": "{\n  \"status\": \"REJECTED\"\n}\n",
-                            },
-                        ],
-                        "edges": [
-                            {"from": "role_factory_request", "to": "persona_file"},
-                            {"from": "persona_file", "to": "member_plan"},
-                            {"from": "member_plan", "to": "member_execute"},
-                            {"from": "member_execute", "to": "audit"},
-                            {"from": "audit", "to": "force_approve"},
-                            {"from": "force_approve", "to": "audit_json_force_approved", "when": True},
-                            {"from": "force_approve", "to": "audit_condition", "when": False},
-                            {"from": "audit_condition", "to": "audit_json_text_approved", "when": True},
-                            {"from": "audit_condition", "to": "audit_json_rejected", "when": False},
-                        ],
-                    },
-                    "collect_variable": "team_results_block",
-                    "collect_template": (
-                        "### ${task_title}\n角色：${task_role}\n結果：\n${member_execute_content}\n\n"
-                        "審核：\n${audit_content}\n\n批准：${audit_condition_result}\n"
-                    ),
-                },
-                {
-                    "id": "audit_committee_role_factory",
-                    "type": "agent_task",
-                    "prompt": (
-                        "你是角色工廠，請為最終稽核會建立 3 位稽核員人設，輸出 JSON。"
-                        "輸出開頭請標示『角色工廠：人設為...』。"
-                        "格式：{\"committee\":[{\"name\":\"...\",\"role\":\"...\",\"focus\":\"...\",\"instructions\":\"...\"}]}。"
-                        "請涵蓋品質、風險、可驗證性三種視角。\n\n任務：${prompt}\n"
-                    ),
-                    "output_path": "docs/audits/committee_roles.md",
-                    "store_output": "committee_roles",
-                },
-                {
-                    "id": "audit_committee_gate",
-                    "type": "agent_task",
-                    "prompt": (
-                        "你是稽核會，請審查全部任務是否皆可通過。"
-                        "輸出第一行請標註『稽核會：』。"
-                        "請只輸出 JSON：{\"status\":\"APPROVED_ALL|REJECTED\",\"reason\":\"...\",\"actions\":[\"...\"]}。"
-                        "\n\n稽核會人設：\n${committee_roles}\n"
-                        "\n任務摘要：\n${team_results_block}\n"
-                    ),
-                    "output_path": "docs/audits/committee_decision.md",
-                    "store_output": "committee_decision",
-                },
-                {
-                    "id": "audit_committee_condition",
-                    "type": "condition",
-                    "variable": "committee_decision",
-                    "contains": "APPROVED_ALL",
-                },
-                {
-                    "id": "final_rework_notice",
-                    "type": "agent_task",
-                    "prompt": (
-                        "你是 PM，稽核會尚未全數通過。請輸出退回補強通知，"
-                        "輸出第一行請標註『專案經理：任務分派為補強』。"
-                        "需列出未通過理由與下一輪補強步驟。"
-                        "\n\n稽核會決議：\n${committee_decision}\n"
-                        "\n任務摘要：\n${team_results_block}\n"
-                    ),
-                    "output_path": "docs/final.md",
-                },
-                {
-                    "id": "synthesis",
-                    "type": "agent_task",
-                    "prompt": (
-                        "你是 PM，請彙整所有任務結果與審核，產出最終總結。"
-                        "輸出中需使用具名段落（專案經理/角色工廠/專案成員/稽核會）。"
-                        "輸出開頭必須是 '# TeamworksGPT'，第二行要有"
-                        "'## 我務必依照以下的【角色定義】 以及【工作流程】來完成任務'。"
-                        "同時說明已如何遵守 Step0~Step6，並註明稽核會全員通過。"
-                        "\n\n任務：${prompt}\n\n彙整：\n${team_results_block}\n"
-                    ),
-                    "output_path": "docs/final.md",
-                },
-            ],
-            "edges": [
-                {"from": "pm_todo", "to": "pm_log_bootstrap"},
-                {"from": "pm_log_bootstrap", "to": "pm_plan"},
-                {"from": "pm_plan", "to": "tasks_file"},
-                {"from": "tasks_file", "to": "tasks_map"},
-                {"from": "tasks_map", "to": "audit_committee_role_factory"},
-                {"from": "audit_committee_role_factory", "to": "audit_committee_gate"},
-                {"from": "audit_committee_gate", "to": "audit_committee_condition"},
-                {"from": "audit_committee_condition", "to": "synthesis", "when": True},
-                {"from": "audit_committee_condition", "to": "final_rework_notice", "when": False},
-            ],
-        }
+        return build_team_graph_payload()
 
     def _write_graph_resolved(
         self,
@@ -1988,24 +1708,12 @@ class AmonCore:
             raise
 
         if not isinstance(graph_payload, dict) or str(graph_payload.get("version") or "") != "taskgraph.v3":
-            raise ValueError("Unsupported graph format\nRun migrator: amon graph migrate ...")
+            raise ValueError("Unsupported graph format: only taskgraph.v3 is supported.")
 
         effective_run_id = run_id or uuid.uuid4().hex
         runtime_vars = dict(graph_payload.get("variables", {})) if isinstance(graph_payload.get("variables"), dict) else {}
         if variables:
             runtime_vars.update(variables)
-        if self._uses_legacy_graph_runtime(graph_payload):
-            runtime = LegacyGraphRuntime(
-                core=self,
-                project_path=project_path,
-                graph_payload=graph_payload,
-                variables=runtime_vars,
-                stream_handler=stream_handler,
-                run_id=effective_run_id,
-                request_id=request_id,
-                thread_id=thread_id,
-            )
-            return runtime.run()
 
         graph = self._to_taskgraph3_definition(graph_payload)
         runtime = TaskGraph3Runtime(project_path=project_path, graph=graph, run_id=effective_run_id)
@@ -2020,13 +1728,6 @@ class AmonCore:
         )
         result = runtime.run(node_runner.run_task)
         return result
-
-    @staticmethod
-    def _uses_legacy_graph_runtime(payload: dict[str, Any]) -> bool:
-        nodes = payload.get("nodes")
-        if not isinstance(nodes, list):
-            return False
-        return any(isinstance(node, dict) and str(node.get("type") or "").strip() for node in nodes)
 
     def _to_taskgraph3_definition(self, payload: dict[str, Any]) -> GraphDefinition:
         nodes_payload = payload.get("nodes") if isinstance(payload.get("nodes"), list) else []
@@ -2046,11 +1747,10 @@ class AmonCore:
 
     def _to_taskgraph3_node(self, raw: dict[str, Any]):
         node_type = str(raw.get("node_type") or "").upper()
-        legacy_type = str(raw.get("type") or "").strip().lower()
         node_id = str(raw.get("id") or "")
         title = str(raw.get("title") or "")
 
-        if node_type == "GATE" or legacy_type == "condition":
+        if node_type == "GATE":
             routes: list[GateRoute] = []
             for route in raw.get("routes", []):
                 if not isinstance(route, dict):
@@ -2062,11 +1762,8 @@ class AmonCore:
             children = [str(item) for item in raw.get("children", []) if str(item).strip()]
             return GroupNode(id=node_id, title=title, children=children)
 
-        if node_type == "ARTIFACT" or legacy_type == "artifact":
+        if node_type == "ARTIFACT":
             return ArtifactNode(id=node_id, title=title)
-
-        if legacy_type in {"map", "recursive"}:
-            raise ValueError(f"node={node_id} legacy type={legacy_type} no longer supported in v3 runtime")
 
         if isinstance(raw.get("taskSpec"), dict):
             spec = raw["taskSpec"]
@@ -2076,36 +1773,6 @@ class AmonCore:
                 execution=str(raw.get("execution") or "SINGLE"),
                 execution_config=raw.get("executionConfig") if isinstance(raw.get("executionConfig"), dict) else None,
                 task_spec=task_spec_from_payload(spec),
-            )
-
-        if legacy_type == "agent_task":
-            prompt = str(raw.get("prompt") or "")
-            return TaskNode(id=node_id, title=title, task_spec=TaskSpec(executor="agent", agent=AgentTaskConfig(prompt=prompt)))
-        if legacy_type in {"tool.call", "tool_call", "tool"}:
-            return TaskNode(
-                id=node_id,
-                title=title,
-                task_spec=TaskSpec(
-                    executor="tool",
-                    tool=ToolTaskConfig(tools=[ToolCallSpec(name=str(raw.get("tool") or ""), args=raw.get("args") or {})]),
-                ),
-            )
-        if legacy_type == "sandbox_run":
-            command = str(raw.get("command") or raw.get("code") or "")
-            shell = str(raw.get("language") or raw.get("shell") or "bash")
-            return TaskNode(
-                id=node_id,
-                title=title,
-                task_spec=TaskSpec(executor="sandbox_run", sandbox_run=SandboxRunConfig(command=command, shell=shell)),
-            )
-        if legacy_type == "write_file":
-            path = str(raw.get("path") or "docs/output.txt")
-            content = str(raw.get("content") or "")
-            command = f"cat <<'EOF' > {path}\n{content}\nEOF"
-            return TaskNode(
-                id=node_id,
-                title=title,
-                task_spec=TaskSpec(executor="sandbox_run", sandbox_run=SandboxRunConfig(command=command, shell="bash")),
             )
         raise ValueError(f"Unsupported node payload: node_id={node_id}")
 
@@ -2233,7 +1900,7 @@ class AmonCore:
         variables = variables or {}
         variables = self._apply_schema_defaults(schema, variables)
         if str(payload.get("version") or "") != "taskgraph.v3":
-            raise ValueError("Unsupported graph format\nRun migrator: amon graph migrate ...")
+            raise ValueError("Unsupported graph format: only taskgraph.v3 is supported.")
         graph = {
             "version": "taskgraph.v3",
             "nodes": payload.get("nodes", []),
@@ -2548,308 +2215,6 @@ class AmonCore:
         if errors:
             return {"status": "error", "message": "MCP 檢查失敗：" + "; ".join(errors)}
         return {"status": "ok", "message": "MCP tools 連線正常"}
-
-    def _team_plan_tasks(
-        self,
-        provider: Any,
-        provider_name: str,
-        provider_model: str | None,
-        provider_type: str | None,
-        prompt: str,
-        docs_dir: Path,
-        session_path: Path,
-        session_id: str,
-        config: dict[str, Any],
-        project_id: str | None,
-    ) -> dict[str, Any]:
-        plan_dir = docs_dir / "tasks"
-        try:
-            plan_dir.mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
-            self.logger.error("建立 team 任務目錄失敗：%s", exc, exc_info=True)
-            raise
-        plan_path = plan_dir / "plan.json"
-        system_message = "你是 PM，負責拆解任務並輸出 JSON。"
-        user_message = (
-            "請根據 user_task 拆解任務，輸出 JSON 格式："
-            '{"tasks":[{"task_id":"t1","title":"...","requiredCapabilities":["capability"]}]}。'
-            "請只輸出 JSON。user_task: "
-            f"{prompt}"
-        )
-        messages = [
-            {"role": "system", "content": system_message},
-            {"role": "user", "content": user_message},
-        ]
-        response_text = self._stream_and_collect(
-            provider=provider,
-            provider_name=provider_name,
-            provider_model=provider_model,
-            messages=messages,
-            session_path=session_path,
-            session_id=session_id,
-            stage="team:plan",
-            config=config,
-            prompt_text=user_message,
-            project_id=project_id,
-        )
-        try:
-            self._atomic_write_text(plan_path, response_text)
-        except OSError as exc:
-            self.logger.error("寫入 team 任務規劃失敗：%s", exc, exc_info=True)
-            raise
-        parsed = self._parse_json_payload(response_text)
-        tasks_data = []
-        if isinstance(parsed, dict):
-            tasks_data = parsed.get("tasks", [])
-        elif isinstance(parsed, list):
-            tasks_data = parsed
-        if not tasks_data:
-            tasks_data = [
-                {
-                    "task_id": "task-1",
-                    "title": "預設任務",
-                    "requiredCapabilities": ["generalist"],
-                }
-            ]
-        return {"tasks": tasks_data}
-
-    def _team_role_factory(
-        self,
-        provider: Any,
-        provider_name: str,
-        provider_model: str | None,
-        provider_type: str | None,
-        task: dict[str, Any],
-        docs_dir: Path,
-        session_path: Path,
-        session_id: str,
-        config: dict[str, Any],
-        project_id: str | None,
-    ) -> dict[str, Any]:
-        role_dir = docs_dir / "tasks" / task["task_id"]
-        try:
-            role_dir.mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
-            self.logger.error("建立角色目錄失敗：%s", exc, exc_info=True)
-            raise
-        persona_path = role_dir / "persona.json"
-        system_message = "你是 RoleFactory，請為任務建立 persona，輸出 JSON。"
-        user_message = (
-            "請輸出 persona JSON："
-            '{"persona_id":"p1","name":"...","focus":"...","tone":"...","instructions":"..."}。'
-            f" 任務：{task['title']}，能力：{', '.join(task['requiredCapabilities'])}"
-        )
-        messages = [
-            {"role": "system", "content": system_message},
-            {"role": "user", "content": user_message},
-        ]
-        response_text = self._stream_and_collect(
-            provider=provider,
-            provider_name=provider_name,
-            provider_model=provider_model,
-            messages=messages,
-            session_path=session_path,
-            session_id=session_id,
-            stage=f"team:role:{task['task_id']}",
-            config=config,
-            prompt_text=user_message,
-            project_id=project_id,
-        )
-        parsed = self._parse_json_payload(response_text)
-        if not isinstance(parsed, dict) or not {"persona_id", "name", "focus", "tone", "instructions"}.issubset(
-            parsed.keys()
-        ):
-            parsed = {
-                "persona_id": f"persona-{task['task_id']}",
-                "name": "通用執行者",
-                "focus": "任務交付",
-                "tone": "務實",
-                "instructions": "依照任務需求完成工作，輸出清楚的結果。",
-            }
-        try:
-            self._atomic_write_text(persona_path, json.dumps(parsed, ensure_ascii=False, indent=2))
-        except OSError as exc:
-            self.logger.error("寫入 persona 失敗：%s", exc, exc_info=True)
-            raise
-        return parsed
-
-    def _team_execute_task(
-        self,
-        provider: Any,
-        provider_name: str,
-        provider_model: str | None,
-        provider_type: str | None,
-        prompt: str,
-        task: dict[str, Any],
-        persona: dict[str, Any],
-        docs_dir: Path,
-        session_path: Path,
-        session_id: str,
-        config: dict[str, Any],
-        project_id: str | None,
-    ) -> Path:
-        task_dir = docs_dir / "tasks" / task["task_id"]
-        try:
-            task_dir.mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
-            self.logger.error("建立任務目錄失敗：%s", exc, exc_info=True)
-            raise
-        result_path = task_dir / "result.md"
-        system_message = "你是 StemAgent，負責完成指定任務。請用繁體中文輸出 markdown。"
-        persona_block = (
-            f"persona_id: {persona.get('persona_id')}\n"
-            f"name: {persona.get('name')}\n"
-            f"focus: {persona.get('focus')}\n"
-            f"tone: {persona.get('tone')}\n"
-            f"instructions: {persona.get('instructions')}"
-        )
-        user_message = (
-            f"user_task: {prompt}\n\n"
-            f"task: {task['title']}\n"
-            f"requiredCapabilities: {', '.join(task['requiredCapabilities'])}\n\n"
-            f"persona:\n{persona_block}\n\n"
-            "請產出對應的結果。"
-        )
-        messages = [
-            {"role": "system", "content": system_message},
-            {"role": "user", "content": user_message},
-        ]
-        self._stream_to_file(
-            provider=provider,
-            provider_name=provider_name,
-            provider_model=provider_model,
-            messages=messages,
-            output_path=result_path,
-            session_path=session_path,
-            session_id=session_id,
-            stage=f"team:execute:{task['task_id']}",
-            config=config,
-            provider_type=provider_type,
-            prompt_text=user_message,
-            project_id=project_id,
-        )
-        return result_path
-
-    def _team_audit_task(
-        self,
-        provider: Any,
-        provider_name: str,
-        provider_model: str | None,
-        provider_type: str | None,
-        task: dict[str, Any],
-        result_path: Path,
-        docs_dir: Path,
-        session_path: Path,
-        session_id: str,
-        config: dict[str, Any],
-        project_id: str | None,
-    ) -> dict[str, Any]:
-        audits_dir = docs_dir / "audits"
-        try:
-            audits_dir.mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
-            self.logger.error("建立 audits 目錄失敗：%s", exc, exc_info=True)
-            raise
-        audit_path = audits_dir / f"{task['task_id']}.json"
-        try:
-            result_text = result_path.read_text(encoding="utf-8")
-        except OSError as exc:
-            self.logger.error("讀取任務結果失敗：%s", exc, exc_info=True)
-            raise
-        system_message = "你是 Auditor，請審核任務結果並輸出 JSON。"
-        user_message = (
-            "請輸出 JSON 格式："
-            '{"status":"APPROVED|REJECTED","feedback":"..."}。'
-            f" 任務：{task['title']}\n結果：\n{result_text}"
-        )
-        messages = [
-            {"role": "system", "content": system_message},
-            {"role": "user", "content": user_message},
-        ]
-        response_text = self._stream_and_collect(
-            provider=provider,
-            provider_name=provider_name,
-            provider_model=provider_model,
-            messages=messages,
-            session_path=session_path,
-            session_id=session_id,
-            stage=f"team:audit:{task['task_id']}",
-            config=config,
-            prompt_text=user_message,
-            project_id=project_id,
-        )
-        parsed = self._parse_json_payload(response_text)
-        status = "APPROVED"
-        feedback = "自動通過（未提供有效審核結果）。"
-        if isinstance(parsed, dict):
-            status = str(parsed.get("status") or status).upper()
-            feedback = str(parsed.get("feedback") or feedback)
-        if status not in {"APPROVED", "REJECTED"}:
-            status = "APPROVED"
-        audit_payload = {"status": status, "feedback": feedback}
-        try:
-            self._atomic_write_text(audit_path, json.dumps(audit_payload, ensure_ascii=False, indent=2))
-        except OSError as exc:
-            self.logger.error("寫入審核結果失敗：%s", exc, exc_info=True)
-            raise
-        return audit_payload
-
-    def _team_synthesize(
-        self,
-        provider: Any,
-        provider_name: str,
-        provider_model: str | None,
-        provider_type: str | None,
-        prompt: str,
-        tasks: list[dict[str, Any]],
-        docs_dir: Path,
-        session_path: Path,
-        session_id: str,
-        config: dict[str, Any],
-        project_id: str | None,
-    ) -> str:
-        final_path = docs_dir / "final.md"
-        approved_tasks = [task for task in tasks if task.get("status") == "done"]
-        if not approved_tasks:
-            fallback_text = "目前沒有通過審核的任務，無法產出最終整合結果。"
-            try:
-                self._atomic_write_text(final_path, fallback_text)
-            except OSError as exc:
-                self.logger.error("寫入 final.md 失敗：%s", exc, exc_info=True)
-                raise
-            return fallback_text
-        result_blocks = []
-        for task in approved_tasks:
-            result_path = docs_dir / "tasks" / task["task_id"] / "result.md"
-            try:
-                result_text = result_path.read_text(encoding="utf-8")
-            except OSError as exc:
-                self.logger.error("讀取任務結果失敗：%s", exc, exc_info=True)
-                raise
-            result_blocks.append(f"task_id: {task['task_id']}\n標題：{task['title']}\n{result_text}")
-        synthesis_prompt = (
-            f"user_task: {prompt}\n\n"
-            "以下是已通過審核的任務結果，請整合為最終輸出：\n\n"
-            + "\n\n".join(result_blocks)
-        )
-        messages = [
-            {"role": "system", "content": "你是 PM，負責整合所有任務輸出。請用繁體中文輸出 markdown。"},
-            {"role": "user", "content": synthesis_prompt},
-        ]
-        return self._stream_to_file(
-            provider=provider,
-            provider_name=provider_name,
-            provider_model=provider_model,
-            messages=messages,
-            output_path=final_path,
-            session_path=session_path,
-            session_id=session_id,
-            stage="team:final",
-            config=config,
-            provider_type=provider_type,
-            prompt_text=synthesis_prompt,
-            project_id=project_id,
-        )
 
     def _load_tasks_payload(self, tasks_path: Path) -> dict[str, Any]:
         if not tasks_path.exists():
@@ -3384,10 +2749,28 @@ class AmonCore:
         payload: dict[str, Any],
         project_id: str | None = None,
         *,
+        project_path: Path | None = None,
         timeout_s: int | None = None,
         cancel_event: threading.Event | None = None,
     ) -> dict[str, Any]:
         self.ensure_base_structure()
+        builtin_workspace = project_path or (Path(self.get_project(project_id).path) if project_id else Path.cwd())
+        builtin_registry = build_registry(builtin_workspace)
+        builtin_spec = builtin_registry.get_spec(tool_name)
+        if builtin_spec is not None:
+            call_args = dict(payload)
+            for key in ("path", "root", "cwd"):
+                value = call_args.get(key)
+                if isinstance(value, str) and value and not Path(value).is_absolute():
+                    call_args[key] = str((builtin_workspace / value).resolve())
+            call = ToolCall(tool=tool_name, args=call_args, caller="taskgraph", project_id=project_id)
+            result = builtin_registry.get_handler(tool_name)(call)
+            return {
+                "content": result.content,
+                "is_error": result.is_error,
+                "meta": result.meta,
+                "text": result.as_text(),
+            }
         tool_dir, scope, project_path = self._resolve_tool_dir(tool_name, project_id)
         spec = load_tool_spec(tool_dir)
         project_allowed = self._resolve_project_allowed_paths(project_path)

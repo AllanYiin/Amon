@@ -59,7 +59,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "tools": {
         "global_dir": "~/.amon/tools",
         "project_dir_rel": "tools",
-        "allowed_paths": ["workspace"],
+        "allowed_paths": ["workspace", "docs", "tasks", ".amon"],
     },
     "web": {
         "serpapi_key_env": "SERPAPI_KEY",

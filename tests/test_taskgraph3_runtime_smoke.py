@@ -152,6 +152,42 @@ class TaskGraph3RuntimeSmokeTests(unittest.TestCase):
             self.assertEqual(result.state["nodes"]["map"]["status"], "SUCCEEDED")
             self.assertGreaterEqual(len(invoked), 3)
 
+    def test_parallel_map_supports_upstream_items_json_path_and_json_result_parser(self) -> None:
+        graph = GraphDefinition(
+            nodes=[
+                TaskNode(
+                    id="plan",
+                    output_contract=OutputContract(
+                        ports=[OutputPort(name="plan", extractor="json", type_ref="object", json_schema={"type": "object", "required": ["tasks"]})]
+                    ),
+                ),
+                TaskNode(
+                    id="map",
+                    execution="PARALLEL_MAP",
+                    execution_config={
+                        "itemsFrom": {"source": "upstream", "fromNode": "plan", "port": "plan", "jsonPath": "tasks"},
+                        "maxConcurrency": 2,
+                        "resultParser": "json",
+                    },
+                    output_contract=OutputContract(ports=[OutputPort(name="items", extractor="json", type_ref="array")]),
+                ),
+            ],
+            edges=[GraphEdge(from_node="plan", to_node="map", edge_type="CONTROL", kind="next")],
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = TaskGraph3Runtime(project_path=Path(tmp), graph=graph, run_id="run-dynamic-map")
+
+            def node_runner(node: TaskNode, ctx: dict[str, object]) -> str:
+                if node.id == "plan":
+                    return json.dumps({"tasks": [{"task_id": "T1", "title": "分析"}, {"task_id": "T2", "title": "驗證"}]})
+                return json.dumps({"task_id": ctx.get("map_item_task_id"), "title": ctx.get("map_item_title")})
+
+            result = runtime.run(node_runner)
+            items = result.state["nodes"]["map"]["output"]["ports"]["items"]
+            self.assertEqual(items[0]["task_id"], "T1")
+            self.assertEqual(items[1]["title"], "驗證")
+
     def test_recursive_respects_stop_condition_and_max_iters(self) -> None:
         graph = GraphDefinition(
             nodes=[

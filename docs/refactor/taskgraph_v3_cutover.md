@@ -4,17 +4,17 @@
 
 ## A. 目標終態（Definition of Done）
 
-- [ ] `docs/plan.json` 版本固定為 `taskgraph.v3`。
-- [ ] `TaskGraph3Runtime` 成為唯一 production runtime。
-- [ ] legacy/v2 僅保留 migrate/import 工具，不再作為主執行路徑。
-- [ ] runtime 對不支援 node type 皆 fail-fast，無靜默略過。
+- [x] `docs/plan.json` 版本固定為 `taskgraph.v3`。
+- [x] `TaskGraph3Runtime` 成為唯一 production runtime。
+- [x] legacy/v2 runtime 與 migrate/import 工具已移除。
+- [x] runtime 對不支援 node type 皆 fail-fast，無靜默略過。
 - [ ] run artifact 檔名保持相容：`state.json` / `events.jsonl` / `graph.resolved.json`。
 
 ## B. 現況已知 legacy 殘留（需逐步清除）
 
-- [ ] `PlanGraph`
-- [ ] `compile_plan_to_exec_graph`
-- [ ] `taskgraph3.engine_runtime.GraphRuntime`
+- [x] `PlanGraph`
+- [x] `compile_plan_to_exec_graph`
+- [x] `taskgraph3.engine_runtime.GraphRuntime`
 - [ ] `plan_execute` 命名與測試
 - [ ] CLI step5/step6 相容殘留
 
@@ -30,13 +30,13 @@
 - [ ] 對不支援 node type 增加 fail-fast 測試。
 
 ### Phase 2（runtime 單一路徑）
-- [ ] 將 production 執行入口收斂到 `TaskGraph3Runtime`。
-- [ ] 移除/封鎖雙軌執行相容層（除明確短期 shim）。
+- [x] 將 production 執行入口收斂到 `TaskGraph3Runtime`。
+- [x] 移除/封鎖雙軌執行相容層。
 
 ### Phase 3（CLI 與測試命名清理）
 - [ ] 清理 step5/step6 舊命名殘留。
 - [ ] `plan_execute` 相關命名改為 v3 對應語彙。
 
 ### Phase 4（legacy 封存）
-- [ ] legacy/v2 僅剩 migrate/import。
-- [ ] anti-legacy guard 升級為 CI 阻擋規則。
+- [x] legacy/v2 runtime 與 migrate/import 已移除。
+- [x] anti-legacy guard 升級為 CI 阻擋規則。

@@ -34,7 +34,7 @@ if start == -1:
     violations.append('src/amon/core.py: run_graph function not found')
 else:
     run_graph_body = core_text[start:]
-    required = ('Unsupported graph format', 'Run migrator: amon graph migrate ...')
+    required = ('Unsupported graph format', 'only taskgraph.v3 is supported')
     for token in required:
         if token not in run_graph_body:
             violations.append(f'src/amon/core.py:run_graph missing required token: {token}')
