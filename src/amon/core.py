@@ -44,6 +44,7 @@ from .project_registry import ProjectRegistry, load_project_config
 from .taskgraph3.amon_node_runner import AmonNodeRunner
 from .taskgraph3.payloads import (
     AgentTaskConfig,
+    InputBinding,
     SandboxRunConfig,
     TaskDisplayMetadata,
     TaskSpec,
@@ -1218,6 +1219,26 @@ class AmonCore:
         for node in nodes:
             if not isinstance(node, TaskNode) or node.task_spec.executor != "agent" or node.task_spec.agent is None:
                 continue
+            if node.id != "concept_alignment":
+                has_concept_binding = any(
+                    binding.source == "upstream"
+                    and binding.from_node == "concept_alignment"
+                    and binding.key == "concept_alignment_context"
+                    for binding in node.task_spec.input_bindings
+                )
+                if not has_concept_binding:
+                    node.task_spec.input_bindings.append(
+                        InputBinding(
+                            source="upstream",
+                            key="concept_alignment_context",
+                            from_node="concept_alignment",
+                            port="raw",
+                        )
+                    )
+                prompt_text = node.task_spec.agent.prompt or ""
+                if "concept_alignment_context" not in prompt_text:
+                    prefix = "前置概念對齊結果：\n${concept_alignment_context}\n\n"
+                    node.task_spec.agent.prompt = f"{prefix}{prompt_text}" if prompt_text else prefix
             if node.task_spec.agent.allowed_tools:
                 continue
             node.task_spec.agent.allowed_tools = self._suggest_agent_tools_for_task(
@@ -1418,11 +1439,17 @@ class AmonCore:
         )
         _emit_planning_progress("執行圖準備完成，開始執行任務…")
         phase_started_at = time.monotonic()
+        runtime_variables: dict[str, Any] = {}
+        if conversation_history:
+            runtime_variables["conversation_history"] = conversation_history
+        if thread_id:
+            runtime_variables["thread_id"] = thread_id
         result = _run_with_heartbeat(
             "任務執行中",
             lambda: self.run_graph(
                 project_path=project_path,
                 graph_path=graph_path,
+                variables=runtime_variables,
                 stream_handler=stream_handler,
                 run_id=run_id,
                 thread_id=thread_id,

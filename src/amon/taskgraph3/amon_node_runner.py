@@ -48,15 +48,17 @@ class AmonNodeRunner:
     def _run_agent(self, node: TaskNode, context: dict[str, Any]) -> dict[str, Any]:
         agent = node.task_spec.agent
         assert agent is not None
-        render_ctx = self._render_context(context)
+        render_ctx = self._render_context(node, context)
         prompt_template = agent.prompt or agent.instructions or ""
         prompt = Template(prompt_template).safe_substitute(render_ctx)
+        conversation_history = render_ctx.get("conversation_history")
         response = self.core.run_agent_task(
             prompt,
             project_path=self.project_path,
             model=agent.model,
             stream_handler=self.stream_handler,
             allowed_tools=agent.allowed_tools,
+            conversation_history=conversation_history if isinstance(conversation_history, list) else None,
             run_id=self.run_id,
             node_id=node.id,
             thread_id=self.thread_id,
@@ -74,7 +76,7 @@ class AmonNodeRunner:
     def _run_tool(self, node: TaskNode, context: dict[str, Any]) -> dict[str, Any]:
         tool_cfg = node.task_spec.tool
         assert tool_cfg is not None
-        render_ctx = self._render_context(context)
+        render_ctx = self._render_context(node, context)
         call_results: list[dict[str, Any]] = []
         for spec in tool_cfg.tools:
             payload = self._render_payload(spec.args, render_ctx)
@@ -86,7 +88,7 @@ class AmonNodeRunner:
         config = self.core.load_config(self.project_path)
         run_cfg = node.task_spec.sandbox_run
         assert run_cfg is not None
-        render_ctx = self._render_context(context)
+        render_ctx = self._render_context(node, context)
         command = Template(run_cfg.command or "").safe_substitute(render_ctx)
         workdir = Template(run_cfg.workdir or "").safe_substitute(render_ctx)
         language = "bash"
@@ -109,8 +111,52 @@ class AmonNodeRunner:
         )
         return {"raw_output": json.dumps(result, ensure_ascii=False), **result}
 
-    def _render_context(self, context: dict[str, Any]) -> dict[str, Any]:
-        return {**self.variables, **context, "run_id": self.run_id}
+    def _render_context(self, node: TaskNode, context: dict[str, Any]) -> dict[str, Any]:
+        render_ctx = {**self.variables, **context, "run_id": self.run_id}
+        render_ctx.update(self._resolve_input_bindings(node, render_ctx, context))
+        return render_ctx
+
+    def _resolve_input_bindings(
+        self,
+        node: TaskNode,
+        render_ctx: dict[str, Any],
+        runtime_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        resolved: dict[str, Any] = {}
+        for binding in node.task_spec.input_bindings:
+            if binding.source == "literal":
+                resolved[binding.key] = binding.value
+                continue
+            if binding.source == "variable":
+                source_key = str(binding.value).strip() if binding.value is not None else binding.key
+                resolved[binding.key] = render_ctx.get(source_key)
+                continue
+            if binding.source == "upstream":
+                resolved[binding.key] = self._resolve_upstream_binding(runtime_context, binding.from_node or "", binding.port or "")
+        return resolved
+
+    @staticmethod
+    def _resolve_upstream_binding(runtime_context: dict[str, Any], from_node: str, port: str) -> Any:
+        nodes = runtime_context.get("nodes")
+        if not isinstance(nodes, dict):
+            return None
+        upstream_state = nodes.get(from_node)
+        if not isinstance(upstream_state, dict):
+            return None
+        output = upstream_state.get("output")
+        if port == "raw":
+            if isinstance(output, dict):
+                if "raw" in output:
+                    return output.get("raw")
+                if "raw_output" in output:
+                    return output.get("raw_output")
+            return output
+        if not isinstance(output, dict):
+            return None
+        ports = output.get("ports")
+        if isinstance(ports, dict) and port in ports:
+            return ports.get(port)
+        return output.get(port)
 
     def _render_payload(self, payload: Any, context: dict[str, Any]) -> Any:
         if isinstance(payload, str):

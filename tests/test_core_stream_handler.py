@@ -169,8 +169,85 @@ class CoreStreamHandlerTests(unittest.TestCase):
                 self.assertTrue(mock_generate.called)
                 self.assertEqual(getattr(result, "execution_route", ""), "planner")
                 self.assertTrue(getattr(result, "planner_enabled", False))
+                self.assertEqual(mock_generate.call_args.kwargs.get("project_path"), project_path)
+                self.assertEqual(mock_generate.call_args.kwargs.get("project_id"), project.project_id)
             finally:
                 os.environ.pop("AMON_HOME", None)
+
+    def test_run_graph_stream_forwards_conversation_history_to_runtime_variables(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("plan-exec-history")
+                project_path = Path(project.path)
+                history = [
+                    {"role": "user", "content": "前一輪需求"},
+                    {"role": "assistant", "content": "先做概念對齊"},
+                ]
+                fake_result = SimpleNamespace(run_id="run-plan", run_dir=project_path / ".amon" / "runs" / "run-plan")
+
+                with patch.object(core, "generate_plan_docs", return_value=self._fake_v3_plan()), patch.object(
+                    core, "run_graph", return_value=fake_result
+                ) as mock_run_graph, patch.object(core, "_load_graph_primary_output", return_value="plan response"):
+                    core.run_graph_stream(
+                        "請完成任務",
+                        project_path=project_path,
+                        project_id=project.project_id,
+                        thread_id="thread-001",
+                        conversation_history=history,
+                    )
+
+                self.assertEqual(
+                    mock_run_graph.call_args.kwargs.get("variables"),
+                    {
+                        "conversation_history": history,
+                        "thread_id": "thread-001",
+                    },
+                )
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+    def test_postprocess_planner_graph_injects_concept_alignment_context_for_agent_tasks(self) -> None:
+        core = AmonCore()
+        graph = GraphDefinition(
+            version="taskgraph.v3",
+            nodes=[
+                TaskNode(
+                    id="writer",
+                    title="撰寫結果",
+                    task_spec=TaskSpec(
+                        executor="agent",
+                        agent=AgentTaskConfig(prompt="請輸出最終結果"),
+                        display=TaskDisplayMetadata(label="撰寫", summary="整理輸出", todo_hint="write"),
+                    ),
+                )
+            ],
+            edges=[],
+        )
+
+        processed = core._postprocess_planner_graph(
+            graph,
+            message="修正 taskgraph v3 一直重複概念對齊的問題",
+            available_tools=[{"name": "web.search"}],
+        )
+
+        writer = next(node for node in processed.nodes if isinstance(node, TaskNode) and node.id == "writer")
+        concept_binding = next(
+            binding for binding in writer.task_spec.input_bindings if binding.key == "concept_alignment_context"
+        )
+
+        self.assertEqual(concept_binding.source, "upstream")
+        self.assertEqual(concept_binding.from_node, "concept_alignment")
+        self.assertEqual(concept_binding.port, "raw")
+        self.assertTrue(writer.task_spec.agent.prompt.startswith("前置概念對齊結果：\n${concept_alignment_context}\n\n"))
+        self.assertTrue(
+            any(
+                edge.from_node == "concept_alignment" and edge.to_node == "writer" and edge.edge_type == "CONTROL"
+                for edge in processed.edges
+            )
+        )
 
     def test_run_graph_stream_emits_planning_progress_reasoning_chunks(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
