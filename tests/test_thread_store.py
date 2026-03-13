@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -167,6 +168,35 @@ class ThreadSessionStoreTests(unittest.TestCase):
             self.assertEqual(len(lines), 2)
             payloads = [json.loads(line) for line in lines]
             self.assertTrue(all(payload["type"] == "assistant_chunk" for payload in payloads))
+
+    def test_append_assistant_chunks_concurrently_does_not_fail_rollup_write(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                project_id = "proj-rollup-lock-001"
+                thread_id = create_thread_session(project_id)
+                errors: list[Exception] = []
+                barrier = threading.Barrier(6)
+
+                def _worker(index: int) -> None:
+                    try:
+                        barrier.wait(timeout=2)
+                        append_event(
+                            thread_id,
+                            {"type": "assistant_chunk", "text": f"chunk-{index}", "project_id": project_id},
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        errors.append(exc)
+
+                workers = [threading.Thread(target=_worker, args=(index,)) for index in range(6)]
+                for worker in workers:
+                    worker.start()
+                for worker in workers:
+                    worker.join(timeout=5)
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+        self.assertFalse(errors)
 
     def test_rejects_invalid_project_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

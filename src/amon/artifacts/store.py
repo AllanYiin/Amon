@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 import mimetypes
 from pathlib import Path
 from typing import Any
@@ -27,7 +27,7 @@ class ArtifactWriteResult:
 def _history_backup_path(project_path: Path, target_path: Path) -> Path:
     workspace_root = (project_path / "workspace").resolve()
     relative = target_path.resolve().relative_to(workspace_root)
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     history_root = project_path / ".amon" / "artifacts" / "history"
     return history_root / relative.parent / f"{relative.name}.{stamp}.bak"
 
@@ -100,7 +100,7 @@ def ingest_artifacts(response_text: str, project_path: Path, source: dict[str, A
                 "path": result.target_path,
                 "mime": mime_type or "application/octet-stream",
                 "size": stat.st_size,
-                "createdAt": datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat().replace("+00:00", "Z"),
+                "createdAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat().replace("+00:00", "Z"),
                 "run_id": str(source_meta.get("run_id") or ""),
                 "node_id": str(source_meta.get("node_id") or ""),
             }

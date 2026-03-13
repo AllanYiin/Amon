@@ -14,9 +14,31 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from amon import cli
 from amon.logging import log_billing, log_event
+from amon.logging_utils import setup_logger
 
 
 class LoggingTests(unittest.TestCase):
+    def test_setup_logger_reconfigures_and_releases_previous_log_file(self) -> None:
+        logger_name = "amon.test.reconfigure"
+        with tempfile.TemporaryDirectory() as first_dir, tempfile.TemporaryDirectory() as second_dir:
+            first_logs = Path(first_dir) / "logs"
+            second_logs = Path(second_dir) / "logs"
+            first_log_path = first_logs / "amon.log"
+            second_log_path = second_logs / "amon.log"
+
+            logger = setup_logger(logger_name, first_logs)
+            logger.info("first")
+            first_log_path.unlink()
+            self.assertFalse(first_log_path.exists())
+
+            logger = setup_logger(logger_name, second_logs)
+            logger.info("second")
+            self.assertIn("second", second_log_path.read_text(encoding="utf-8"))
+
+            for handler in list(logger.handlers):
+                logger.removeHandler(handler)
+                handler.close()
+
     def test_log_event_appends_jsonl(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir
