@@ -27,6 +27,9 @@ class PlanExecGraphContractTests(unittest.TestCase):
         import amon.planning as planning
 
         self.assertNotIn("compile_plan_to_exec_graph", planning.__all__)
+        self.assertNotIn("PlanGraph", planning.__all__)
+        self.assertNotIn("render_todo_markdown", planning.__all__)
+        self.assertNotIn("dumps_plan", planning.__all__)
 
 
 if __name__ == "__main__":

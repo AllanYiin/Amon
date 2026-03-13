@@ -9,19 +9,10 @@
 發版前先確認未新增 legacy 參考：
 
 ```bash
-rg -n "PlanGraph|compile_plan_to_exec_graph|legacy_graph_runtime|taskgraph3\.engine_runtime|taskgraph3\.migrate|graph migrate|plan_execute|step5|step6" src tests docs
+scripts/anti_legacy_graph.sh
 ```
 
-禁止再擴散的關鍵字/模組：
-
-- `PlanGraph`
-- `compile_plan_to_exec_graph`
-- `legacy_graph_runtime`
-- `taskgraph3.engine_runtime`
-- `taskgraph3.migrate`
-- `graph migrate`
-- `plan_execute`（新功能不得再沿用此命名）
-- CLI step5/step6 舊相容邏輯（新功能不得依賴）
+若 anti-legacy scan 失敗，先清除舊 planning/runtime 命名、舊 graph 相容入口與過期文件描述，再進入其餘驗收。
 
 ```bash
 python -m compileall src tests

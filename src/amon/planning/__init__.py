@@ -1,21 +1,10 @@
-"""Planning helpers.
+"""TaskGraph v3 planning helpers."""
 
-TaskGraph v3 GraphDefinition is the only execution/persistence format.
-"""
-
+from .compiler import LegacyPlanCompilerRemovedError, normalize_graph_definition_payload
 from .planner_llm import generate_plan_with_llm
-from .render import render_todo_markdown
-from .schema import PlanContext, PlanGraph, PlanNode, infer_edges_from_depends_on, validate_plan_graph
-from .serialize import dumps_plan, loads_plan
 
 __all__ = [
-    "PlanContext",
-    "PlanNode",
-    "PlanGraph",
-    "validate_plan_graph",
-    "infer_edges_from_depends_on",
-    "dumps_plan",
-    "loads_plan",
-    "render_todo_markdown",
+    "LegacyPlanCompilerRemovedError",
+    "normalize_graph_definition_payload",
     "generate_plan_with_llm",
 ]

@@ -4,28 +4,28 @@
 - 目標：定義 artifact ingest 的掛載層級、輸入格式（code fence）、輸出限制與 manifest schema，供後續 Phase 實作。
 - 範圍：僅定義規格與策略，不改動既有執行流程。
 
-## 現況盤點（GraphRuntime 寫檔落點）
+## 現況盤點（TaskGraph3Runtime 寫檔落點）
 
-### 1) `agent_task` / `write_file` 的落地流程
-- `agent_task`：在 `GraphRuntime._execute_node()` 內呼叫 `core.run_agent_task(...)` 取得文字後，透過 `_resolve_output_path(...)` 解析路徑，最後 `atomic_write_text(output_path, response)` 寫檔。
-- `write_file`：同樣在 `GraphRuntime._execute_node()` 內以 `_resolve_output_path(...)` 解析路徑後 `atomic_write_text(safe_path, content)` 寫檔。
-- `_resolve_output_path(...)` 會做 canonicalize，並強制輸出僅能位於 `docs/` 或 `audits/`，超出即拋錯。
+### 1) `TASK` / tool write 節點的落地流程
+- `TASK`（`taskSpec.executor=agent`）：由 `AmonNodeRunner` 呼叫 `core.run_agent_task(...)` 取得文字輸出。
+- `TASK`（`taskSpec.executor=tool`）：由 `AmonNodeRunner` 呼叫 `core.run_tool(...)`；像 `artifacts.write_text` 這類內建工具會直接把內容落地到專案路徑。
+- 實際寫入路徑會先經內建工具與專案 allowed paths 檢查，限制於 `workspace/`、`docs/`、`tasks/`、`.amon/` 等允許範圍。
 
 ### 2) single / self_critique / team 三路徑是否寫入 `docs/`
 - single graph：`single_task.output_path = docs/single_${run_id}.md`。
 - self_critique graph：`draft_path`、`reviews_dir/review_*.md`、`final_path` 均位於 `docs/`。
 - team graph：`TODO.md`、`ProjectManager.md`、`team_plan_*.md`、`tasks/*`、`audits/*`、`final.md` 皆由 graph node 指向 `docs/`（含 `docs/audits/*`）。
 
-**結論**：以 GraphRuntime 寫入 `docs/...` 作為 ingest 主要輸入來源可行，且可覆蓋三種模式。
+**結論**：以 TaskGraph v3 執行流程寫入 `docs/...` 作為 ingest 主要輸入來源可行，且可覆蓋三種模式。
 
 ## Hook 點決策
 
 ### 決策
-- **主掛點：GraphRuntime（優先）**
-  - 原因：三種模式都經由 graph node 寫檔，且 `agent_task`/`write_file` 寫檔責任集中於同一層。
-  - 建議掛點：在 `_execute_node()` 完成寫檔後，進行「內容解析 → artifact 擷取 → workspace 寫入 → manifest 落盤」。
+- **主掛點：TaskGraph3Runtime / AmonNodeRunner（優先）**
+  - 原因：三種模式都經由 v3 graph node 產生輸出，且 agent/tool/sandbox_run 的執行責任集中於同一層。
+  - 建議掛點：在 node 執行完成並確認 artifact 已落地後，進行「內容解析 → artifact 擷取 → workspace 寫入 → manifest 落盤」。
 - **補強掛點：chat/cli（次要 fallback）**
-  - 僅在非 GraphRuntime 路徑（若未來新增直寫流程）時啟用。
+  - 僅在非 TaskGraph3Runtime 路徑（若未來新增直寫流程）時啟用。
   - 預設關閉（opt-in），避免改變既有對外行為。
 
 ## Code Fence 規格（嚴格）

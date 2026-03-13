@@ -12,15 +12,15 @@
 - `src/amon/sandbox/path_rules.py`
 - `src/amon/sandbox/types.py`
 - `src/amon/cli.py`
-- `src/amon/taskgraph3/engine_runtime.py`
+- `src/amon/taskgraph3/runtime.py`
 - `src/amon/tooling.py`
 - `src/amon/core.py`
 
 ### 0.2 目前入口與能力
 - **CLI sandbox 入口（已存在）**：`amon sandbox exec`，讀取 runner 設定、打包 `input_files`、呼叫 runner、解碼 `output_files` 到 `--out-dir`。  
   參考：`build_parser()` 與 `_handle_sandbox(...)`。
-- **Graph 執行入口（已存在）**：`AmonCore.run_graph(...)` 建立 v3 `GraphRuntime`，於專案 `.amon/runs/<run_id>/` 產生 `state.json`、`events.jsonl`、`graph.resolved.json`。
-- **Graph node 類型（已存在）**：`agent_task`、`write_file`、`condition`、`map`、`tool.call|tool_call`（目前尚無 `sandbox_run`）。
+- **Graph 執行入口（已存在）**：`AmonCore.run_graph(...)` 建立 v3 `TaskGraph3Runtime`，於專案 `.amon/runs/<run_id>/` 產生 `state.json`、`events.jsonl`、`graph.resolved.json`。
+- **Graph node 類型（已存在）**：以 `TASK/GATE/GROUP/ARTIFACT` 為主；`TASK.taskSpec.executor` 可用 `agent`、`tool`、`sandbox_run`。
 - **Tooling（已存在）**：`AmonCore.run_tool(...)` 走 legacy tool 目錄與 `tool.py` 子程序，透過 `allowed_paths` + `canonicalize_path(...)` 進行路徑限制。
 - **Sandbox client（已存在）**：`SandboxRunnerClient.run_code(...)` 呼叫外部 runner；`validate_relative_path(...)` 與 `decode_output_files(...)` 提供 path traversal 防護。
 
@@ -103,7 +103,7 @@
 
 ---
 
-## 5. Graph 新 node：`sandbox_run` schema 與行為（提案）
+## 5. Graph `sandbox_run` executor schema 與行為（提案）
 
 > 本節為 schema 提案；目前 runtime 尚未實作該 node type。
 
@@ -111,19 +111,23 @@
 ```json
 {
   "id": "sandbox_step_1",
-  "type": "sandbox_run",
-  "language": "python",
-  "code": "print('hello')",
-  "code_file": "scripts/task.py",
-  "input_files": [
-    "docs/input/data.csv",
-    ".amon/runs/{{run_id}}/context.json"
-  ],
-  "output_prefix": "docs/artifacts/{{run_id}}",
-  "allowed_prefixes": ["docs/", ".amon/runs/{{run_id}}/"],
-  "timeout_s": 30,
-  "overwrite": false,
-  "store_output": "sandbox_result"
+  "node_type": "TASK",
+  "execution": "SINGLE",
+  "taskSpec": {
+    "executor": "sandbox_run",
+    "sandboxRun": {
+      "command": "python scripts/task.py",
+      "shell": "bash",
+      "workdir": "workspace"
+    },
+    "display": {
+      "label": "sandbox_step_1",
+      "summary": "執行 sandbox 任務",
+      "todoHint": "驗證輸出與落地路徑",
+      "tags": ["sandbox"]
+    },
+    "runnable": true
+  }
 }
 ```
 
@@ -177,7 +181,7 @@
 ---
 
 ## 8. 非目標（本次）
-- 不修改 `GraphRuntime` 現有 node 行為。
+- 不修改 `TaskGraph3Runtime` 現有 node 行為。
 - 不修改 `AmonCore.run_tool(...)` 既有 backend。
 - 不更動現有 CLI `sandbox exec` 行為。
 - 不引入新的預設寫入路徑或自動覆寫策略。

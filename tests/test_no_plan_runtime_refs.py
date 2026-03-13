@@ -13,6 +13,12 @@ ALLOWED_FILES: set[Path] = set()
 
 
 class NoPlanGraphRuntimeRefsTests(unittest.TestCase):
+    def test_legacy_plan_schema_helpers_removed(self) -> None:
+        self.assertFalse((ROOT / "src" / "amon" / "planning" / "schema.py").exists())
+        self.assertFalse((ROOT / "src" / "amon" / "planning" / "render.py").exists())
+        self.assertFalse((ROOT / "src" / "amon" / "planning" / "serialize.py").exists())
+        self.assertFalse((ROOT / "tests" / "test_plan_schema.py").exists())
+
     def _iter_runtime_files(self):
         for scope in RUNTIME_SCOPES:
             if scope.is_dir():

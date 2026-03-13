@@ -10,12 +10,11 @@
 - [x] runtime 對不支援 node type 皆 fail-fast，無靜默略過。
 - [ ] run artifact 檔名保持相容：`state.json` / `events.jsonl` / `graph.resolved.json`。
 
-## B. 現況已知 legacy 殘留（需逐步清除）
+## B. 現況已知殘留（需逐步清除）
 
-- [x] `PlanGraph`
-- [x] `compile_plan_to_exec_graph`
-- [x] `taskgraph3.engine_runtime.GraphRuntime`
-- [ ] `plan_execute` 命名與測試
+- [x] 舊 planning graph 型別與編譯路徑
+- [x] 舊 runtime 模組與相容入口
+- [ ] 舊 planner mode 命名與測試
 - [ ] CLI step5/step6 相容殘留
 
 ## C. Phase Gate
@@ -35,7 +34,7 @@
 
 ### Phase 3（CLI 與測試命名清理）
 - [ ] 清理 step5/step6 舊命名殘留。
-- [ ] `plan_execute` 相關命名改為 v3 對應語彙。
+- [ ] 舊 planner mode 相關命名改為 v3 對應語彙。
 
 ### Phase 4（legacy 封存）
 - [x] legacy/v2 runtime 與 migrate/import 已移除。

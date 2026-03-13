@@ -6,7 +6,7 @@
 
 - `run_graph` 與 graph template 執行入口只接受 `taskgraph.v3`
 - single / self_critique / team 皆由原生 v3 payload builder 產生
-- legacy runtime、legacy graph migrator、graph migrate CLI 已移除
+- legacy runtime、legacy graph 轉換入口與相容 CLI 已移除
 - runtime 對非 v3 payload 採 fail-fast
 
 ## 維護原則

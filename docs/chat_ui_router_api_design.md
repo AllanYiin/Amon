@@ -13,8 +13,8 @@
 - Project 與 Run 核心流程：`src/amon/core.py`
   - 專案生命週期（create/list/show/update/delete/restore）
   - `run_single/run_self_critique/run_team/run_graph/...` 皆集中在 AmonCore。 
-- Graph runtime：`src/amon/taskgraph3/engine_runtime.py`
-  - `GraphRuntime.run()` 負責建立 `graph.resolved.json`、`state.json`、`events.jsonl`。
+- Graph runtime：`src/amon/taskgraph3/runtime.py`
+  - `TaskGraph3Runtime.run()` 負責建立 `graph.resolved.json`、`state.json`、`events.jsonl`。
 
 ### UI 入口
 - `src/amon/ui_server.py`：簡易 HTTP UI 服務與 API 路由（`/v1/*`）。
@@ -26,7 +26,7 @@
 - 專案 sessions：`<project_path>/sessions/*.jsonl`。
   - `AmonCore._create_project_structure()` 建立 `sessions/`。
 - graph runs：`<project_path>/.amon/runs/<run_id>/`。
-  - `GraphRuntime.run()` 產出 `graph.resolved.json`、`state.json`、`events.jsonl`。
+  - `TaskGraph3Runtime.run()` 產出 `graph.resolved.json`、`state.json`、`events.jsonl`。
 
 ## 新增模組建議位置（不實作，僅插入點）
 
@@ -76,7 +76,7 @@
 - `ui_server.py` 新增 `/v1/chat/health` 或 `/v1/commands/health`，確認路由可達。
 
 ### Phase 2（Graph-first 串接）
-- `Chat Router -> GraphRuntime`：
+- `Chat Router -> TaskGraph3Runtime`：
   - 每次 chat 指令都落地到 `.amon/runs/<run_id>/`，確保 `graph.resolved.json + state.json + events.jsonl` 產生。
 - `Session` 落地到 `sessions/`：
   - Chat 每次互動寫入 `sessions/<session_id>.jsonl`。

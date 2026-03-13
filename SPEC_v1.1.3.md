@@ -843,7 +843,15 @@ embedding_text =
 ```json
 {
   "id": "n_research",
-  "type": "agent_task",
+  "node_type": "TASK",
+  "taskSpec": {
+    "executor": "agent",
+    "agent": {
+      "prompt": "執行研究任務",
+      "instructions": "先查詢記憶再整合上下文"
+    },
+    "runnable": true
+  },
   "memory": {
     "query": {
       "entities": ["person:wang_xiaoming"],

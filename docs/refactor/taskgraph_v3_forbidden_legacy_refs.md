@@ -1,20 +1,16 @@
 # TaskGraph v3 Anti-legacy 禁止引用清單
 
-下列關鍵字與模組在 cutover 期間列為「禁止新增依賴」：
+下列類型的舊概念在 cutover 後列為「禁止新增依賴」：
 
-- `PlanGraph`
-- `compile_plan_to_exec_graph`
-- `legacy_graph_runtime`
-- `taskgraph3.engine_runtime`
-- `taskgraph3.migrate`
-- `graph migrate`
-- `plan_execute`
+- 舊 planning graph 型別與編譯入口
+- 舊 runtime 模組與舊 graph 轉換入口
+- 舊 planner mode 命名
 - CLI step5 / step6 舊相容邏輯
 
 ## 檢查命令
 
 ```bash
-rg -n "PlanGraph|compile_plan_to_exec_graph|legacy_graph_runtime|taskgraph3\.engine_runtime|taskgraph3\.migrate|graph migrate|plan_execute|step5|step6" src tests docs
+scripts/anti_legacy_graph.sh
 ```
 
 ## 說明
