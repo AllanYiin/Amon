@@ -11,6 +11,7 @@ from amon.models import build_provider
 
 from amon.taskgraph3.payloads import AgentTaskConfig, ArtifactOutput, TaskDisplayMetadata, TaskSpec, task_spec_from_payload
 from amon.taskgraph3.schema import ArtifactNode, GateNode, GateRoute, GraphDefinition, GraphEdge, GroupNode, TaskNode, validate_graph_definition
+from amon.taskgraph3.validate import graph_definition_from_payload
 
 logger = logging.getLogger(__name__)
 
@@ -227,18 +228,7 @@ def _loads_graph_definition(text: str) -> GraphDefinition:
         raise ValueError(f"TaskGraph JSON 格式錯誤：{exc}") from exc
     if not isinstance(payload, dict):
         raise ValueError("TaskGraph 必須是 object")
-    if str(payload.get("version") or "") != "taskgraph.v3":
-        raise ValueError("TaskGraph version 必須是 taskgraph.v3")
-    nodes_raw = payload.get("nodes")
-    if not isinstance(nodes_raw, list):
-        raise ValueError("nodes 必須是 list")
-    edges_raw = payload.get("edges")
-    if not isinstance(edges_raw, list):
-        raise ValueError("edges 必須是 list")
-
-    nodes = [_coerce_node(item) for item in nodes_raw]
-    edges = [_coerce_edge(item) for item in edges_raw]
-    graph = GraphDefinition(version="taskgraph.v3", nodes=nodes, edges=edges)
+    graph = graph_definition_from_payload(payload)
     validate_graph_definition(graph)
     return graph
 

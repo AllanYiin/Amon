@@ -78,7 +78,7 @@ class GraphSandboxRunTests(unittest.TestCase):
             result = runtime.run(runner.run_task)
 
             state_payload = json.loads((result.run_dir / "state.json").read_text(encoding="utf-8"))
-            self.assertEqual(state_payload["status"], "completed")
+            self.assertEqual(state_payload["status"], "succeeded")
             node_output = state_payload["nodes"]["sandbox1"]["output"]
             self.assertEqual(node_output["exit_code"], 0)
 

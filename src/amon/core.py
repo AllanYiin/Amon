@@ -60,6 +60,7 @@ from .taskgraph3.payloads import (
 from .taskgraph3.runtime import TaskGraph3RunResult, TaskGraph3Runtime
 from .taskgraph3.schema import ArtifactNode, GateNode, GateRoute, GraphDefinition, GraphEdge, GroupNode, TaskNode
 from .taskgraph3.serialize import dumps_graph_definition
+from .taskgraph3.validate import graph_definition_from_payload
 from .sandbox.service import run_sandbox_step
 from .tooling import (
     ToolingError,
@@ -1730,20 +1731,7 @@ class AmonCore:
         return result
 
     def _to_taskgraph3_definition(self, payload: dict[str, Any]) -> GraphDefinition:
-        nodes_payload = payload.get("nodes") if isinstance(payload.get("nodes"), list) else []
-        edges_payload = payload.get("edges") if isinstance(payload.get("edges"), list) else []
-        nodes = [self._to_taskgraph3_node(item) for item in nodes_payload if isinstance(item, dict)]
-        edges = [
-            GraphEdge(
-                from_node=str(item.get("from") or item.get("from_node") or ""),
-                to_node=str(item.get("to") or item.get("to_node") or ""),
-                edge_type=str(item.get("edge_type") or "CONTROL"),
-                kind=str(item.get("kind") or "next"),
-            )
-            for item in edges_payload
-            if isinstance(item, dict)
-        ]
-        return GraphDefinition(version="taskgraph.v3", nodes=nodes, edges=edges)
+        return graph_definition_from_payload(payload)
 
     def _to_taskgraph3_node(self, raw: dict[str, Any]):
         node_type = str(raw.get("node_type") or "").upper()

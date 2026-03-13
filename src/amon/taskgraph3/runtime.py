@@ -17,6 +17,7 @@ from amon.fs.atomic import append_jsonl, atomic_write_text
 from amon.artifacts.store import ingest_artifacts
 
 from .schema import ArtifactNode, GateNode, GraphDefinition, GraphEdge, GroupNode, TaskNode, validate_graph_definition
+from .serialize import dumps_graph_definition
 
 
 class OutputContractError(ValueError):
@@ -71,7 +72,7 @@ class TaskGraph3Runtime:
             "status": "running",
             "nodes": {
                 node_id: {
-                    "status": "READY" if incoming.get(node_id, 0) == 0 else "PENDING",
+                    "status": "ready" if incoming.get(node_id, 0) == 0 else "queued",
                     "attempt_logs": [],
                     "output": None,
                     "error": None,
@@ -85,25 +86,18 @@ class TaskGraph3Runtime:
             },
         }
 
-        self._write_json(
-            resolved_path,
-            {
-                "version": self.graph.version,
-                "nodes": [self._node_to_dict(n) for n in self.graph.nodes],
-                "edges": [self._edge_to_dict(e) for e in self.graph.edges],
-            },
-        )
+        self._write_json(resolved_path, json.loads(dumps_graph_definition(self.graph)))
         self._emit_event(events_path, {"event": "run_start", "run_id": run_id}, stream_limit=None)
 
         while ready:
             node_id = ready.popleft()
             node_state = state["nodes"][node_id]
-            node_state["status"] = "RUNNING"
+            node_state["status"] = "running"
             node = nodes[node_id]
             stream_limit = node.policy.stream_limit if isinstance(node, TaskNode) else None
             self._emit_event(
                 events_path,
-                {"event": "node_status", "node_id": node_id, "status": "RUNNING"},
+                {"event": "node_status", "node_id": node_id, "status": "running"},
                 stream_limit=stream_limit,
             )
 
@@ -154,7 +148,7 @@ class TaskGraph3Runtime:
                 latency_ms = int((self._time() - started) * 1000)
                 state["metrics"]["latency_ms"][node_id] = latency_ms
                 state["metrics"]["counters"]["nodes_succeeded"] += 1
-                node_state["status"] = "SUCCEEDED"
+                node_state["status"] = "succeeded"
                 if isinstance(node, TaskNode):
                     merged_output = {"raw": str(output_payload.get("raw_output") or ""), "ports": extracted}
                     for key, value in output_payload.items():
@@ -166,18 +160,18 @@ class TaskGraph3Runtime:
                     node_state["output"] = output_payload
                 self._emit_event(
                     events_path,
-                    {"event": "node_status", "node_id": node_id, "status": "SUCCEEDED", "latency_ms": latency_ms},
+                    {"event": "node_status", "node_id": node_id, "status": "succeeded", "latency_ms": latency_ms},
                     stream_limit=stream_limit,
                 )
             except Exception as exc:  # noqa: BLE001
                 self._flush_stream(events_path, node.id)
                 state["metrics"]["counters"]["nodes_failed"] += 1
-                node_state["status"] = "FAILED"
+                node_state["status"] = "failed"
                 node_state["error"] = str(exc)
                 node_state["attempt_logs"].append(f"attempt=1 failed={exc}")
                 self._emit_event(
                     events_path,
-                    {"event": "node_status", "node_id": node_id, "status": "FAILED", "error": str(exc)},
+                    {"event": "node_status", "node_id": node_id, "status": "failed", "error": str(exc)},
                     stream_limit=stream_limit,
                 )
                 state["status"] = "failed"
@@ -185,12 +179,12 @@ class TaskGraph3Runtime:
 
             for nxt in adjacency.get(node_id, []):
                 incoming[nxt] -= 1
-                if incoming[nxt] == 0 and state["nodes"][nxt]["status"] == "PENDING":
-                    state["nodes"][nxt]["status"] = "READY"
+                if incoming[nxt] == 0 and state["nodes"][nxt]["status"] == "queued":
+                    state["nodes"][nxt]["status"] = "ready"
                     ready.append(nxt)
 
         if state["status"] == "running":
-            state["status"] = "completed"
+            state["status"] = "succeeded"
 
         self._emit_event(
             events_path,
@@ -287,8 +281,8 @@ class TaskGraph3Runtime:
             if target in selected_targets:
                 continue
             target_state = state["nodes"].get(target)
-            if isinstance(target_state, dict) and target_state.get("status") == "PENDING":
-                target_state["status"] = "SKIPPED"
+            if isinstance(target_state, dict) and target_state.get("status") == "queued":
+                target_state["status"] = "skipped"
                 target_state["error"] = f"gate {node.id} route outcome={outcome} not selected"
         return {"outcome": outcome, "selected_targets": sorted(selected_targets)}
 
@@ -301,7 +295,7 @@ class TaskGraph3Runtime:
         _ = adjacency
         raw_output = ""
         for node_id, node_state in state["nodes"].items():
-            if node_state.get("status") != "SUCCEEDED":
+            if node_state.get("status") != "succeeded":
                 continue
             output = node_state.get("output")
             if isinstance(output, dict) and isinstance(output.get("raw"), str):
@@ -545,25 +539,3 @@ class TaskGraph3Runtime:
             return output
         return {"raw_output": str(output)}
 
-    def _node_to_dict(self, node: Any) -> dict[str, Any]:
-        payload = {"id": node.id, "node_type": node.node_type, "title": node.title}
-        if isinstance(node, TaskNode):
-            payload["execution"] = node.execution
-            payload["executionConfig"] = node.execution_config or {}
-            payload["policy"] = {"rateLimit": node.policy.rate_limit, "streamLimit": node.policy.stream_limit}
-            payload["outputContract"] = {
-                "ports": [
-                    {
-                        "name": p.name,
-                        "extractor": p.extractor,
-                        "parser": p.parser,
-                        "jsonSchema": p.json_schema,
-                        "typeRef": p.type_ref,
-                    }
-                    for p in node.output_contract.ports
-                ]
-            }
-        return payload
-
-    def _edge_to_dict(self, edge: GraphEdge) -> dict[str, Any]:
-        return {"from": edge.from_node, "to": edge.to_node, "edge_type": edge.edge_type, "kind": edge.kind}

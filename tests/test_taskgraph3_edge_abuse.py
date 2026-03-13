@@ -30,8 +30,8 @@ class TaskGraph3EdgeAbuseTests(unittest.TestCase):
             second = runtime.run(lambda *_: "second")
 
             self.assertNotEqual(first.run_id, second.run_id)
-            self.assertEqual(first.state["status"], "completed")
-            self.assertEqual(second.state["status"], "completed")
+            self.assertEqual(first.state["status"], "succeeded")
+            self.assertEqual(second.state["status"], "succeeded")
             self.assertNotEqual(first.run_dir, second.run_dir)
 
 

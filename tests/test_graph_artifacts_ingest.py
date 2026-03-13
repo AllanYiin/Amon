@@ -111,7 +111,7 @@ class GraphArtifactsIngestTests(unittest.TestCase):
             context = {
                 "nodes": {
                     "concept_alignment": {
-                        "status": "SUCCEEDED",
+                        "status": "succeeded",
                         "output": {
                             "raw": "概念摘要：TaskGraph v3 需承接上一節點結果。",
                             "ports": {},

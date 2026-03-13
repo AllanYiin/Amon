@@ -81,16 +81,16 @@ class TaskGraph3RuntimeSmokeTests(unittest.TestCase):
 
             result = runtime.run(node_runner)
 
-            self.assertEqual(result.state["status"], "completed")
-            self.assertEqual(result.state["nodes"]["n1"]["status"], "SUCCEEDED")
-            self.assertEqual(result.state["nodes"]["n2"]["status"], "SUCCEEDED")
-            self.assertEqual(result.state["nodes"]["n3"]["status"], "SUCCEEDED")
+            self.assertEqual(result.state["status"], "succeeded")
+            self.assertEqual(result.state["nodes"]["n1"]["status"], "succeeded")
+            self.assertEqual(result.state["nodes"]["n2"]["status"], "succeeded")
+            self.assertEqual(result.state["nodes"]["n3"]["status"], "succeeded")
             self.assertIn("artifact", result.state["nodes"]["n3"]["output"]["ports"]["payload"])
 
             events_path = result.run_dir / "events.jsonl"
             lines = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-            self.assertTrue(any(event.get("status") == "RUNNING" and event.get("node_id") == "n1" for event in lines))
-            self.assertTrue(any(event.get("status") == "SUCCEEDED" and event.get("node_id") == "n3" for event in lines))
+            self.assertTrue(any(event.get("status") == "running" and event.get("node_id") == "n1" for event in lines))
+            self.assertTrue(any(event.get("status") == "succeeded" and event.get("node_id") == "n3" for event in lines))
 
     def test_output_contract_failure_stops_downstream(self) -> None:
         graph = GraphDefinition(
@@ -110,9 +110,9 @@ class TaskGraph3RuntimeSmokeTests(unittest.TestCase):
             runtime = TaskGraph3Runtime(project_path=Path(tmp), graph=graph, run_id="run-fail")
             result = runtime.run(lambda *_: json.dumps({"not_value": 1}))
             self.assertEqual(result.state["status"], "failed")
-            self.assertEqual(result.state["nodes"]["a"]["status"], "FAILED")
+            self.assertEqual(result.state["nodes"]["a"]["status"], "failed")
             self.assertIn("missing required key=value", str(result.state["nodes"]["a"]["error"]))
-            self.assertEqual(result.state["nodes"]["b"]["status"], "PENDING")
+            self.assertEqual(result.state["nodes"]["b"]["status"], "queued")
 
     def test_parallel_map_respects_max_concurrency_and_rate_limit(self) -> None:
         lock = threading.Lock()
@@ -149,7 +149,7 @@ class TaskGraph3RuntimeSmokeTests(unittest.TestCase):
             payload = result.state["nodes"]["map"]["output"]["ports"]["items"]
             self.assertEqual(payload, ["a", "b", "c"])
             self.assertLessEqual(max_seen, 2)
-            self.assertEqual(result.state["nodes"]["map"]["status"], "SUCCEEDED")
+            self.assertEqual(result.state["nodes"]["map"]["status"], "succeeded")
             self.assertGreaterEqual(len(invoked), 3)
 
     def test_parallel_map_supports_upstream_items_json_path_and_json_result_parser(self) -> None:
@@ -213,7 +213,7 @@ class TaskGraph3RuntimeSmokeTests(unittest.TestCase):
                 return f"continue-{idx}"
 
             result = runtime.run(node_runner)
-            self.assertEqual(result.state["status"], "completed")
+            self.assertEqual(result.state["status"], "succeeded")
             self.assertEqual(calls, [0, 1, 2])
             self.assertEqual(result.state["nodes"]["recur"]["output"]["ports"]["line"], "done")
 
@@ -260,9 +260,9 @@ class TaskGraph3RuntimeSmokeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             runtime = TaskGraph3Runtime(project_path=Path(tmp), graph=graph, run_id="run-gate")
             result = runtime.run(lambda *_: "ok")
-            self.assertEqual(result.state["status"], "completed")
+            self.assertEqual(result.state["status"], "succeeded")
             self.assertEqual(result.state["nodes"]["gate"]["output"]["outcome"], "success")
-            self.assertEqual(result.state["nodes"]["fallback"]["status"], "SKIPPED")
+            self.assertEqual(result.state["nodes"]["fallback"]["status"], "skipped")
 
     def test_group_node_fail_fast(self) -> None:
         graph = GraphDefinition(nodes=[GroupNode(id="grp", children=[])], edges=[])
@@ -270,7 +270,7 @@ class TaskGraph3RuntimeSmokeTests(unittest.TestCase):
             runtime = TaskGraph3Runtime(project_path=Path(tmp), graph=graph, run_id="run-group")
             result = runtime.run(lambda *_: "ok")
             self.assertEqual(result.state["status"], "failed")
-            self.assertEqual(result.state["nodes"]["grp"]["status"], "FAILED")
+            self.assertEqual(result.state["nodes"]["grp"]["status"], "failed")
             self.assertIn("fail-fast", result.state["nodes"]["grp"]["error"])
 
     def test_artifact_node_ingests_upstream_output(self) -> None:
@@ -282,7 +282,7 @@ class TaskGraph3RuntimeSmokeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             runtime = TaskGraph3Runtime(project_path=Path(tmp), graph=graph, run_id="run-artifact")
             result = runtime.run(lambda *_: response)
-            self.assertEqual(result.state["nodes"]["artifact"]["status"], "SUCCEEDED")
+            self.assertEqual(result.state["nodes"]["artifact"]["status"], "succeeded")
             self.assertEqual(result.state["nodes"]["artifact"]["output"]["ingest_summary"]["created"], 1)
 
 

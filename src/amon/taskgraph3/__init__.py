@@ -1,13 +1,29 @@
 """TaskGraph v3 schema and deterministic serializer."""
 
 from .schema import (
+    Agent,
+    AgentMemoryConfig,
+    AgentModelConfig,
+    AgentPreview,
+    AgentToolRef,
     ArtifactNode,
     BaseNode,
+    EdgeCondition,
+    EdgeDataMapping,
     GateNode,
     GateRoute,
     GraphDefinition,
     GraphEdge,
+    GraphRun,
+    GraphSettings,
+    GraphViewport,
     GroupNode,
+    NodeExecutionPolicy,
+    NodeInputBindingV3,
+    NodeInputSource,
+    NodePort,
+    NodeRun,
+    NodeUIState,
     OutputContract,
     OutputPort,
     Policy,
@@ -17,16 +33,32 @@ from .schema import (
 )
 from .serialize import dumps_graph_definition
 from .runtime import OutputContractError, TaskGraph3RunResult, TaskGraph3Runtime
-from .validate import validate_v3_graph_json
+from .validate import graph_definition_from_payload, validate_v3_graph_json
 
 __all__ = [
+    "Agent",
+    "AgentMemoryConfig",
+    "AgentModelConfig",
+    "AgentPreview",
+    "AgentToolRef",
     "ArtifactNode",
     "BaseNode",
+    "EdgeCondition",
+    "EdgeDataMapping",
     "GateNode",
     "GateRoute",
     "GraphDefinition",
     "GraphEdge",
+    "GraphRun",
+    "GraphSettings",
+    "GraphViewport",
     "GroupNode",
+    "NodeExecutionPolicy",
+    "NodeInputBindingV3",
+    "NodeInputSource",
+    "NodePort",
+    "NodeRun",
+    "NodeUIState",
     "OutputContract",
     "OutputPort",
     "Policy",
@@ -37,5 +69,6 @@ __all__ = [
     "OutputContractError",
     "TaskGraph3RunResult",
     "TaskGraph3Runtime",
+    "graph_definition_from_payload",
     "validate_v3_graph_json",
 ]
