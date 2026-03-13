@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -14,6 +15,35 @@ from amon.taskgraph3.schema import ArtifactNode, GraphDefinition, GraphEdge, Tas
 
 
 class CorePlanGenerationTests(unittest.TestCase):
+    def test_to_taskgraph3_definition_accepts_agent_allowed_tools_payload(self) -> None:
+        temp_dir = tempfile.mkdtemp()
+        try:
+            core = AmonCore(data_dir=Path(temp_dir))
+            graph = core._to_taskgraph3_definition(
+                {
+                    "version": "taskgraph.v3",
+                    "nodes": [
+                        {
+                            "id": "task-1",
+                            "node_type": "TASK",
+                            "title": "概念對齊",
+                            "taskSpec": {
+                                "executor": "agent",
+                                "agent": {
+                                    "prompt": "先查概念",
+                                    "allowedTools": ["web.search"],
+                                },
+                            },
+                        }
+                    ],
+                    "edges": [],
+                }
+            )
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        node = next(node for node in graph.nodes if isinstance(node, TaskNode))
+        self.assertEqual(node.task_spec.agent.allowed_tools, ["web.search"])
+
     def test_generate_plan_docs_writes_v3_plan_and_todo_and_emits_event(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir

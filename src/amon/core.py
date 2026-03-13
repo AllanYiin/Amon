@@ -49,6 +49,7 @@ from .taskgraph3.payloads import (
     TaskSpec,
     ToolCallSpec,
     ToolTaskConfig,
+    task_spec_from_payload,
 )
 from .taskgraph3.runtime import TaskGraph3RunResult, TaskGraph3Runtime
 from .taskgraph3.schema import ArtifactNode, GateNode, GateRoute, GraphDefinition, GraphEdge, GroupNode, TaskNode
@@ -2042,35 +2043,12 @@ class AmonCore:
 
         if isinstance(raw.get("taskSpec"), dict):
             spec = raw["taskSpec"]
-            executor = str(spec.get("executor") or "")
             return TaskNode(
                 id=node_id,
                 title=title,
                 execution=str(raw.get("execution") or "SINGLE"),
                 execution_config=raw.get("executionConfig") if isinstance(raw.get("executionConfig"), dict) else None,
-                task_spec=TaskSpec(
-                    executor=executor,
-                    agent=AgentTaskConfig(**spec["agent"]) if isinstance(spec.get("agent"), dict) else None,
-                    tool=ToolTaskConfig(
-                        tools=[ToolCallSpec(name=str(it.get("name") or ""), args=it.get("args") or {}) for it in spec.get("tool", {}).get("tools", []) if isinstance(it, dict)],
-                        skills=[str(s) for s in spec.get("tool", {}).get("skills", [])],
-                    )
-                    if isinstance(spec.get("tool"), dict)
-                    else None,
-                    sandbox_run=(
-                        SandboxRunConfig(**spec["sandboxRun"]) if isinstance(spec.get("sandboxRun"), dict)
-                        else (
-                            SandboxRunConfig(
-                                command=f"cat <<'EOF' > {str(spec.get('writeFile', {}).get('path') or 'docs/output.txt')}\n{str(spec.get('writeFile', {}).get('contentTemplate') or '')}\nEOF",
-                                shell="bash",
-                            )
-                            if isinstance(spec.get("writeFile"), dict)
-                            else None
-                        )
-                    ),
-                    runnable=bool(spec.get("runnable", True)),
-                    non_runnable_reason=str(spec.get("nonRunnableReason") or "") or None,
-                ),
+                task_spec=task_spec_from_payload(spec),
             )
 
         if legacy_type == "agent_task":
