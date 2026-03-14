@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 from typing import Any, Iterable, Protocol
 
 from amon.config import ConfigLoader
+from amon.llm_request_log import append_llm_request, build_llm_request_payload
 from amon.models import build_provider
 
 from amon.taskgraph3.payloads import AgentTaskConfig, ArtifactOutput, TaskDisplayMetadata, TaskSpec, task_spec_from_payload
@@ -25,10 +27,14 @@ def generate_plan_with_llm(
     message: str,
     *,
     project_id: str | None = None,
+    project_path: Path | None = None,
     llm_client: LLMClient | None = None,
     model: str | None = None,
     available_tools: list[dict[str, Any]] | None = None,
     available_skills: list[dict[str, Any]] | None = None,
+    run_id: str | None = None,
+    thread_id: str | None = None,
+    request_id: str | None = None,
 ) -> GraphDefinition:
     normalized = " ".join((message or "").split())
     if not normalized:
@@ -48,6 +54,11 @@ def generate_plan_with_llm(
             available_skills=available_skills,
             repair_error=None,
             previous_raw=None,
+            project_path=project_path,
+            project_id=project_id,
+            run_id=run_id,
+            thread_id=thread_id,
+            request_id=request_id,
         )
         try:
             return _loads_graph_definition(_strip_code_fences(raw))
@@ -60,6 +71,11 @@ def generate_plan_with_llm(
                 available_skills=available_skills,
                 repair_error=str(exc),
                 previous_raw=raw,
+                project_path=project_path,
+                project_id=project_id,
+                run_id=run_id,
+                thread_id=thread_id,
+                request_id=request_id,
             )
             return _loads_graph_definition(_strip_code_fences(repaired))
     except Exception as exc:  # noqa: BLE001
@@ -76,6 +92,11 @@ def _request_plan(
     available_skills: list[dict[str, Any]] | None,
     repair_error: str | None,
     previous_raw: str | None,
+    project_path: Path | None,
+    project_id: str | None,
+    run_id: str | None,
+    thread_id: str | None,
+    request_id: str | None,
 ) -> str:
     payload: dict[str, Any] = {
         "message": message,
@@ -90,6 +111,31 @@ def _request_plan(
         {"role": "system", "content": _planner_system_prompt(is_repair=bool(repair_error))},
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
     ]
+    if project_path is not None:
+        try:
+            append_llm_request(
+                project_path,
+                build_llm_request_payload(
+                    source="planner_llm",
+                    provider="configured_llm_client",
+                    model=model,
+                    project_id=project_id,
+                    run_id=run_id,
+                    thread_id=thread_id,
+                    node_id="__planner__",
+                    request_id=request_id,
+                    stage="planner_repair" if repair_error else "planner_generation",
+                    messages=messages,
+                    prompt_text=messages[-1]["content"],
+                    metadata={
+                        "repair": bool(repair_error),
+                        "available_tools_count": len(available_tools or []),
+                        "available_skills_count": len(available_skills or []),
+                    },
+                ),
+            )
+        except OSError as exc:
+            logger.warning("寫入 planner llm request trace 失敗：%s", exc)
     return _collect_stream(llm_client, messages, model)
 
 

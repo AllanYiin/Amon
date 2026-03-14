@@ -128,6 +128,95 @@ function renderBreakdown(rootEl, categories = []) {
   });
 }
 
+function clearLlmRequests(rootEl, message = "尚未記錄 LLM request context。") {
+  const meta = rootEl.querySelector("#context-trace-meta");
+  const list = rootEl.querySelector("#context-trace-list");
+  if (meta) meta.textContent = "尚未載入 LLM 上下文。";
+  if (!list) return;
+  list.innerHTML = "";
+  const empty = document.createElement("p");
+  empty.className = "empty-context";
+  empty.textContent = message;
+  list.appendChild(empty);
+}
+
+function formatTraceSummary(entry = {}) {
+  const nodeId = String(entry.node_id || "").trim() || "no-node";
+  const stage = String(entry.stage || "").trim() || "unknown";
+  const model = String(entry.model || "").trim() || "default-model";
+  return `${nodeId} · ${stage} · ${model}`;
+}
+
+function renderLlmRequests(rootEl, requests = []) {
+  const meta = rootEl.querySelector("#context-trace-meta");
+  const list = rootEl.querySelector("#context-trace-list");
+  if (!(list instanceof HTMLElement)) return;
+  list.innerHTML = "";
+
+  if (!Array.isArray(requests) || !requests.length) {
+    clearLlmRequests(rootEl);
+    return;
+  }
+
+  if (meta) {
+    meta.textContent = `目前顯示最近 ${requests.length} 筆 LLM request。`;
+  }
+
+  requests.forEach((entry, index) => {
+    const details = document.createElement("details");
+    details.className = "context-trace__item";
+    details.open = index === 0;
+
+    const summary = document.createElement("summary");
+    summary.className = "context-trace__summary";
+    summary.textContent = formatTraceSummary(entry);
+    details.appendChild(summary);
+
+    const body = document.createElement("div");
+    body.className = "context-trace__body";
+
+    const info = document.createElement("div");
+    info.className = "context-trace__info";
+    [
+      `時間：${entry.ts || "unknown"}`,
+      `source：${entry.source || "unknown"}`,
+      `messages：${Number(entry.message_count || 0)}`,
+      `run：${entry.run_id || "-"}`,
+    ].forEach((text) => {
+      const chip = document.createElement("span");
+      chip.textContent = text;
+      info.appendChild(chip);
+    });
+    body.appendChild(info);
+
+    const messagesTitle = document.createElement("strong");
+    messagesTitle.className = "context-trace__label";
+    messagesTitle.textContent = "OpenAI-like Messages";
+    body.appendChild(messagesTitle);
+
+    const messagesPre = document.createElement("pre");
+    messagesPre.className = "context-trace__code";
+    messagesPre.textContent = JSON.stringify(entry.openai_messages || [], null, 2);
+    body.appendChild(messagesPre);
+
+    const promptText = String(entry.prompt_text || "").trim();
+    if (promptText) {
+      const promptTitle = document.createElement("strong");
+      promptTitle.className = "context-trace__label";
+      promptTitle.textContent = "Prompt Text";
+      body.appendChild(promptTitle);
+
+      const promptPre = document.createElement("pre");
+      promptPre.className = "context-trace__code";
+      promptPre.textContent = promptText;
+      body.appendChild(promptPre);
+    }
+
+    details.appendChild(body);
+    list.appendChild(details);
+  });
+}
+
 function setDashboardUnavailable(rootEl) {
   const usagePercent = rootEl.querySelector("#context-usage-percent");
   const usageMeta = rootEl.querySelector("#context-usage-meta");
@@ -136,6 +225,7 @@ function setDashboardUnavailable(rootEl) {
   if (usageMeta) usageMeta.textContent = "Token 使用量尚未可取得。";
   if (status) status.textContent = "尚未可取得";
   renderWaffle(rootEl, [], 0);
+  clearLlmRequests(rootEl, "目前沒有可用的 LLM request trace。");
 }
 
 function renderContextStats(rootEl, payload) {
@@ -330,6 +420,7 @@ export const CONTEXT_VIEW = {
       if (editor) editor.value = contextText;
       updateDraftMeta(ctx.rootEl, contextText ? "已載入目前專案草稿。" : "目前專案尚無草稿。");
       emptyCta.hidden = Boolean(contextText);
+      renderLlmRequests(ctx.rootEl, payload?.llm_requests || []);
       dispatchContext(ctx, { context: contextText, projectId, loadedAt: Date.now(), stats: statsPayload });
     } catch (error) {
       ctx.ui.toast?.show(t("toast.context.loadFailed", "", { message: error.message }), { type: "danger", duration: 12000 });

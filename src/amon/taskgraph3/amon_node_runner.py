@@ -63,6 +63,7 @@ class AmonNodeRunner:
             run_id=self.run_id,
             node_id=node.id,
             thread_id=self.thread_id,
+            request_id=self.request_id,
         )
         ingest_summary = ingest_artifacts(
             response_text=response,

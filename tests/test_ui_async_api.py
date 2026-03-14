@@ -1210,6 +1210,88 @@ class UIAsyncAPITests(unittest.TestCase):
                     server.server_close()
                 os.environ.pop("AMON_HOME", None)
 
+    def test_project_context_endpoint_includes_llm_request_traces_for_thread_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("context-llm-trace")
+                project_path = Path(project.path)
+
+                session_path = project_path / ".amon" / "threads" / "chat-ctx" / "events.jsonl"
+                session_path.parent.mkdir(parents=True, exist_ok=True)
+                session_path.write_text(
+                    "\n".join(
+                        [
+                            json.dumps({"type": "user", "text": "第一輪需求", "project_id": project.project_id}, ensure_ascii=False),
+                            json.dumps({"type": "assistant", "text": "已完成", "project_id": project.project_id, "run_id": "run-ctx-001"}, ensure_ascii=False),
+                        ]
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+
+                trace_path = project_path / ".amon" / "runs" / "run-ctx-001" / "llm_requests.jsonl"
+                trace_path.parent.mkdir(parents=True, exist_ok=True)
+                trace_path.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "source": "run_agent_task",
+                            "stage": "graph",
+                            "provider": "openai",
+                            "model": "gpt-5",
+                            "project_id": project.project_id,
+                            "run_id": "run-ctx-001",
+                            "thread_id": "chat-ctx",
+                            "node_id": "task-analyze",
+                            "request_id": "req-ctx-001",
+                            "message_count": 2,
+                            "openai_messages": [
+                                {"type": "message", "role": "system", "content": [{"type": "input_text", "text": "system"}]},
+                                {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "請分析"}]},
+                            ],
+                            "prompt_text": "請分析",
+                            "ts": "2026-03-14T10:00:00+08:00",
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+
+                handler = partial(
+                    AmonUIHandler,
+                    directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"),
+                    core=core,
+                )
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port)
+                encoded_project = quote(project.project_id)
+                conn.request("GET", f"/v1/projects/{encoded_project}/threads/chat-ctx/context")
+                response = conn.getresponse()
+                payload = json.loads(response.read().decode("utf-8"))
+
+                self.assertEqual(response.status, 200)
+                self.assertEqual(payload.get("run_id"), "run-ctx-001")
+                self.assertEqual(len(payload.get("llm_requests", [])), 1)
+                trace = payload["llm_requests"][0]
+                self.assertEqual(trace.get("node_id"), "task-analyze")
+                self.assertEqual(trace.get("thread_id"), "chat-ctx")
+                self.assertEqual(trace.get("openai_messages", [])[0].get("type"), "message")
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
     def test_project_context_stats_endpoint_returns_required_categories(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"

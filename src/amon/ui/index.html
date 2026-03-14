@@ -586,6 +586,19 @@
               </article>
             </section>
 
+            <section class="context-trace card" id="context-trace-box">
+              <header class="context-trace__header">
+                <div>
+                  <h3>LLM Context Trace</h3>
+                  <p class="subtitle">顯示目前 run 內最近送往模型的上下文快照，格式接近 OpenAI message objects。</p>
+                </div>
+                <span class="context-trace__meta" id="context-trace-meta">尚未載入 LLM 上下文。</span>
+              </header>
+              <div class="context-trace__list" id="context-trace-list">
+                <p class="empty-context">尚未記錄 LLM request context。</p>
+              </div>
+            </section>
+
             <section class="context-draft card" id="context-draft-box">
               <details open>
                 <summary>Context 草稿與清理操作（僅本機）</summary>

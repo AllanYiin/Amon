@@ -44,6 +44,7 @@ from amon.daemon.queue import get_queue_depth
 from amon.events import emit_event
 from amon.jobs.runner import start_job
 from amon.artifacts.store import ingest_artifacts
+from amon.llm_request_log import load_recent_llm_requests
 from amon.observability import ensure_correlation_fields, normalize_project_id
 from amon.tooling.audit import default_audit_log_path
 from amon.tooling.types import ToolCall
@@ -2475,6 +2476,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
     def _build_project_context(self, project_id: str, thread_id: str | None = None) -> dict[str, Any]:
         project_path = self.core.get_project_path(project_id)
         selected_thread_id = self._resolve_thread_id(project_id, thread_id)
+        selected_run_id: str | None = None
         run_bundle = {
             "run_id": None,
             "run_status": "not_found",
@@ -2485,6 +2487,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         if selected_thread_id:
             run_context = load_latest_run_context(project_id, selected_thread_id)
             run_id = str(run_context.get("run_id") or "").strip()
+            selected_run_id = run_id or None
             if run_id:
                 try:
                     run_bundle = self._load_run_bundle(run_id=run_id, project_id=project_id)
@@ -2492,19 +2495,23 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     pass
         else:
             run_bundle = self._load_latest_run_bundle(project_path)
+            selected_run_id = str(run_bundle.get("run_id") or "").strip() or None
         graph = run_bundle["graph"]
         docs = self._build_docs_catalog(project_id=project_id, project_path=project_path)
         project_context_text = self._read_project_context(project_path)
+        effective_run_id = str(run_bundle.get("run_id") or "").strip() or selected_run_id
+        llm_requests = load_recent_llm_requests(project_path, run_id=effective_run_id, limit=12)
         return {
             "graph_mermaid": self._graph_to_mermaid(graph),
             "graph": graph,
-            "run_id": run_bundle["run_id"],
+            "run_id": effective_run_id,
             "run_status": run_bundle["run_status"],
             "node_states": run_bundle["node_states"],
             "recent_events": run_bundle["recent_events"],
             "docs": docs,
             "context": project_context_text,
             "thread_id": selected_thread_id,
+            "llm_requests": llm_requests,
         }
 
 

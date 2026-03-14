@@ -42,6 +42,7 @@ from .graph_presets import (
 )
 from .logging import log_billing, log_event
 from .logging_utils import setup_logger
+from .llm_request_log import append_llm_request, build_llm_request_payload
 from .mcp_client import MCPClientError, MCPServerConfig, MCPStdioClient
 from .planning import generate_plan_with_llm
 from .models import ProviderError, build_provider, decode_reasoning_chunk, encode_reasoning_chunk
@@ -566,6 +567,7 @@ class AmonCore:
         run_id: str | None = None,
         node_id: str | None = None,
         thread_id: str | None = None,
+        request_id: str | None = None,
     ) -> str:
         config = self.load_config(project_path)
         project_id, _ = self.resolve_project_identity(project_path)
@@ -607,6 +609,27 @@ class AmonCore:
         response_text = ""
         session_id = uuid.uuid4().hex
         session_path = self._prepare_session_path(project_path, session_id)
+        self._record_llm_request(
+            project_path=project_path,
+            provider_name=provider_name,
+            provider_model=provider_model,
+            project_id=project_id,
+            run_id=run_id,
+            thread_id=thread_id,
+            node_id=node_id,
+            request_id=request_id,
+            source="run_agent_task",
+            stage="node_agent" if node_id else mode,
+            messages=messages,
+            prompt_text=user_prompt or prompt,
+            metadata={
+                "mode": mode,
+                "session_id": session_id,
+                "history_count": len(self._normalize_chat_history(conversation_history)),
+                "has_web_context": bool(web_context),
+                "has_custom_system_prompt": bool(system_prompt),
+            },
+        )
         log_event(
             {
                 "level": "INFO",
@@ -700,6 +723,44 @@ class AmonCore:
             mode=mode,
         )
         return response_text
+
+    def _record_llm_request(
+        self,
+        *,
+        project_path: Path | None,
+        provider_name: str,
+        provider_model: str | None,
+        project_id: str | None,
+        run_id: str | None,
+        thread_id: str | None,
+        node_id: str | None,
+        request_id: str | None,
+        source: str,
+        stage: str | None,
+        messages: list[dict[str, Any]] | None,
+        prompt_text: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        if project_path is None:
+            return
+        payload = build_llm_request_payload(
+            source=source,
+            provider=provider_name,
+            model=provider_model,
+            project_id=project_id,
+            run_id=run_id,
+            thread_id=thread_id,
+            node_id=node_id,
+            request_id=request_id,
+            stage=stage,
+            messages=messages,
+            prompt_text=prompt_text,
+            metadata=metadata,
+        )
+        try:
+            append_llm_request(project_path, payload)
+        except OSError as exc:
+            self.logger.warning("寫入 llm request trace 失敗：%s", exc)
 
 
     def _normalize_chat_history(self, history: list[dict[str, str]] | None) -> list[dict[str, str]]:
@@ -981,6 +1042,9 @@ class AmonCore:
         model: str | None = None,
         available_tools: list[dict[str, Any]] | None = None,
         available_skills: list[dict[str, Any]] | None = None,
+        run_id: str | None = None,
+        thread_id: str | None = None,
+        request_id: str | None = None,
     ):
         """Generate TaskGraph v3 and materialize docs/plan.json + docs/TODO.md."""
         if available_tools is None:
@@ -994,6 +1058,10 @@ class AmonCore:
             model=model,
             available_tools=planning_tools,
             available_skills=available_skills,
+            project_path=project_path,
+            run_id=run_id,
+            thread_id=thread_id,
+            request_id=request_id,
         )
         plan = self._postprocess_planner_graph(plan, message=message, available_tools=planning_tools)
         docs_dir = project_path / "docs"
@@ -1417,6 +1485,9 @@ class AmonCore:
                 model=model,
                 available_tools=available_tools,
                 available_skills=available_skills,
+                run_id=run_id,
+                thread_id=thread_id,
+                request_id=request_id,
             ),
         )
         phase_metrics["plan_generation_ms"] = int((time.monotonic() - phase_started_at) * 1000)

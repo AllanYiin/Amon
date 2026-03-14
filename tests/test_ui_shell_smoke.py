@@ -149,6 +149,8 @@ class UIShellSmokeTests(unittest.TestCase):
             'id="context-clear-chat"',
             'id="context-clear-project"',
             'id="context-waffle-grid"',
+            'id="context-trace-box"',
+            'id="context-trace-list"',
         ]:
             self.assertIn(token, html)
 
@@ -166,6 +168,9 @@ class UIShellSmokeTests(unittest.TestCase):
 
         self.assertIn("async function fetchContextStats", context_js)
         self.assertIn("async function refreshContextStats", context_js)
+        self.assertIn("function renderLlmRequests", context_js)
+        self.assertIn("OpenAI-like Messages", context_js)
+        self.assertIn("payload?.llm_requests || []", context_js)
         self.assertIn("ctx.services.context.getContextStats(projectId)", context_js)
         self.assertIn("ctx.services.context.getContextStats(projectId, normalizedChatId)", context_js)
         self.assertIn("if (!normalizedChatId)", context_js)
