@@ -1938,7 +1938,6 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         "notice",
                         {"text": "Amon：目前尚未指定專案，且無法自動判斷任務範圍。請補充任務目標，或先建立專案。"},
                     )
-                    send_event("error", {"message": "缺少 project_id"})
                     send_event("done", {"status": "project_required"})
                     return
             incoming_thread_id = thread_id

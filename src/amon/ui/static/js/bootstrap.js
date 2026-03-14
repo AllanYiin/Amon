@@ -8,6 +8,7 @@ import { createInitialUiState } from "./store/app_state.js";
 import { collectElements } from "./store/elements.js";
 import { readStorage, writeStorage, removeStorage } from "./domain/storage.js";
 import { formatUnknownValue, shortenId, mapRunStatusLevel, mapDaemonStatusLevel, statusToI18nKey } from "./domain/status.js";
+import { normalizeProjectIdForUi } from "./domain/projectId.js";
 import { createAdminService } from "./domain/adminService.js";
 import { createServices } from "./domain/services.js";
 import { registerGlobalErrorHandlers } from "./domain/error_boundary.js";
@@ -1812,11 +1813,11 @@ appStore.patch({ bootstrappedAt: Date.now() });
       }
 
       function setProjectState(projectId) {
-        const previousProjectId = String(state.projectId || "").trim();
+        const previousProjectId = normalizeProjectIdForUi(state.projectId);
         if (previousProjectId) {
           state.activeThreadByProject[previousProjectId] = state.activeThreadId;
         }
-        const nextProjectId = projectId || null;
+        const nextProjectId = normalizeProjectIdForUi(projectId) || null;
         if (state.projectId !== nextProjectId) {
           state.activeThreadId = String(state.activeThreadByProject[nextProjectId] || "").trim() || null;
           state.threadList = [...(state.threadsByProject[nextProjectId] || [])];
@@ -1839,7 +1840,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
           dynamicOption.dataset.dynamic = "true";
           elements.projectSelect.appendChild(dynamicOption);
         }
-        elements.projectSelect.value = projectId || "";
+        elements.projectSelect.value = nextProjectId || "";
         syncContextHeader();
         renderThreadList();
         refreshContextDraftUi();
@@ -2653,9 +2654,9 @@ appStore.patch({ bootstrappedAt: Date.now() });
       async function applySessionFromEvent(data) {
         if (!data) return;
         let projectChanged = false;
-        const eventProjectId = String(data.project_id || "").trim();
+        const eventProjectId = normalizeProjectIdForUi(data.project_id);
         const eventThreadId = String(data.thread_id || "").trim();
-        const activeProjectId = String(state.projectId || "").trim();
+        const activeProjectId = normalizeProjectIdForUi(state.projectId);
 
         // 僅在「無專案模式」下，才讓事件自動切換專案，避免切換專案後被舊串流事件覆寫。
         if (eventProjectId && !activeProjectId) {
@@ -2663,7 +2664,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
           projectChanged = true;
         }
 
-        const latestActiveProjectId = String(state.projectId || "").trim();
+        const latestActiveProjectId = normalizeProjectIdForUi(state.projectId);
         const shouldApplyToActiveProject = !eventProjectId || eventProjectId === latestActiveProjectId;
         if (shouldApplyToActiveProject && eventThreadId) {
           state.activeThreadId = eventThreadId;

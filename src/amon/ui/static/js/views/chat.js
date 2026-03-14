@@ -4,6 +4,7 @@ import { createInputBar } from "./chat/renderers/inputBar.js";
 import { createStreamingArtifactParser } from "./chat/renderers/streamingArtifactParser.js";
 import { buildPreviewForFiles, revoke as revokeInlinePreviewUrl } from "./chat/renderers/inlineArtifactPreview.js";
 import { renderInlineArtifactsList, renderInlineArtifactStreamingHint, showInlineArtifactPreview } from "../layout/inlineArtifactsBinder.js";
+import { hasConcreteProjectId, normalizeProjectIdForUi } from "../domain/projectId.js";
 import { logViewInitDebug } from "../utils/debug.js";
 
 const { EventStreamClient } = window.AmonUIEventStream || {};
@@ -25,8 +26,9 @@ export const CHAT_VIEW = {
   mount(ctx) {
     const { elements, appState, store, t, ui } = ctx;
     if (!elements?.timeline || !elements?.chatForm || !EventStreamClient) return;
+    const getConcreteProjectId = () => normalizeProjectIdForUi(appState.projectId);
     logViewInitDebug("chat", {
-      project_id: appState.projectId || null,
+      project_id: getConcreteProjectId() || null,
       run_id: appState.graphRunId || null,
       thread_id: appState.activeThreadId || null,
       node_states_count: Object.keys(appState.graphNodeStates || {}).length,
@@ -287,6 +289,7 @@ export const CHAT_VIEW = {
 
       const messageLength = finalMessage.length;
       let streamToken = null;
+      const activeProjectId = getConcreteProjectId() || null;
       if (messageLength > 1800) {
         try {
           const response = await fetch("/v1/threads/stream/init", {
@@ -295,7 +298,7 @@ export const CHAT_VIEW = {
             signal: streamAbortController.signal,
             body: JSON.stringify({
               message: finalMessage,
-              project_id: appState.projectId,
+              project_id: activeProjectId,
               thread_id: appState.activeThreadId,
             }),
           });
@@ -354,7 +357,7 @@ export const CHAT_VIEW = {
             appState.uiStore.applyEvent(eventType, data);
             ctx.bus?.emit?.("stream:event", { eventType, data });
             await ctx.chatDeps.applySessionFromEvent(data);
-            if (appState.projectId && ["result", "done", "notice"].includes(eventType)) {
+            if (hasConcreteProjectId(appState.projectId) && ["result", "done", "notice"].includes(eventType)) {
               await ctx.chatDeps.loadContext();
             }
             timelineRenderer.applyExecutionEvent(eventType, data);
@@ -391,7 +394,7 @@ export const CHAT_VIEW = {
               if (markdown) {
                 messageRenderer.appendMessage("agent", markdown);
                 messageRenderer.appendTimelineStatus("已產出 TODO 初稿，開始概念對齊與詳細規劃。");
-                if (appState.projectId) {
+                if (hasConcreteProjectId(appState.projectId)) {
                   await ctx.chatDeps.loadContext();
                 }
               }
@@ -421,7 +424,7 @@ export const CHAT_VIEW = {
               streamCompleted = true;
               await ctx.chatDeps.applySessionFromEvent(data);
               const doneStatus = data.status || "ok";
-              if (doneStatus !== "ok" && doneStatus !== "confirm_required" && doneStatus !== "warning") {
+              if (doneStatus !== "ok" && doneStatus !== "confirm_required" && doneStatus !== "warning" && doneStatus !== "project_required") {
                 messageRenderer.appendMessage("agent", `流程結束（${doneStatus}）。我已收到你的訊息，請調整描述後再送出，我會持續回應。`);
                 messageRenderer.appendTimelineStatus(`流程狀態：${doneStatus}`);
               }
@@ -451,7 +454,7 @@ export const CHAT_VIEW = {
               ctx.chatDeps.updateThinking({ status: doneStatus === "ok" ? "done" : doneStatus, brief: doneStatus === "ok" ? "流程已完成" : `流程結束：${doneStatus}` });
               stopStream();
               await ctx.chatDeps.loadProjects();
-              if (appState.projectId) {
+              if (hasConcreteProjectId(appState.projectId)) {
                 await ctx.chatDeps.loadContext();
                 ctx.chatDeps.appendArtifactsHintToTimeline(appState.runArtifacts.length);
               }
@@ -466,7 +469,7 @@ export const CHAT_VIEW = {
       appState.streamClient.start({
         message: streamToken ? "" : finalMessage,
         stream_token: streamToken,
-        project_id: appState.projectId,
+        project_id: activeProjectId,
         thread_id: appState.activeThreadId,
       });
     };

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .fs.atomic import append_jsonl
+from .observability import VIRTUAL_PROJECT_ID
 from .project_registry import ProjectRegistry
 
 
@@ -44,7 +45,7 @@ class ProjectLogStore:
 
     def _append(self, *, project_id: str, filename: str, payload: dict[str, Any]) -> bool:
         normalized = project_id.strip()
-        if not normalized:
+        if not normalized or normalized == VIRTUAL_PROJECT_ID:
             return False
         try:
             log_path = self.project_log_path(normalized, filename)

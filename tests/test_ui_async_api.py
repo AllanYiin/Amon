@@ -1707,6 +1707,53 @@ class UIAsyncAPITests(unittest.TestCase):
                     server.server_close()
                 os.environ.pop("AMON_HOME", None)
 
+    def test_chat_stream_without_project_finishes_with_project_required_without_error_event(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                conn.request("GET", f"/v1/threads/stream?message={quote('哈囉')}")
+                response = conn.getresponse()
+
+                self.assertEqual(response.status, 200)
+                current_event = ""
+                events: list[tuple[str, dict[str, object]]] = []
+                for _ in range(200):
+                    raw_line = response.fp.readline()
+                    if not raw_line:
+                        break
+                    decoded = raw_line.decode("utf-8", errors="ignore").strip()
+                    if decoded.startswith("event: "):
+                        current_event = decoded.split(":", 1)[1].strip()
+                    elif decoded.startswith("data: "):
+                        events.append((current_event, json.loads(decoded.split(": ", 1)[1])))
+                        if current_event == "done":
+                            break
+
+                error_events = [payload for event_type, payload in events if event_type == "error"]
+                self.assertEqual(error_events, [])
+                notice_texts = [str(payload.get("text") or "") for event_type, payload in events if event_type == "notice"]
+                self.assertTrue(any("目前尚未指定專案" in text for text in notice_texts))
+                done_payload = next((payload for event_type, payload in events if event_type == "done"), None)
+                self.assertIsNotNone(done_payload)
+                self.assertEqual(done_payload.get("status"), "project_required")
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
     def test_chat_stream_graph_emits_todo_preview_event(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "data"

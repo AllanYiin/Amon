@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from amon.logging import log_event
+from amon.observability import VIRTUAL_PROJECT_ID
 from amon.project_log_store import ProjectLogStore
 from amon.project_registry import ProjectRegistry
 
@@ -43,6 +44,16 @@ class ProjectLogStoreTests(unittest.TestCase):
             with self.assertLogs("test.project-log-store", level="WARNING") as captured:
                 self.assertFalse(store.append_event({"event": "run.start", "project_id": "missing", "run_id": "run-01"}))
             self.assertIn("unknown project_id=missing", "\n".join(captured.output))
+
+    def test_append_skips_virtual_project_without_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            registry = ProjectRegistry(data_dir / "projects")
+            registry.scan()
+            logger = logging.getLogger("test.project-log-store")
+            store = ProjectLogStore(data_dir=data_dir, registry=registry, logger=logger)
+            with self.assertNoLogs("test.project-log-store", level="WARNING"):
+                self.assertFalse(store.append_event({"event": "ui.notice", "project_id": VIRTUAL_PROJECT_ID}))
 
     def test_contract_run_events_contain_project_and_run_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
