@@ -177,7 +177,9 @@ def _planner_system_prompt(*, is_repair: bool) -> str:
     return (
         "你是 LLM Planner。"
         "你必須只輸出符合 TaskGraph v3 GraphDefinition 的 JSON，不得輸出 markdown、code fence、說明文字。"
-        "所有流程第一個 TASK 必須是概念對齊，先抽取關鍵概念並安排上網查證。"
+        "所有流程只能有一個概念對齊型 TASK，且必須放在最前面，專門負責抽取關鍵概念與安排必要查證。"
+        "後續 TASK 必須延續前置結果，直接產出不同交付物，不得重複做概念對齊、需求釐清或同義研究起手式。"
+        "後續 TASK 的 title、display.label、prompt、instructions 應明確區分為不同階段，例如架構設計、實作、驗證、交付。"
         "每個 TASK 都要最小化可用工具；若 executor=agent，請在 agent.allowedTools 僅列出該節點真正需要的工具。"
         "每個高階 task 都應該是 TASK node 並含 taskSpec，executor 可用 agent/tool。"
         "expected_artifacts 要映射到 taskSpec.artifacts 並建立對應 ARTIFACT node + DATA/EMITS edge。"

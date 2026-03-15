@@ -155,6 +155,12 @@ appStore.patch({ bootstrappedAt: Date.now() });
         return getKnownProjects().find((project) => project.project_id === normalizedProjectId)?.name || normalizedProjectId;
       }
 
+      function isMissingProjectError(error) {
+        const message = String(error?.message || error || "").trim();
+        if (!message) return false;
+        return message.includes("找不到專案") || message.toLowerCase().includes("project not found");
+      }
+
       function toProjectDomId(projectId = "") {
         return String(projectId || "")
           .trim()
@@ -1847,6 +1853,12 @@ appStore.patch({ bootstrappedAt: Date.now() });
         if (!state.projectId) {
           state.activeThreadId = null;
           state.threadList = [];
+          state.graphRunId = null;
+          state.graph = null;
+          state.graphNodeStates = {};
+          state.graphEvents = [];
+          state.runArtifacts = [];
+          state.artifactPreviewItem = null;
           elements.timeline.innerHTML = "";
           renderArtifactsInspector([]);
           elements.graphPreview.innerHTML = "<p class=\"empty-context\">請先在上方選擇專案。</p>";
@@ -1855,6 +1867,25 @@ appStore.patch({ bootstrappedAt: Date.now() });
           elements.graphRunMeta.textContent = "尚未偵測到 Run";
           elements.copyRunId.disabled = true;
         }
+      }
+
+      async function recoverFromMissingProject(error, options = {}) {
+        const { source } = options;
+        const failedProjectId = String(state.projectId || "").trim();
+        logUiDebug("project.missing", {
+          source: source || "unknown",
+          project_id: failedProjectId || null,
+          message: String(error?.message || error || ""),
+        });
+        setProjectState(null);
+        await loadProjects();
+        showToast(
+          failedProjectId
+            ? `目前專案 ${failedProjectId} 已不存在，已清除失效狀態。`
+            : `目前專案已不存在，已清除失效狀態。`,
+          9000,
+          "warning",
+        );
       }
 
       function syncContextHeader() {
@@ -2301,7 +2332,16 @@ appStore.patch({ bootstrappedAt: Date.now() });
           showToast("請先選擇專案。");
           return;
         }
-        const payload = await services.threads.getProjectThreadContext(state.projectId, state.activeThreadId || "");
+        let payload;
+        try {
+          payload = await services.threads.getProjectThreadContext(state.projectId, state.activeThreadId || "");
+        } catch (error) {
+          if (isMissingProjectError(error)) {
+            await recoverFromMissingProject(error, { source: "load_context" });
+            return;
+          }
+          throw error;
+        }
         if (!isCurrentProjectHydrationToken(token)) return;
         state.graph = payload.graph || { nodes: [], edges: [] };
         state.graphRunId = payload.run_id || null;
@@ -2795,6 +2835,10 @@ appStore.patch({ bootstrappedAt: Date.now() });
           state.runArtifacts = artifacts.filter((artifact) => !isConversationArtifact(artifact));
           renderArtifactsInspector(state.runArtifacts);
         } catch (error) {
+          if (isMissingProjectError(error)) {
+            await recoverFromMissingProject(error, { source: "load_run_artifacts", run_id: state.graphRunId || null });
+            return;
+          }
           state.runArtifacts = [];
           renderArtifactsInspector([]);
           showToast(`載入 artifacts 失敗：${error.message}`, 9000, "danger");

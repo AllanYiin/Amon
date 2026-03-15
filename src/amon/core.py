@@ -1291,29 +1291,32 @@ class AmonCore:
             )
             for target_id in root_targets:
                 edges.append(GraphEdge(from_node="concept_alignment", to_node=target_id, edge_type="CONTROL", kind="next"))
+        control_predecessors = self._build_control_predecessors(edges)
         for node in nodes:
             if not isinstance(node, TaskNode) or node.task_spec.executor != "agent" or node.task_spec.agent is None:
                 continue
             if node.id != "concept_alignment":
-                has_concept_binding = any(
-                    binding.source == "upstream"
-                    and binding.from_node == "concept_alignment"
-                    and binding.key == "concept_alignment_context"
-                    for binding in node.task_spec.input_bindings
-                )
-                if not has_concept_binding:
-                    node.task_spec.input_bindings.append(
-                        InputBinding(
-                            source="upstream",
-                            key="concept_alignment_context",
-                            from_node="concept_alignment",
-                            port="raw",
-                        )
+                binding_spec = self._select_planner_context_binding(node.id, control_predecessors)
+                if binding_spec is not None:
+                    binding_key, binding_from_node, prompt_prefix = binding_spec
+                    has_context_binding = any(
+                        binding.source == "upstream"
+                        and binding.from_node == binding_from_node
+                        and binding.key == binding_key
+                        for binding in node.task_spec.input_bindings
                     )
-                prompt_text = node.task_spec.agent.prompt or ""
-                if "concept_alignment_context" not in prompt_text:
-                    prefix = "前置概念對齊結果：\n${concept_alignment_context}\n\n"
-                    node.task_spec.agent.prompt = f"{prefix}{prompt_text}" if prompt_text else prefix
+                    if not has_context_binding:
+                        node.task_spec.input_bindings.append(
+                            InputBinding(
+                                source="upstream",
+                                key=binding_key,
+                                from_node=binding_from_node,
+                                port="raw",
+                            )
+                        )
+                    prompt_text = node.task_spec.agent.prompt or ""
+                    if f"${{{binding_key}}}" not in prompt_text:
+                        node.task_spec.agent.prompt = f"{prompt_prefix}{prompt_text}" if prompt_text else prompt_prefix.rstrip()
             if node.task_spec.agent.allowed_tools:
                 continue
             node.task_spec.agent.allowed_tools = self._suggest_agent_tools_for_task(
@@ -1337,6 +1340,37 @@ class AmonCore:
             edges=edges,
             runtime_capabilities=graph.runtime_capabilities,
         )
+
+    @staticmethod
+    def _build_control_predecessors(edges: list[GraphEdge]) -> dict[str, list[str]]:
+        predecessors: dict[str, list[str]] = {}
+        for edge in edges:
+            if edge.edge_type != "CONTROL":
+                continue
+            predecessors.setdefault(edge.to_node, []).append(edge.from_node)
+        return predecessors
+
+    @staticmethod
+    def _select_planner_context_binding(
+        node_id: str,
+        control_predecessors: dict[str, list[str]],
+    ) -> tuple[str, str, str] | None:
+        predecessors = [item for item in control_predecessors.get(node_id, []) if item]
+        non_concept_predecessors = [item for item in predecessors if item != "concept_alignment"]
+        if len(non_concept_predecessors) == 1:
+            return (
+                "upstream_context",
+                non_concept_predecessors[0],
+                "前置節點輸出摘要：\n${upstream_context}\n\n"
+                "請直接完成本節點交付物，不要重複需求釐清、概念對齊或研究起手式。\n\n",
+            )
+        if not non_concept_predecessors and "concept_alignment" in predecessors:
+            return (
+                "concept_alignment_context",
+                "concept_alignment",
+                "前置概念摘要（僅作背景，勿重複概念對齊）：\n${concept_alignment_context}\n\n",
+            )
+        return None
 
     def _suggest_agent_tools_for_task(self, text: str, available_tools: list[dict[str, Any]]) -> list[str]:
         available_names = {str(item.get("name") or "") for item in available_tools if str(item.get("name") or "").strip()}

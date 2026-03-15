@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from amon.core import AmonCore
 from amon.models import decode_reasoning_chunk
 from amon.taskgraph3.payloads import AgentTaskConfig, TaskDisplayMetadata, TaskSpec
-from amon.taskgraph3.schema import GraphDefinition, TaskNode
+from amon.taskgraph3.schema import GraphDefinition, GraphEdge, TaskNode
 
 
 class CoreStreamHandlerTests(unittest.TestCase):
@@ -209,7 +209,7 @@ class CoreStreamHandlerTests(unittest.TestCase):
             finally:
                 os.environ.pop("AMON_HOME", None)
 
-    def test_postprocess_planner_graph_injects_concept_alignment_context_for_agent_tasks(self) -> None:
+    def test_postprocess_planner_graph_injects_concept_alignment_context_only_for_root_agent_tasks(self) -> None:
         core = AmonCore()
         graph = GraphDefinition(
             version="taskgraph.v3",
@@ -241,13 +241,56 @@ class CoreStreamHandlerTests(unittest.TestCase):
         self.assertEqual(concept_binding.source, "upstream")
         self.assertEqual(concept_binding.from_node, "concept_alignment")
         self.assertEqual(concept_binding.port, "raw")
-        self.assertTrue(writer.task_spec.agent.prompt.startswith("前置概念對齊結果：\n${concept_alignment_context}\n\n"))
+        self.assertTrue(writer.task_spec.agent.prompt.startswith("前置概念摘要（僅作背景，勿重複概念對齊）：\n${concept_alignment_context}\n\n"))
         self.assertTrue(
             any(
                 edge.from_node == "concept_alignment" and edge.to_node == "writer" and edge.edge_type == "CONTROL"
                 for edge in processed.edges
             )
         )
+        self.assertNotIn("前置節點輸出摘要", writer.task_spec.agent.prompt)
+
+    def test_postprocess_planner_graph_prefers_immediate_upstream_context_for_non_root_tasks(self) -> None:
+        core = AmonCore()
+        graph = GraphDefinition(
+            version="taskgraph.v3",
+            nodes=[
+                TaskNode(
+                    id="writer",
+                    title="撰寫結果",
+                    task_spec=TaskSpec(
+                        executor="agent",
+                        agent=AgentTaskConfig(prompt="請撰寫系統設計"),
+                        display=TaskDisplayMetadata(label="撰寫", summary="整理輸出", todo_hint="write"),
+                    ),
+                ),
+                TaskNode(
+                    id="reviewer",
+                    title="審查結果",
+                    task_spec=TaskSpec(
+                        executor="agent",
+                        agent=AgentTaskConfig(prompt="請審查上一節點輸出"),
+                        display=TaskDisplayMetadata(label="審查", summary="檢查內容", todo_hint="review"),
+                    ),
+                ),
+            ],
+            edges=[GraphEdge(from_node="writer", to_node="reviewer", edge_type="CONTROL", kind="next")],
+        )
+
+        processed = core._postprocess_planner_graph(
+            graph,
+            message="規劃 3D 煙火模擬器",
+            available_tools=[{"name": "web.search"}],
+        )
+
+        reviewer = next(node for node in processed.nodes if isinstance(node, TaskNode) and node.id == "reviewer")
+        upstream_binding = next(binding for binding in reviewer.task_spec.input_bindings if binding.key == "upstream_context")
+
+        self.assertEqual(upstream_binding.source, "upstream")
+        self.assertEqual(upstream_binding.from_node, "writer")
+        self.assertEqual(upstream_binding.port, "raw")
+        self.assertTrue(reviewer.task_spec.agent.prompt.startswith("前置節點輸出摘要：\n${upstream_context}\n\n"))
+        self.assertNotIn("concept_alignment_context", reviewer.task_spec.agent.prompt)
 
     def test_run_graph_stream_emits_planning_progress_reasoning_chunks(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

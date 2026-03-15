@@ -177,6 +177,18 @@ class UIShellSmokeTests(unittest.TestCase):
         self.assertNotIn("estimateByContextText", context_js)
         self.assertNotIn("由草稿推估", context_js)
 
+    def test_bootstrap_recovers_from_missing_project_during_context_and_artifact_load(self) -> None:
+        bootstrap_js = Path("src/amon/ui/static/js/bootstrap.js").read_text(encoding="utf-8")
+
+        self.assertIn("function isMissingProjectError(error)", bootstrap_js)
+        self.assertIn("async function recoverFromMissingProject(error, options = {})", bootstrap_js)
+        self.assertIn("const { source } = options;", bootstrap_js)
+        self.assertIn('if (isMissingProjectError(error)) {', bootstrap_js)
+        self.assertIn('await recoverFromMissingProject(error, { source: "load_context" });', bootstrap_js)
+        self.assertIn('await recoverFromMissingProject(error, { source: "load_run_artifacts", run_id: state.graphRunId || null });', bootstrap_js)
+        self.assertIn("目前專案", bootstrap_js)
+        self.assertIn("已清除失效狀態", bootstrap_js)
+
     def test_status_semantics_and_run_copy_controls_exist(self) -> None:
         html = Path("src/amon/ui/index.html").read_text(encoding="utf-8")
         css = Path("src/amon/ui/styles.css").read_text(encoding="utf-8")

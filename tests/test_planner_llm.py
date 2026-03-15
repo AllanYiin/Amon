@@ -61,6 +61,9 @@ class PlannerLLMTests(unittest.TestCase):
         self.assertIn('"input_schema"', payload)
         self.assertIn('"available_skills"', payload)
         self.assertIn('"inject_to"', payload)
+        system_prompt = llm.calls[0][0]["content"]
+        self.assertIn("只能有一個概念對齊型 TASK", system_prompt)
+        self.assertIn("後續 TASK 必須延續前置結果", system_prompt)
 
 
 if __name__ == "__main__":
