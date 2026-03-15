@@ -13,7 +13,18 @@ cd "${ROOT_DIR}" || exit 2
 echo "[anti-legacy-graph] scanning repository: ${ROOT_DIR}"
 echo "[anti-legacy-graph] mode: ${MODE}"
 
-output="$(python - <<'PY'
+if command -v python3 >/dev/null 2>&1; then
+  PYTHON_CMD=(python3)
+elif command -v python >/dev/null 2>&1; then
+  PYTHON_CMD=(python)
+elif command -v py >/dev/null 2>&1; then
+  PYTHON_CMD=(py -3)
+else
+  echo "[anti-legacy-graph] python interpreter not found" >&2
+  exit 2
+fi
+
+output="$("${PYTHON_CMD[@]}" - <<'PY'
 from pathlib import Path
 
 ROOT = Path('.')
@@ -23,6 +34,20 @@ deleted_paths = [
     'src/amon/graph_runtime.py',
     'src/amon/taskgraph2',
 ]
+forbidden_payload_keys = (
+    'schemaVersion',
+    'legacyTaskSpec',
+    'legacyExecution',
+    'legacyExecutionConfig',
+    'legacyPolicy',
+    'legacyGuardrails',
+    'legacyTaskBoundaries',
+    'legacyRoutes',
+    'legacyChildren',
+    'legacyNodeType',
+    'legacyKind',
+)
+
 for item in deleted_paths:
     if Path(item).exists():
         violations.append(f'{item}: deleted legacy path still exists')
@@ -68,6 +93,16 @@ for doc_path in ROOT.glob('docs/**/*.md'):
     for deleted in deleted_paths:
         if deleted in text:
             violations.append(f'{doc_path.as_posix()}: references deleted path {deleted}')
+
+graph_globs = ('examples/**/*.json', 'fixtures/**/*.json', 'tests/fixtures/**/*.json')
+for pattern in graph_globs:
+    for path in ROOT.glob(pattern):
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding='utf-8', errors='ignore')
+        for key in forbidden_payload_keys:
+            if f'"{key}"' in text:
+                violations.append(f'{path.as_posix()}: forbidden legacy payload key {key}')
 
 if violations:
     print('\n'.join(sorted(set(violations))))

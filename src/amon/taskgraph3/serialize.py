@@ -31,6 +31,18 @@ from .schema import (
     validate_graph_definition,
 )
 
+_LEGACY_CONFIG_KEYS = {
+    "legacyTaskSpec",
+    "legacyExecution",
+    "legacyExecutionConfig",
+    "legacyPolicy",
+    "legacyGuardrails",
+    "legacyTaskBoundaries",
+    "legacyRoutes",
+    "legacyChildren",
+    "legacyNodeType",
+}
+
 
 def dumps_graph_definition(graph: GraphDefinition) -> str:
     validate_graph_definition(graph)
@@ -94,49 +106,10 @@ def _graph_to_payload(graph: GraphDefinition) -> dict[str, Any]:
 
 
 def _node_to_payload(node: BaseNode) -> dict[str, Any]:
-    config = dict(node.config)
-    if isinstance(node, TaskNode):
-        config.setdefault("legacyTaskSpec", task_spec_to_payload(node.task_spec))
-        config.setdefault("legacyExecution", node.execution)
-        if node.execution_config is not None:
-            config.setdefault("legacyExecutionConfig", node.execution_config)
-        config.setdefault(
-            "legacyPolicy",
-            {
-                "rateLimit": node.policy.rate_limit,
-                "streamLimit": node.policy.stream_limit,
-                "retry": {
-                    "maxAttempts": node.policy.retry.max_attempts,
-                    "backoffSeconds": node.policy.retry.backoff_s,
-                    "jitterSeconds": node.policy.retry.jitter_s,
-                },
-                "timeout": {
-                    "hardSeconds": node.policy.timeout.hard_s,
-                    "inactivitySeconds": node.policy.timeout.inactivity_s,
-                },
-                "budget": {
-                    "maxTokens": node.policy.budget.max_tokens,
-                    "maxCostUsd": node.policy.budget.max_cost_usd,
-                },
-            },
-        )
-        if node.guardrails is not None:
-            config.setdefault("legacyGuardrails", node.guardrails)
-        if node.task_boundaries is not None:
-            config.setdefault("legacyTaskBoundaries", node.task_boundaries)
-    elif isinstance(node, GateNode):
-        config.setdefault(
-            "legacyRoutes",
-            [{"onOutcome": route.on_outcome, "toNode": route.to_node} for route in node.routes],
-        )
-    elif isinstance(node, GroupNode):
-        config.setdefault("legacyChildren", list(node.children))
-    elif isinstance(node, ArtifactNode):
-        config.setdefault("legacyNodeType", "ARTIFACT")
+    config = {key: value for key, value in dict(node.config).items() if key not in _LEGACY_CONFIG_KEYS}
 
     payload = {
         "id": node.id,
-        "kind": "node",
         "createdAt": node.created_at,
         "updatedAt": node.updated_at,
         "createdBy": node.created_by,
@@ -193,6 +166,8 @@ def _node_to_payload(node: BaseNode) -> dict[str, Any]:
             "rateLimit": node.policy.rate_limit,
             "streamLimit": node.policy.stream_limit,
         }
+        if node.guardrails is not None:
+            payload["guardrails"] = node.guardrails
         if node.task_boundaries is not None:
             payload["taskBoundaries"] = node.task_boundaries
     elif isinstance(node, GateNode):
@@ -205,7 +180,6 @@ def _node_to_payload(node: BaseNode) -> dict[str, Any]:
 def _edge_to_payload(edge: GraphEdge) -> dict[str, Any]:
     payload = {
         "id": edge.id,
-        "kind": "edge",
         "createdAt": edge.created_at,
         "updatedAt": edge.updated_at,
         "createdBy": edge.created_by,
@@ -228,7 +202,7 @@ def _edge_to_payload(edge: GraphEdge) -> dict[str, Any]:
     payload["from"] = edge.from_node
     payload["to"] = edge.to_node
     payload["edge_type"] = edge.edge_type
-    payload["legacyKind"] = edge.kind
+    payload["kind"] = edge.kind or None
     return payload
 
 

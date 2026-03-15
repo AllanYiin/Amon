@@ -48,6 +48,20 @@ from .schema import (
     validate_graph_definition,
 )
 
+_FORBIDDEN_LEGACY_KEYS = {
+    "schemaVersion",
+    "legacyTaskSpec",
+    "legacyExecution",
+    "legacyExecutionConfig",
+    "legacyPolicy",
+    "legacyGuardrails",
+    "legacyTaskBoundaries",
+    "legacyRoutes",
+    "legacyChildren",
+    "legacyNodeType",
+    "legacyKind",
+}
+
 
 def validate_v3_graph_json(graph_json: dict[str, Any]) -> None:
     graph = graph_definition_from_payload(graph_json)
@@ -56,13 +70,14 @@ def validate_v3_graph_json(graph_json: dict[str, Any]) -> None:
 
 def graph_definition_from_payload(graph_json: dict[str, Any]) -> GraphDefinition:
     raw = _ensure_dict(graph_json, name="v3 graph")
+    _reject_legacy_shim_keys(raw)
     nodes_payload = raw.get("nodes")
     edges_payload = raw.get("edges")
     if not isinstance(nodes_payload, list) or not isinstance(edges_payload, list):
         raise ValueError("v3 graph 驗證失敗：nodes/edges 必須是 list")
 
     graph = GraphDefinition(
-        version=str(raw.get("version") or raw.get("schemaVersion") or "taskgraph.v3"),
+        version=str(raw.get("version") or "taskgraph.v3"),
         id=str(raw.get("id") or "graph"),
         name=str(raw.get("name") or "Untitled Graph"),
         description=_optional_str(raw.get("description")),
@@ -131,7 +146,7 @@ def _to_node(raw: Any, *, graph_id: str) -> TaskNode | GateNode | GroupNode | Ar
         routes = _extract_gate_routes(payload)
         return GateNode(routes=routes, **common_kwargs)
     if node_type == "GROUP" or canonical_type == "group":
-        children = [str(item) for item in (payload.get("children") or common_kwargs["config"].get("legacyChildren") or [])]
+        children = [str(item) for item in (payload.get("children") or [])]
         return GroupNode(children=children, **common_kwargs)
     if node_type == "ARTIFACT" or canonical_type == "output":
         return ArtifactNode(**common_kwargs)
@@ -140,13 +155,9 @@ def _to_node(raw: Any, *, graph_id: str) -> TaskNode | GateNode | GroupNode | Ar
     output_contract = _extract_output_contract(payload)
     execution = str(
         payload.get("execution")
-        or common_kwargs["config"].get("legacyExecution")
         or _execution_from_canonical_type(canonical_type, common_kwargs["config"])
     ).upper()
     execution_config = payload.get("executionConfig")
-    if execution_config is None:
-        legacy_config = common_kwargs["config"].get("legacyExecutionConfig")
-        execution_config = legacy_config if isinstance(legacy_config, dict) else None
     policy = _extract_policy(payload)
     return TaskNode(
         execution=execution or "SINGLE",
@@ -154,8 +165,8 @@ def _to_node(raw: Any, *, graph_id: str) -> TaskNode | GateNode | GroupNode | Ar
         task_spec=task_spec,
         output_contract=output_contract,
         policy=policy,
-        guardrails=common_kwargs["config"].get("legacyGuardrails") if isinstance(common_kwargs["config"], dict) else None,
-        task_boundaries=common_kwargs["config"].get("legacyTaskBoundaries") if isinstance(common_kwargs["config"], dict) else None,
+        guardrails=payload.get("guardrails") if isinstance(payload.get("guardrails"), dict) else None,
+        task_boundaries=[str(item) for item in (payload.get("taskBoundaries") or [])] if isinstance(payload.get("taskBoundaries"), list) else None,
         **common_kwargs,
     )
 
@@ -163,8 +174,7 @@ def _to_node(raw: Any, *, graph_id: str) -> TaskNode | GateNode | GroupNode | Ar
 def _extract_gate_routes(payload: dict[str, Any]) -> list[GateRoute]:
     routes_raw = payload.get("routes")
     if not isinstance(routes_raw, list):
-        config = payload.get("config") if isinstance(payload.get("config"), dict) else {}
-        routes_raw = config.get("legacyRoutes") if isinstance(config.get("legacyRoutes"), list) else []
+        routes_raw = []
     routes: list[GateRoute] = []
     for item in routes_raw:
         if not isinstance(item, dict):
@@ -177,15 +187,12 @@ def _extract_task_spec(payload: dict[str, Any], title: str) -> TaskSpec:
     task_spec_raw = payload.get("taskSpec")
     if isinstance(task_spec_raw, dict):
         return task_spec_from_payload(task_spec_raw)
-    config = payload.get("config") if isinstance(payload.get("config"), dict) else {}
-    legacy_task_spec = config.get("legacyTaskSpec")
-    if isinstance(legacy_task_spec, dict):
-        return task_spec_from_payload(legacy_task_spec)
 
     input_bindings = [_legacy_input_binding_from_v3(item) for item in _list_of_dicts(payload.get("inputBindings"))]
     prompt_template = _optional_str(payload.get("promptTemplate"))
     agent_id = _optional_str(payload.get("agentId"))
     canonical_type = str(payload.get("type") or "").strip().lower()
+    config = payload.get("config") if isinstance(payload.get("config"), dict) else {}
     if canonical_type == "tool":
         tool_calls = []
         for item in _list_of_dicts(config.get("toolCalls")):
@@ -266,9 +273,7 @@ def _extract_output_contract(payload: dict[str, Any]) -> OutputContract:
 
 def _extract_policy(payload: dict[str, Any]):
     raw_policy = payload.get("policy") if isinstance(payload.get("policy"), dict) else {}
-    config = payload.get("config") if isinstance(payload.get("config"), dict) else {}
-    legacy_policy = config.get("legacyPolicy") if isinstance(config.get("legacyPolicy"), dict) else {}
-    source = raw_policy or legacy_policy
+    source = raw_policy
     from .schema import Policy, RetryPolicy, BudgetPolicy, TimeoutPolicy
 
     retry_raw = source.get("retry") if isinstance(source.get("retry"), dict) else {}
@@ -305,7 +310,7 @@ def _to_edge(raw: Any, *, graph_id: str) -> GraphEdge:
         from_node=str(payload.get("from") or payload.get("from_node") or payload.get("sourceNodeId") or ""),
         to_node=str(payload.get("to") or payload.get("to_node") or payload.get("targetNodeId") or ""),
         edge_type=str(edge_type),
-        kind=str(payload.get("legacyKind") or payload.get("kind") or payload.get("name") or payload.get("label") or ""),
+        kind=str(payload.get("kind") or payload.get("name") or payload.get("label") or ""),
         graph_id=str(payload.get("graphId") or payload.get("graph_id") or graph_id),
         label=_optional_str(payload.get("label")),
         status=str(payload.get("status") or "active"),
@@ -344,6 +349,19 @@ def _to_agent(raw: dict[str, Any]) -> Agent:
         updated_by=_optional_str(raw.get("updatedBy")),
         entity_version=int(raw.get("version") or raw.get("entityVersion") or 1),
     )
+
+
+def _reject_legacy_shim_keys(raw: Any, *, path: str = "$") -> None:
+    if isinstance(raw, dict):
+        for key, value in raw.items():
+            key_str = str(key)
+            if key_str in _FORBIDDEN_LEGACY_KEYS:
+                raise ValueError(f"v3 graph 驗證失敗：禁止 legacy 欄位 {path}.{key_str}")
+            _reject_legacy_shim_keys(value, path=f"{path}.{key_str}")
+        return
+    if isinstance(raw, list):
+        for index, item in enumerate(raw):
+            _reject_legacy_shim_keys(item, path=f"{path}[{index}]")
 
 
 def _to_graph_run(raw: dict[str, Any]) -> GraphRun:
