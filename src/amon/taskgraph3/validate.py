@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from .payloads import (
@@ -75,10 +76,15 @@ def graph_definition_from_payload(graph_json: dict[str, Any]) -> GraphDefinition
     edges_payload = raw.get("edges")
     if not isinstance(nodes_payload, list) or not isinstance(edges_payload, list):
         raise ValueError("v3 graph 驗證失敗：nodes/edges 必須是 list")
+    graph_id = str(raw.get("id") or raw.get("graphId") or "graph")
+    metadata = raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {}
+    if isinstance(raw.get("globals"), dict):
+        metadata = dict(metadata)
+        metadata["globals"] = raw.get("globals")
 
     graph = GraphDefinition(
         version=str(raw.get("version") or "taskgraph.v3"),
-        id=str(raw.get("id") or "graph"),
+        id=graph_id,
         name=str(raw.get("name") or "Untitled Graph"),
         description=_optional_str(raw.get("description")),
         status=str(raw.get("status") or "draft"),
@@ -87,8 +93,8 @@ def graph_definition_from_payload(graph_json: dict[str, Any]) -> GraphDefinition
         created_by=_optional_str(raw.get("createdBy")),
         updated_by=_optional_str(raw.get("updatedBy")),
         entity_version=int(raw.get("entityVersion") or raw.get("revision") or 1),
-        nodes=[_to_node(item, graph_id=str(raw.get("id") or "graph")) for item in nodes_payload],
-        edges=[_to_edge(item, graph_id=str(raw.get("id") or "graph")) for item in edges_payload],
+        nodes=[_to_node(item, graph_id=graph_id) for item in nodes_payload],
+        edges=[_to_edge(item, graph_id=graph_id) for item in edges_payload],
         agents=[_to_agent(item) for item in raw.get("agents", []) if isinstance(item, dict)],
         graph_runs=[_to_graph_run(item) for item in raw.get("graphRuns", []) if isinstance(item, dict)],
         node_runs=[_to_node_run(item) for item in raw.get("nodeRuns", []) if isinstance(item, dict)],
@@ -102,26 +108,62 @@ def graph_definition_from_payload(graph_json: dict[str, Any]) -> GraphDefinition
         last_opened_at=_optional_str(raw.get("lastOpenedAt")),
         archived_at=_optional_str(raw.get("archivedAt")),
         tags=[str(item) for item in (raw.get("tags") or [])] if isinstance(raw.get("tags"), list) else None,
-        metadata=raw.get("metadata") if isinstance(raw.get("metadata"), dict) else None,
+        metadata=metadata or None,
         runtime_capabilities=_to_runtime_capabilities(raw.get("runtimeCapabilities")),
     )
+    _hydrate_gate_routes_from_edges(graph)
     return graph
 
 
 def _to_node(raw: Any, *, graph_id: str) -> TaskNode | GateNode | GroupNode | ArtifactNode:
     payload = _ensure_dict(raw, name="v3 node")
-    node_type = str(payload.get("node_type") or "").upper().strip()
+    node_type = str(payload.get("node_type") or payload.get("type") or "").upper().strip()
     canonical_type = str(payload.get("type") or "").strip().lower()
-    title = str(payload.get("title") or payload.get("name") or "")
+    title = _node_title_from_payload(payload)
+    config = payload.get("config") if isinstance(payload.get("config"), dict) else {}
+    if payload.get("objective") is not None:
+        config = dict(config)
+        config["objective"] = payload.get("objective")
+    if payload.get("definitionOfDone") is not None:
+        config = dict(config)
+        config["definitionOfDone"] = payload.get("definitionOfDone")
+    if payload.get("constraints") is not None:
+        config = dict(config)
+        config["constraints"] = payload.get("constraints")
+    if isinstance(payload.get("labels"), dict):
+        config = dict(config)
+        config["labels"] = payload.get("labels")
+    if isinstance(payload.get("policy"), dict):
+        config = dict(config)
+        config["policy_raw"] = payload.get("policy")
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    if isinstance(payload.get("artifact"), dict):
+        metadata = dict(metadata)
+        metadata["artifact"] = payload.get("artifact")
+    if isinstance(payload.get("ui"), dict):
+        metadata = dict(metadata)
+        metadata["ui"] = payload.get("ui")
+    if isinstance(payload.get("outputs"), dict):
+        metadata = dict(metadata)
+        metadata["planner_outputs"] = payload.get("outputs")
+    if isinstance(payload.get("inputs"), dict):
+        metadata = dict(metadata)
+        metadata["planner_inputs"] = payload.get("inputs")
+    if isinstance(payload.get("skillBindings"), list):
+        metadata = dict(metadata)
+        metadata["skillBindings"] = payload.get("skillBindings")
+    if isinstance(payload.get("outcomes"), list):
+        metadata = dict(metadata)
+        metadata["outcomes"] = payload.get("outcomes")
     common_kwargs = {
         "id": str(payload.get("id") or ""),
         "title": title,
         "status": str(payload.get("status") or "dirty"),
         "graph_id": str(payload.get("graphId") or payload.get("graph_id") or graph_id),
-        "description": _optional_str(payload.get("description")),
+        "description": _optional_str(payload.get("description")) or _optional_str(payload.get("objective")),
         "agent_id": _optional_str(payload.get("agentId") or payload.get("agent_id")),
         "prompt_template": _optional_str(payload.get("promptTemplate") or payload.get("prompt_template")),
-        "config": payload.get("config") if isinstance(payload.get("config"), dict) else {},
+        "config": config,
         "input_ports": [_to_node_port(item) for item in _list_of_dicts(payload.get("inputPorts"))],
         "output_ports_v3": [_to_node_port(item) for item in _list_of_dicts(payload.get("outputPorts"))],
         "input_bindings_v3": [_to_node_input_binding(item) for item in _list_of_dicts(payload.get("inputBindings"))],
@@ -134,7 +176,7 @@ def _to_node(raw: Any, *, graph_id: str) -> TaskNode | GateNode | GroupNode | Ar
         "last_succeeded_at": _optional_str(payload.get("lastSucceededAt")),
         "last_failed_at": _optional_str(payload.get("lastFailedAt")),
         "error": _to_node_error(payload.get("error")),
-        "metadata": payload.get("metadata") if isinstance(payload.get("metadata"), dict) else None,
+        "metadata": metadata or None,
         "created_at": _optional_str(payload.get("createdAt")) or "1970-01-01T00:00:00Z",
         "updated_at": _optional_str(payload.get("updatedAt")) or "1970-01-01T00:00:00Z",
         "created_by": _optional_str(payload.get("createdBy")),
@@ -142,31 +184,32 @@ def _to_node(raw: Any, *, graph_id: str) -> TaskNode | GateNode | GroupNode | Ar
         "entity_version": int(payload.get("version") or payload.get("entityVersion") or 1),
     }
 
-    if node_type == "GATE" or canonical_type == "decision":
+    if node_type == "GATE" or canonical_type in {"decision", "gate"}:
         routes = _extract_gate_routes(payload)
         return GateNode(routes=routes, **common_kwargs)
     if node_type == "GROUP" or canonical_type == "group":
         children = [str(item) for item in (payload.get("children") or [])]
         return GroupNode(children=children, **common_kwargs)
-    if node_type == "ARTIFACT" or canonical_type == "output":
+    if node_type == "ARTIFACT" or canonical_type in {"output", "artifact"}:
         return ArtifactNode(**common_kwargs)
 
     task_spec = _extract_task_spec(payload, title)
     output_contract = _extract_output_contract(payload)
-    execution = str(
-        payload.get("execution")
-        or _execution_from_canonical_type(canonical_type, common_kwargs["config"])
-    ).upper()
-    execution_config = payload.get("executionConfig")
+    execution, execution_config = _extract_execution(payload, canonical_type, common_kwargs["config"])
     policy = _extract_policy(payload)
+    guardrails = payload.get("guardrails")
+    if isinstance(guardrails, list):
+        guardrails = {"rules": guardrails}
+    elif not isinstance(guardrails, dict):
+        guardrails = None
     return TaskNode(
         execution=execution or "SINGLE",
-        execution_config=execution_config if isinstance(execution_config, dict) else None,
+        execution_config=execution_config,
         task_spec=task_spec,
         output_contract=output_contract,
         policy=policy,
-        guardrails=payload.get("guardrails") if isinstance(payload.get("guardrails"), dict) else None,
-        task_boundaries=[str(item) for item in (payload.get("taskBoundaries") or [])] if isinstance(payload.get("taskBoundaries"), list) else None,
+        guardrails=guardrails,
+        task_boundaries=_extract_task_boundaries(payload.get("taskBoundaries")),
         **common_kwargs,
     )
 
@@ -193,6 +236,7 @@ def _extract_task_spec(payload: dict[str, Any], title: str) -> TaskSpec:
     agent_id = _optional_str(payload.get("agentId"))
     canonical_type = str(payload.get("type") or "").strip().lower()
     config = payload.get("config") if isinstance(payload.get("config"), dict) else {}
+    skill_bindings = _list_of_dicts(payload.get("skillBindings"))
     if canonical_type == "tool":
         tool_calls = []
         for item in _list_of_dicts(config.get("toolCalls")):
@@ -216,6 +260,49 @@ def _extract_task_spec(payload: dict[str, Any], title: str) -> TaskSpec:
             sandbox_run=SandboxRunConfig(command=str(config.get("command") or "sleep 1"), shell="bash"),
             input_bindings=input_bindings,
             display=TaskDisplayMetadata(label=title, summary="delay"),
+            runnable=True,
+        )
+    if skill_bindings:
+        allowed_tools = _extract_skill_binding_tools(skill_bindings)
+        primary_skills = [str(item.get("skillId") or item.get("name") or "") for item in skill_bindings if str(item.get("role") or "PRIMARY").upper() == "PRIMARY"]
+        fallback_skills = [str(item.get("skillId") or item.get("name") or "") for item in skill_bindings if str(item.get("role") or "").upper() in {"FALLBACK", "VALIDATOR"}]
+        objective = _optional_str(payload.get("objective")) or _optional_str(payload.get("description")) or title
+        dod_items = _normalize_text_list(payload.get("definitionOfDone"))
+        constraint_items = _normalize_text_list(payload.get("constraints"))
+        instructions_parts = []
+        if objective:
+            instructions_parts.append(f"目標：{objective}")
+        if dod_items:
+            instructions_parts.append("完成定義：\n- " + "\n- ".join(dod_items))
+        if constraint_items:
+            instructions_parts.append("限制：\n- " + "\n- ".join(constraint_items))
+        if primary_skills:
+            instructions_parts.append("主要 skill：\n- " + "\n- ".join(primary_skills))
+        if fallback_skills:
+            instructions_parts.append("輔助 skill：\n- " + "\n- ".join(fallback_skills))
+        artifacts = []
+        outputs_raw = payload.get("outputs") if isinstance(payload.get("outputs"), dict) else {}
+        for artifact_id in outputs_raw.get("artifacts") or []:
+            if str(artifact_id).strip():
+                artifacts.append(ArtifactOutput(name=str(artifact_id), required=False))
+        summary = objective or _optional_str(payload.get("description"))
+        todo_hint = dod_items[0] if dod_items else None
+        return TaskSpec(
+            executor="agent",
+            agent=AgentTaskConfig(
+                prompt=objective or f"完成「{title}」",
+                instructions="\n\n".join(instructions_parts) or "請完成此子任務。",
+                model=_optional_str(config.get("model")),
+                allowed_tools=allowed_tools,
+            ),
+            input_bindings=input_bindings,
+            artifacts=artifacts,
+            display=TaskDisplayMetadata(
+                label=title,
+                summary=summary,
+                todo_hint=todo_hint,
+                tags=[item for item in primary_skills if item],
+            ),
             runnable=True,
         )
     agent_cfg = AgentTaskConfig(prompt=prompt_template, instructions=_optional_str(config.get("instructions")), model=_optional_str(config.get("model")))
@@ -250,8 +337,8 @@ def _extract_output_contract(payload: dict[str, Any]) -> OutputContract:
                     name=str(port.get("name") or ""),
                     extractor=_optional_str(port.get("extractor")),
                     parser=_optional_str(port.get("parser")),
-                    json_schema=port.get("jsonSchema") if isinstance(port.get("jsonSchema"), dict) else None,
-                    type_ref=_optional_str(port.get("typeRef")),
+                    json_schema=port.get("jsonSchema") if isinstance(port.get("jsonSchema"), dict) else (port.get("schema") if isinstance(port.get("schema"), dict) else None),
+                    type_ref=_optional_str(port.get("typeRef") or port.get("type")),
                 )
                 for port in ports_payload
                 if isinstance(port, dict)
@@ -300,26 +387,44 @@ def _extract_policy(payload: dict[str, Any]):
 
 def _to_edge(raw: Any, *, graph_id: str) -> GraphEdge:
     payload = _ensure_dict(raw, name="v3 edge")
+    control_raw = payload.get("control") if isinstance(payload.get("control"), dict) else {}
+    data_raw = payload.get("data") if isinstance(payload.get("data"), dict) else {}
     edge_type = str(payload.get("edge_type") or payload.get("type") or "control")
     mappings = [_to_edge_mapping(item) for item in _list_of_dicts(payload.get("mappings"))]
+    if not mappings:
+        mappings = [_to_edge_mapping_from_ref(item) for item in _list_of_dicts(data_raw.get("mapping"))]
     condition = _to_edge_condition(payload.get("condition"))
+    if condition is None and control_raw:
+        expression = _optional_str(control_raw.get("conditionExpr"))
+        condition = EdgeCondition(type="expression" if expression else "always", expression=expression)
     if condition is None:
         condition = EdgeCondition(type="always")
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    if control_raw or payload.get("controlKind"):
+        metadata = dict(metadata)
+        metadata["control"] = {
+            "onStatus": _optional_str(control_raw.get("onStatus")),
+            "onOutcome": _optional_str(control_raw.get("onOutcome")),
+            "conditionExpr": _optional_str(control_raw.get("conditionExpr")),
+        }
+    if data_raw or payload.get("dataKind"):
+        metadata = dict(metadata)
+        metadata["data"] = data_raw
     return GraphEdge(
         id=str(payload.get("id") or ""),
         from_node=str(payload.get("from") or payload.get("from_node") or payload.get("sourceNodeId") or ""),
         to_node=str(payload.get("to") or payload.get("to_node") or payload.get("targetNodeId") or ""),
         edge_type=str(edge_type),
-        kind=str(payload.get("kind") or payload.get("name") or payload.get("label") or ""),
+        kind=str(payload.get("kind") or payload.get("controlKind") or payload.get("dataKind") or payload.get("name") or payload.get("label") or ""),
         graph_id=str(payload.get("graphId") or payload.get("graph_id") or graph_id),
         label=_optional_str(payload.get("label")),
         status=str(payload.get("status") or "active"),
         source_port_key=_optional_str(payload.get("sourcePortKey")),
-        target_port_key=_optional_str(payload.get("targetPortKey")),
+        target_port_key=_optional_str(payload.get("targetPortKey")) or _infer_target_port_key(mappings),
         condition=condition,
         mappings=mappings,
         priority=_to_optional_int(payload.get("priority")),
-        metadata=payload.get("metadata") if isinstance(payload.get("metadata"), dict) else None,
+        metadata=metadata or None,
         created_at=_optional_str(payload.get("createdAt")) or "1970-01-01T00:00:00Z",
         updated_at=_optional_str(payload.get("updatedAt")) or "1970-01-01T00:00:00Z",
         created_by=_optional_str(payload.get("createdBy")),
@@ -565,6 +670,96 @@ def _execution_from_canonical_type(canonical_type: str, config: dict[str, Any]) 
     if execution:
         return execution
     return "SINGLE"
+
+
+def _node_title_from_payload(payload: dict[str, Any]) -> str:
+    return str(payload.get("title") or payload.get("name") or payload.get("objective") or payload.get("id") or "")
+
+
+def _extract_execution(payload: dict[str, Any], canonical_type: str, config: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
+    execution_raw = payload.get("execution")
+    if isinstance(execution_raw, dict):
+        mode = str(execution_raw.get("mode") or "SINGLE").upper()
+        if mode == "PARALLEL_MAP" and isinstance(execution_raw.get("parallel"), dict):
+            return mode, execution_raw.get("parallel")
+        if mode == "RECURSIVE" and isinstance(execution_raw.get("recursive"), dict):
+            return mode, execution_raw.get("recursive")
+        return mode, None
+    mode = str(payload.get("execution") or _execution_from_canonical_type(canonical_type, config)).upper()
+    execution_config = payload.get("executionConfig") if isinstance(payload.get("executionConfig"), dict) else None
+    return mode, execution_config
+
+
+def _extract_task_boundaries(raw: Any) -> list[str] | None:
+    if not isinstance(raw, list):
+        return None
+    boundaries: list[str] = []
+    for item in raw:
+        if isinstance(item, str):
+            if item.strip():
+                boundaries.append(item)
+            continue
+        if isinstance(item, dict):
+            boundaries.append(json.dumps(item, ensure_ascii=False, sort_keys=True))
+    return boundaries or None
+
+
+def _normalize_text_list(raw: Any) -> list[str]:
+    if isinstance(raw, list):
+        return [str(item).strip() for item in raw if str(item).strip()]
+    if isinstance(raw, str) and raw.strip():
+        return [raw.strip()]
+    return []
+
+
+def _extract_skill_binding_tools(skill_bindings: list[dict[str, Any]]) -> list[str]:
+    tools: list[str] = []
+    for binding in skill_bindings:
+        config = binding.get("config") if isinstance(binding.get("config"), dict) else {}
+        for tool in config.get("tools") or []:
+            tool_name = str(tool).strip()
+            if tool_name and tool_name not in tools:
+                tools.append(tool_name)
+    return tools
+
+
+def _to_edge_mapping_from_ref(raw: dict[str, Any]) -> EdgeDataMapping:
+    from_ref = _optional_str(raw.get("fromRef"))
+    to_ref = _optional_str(raw.get("toRef")) or "port:input"
+    target_port_key = _ref_to_target_port_key(to_ref)
+    return EdgeDataMapping(source_path=from_ref, target_port_key=target_port_key, transform_expr=None, required=None)
+
+
+def _ref_to_target_port_key(ref: str) -> str:
+    if ref.startswith("port:"):
+        return ref.split(":", 1)[1] or "input"
+    if ref.startswith("var:"):
+        return ref.split(":", 1)[1] or "input"
+    if ref.startswith("artifact:"):
+        return ref.split(":", 1)[1] or "input"
+    return ref or "input"
+
+
+def _infer_target_port_key(mappings: list[EdgeDataMapping]) -> str | None:
+    if not mappings:
+        return None
+    return mappings[0].target_port_key or None
+
+
+def _hydrate_gate_routes_from_edges(graph: GraphDefinition) -> None:
+    gates = {node.id: node for node in graph.nodes if isinstance(node, GateNode)}
+    if not gates:
+        return
+    for edge in graph.edges:
+        gate = gates.get(edge.from_node)
+        if gate is None or gate.routes:
+            continue
+        metadata = edge.metadata if isinstance(edge.metadata, dict) else {}
+        control = metadata.get("control") if isinstance(metadata.get("control"), dict) else {}
+        on_outcome = _optional_str(control.get("onOutcome"))
+        if not on_outcome:
+            continue
+        gate.routes.append(GateRoute(on_outcome=on_outcome, to_node=edge.to_node))
 
 
 def _to_optional_int(value: Any) -> int | None:

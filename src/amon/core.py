@@ -1290,7 +1290,7 @@ class AmonCore:
                 ),
             )
             for target_id in root_targets:
-                edges.append(GraphEdge(from_node="concept_alignment", to_node=target_id, edge_type="CONTROL", kind="next"))
+                edges.append(GraphEdge(from_node="concept_alignment", to_node=target_id, edge_type="CONTROL", kind="DEPENDS_ON"))
         control_predecessors = self._build_control_predecessors(edges)
         for node in nodes:
             if not isinstance(node, TaskNode) or node.task_spec.executor != "agent" or node.task_spec.agent is None:
@@ -1335,9 +1335,19 @@ class AmonCore:
                 available_tools,
             )
         return GraphDefinition(
+            id=graph.id,
             version=graph.version,
+            name=graph.name,
+            description=graph.description,
+            status=graph.status,
+            created_at=graph.created_at,
+            updated_at=graph.updated_at,
+            created_by=graph.created_by,
+            updated_by=graph.updated_by,
+            entity_version=graph.entity_version,
             nodes=nodes,
             edges=edges,
+            metadata=graph.metadata,
             runtime_capabilities=graph.runtime_capabilities,
         )
 

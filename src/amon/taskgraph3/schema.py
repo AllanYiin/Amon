@@ -623,7 +623,7 @@ def validate_graph_definition(graph: GraphDefinition) -> None:
 
     for gate in gate_nodes:
         for route in gate.routes:
-            if route.on_outcome not in _ALLOWED_GATE_OUTCOMES:
+            if not isinstance(route.on_outcome, str) or not route.on_outcome.strip():
                 raise ValueError(
                     f"gate.routes.on_outcome 不合法：node_id={gate.id}, on_outcome={route.on_outcome}"
                 )
