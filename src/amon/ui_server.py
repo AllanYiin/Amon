@@ -3279,17 +3279,40 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             raise ValueError("time range 必須是 ISO 時間格式") from exc
 
     def _load_latest_graph(self, project_path: Path) -> dict[str, Any]:
+        candidate_paths: list[Path] = []
+
         runs_dir = project_path / ".amon" / "runs"
         if runs_dir.exists():
-            run_dirs = [path for path in runs_dir.iterdir() if path.is_dir()]
-            if run_dirs:
-                latest = max(run_dirs, key=lambda path: path.stat().st_mtime)
-                resolved_path = latest / "graph.resolved.json"
-                if resolved_path.exists():
-                    return json.loads(resolved_path.read_text(encoding="utf-8"))
-        fallback = project_path / ".amon" / "graphs" / "single_graph.resolved.json"
-        if fallback.exists():
-            return json.loads(fallback.read_text(encoding="utf-8"))
+            candidate_paths.extend(
+                path / "graph.resolved.json"
+                for path in runs_dir.iterdir()
+                if path.is_dir() and (path / "graph.resolved.json").exists()
+            )
+
+        graphs_dir = project_path / ".amon" / "graphs"
+        if graphs_dir.exists():
+            candidate_paths.extend(path for path in graphs_dir.glob("*_graph.resolved.json") if path.is_file())
+
+        docs_plan_path = project_path / "docs" / "plan.json"
+        if docs_plan_path.exists():
+            candidate_paths.append(docs_plan_path)
+
+        for path in sorted(
+            {candidate.resolve() for candidate in candidate_paths},
+            key=lambda candidate: candidate.stat().st_mtime,
+            reverse=True,
+        ):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not isinstance(payload, dict):
+                continue
+            nodes = payload.get("nodes")
+            edges = payload.get("edges")
+            if isinstance(nodes, list) and isinstance(edges, list):
+                return payload
+
         return {"nodes": [], "edges": []}
 
     def _build_docs_catalog(self, *, project_id: str, project_path: Path) -> list[dict[str, Any]]:

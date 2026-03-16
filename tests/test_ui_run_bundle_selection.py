@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -10,6 +11,52 @@ from amon.ui_server import AmonUIHandler
 
 
 class UiRunBundleSelectionTests(unittest.TestCase):
+    def test_load_latest_graph_prefers_newer_planner_snapshot_over_older_run_graph(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_path = Path(tmp)
+            old_run_dir = project_path / ".amon" / "runs" / "run-old"
+            old_run_dir.mkdir(parents=True)
+            (old_run_dir / "graph.resolved.json").write_text(
+                json.dumps({"nodes": [{"id": "OLD"}], "edges": []}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            planner_graph_path = project_path / ".amon" / "graphs" / "taskgraph.v3_graph.resolved.json"
+            planner_graph_path.parent.mkdir(parents=True, exist_ok=True)
+            planner_graph_path.write_text(
+                json.dumps({"version": "taskgraph.v3", "nodes": [{"id": "NEW"}], "edges": []}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            docs_plan_path = project_path / "docs" / "plan.json"
+            docs_plan_path.parent.mkdir(parents=True, exist_ok=True)
+            docs_plan_path.write_text(
+                json.dumps({"version": "taskgraph.v3", "nodes": [{"id": "PLAN"}], "edges": []}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            os.utime(planner_graph_path, (docs_plan_path.stat().st_mtime + 2, docs_plan_path.stat().st_mtime + 2))
+
+            handler = AmonUIHandler.__new__(AmonUIHandler)
+
+            payload = handler._load_latest_graph(project_path)
+
+            self.assertEqual(payload["nodes"][0]["id"], "NEW")
+
+    def test_load_latest_graph_falls_back_to_docs_plan_when_no_run_graph_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_path = Path(tmp)
+            docs_plan_path = project_path / "docs" / "plan.json"
+            docs_plan_path.parent.mkdir(parents=True, exist_ok=True)
+            docs_plan_path.write_text(
+                json.dumps({"version": "taskgraph.v3", "nodes": [{"id": "PLAN"}], "edges": []}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            handler = AmonUIHandler.__new__(AmonUIHandler)
+
+            payload = handler._load_latest_graph(project_path)
+
+            self.assertEqual(payload["nodes"][0]["id"], "PLAN")
+
     def test_load_latest_run_bundle_prefers_running_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_path = Path(tmp)
