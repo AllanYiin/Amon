@@ -2490,7 +2490,19 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     continue
                 event_type = str(payload.get("type") or "").strip()
                 text = payload.get("text")
-                if event_type not in {"user", "assistant"} or not isinstance(text, str) or not text.strip():
+                if not isinstance(text, str) or not text.strip():
+                    continue
+                if event_type == "assistant_reasoning":
+                    parsed_messages.append(
+                        {
+                            "role": "status",
+                            "kind": "assistant_reasoning",
+                            "text": text.strip(),
+                            "ts": str(payload.get("ts") or "").strip(),
+                        }
+                    )
+                    continue
+                if event_type not in {"user", "assistant"}:
                     continue
                 parsed_messages.append(
                     {
@@ -3018,7 +3030,9 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
     def _read_logs_source(self, source: str, *, project_id: str | None) -> list[dict[str, Any]]:
         if source == "amon":
             if project_id:
-                return self._read_jsonl_records(self._project_logs_path(project_id, "app.jsonl"), source="project")
+                records = self._read_jsonl_records(self._project_logs_path(project_id, "app.jsonl"), source="project")
+                records.extend(self._read_thread_reasoning_logs(project_id=project_id))
+                return records
             return self._read_jsonl_records(self.core.data_dir / "logs" / "amon.log", source="global")
         if source == "billing":
             if project_id:
@@ -3054,6 +3068,36 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                     if "type" in payload and "event" not in payload:
                         payload["event"] = payload.get("type")
                     records.append(payload)
+        return records
+
+    def _read_thread_reasoning_logs(self, *, project_id: str) -> list[dict[str, Any]]:
+        project_path = self.core.get_project_path(project_id)
+        threads_dir = project_path / ".amon" / "threads"
+        if not threads_dir.exists():
+            return []
+        records: list[dict[str, Any]] = []
+        for session_path in threads_dir.glob("*/events.jsonl"):
+            thread_id = session_path.parent.name
+            for payload in self._read_jsonl_records(session_path, source="thread"):
+                if str(payload.get("type") or "").strip() != "assistant_reasoning":
+                    continue
+                message = str(payload.get("text") or "").strip()
+                if not message:
+                    continue
+                records.append(
+                    {
+                        "ts": payload.get("ts"),
+                        "level": "INFO",
+                        "event": "assistant_reasoning",
+                        "component": "thread_session",
+                        "project_id": project_id,
+                        "thread_id": str(payload.get("thread_id") or thread_id).strip() or thread_id,
+                        "run_id": payload.get("run_id"),
+                        "message": message[:600],
+                        "message_length": len(message),
+                        "source": "thread",
+                    }
+                )
         return records
 
     def _billing_amount(self, record: dict[str, Any]) -> float:

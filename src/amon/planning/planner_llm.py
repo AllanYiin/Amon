@@ -9,7 +9,9 @@ import re
 from typing import Any, Iterable, Protocol
 
 from amon.config import ConfigLoader
+from amon.events import emit_event
 from amon.llm_request_log import append_llm_request, build_llm_request_payload
+from amon.logging import log_event
 from amon.models import build_provider
 
 from amon.taskgraph3.payloads import AgentTaskConfig, ArtifactOutput, TaskDisplayMetadata, TaskSpec, task_spec_from_payload
@@ -47,6 +49,11 @@ _PLANNING_TASK_TOKENS = (
     "問題拆解",
     "骨架規劃",
 )
+_REPAIRABLE_SEMANTIC_ISSUES = {
+    "出現重複的概念對齊/背景調研 TASK，必須只保留 1 個。",
+    "需求/PRD/架構/視覺/預設參數被切成過多獨立 TASK，必須合併為同一設計階段節點。",
+    "打包交付/release 類 TASK 缺少前置依賴，不可作為前段 root。",
+}
 
 
 class LLMClient(Protocol):
@@ -96,10 +103,10 @@ def generate_plan_with_llm(
         for _ in range(2):
             try:
                 graph = _loads_graph_definition_from_response(previous_raw)
-                semantic_issues = _semantic_plan_issues(graph)
-                if not semantic_issues:
+                fatal_issues = _fatal_semantic_plan_issues(graph)
+                if not fatal_issues:
                     return graph
-                repair_reason = "語義修復要求：\n- " + "\n- ".join(semantic_issues)
+                repair_reason = "語義修復要求：\n- " + "\n- ".join(fatal_issues)
             except ValueError as exc:
                 repair_reason = str(exc)
             previous_raw = _request_plan(
@@ -117,11 +124,17 @@ def generate_plan_with_llm(
                 request_id=request_id,
             )
         graph = _loads_graph_definition_from_response(previous_raw)
-        semantic_issues = _semantic_plan_issues(graph)
-        if semantic_issues:
-            raise ValueError("planner 語義修復失敗：" + "; ".join(semantic_issues))
+        fatal_issues = _fatal_semantic_plan_issues(graph)
+        if fatal_issues:
+            raise ValueError("planner 語義修復失敗：" + "; ".join(fatal_issues))
         return graph
     except Exception as exc:  # noqa: BLE001
+        _record_planner_fallback(
+            error=exc,
+            project_id=project_id,
+            run_id=run_id,
+            thread_id=thread_id,
+        )
         logger.warning("LLM planner 失敗，改用最小計畫：%s", exc)
         return _minimal_plan(normalized)
 
@@ -228,6 +241,8 @@ def _planner_system_prompt(*, is_repair: bool) -> str:
             "- 後續執行節點只負責完成當前交付，不可把整體問題再拆解一次，也不可重做概念對齊。\n"
             "- node.title 不得為空；若原本會是 None/空白，必須重寫成 <=10 個中文漢字的完整標題。\n"
             "- 嚴禁輸出任何 agent/persona/assignment/owner。\n"
+            "- 壞例子：概念對齊 -> 背景調研 -> 需求規格 -> PRD -> 架構設計 -> 視覺規格 -> 預設參數 -> 打包交付。\n"
+            "- 好例子：概念對齊 -> 設計定義（需求/PRD/架構/視覺/預設參數合併） -> 原型實作/內容產出 -> 打包交付。\n"
             "- 除這兩段 code block 外不得輸出其他文字。\n"
         )
     return (
@@ -267,6 +282,9 @@ def _planner_system_prompt(*, is_repair: bool) -> str:
         "- 每個 TASK 至少要有 objective + definitionOfDone（>=2 條）+ 主要 skillBindings（PRIMARY）。\n"
         "- 若產出需要被下游使用，優先建立 ARTIFACT node 與 PRODUCES/CONSUMES，或用 MAPS 明確傳遞 vars/ports。\n"
         "- 只有在真的有外部呼叫量、事件量或即時性需求時才設定 rateLimit/streamLimit。\n\n"
+        "正反例（硬性參考）：\n"
+        "- 壞例子：概念對齊 -> 背景調研 -> 需求規格 -> PRD -> 架構設計 -> 視覺規格 -> 預設參數 -> 打包交付。\n"
+        "- 好例子：概念對齊 -> 設計定義（把需求/PRD/架構/視覺/預設參數合併成同一節點） -> 實作/內容產出 -> 打包交付。\n\n"
         "輸出格式（硬性，違者視為失敗）：\n"
         "- 只輸出兩段 code block：\n"
         "  1) ```json ...```：GraphDefinition（純 JSON、無註解、雙引號）\n"
@@ -391,6 +409,14 @@ def _semantic_plan_issues(graph: GraphDefinition) -> list[str]:
     return issues
 
 
+def semantic_plan_issues(graph: GraphDefinition) -> list[str]:
+    return _semantic_plan_issues(graph)
+
+
+def _fatal_semantic_plan_issues(graph: GraphDefinition) -> list[str]:
+    return [issue for issue in _semantic_plan_issues(graph) if issue not in _REPAIRABLE_SEMANTIC_ISSUES]
+
+
 def _incoming_dependency_count(graph: GraphDefinition) -> dict[str, int]:
     incoming = {node.id: 0 for node in graph.nodes}
     for edge in graph.edges:
@@ -400,13 +426,20 @@ def _incoming_dependency_count(graph: GraphDefinition) -> dict[str, int]:
     return incoming
 
 
-def _normalize_task_text(node: TaskNode) -> str:
+def _normalize_task_identity_text(node: TaskNode) -> str:
     parts = [
         node.id,
         node.title,
         node.task_spec.display.label if node.task_spec and node.task_spec.display else "",
         node.task_spec.display.summary if node.task_spec and node.task_spec.display else "",
         node.task_spec.display.todo_hint if node.task_spec and node.task_spec.display else "",
+    ]
+    return " ".join(str(item or "").strip().lower() for item in parts if str(item or "").strip())
+
+
+def _normalize_task_text(node: TaskNode) -> str:
+    parts = [
+        _normalize_task_identity_text(node),
         node.task_spec.agent.prompt if node.task_spec and node.task_spec.agent else "",
         node.task_spec.agent.instructions if node.task_spec and node.task_spec.agent else "",
     ]
@@ -414,17 +447,17 @@ def _normalize_task_text(node: TaskNode) -> str:
 
 
 def _is_concept_task(node: TaskNode) -> bool:
-    normalized = _normalize_task_text(node)
+    normalized = _normalize_task_identity_text(node)
     return any(token in normalized for token in _CONCEPT_TASK_TOKENS)
 
 
 def _is_spec_cluster_task(node: TaskNode) -> bool:
-    normalized = _normalize_task_text(node)
+    normalized = _normalize_task_identity_text(node)
     return any(token in normalized for token in _SPEC_CLUSTER_TOKENS)
 
 
 def _is_packaging_task(node: TaskNode) -> bool:
-    normalized = _normalize_task_text(node)
+    normalized = _normalize_task_identity_text(node)
     return any(token in normalized for token in _PACKAGING_TOKENS)
 
 
@@ -497,6 +530,42 @@ def _minimal_plan(message: str) -> GraphDefinition:
             GraphEdge(from_node="task-1", to_node="artifact-task-1-todo", edge_type="DATA", kind="PRODUCES"),
         ],
     )
+
+
+def _record_planner_fallback(
+    *,
+    error: Exception,
+    project_id: str | None,
+    run_id: str | None,
+    thread_id: str | None,
+) -> None:
+    error_text = str(error or "").strip() or error.__class__.__name__
+    log_event(
+        {
+            "level": "WARNING",
+            "event": "planner_fallback_minimal_plan",
+            "project_id": project_id,
+            "run_id": run_id,
+            "thread_id": thread_id,
+            "source": "planner_llm",
+            "message": error_text[:600],
+            "error_type": error.__class__.__name__,
+        }
+    )
+    if project_id:
+        emit_event(
+            {
+                "type": "planner_fallback_minimal_plan",
+                "scope": "planning",
+                "project_id": project_id,
+                "actor": "system",
+                "payload": {
+                    "reason": error_text[:600],
+                    "error_type": error.__class__.__name__,
+                },
+                "risk": "medium",
+            }
+        )
 
 
 def _loads_graph_definition_from_response(text: str) -> GraphDefinition:

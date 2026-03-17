@@ -191,6 +191,78 @@ class CorePlanGenerationTests(unittest.TestCase):
         self.assertIn(("concept_alignment", "requirements"), control_pairs)
         self.assertIn(("requirements", "packaging"), control_pairs)
 
+    def test_postprocess_planner_graph_merges_spec_cluster_tasks(self) -> None:
+        core = AmonCore(data_dir=Path(tempfile.mkdtemp()))
+        try:
+            graph = GraphDefinition(
+                version="taskgraph.v3",
+                nodes=[
+                    TaskNode(
+                        id="concept_alignment",
+                        title="概念對齊",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="先查概念"),
+                            display=TaskDisplayMetadata(label="概念對齊", summary="查概念", todo_hint="完成概念摘要"),
+                        ),
+                    ),
+                    TaskNode(
+                        id="requirements",
+                        title="需求規格",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="整理需求"),
+                            display=TaskDisplayMetadata(label="需求規格", summary="需求", todo_hint="完成規格"),
+                        ),
+                    ),
+                    TaskNode(
+                        id="architecture",
+                        title="架構設計",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="整理架構"),
+                            display=TaskDisplayMetadata(label="架構設計", summary="架構", todo_hint="完成架構"),
+                        ),
+                    ),
+                    TaskNode(
+                        id="visual",
+                        title="視覺規格",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="整理視覺"),
+                            display=TaskDisplayMetadata(label="視覺規格", summary="視覺", todo_hint="完成視覺"),
+                        ),
+                    ),
+                    TaskNode(
+                        id="packaging",
+                        title="打包交付",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="完成打包"),
+                            display=TaskDisplayMetadata(label="打包交付", summary="打包", todo_hint="完成交付包"),
+                        ),
+                    ),
+                ],
+                edges=[],
+            )
+
+            processed = core._postprocess_planner_graph(graph, message="請規劃創意遊戲交付流程", available_tools=[{"name": "web.search"}])
+        finally:
+            shutil.rmtree(core.data_dir, ignore_errors=True)
+
+        task_nodes = [node for node in processed.nodes if isinstance(node, TaskNode)]
+        task_ids = [node.id for node in task_nodes]
+        self.assertEqual(task_ids, ["concept_alignment", "requirements", "packaging"])
+        self.assertEqual(task_nodes[1].title, "設計定義")
+        self.assertIn("請把需求、PRD、系統架構、視覺方向與預設參數整合成同一設計階段", task_nodes[1].task_spec.agent.prompt or "")
+        control_pairs = {
+            (edge.from_node, edge.to_node)
+            for edge in processed.edges
+            if edge.edge_type == "CONTROL"
+        }
+        self.assertIn(("concept_alignment", "requirements"), control_pairs)
+        self.assertIn(("requirements", "packaging"), control_pairs)
+
 
 if __name__ == "__main__":
     unittest.main()

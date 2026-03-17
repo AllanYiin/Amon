@@ -1169,6 +1169,7 @@ class UIAsyncAPITests(unittest.TestCase):
                     "\n".join(
                         [
                             json.dumps({"type": "user", "text": "你好", "ts": "2026-01-01T10:00:00Z"}, ensure_ascii=False),
+                            json.dumps({"type": "assistant_reasoning", "text": "我會先做概念對齊", "ts": "2026-01-01T10:00:00Z"}, ensure_ascii=False),
                             json.dumps({"type": "assistant", "text": "已收到", "ts": "2026-01-01T10:00:01Z"}, ensure_ascii=False),
                         ]
                     ),
@@ -1194,9 +1195,11 @@ class UIAsyncAPITests(unittest.TestCase):
 
                 self.assertEqual(response.status, 200)
                 self.assertEqual(payload["thread_id"], "chat-has-history")
-                self.assertEqual(len(payload["messages"]), 2)
+                self.assertEqual(len(payload["messages"]), 3)
                 self.assertEqual(payload["messages"][0]["role"], "user")
-                self.assertEqual(payload["messages"][1]["role"], "assistant")
+                self.assertEqual(payload["messages"][1]["role"], "status")
+                self.assertEqual(payload["messages"][1]["kind"], "assistant_reasoning")
+                self.assertEqual(payload["messages"][2]["role"], "assistant")
             finally:
                 if server:
                     server.shutdown()
@@ -2745,6 +2748,54 @@ class UIAsyncAPITests(unittest.TestCase):
                 self.assertEqual(toast_record["thread_id"], "chat_test_1")
                 self.assertEqual(toast_record["level"], "WARNING")
                 self.assertEqual(toast_record["metadata"]["error_code"], "E_TOAST")
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
+    def test_logs_query_includes_thread_reasoning_entries_for_project(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("reasoning-log")
+                session_path = Path(project.path) / ".amon" / "threads" / "thread-1" / "events.jsonl"
+                session_path.parent.mkdir(parents=True, exist_ok=True)
+                session_path.write_text(
+                    json.dumps(
+                        {
+                            "type": "assistant_reasoning",
+                            "text": "我會先做概念對齊：先整理關鍵概念與背景。",
+                            "ts": "2026-01-01T10:00:00Z",
+                            "project_id": project.project_id,
+                            "thread_id": "thread-1",
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+
+                handler = partial(AmonUIHandler, directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"), core=core)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                conn.request("GET", f"/v1/logs/query?source=amon&project_id={quote(project.project_id)}&page=1&page_size=10")
+                response = conn.getresponse()
+                payload = json.loads(response.read().decode("utf-8"))
+
+                self.assertEqual(response.status, 200)
+                reasoning_records = [item for item in payload["items"] if item.get("event") == "assistant_reasoning"]
+                self.assertEqual(len(reasoning_records), 1)
+                self.assertEqual(reasoning_records[0]["thread_id"], "thread-1")
+                self.assertIn("概念對齊", reasoning_records[0]["message"])
             finally:
                 if server:
                     server.shutdown()

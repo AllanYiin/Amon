@@ -45,7 +45,7 @@ from .logging import log_billing, log_event
 from .logging_utils import setup_logger
 from .llm_request_log import append_llm_request, build_llm_request_payload
 from .mcp_client import MCPClientError, MCPServerConfig, MCPStdioClient
-from .planning import generate_plan_with_llm
+from .planning import generate_plan_with_llm, semantic_plan_issues
 from .models import (
     ProviderError,
     build_provider,
@@ -1151,6 +1151,9 @@ class AmonCore:
             request_id=request_id,
         )
         plan = self._postprocess_planner_graph(plan, message=message, available_tools=planning_tools)
+        postprocess_issues = semantic_plan_issues(plan)
+        if postprocess_issues:
+            raise ValueError("planner 後處理後仍不合法：" + "; ".join(postprocess_issues))
         docs_dir = project_path / "docs"
         docs_dir.mkdir(parents=True, exist_ok=True)
         plan_json = dumps_graph_definition(plan)
@@ -1345,6 +1348,7 @@ class AmonCore:
             message=message,
             tool_names=tool_names,
         )
+        nodes, edges = self._merge_spec_cluster_tasks(nodes, edges)
         edges = self._stabilize_root_sequence(nodes, edges)
         control_predecessors = self._build_control_predecessors(edges)
         for node in nodes:
@@ -1411,7 +1415,7 @@ class AmonCore:
 
     @staticmethod
     def _planning_default_skill_names() -> list[str]:
-        return ["concept-alignment", "problem-decomposer"]
+        return ["concept-alignment"]
 
     def _merge_planning_available_skills(
         self,
@@ -1433,8 +1437,7 @@ class AmonCore:
         return merged
 
     @staticmethod
-    def _planner_text_tokens(node: TaskNode) -> str:
-        agent = node.task_spec.agent
+    def _planner_identity_tokens(node: TaskNode) -> str:
         return unicodedata.normalize(
             "NFKC",
             " ".join(
@@ -1446,6 +1449,21 @@ class AmonCore:
                         node.task_spec.display.label if node.task_spec.display else "",
                         node.task_spec.display.summary if node.task_spec.display else "",
                         node.task_spec.display.todo_hint if node.task_spec.display else "",
+                    ],
+                )
+            ),
+        ).lower()
+
+    @staticmethod
+    def _planner_text_tokens(node: TaskNode) -> str:
+        agent = node.task_spec.agent
+        return unicodedata.normalize(
+            "NFKC",
+            " ".join(
+                filter(
+                    None,
+                    [
+                        AmonCore._planner_identity_tokens(node),
                         agent.prompt if agent else "",
                         agent.instructions if agent else "",
                     ],
@@ -1454,8 +1472,13 @@ class AmonCore:
         ).lower()
 
     def _is_concept_alignment_like_task(self, node: TaskNode) -> bool:
-        normalized = self._planner_text_tokens(node)
+        normalized = self._planner_identity_tokens(node)
         tokens = {"concept_alignment", "concept alignment", "概念對齊"}
+        return any(token in normalized for token in tokens)
+
+    def _is_spec_cluster_like_task(self, node: TaskNode) -> bool:
+        normalized = self._planner_identity_tokens(node)
+        tokens = {"requirements", "需求", "prd", "visual", "視覺", "architecture", "架構", "spec", "規格", "preset", "預設"}
         return any(token in normalized for token in tokens)
 
     def _deduplicate_concept_tasks(
@@ -1568,6 +1591,123 @@ class AmonCore:
             ),
         )
         return [concept_node, *nodes], edges
+
+    @staticmethod
+    def _merge_unique_text_segments(*segments: str) -> str:
+        merged: list[str] = []
+        seen: set[str] = set()
+        for segment in segments:
+            text = str(segment or "").strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            merged.append(text)
+        return "\n\n".join(merged)
+
+    @staticmethod
+    def _merge_unique_items(items: list[str]) -> list[str]:
+        merged: list[str] = []
+        seen: set[str] = set()
+        for item in items:
+            text = str(item or "").strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            merged.append(text)
+        return merged
+
+    @staticmethod
+    def _clone_edge_with_nodes(edge: GraphEdge, *, from_node: str, to_node: str) -> GraphEdge:
+        return GraphEdge(
+            from_node=from_node,
+            to_node=to_node,
+            edge_type=edge.edge_type,
+            kind=edge.kind,
+            label=edge.label,
+            status=edge.status,
+            source_port_key=edge.source_port_key,
+            target_port_key=edge.target_port_key,
+            condition=edge.condition,
+            mappings=list(edge.mappings),
+            priority=edge.priority,
+            metadata=edge.metadata,
+        )
+
+    def _merge_spec_cluster_tasks(
+        self,
+        nodes: list[BaseNode],
+        edges: list[GraphEdge],
+    ) -> tuple[list[BaseNode], list[GraphEdge]]:
+        spec_nodes = [
+            node for node in nodes if isinstance(node, TaskNode) and self._is_spec_cluster_like_task(node)
+        ]
+        if len(spec_nodes) <= 1:
+            return nodes, edges
+
+        primary_node = spec_nodes[0]
+        duplicate_ids = {node.id for node in spec_nodes[1:]}
+        if not duplicate_ids:
+            return nodes, edges
+
+        if primary_node.task_spec.agent is not None:
+            primary_node.task_spec.agent.prompt = self._merge_unique_text_segments(
+                "請把需求、PRD、系統架構、視覺方向與預設參數整合成同一設計階段一次完成，不可拆成多個規劃節點。",
+                *(node.task_spec.agent.prompt or "" for node in spec_nodes if node.task_spec.agent is not None),
+            )
+            primary_node.task_spec.agent.instructions = self._merge_unique_text_segments(
+                "輸出應以單一設計定義節點交付，整合需求、架構、視覺與參數決策。",
+                *(node.task_spec.agent.instructions or "" for node in spec_nodes if node.task_spec.agent is not None),
+            )
+            primary_node.task_spec.agent.allowed_tools = self._merge_unique_items(
+                [
+                    tool
+                    for node in spec_nodes
+                    if node.task_spec.agent is not None
+                    for tool in node.task_spec.agent.allowed_tools
+                ]
+            )
+            primary_node.task_spec.agent.skills = self._merge_unique_items(
+                [
+                    skill
+                    for node in spec_nodes
+                    if node.task_spec.agent is not None
+                    for skill in node.task_spec.agent.skills
+                ]
+            )
+
+        primary_node.title = "設計定義"
+        primary_node.task_spec.display.label = "設計定義"
+        primary_node.task_spec.display.summary = "整合需求、PRD、系統架構、視覺規格與預設參數，作為同一設計階段一次完成。"
+        primary_node.task_spec.display.todo_hint = "完成整合設計定義，並保留必要 artifacts 供下游使用。"
+        primary_node.task_spec.display.tags = self._merge_unique_items(
+            [*primary_node.task_spec.display.tags, "design_stage", "spec_cluster"]
+        )
+
+        merged_artifacts = []
+        seen_artifacts: set[tuple[str, str | None]] = set()
+        for node in spec_nodes:
+            for artifact in node.task_spec.artifacts:
+                signature = (artifact.name, artifact.media_type)
+                if signature in seen_artifacts:
+                    continue
+                seen_artifacts.add(signature)
+                merged_artifacts.append(artifact)
+        primary_node.task_spec.artifacts = merged_artifacts
+
+        retained_nodes = [node for node in nodes if node.id not in duplicate_ids]
+        retained_edges: list[GraphEdge] = []
+        seen_edges: set[tuple[str, str, str, str, str | None, str | None]] = set()
+        for edge in edges:
+            from_node = primary_node.id if edge.from_node in duplicate_ids else edge.from_node
+            to_node = primary_node.id if edge.to_node in duplicate_ids else edge.to_node
+            if from_node == to_node:
+                continue
+            signature = (from_node, to_node, edge.edge_type, edge.kind, edge.source_port_key, edge.target_port_key)
+            if signature in seen_edges:
+                continue
+            seen_edges.add(signature)
+            retained_edges.append(self._clone_edge_with_nodes(edge, from_node=from_node, to_node=to_node))
+        return retained_nodes, retained_edges
 
     @staticmethod
     def _dependency_incoming_counts(nodes: list[BaseNode], edges: list[GraphEdge]) -> dict[str, int]:
@@ -1846,6 +1986,8 @@ class AmonCore:
             ),
         )
         phase_metrics["plan_generation_ms"] = int((time.monotonic() - phase_started_at) * 1000)
+        if str(getattr(plan, "id", "") or "").strip() == "planner-fallback":
+            _emit_planning_progress("詳細規劃失敗，已切換最小計畫繼續執行。")
 
         _emit_planning_progress("任務計畫已產生，正在準備執行圖…")
         phase_started_at = time.monotonic()

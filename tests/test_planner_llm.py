@@ -1,6 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -57,6 +58,36 @@ class PlannerLLMTests(unittest.TestCase):
         self.assertEqual(plan.nodes[0].id, "concept_alignment")
         self.assertTrue(any(isinstance(node, ArtifactNode) for node in plan.nodes))
 
+    def test_generate_plan_with_llm_fallback_emits_observability_event(self) -> None:
+        llm = _MockLLM(["not-json", "still-not-json"])
+        with patch("amon.planning.planner_llm.log_event") as mock_log_event, patch("amon.planning.planner_llm.emit_event") as mock_emit_event:
+            generate_plan_with_llm(
+                "請規劃",
+                llm_client=llm,
+                project_id="project-123",
+                run_id="run-123",
+                thread_id="thread-123",
+            )
+
+        self.assertTrue(any(call.args[0].get("event") == "planner_fallback_minimal_plan" for call in mock_log_event.call_args_list))
+        self.assertTrue(any(call.args[0].get("type") == "planner_fallback_minimal_plan" for call in mock_emit_event.call_args_list))
+
+    def test_generate_plan_with_llm_keeps_repairable_semantic_issues_for_postprocess(self) -> None:
+        llm = _MockLLM([
+            "```json\n"
+            '{"graphId":"graph-2","name":"規劃圖","version":"taskgraph.v3","createdAt":"2026-03-16T00:00:00Z","createdBy":"planner","nodes":[{"id":"concept_alignment","type":"TASK","title":"概念對齊","objective":"查關鍵概念","definitionOfDone":["完成概念摘要","整理風險"],"skillBindings":[{"skillId":"concept-alignment","role":"PRIMARY","config":{"tools":["web.search"]}}],"execution":{"mode":"SINGLE"}},{"id":"requirements","type":"TASK","title":"需求規格","objective":"整理需求","definitionOfDone":["完成需求","完成規格"],"execution":{"mode":"SINGLE"}},{"id":"architecture","type":"TASK","title":"架構設計","objective":"整理架構","definitionOfDone":["完成架構","完成限制"],"execution":{"mode":"SINGLE"}},{"id":"visual","type":"TASK","title":"視覺規格","objective":"整理視覺","definitionOfDone":["完成視覺","完成風格"],"execution":{"mode":"SINGLE"}},{"id":"artifact-task-1-todo","type":"ARTIFACT","title":"docs/TODO.md","artifact":{"artifactId":"artifact-task-1-todo","name":"TODO","kind":"document"}}],"edges":[{"id":"edge-1","type":"DATA","from":"visual","to":"artifact-task-1-todo","dataKind":"PRODUCES"}]}\n'
+            "```\n"
+            "```mermaid\n"
+            "flowchart TD\n"
+            "  concept_alignment --> requirements --> architecture --> visual --> artifact_task_1_todo\n"
+            "```",
+        ])
+
+        plan = generate_plan_with_llm("請規劃創意遊戲", llm_client=llm)
+
+        self.assertEqual(plan.id, "graph-2")
+        self.assertEqual([node.id for node in plan.nodes if isinstance(node, TaskNode)][0], "concept_alignment")
+
     def test_generate_plan_with_llm_payload_contains_simplified_tools_skills(self) -> None:
         llm = _MockLLM([
             '{"version":"taskgraph.v3","nodes":[{"id":"task-1","node_type":"TASK","title":"做事","taskSpec":{"executor":"agent","agent":{"prompt":"完成","instructions":"執行"},"artifacts":[{"name":"todo","mediaType":"text/markdown","description":"待辦","required":true}],"display":{"label":"做事","summary":"測試","todoHint":"done","tags":[]},"runnable":true}},{"id":"artifact-task-1-todo","node_type":"ARTIFACT","title":"docs/TODO.md"}],"edges":[{"from":"task-1","to":"artifact-task-1-todo","edge_type":"DATA","kind":"EMITS"}]}',
@@ -78,6 +109,7 @@ class PlannerLLMTests(unittest.TestCase):
         self.assertIn("只輸出兩段 code block", system_prompt)
         self.assertIn("planner 已在圖外完成拆題；graph 內不可再放 TODO / 任務拆解 / task outline / WBS 類節點", system_prompt)
         self.assertIn("TASK 節點總數不得超過 8", system_prompt)
+        self.assertIn("好例子：概念對齊 -> 設計定義", system_prompt)
         self.assertIn("同一設計階段的需求/PRD/系統架構/架構設計/視覺規格/預設參數要合併", payload)
 
 

@@ -1749,6 +1749,12 @@ appStore.patch({ bootstrappedAt: Date.now() });
           return;
         }
         messages.forEach((item) => {
+          if (item.role === "status") {
+            const text = String(item.text || "").trim();
+            if (!text) return;
+            appendTimelineStatus(text);
+            return;
+          }
           const role = item.role === "user" ? "user" : "agent";
           const text = String(item.text || "").trim();
           if (!text) return;
