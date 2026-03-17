@@ -266,7 +266,9 @@ class ThreadSessionStoreTests(unittest.TestCase):
         self.assertIn("[目前訊息]", prompt)
         self.assertIn("使用者: 請繼續", prompt)
         self.assertIn("請直接沿用既有任務往下執行", prompt)
-        self.assertIn("除非缺少關鍵資訊而無法完成任務", prompt)
+        self.assertIn("只有在缺少關鍵資訊而無法完成任務", prompt)
+        self.assertIn("一次整合提出所有阻塞問題", prompt)
+        self.assertIn("停在等待使用者回覆的狀態", prompt)
         self.assertIn("不要用問句收尾", prompt)
 
     def test_build_prompt_with_history_trims_long_assistant_turn(self) -> None:
