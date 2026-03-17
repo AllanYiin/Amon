@@ -38,6 +38,7 @@ class PlannerLLMTests(unittest.TestCase):
         self.assertEqual(len(plan.nodes), 2)
         task_node = next(node for node in plan.nodes if isinstance(node, TaskNode))
         self.assertEqual(task_node.task_spec.agent.allowed_tools, ["web.search"])
+        self.assertEqual(task_node.task_spec.agent.skills, ["concept-alignment"])
         self.assertIn("planner_mermaid", plan.metadata)
 
     def test_generate_plan_with_llm_retry_once(self) -> None:
@@ -71,9 +72,12 @@ class PlannerLLMTests(unittest.TestCase):
         self.assertIn("可用 Skills", payload)
         self.assertIn('"toolId": "web.search"', payload)
         self.assertIn('"skillId": "spec-to-tasks"', payload)
+        self.assertIn("concept-alignment", payload)
+        self.assertIn("problem-decomposer", payload)
         system_prompt = llm.calls[0][0]["content"]
         self.assertIn("嚴禁輸出任何 agent/persona/assignment", system_prompt)
         self.assertIn("只輸出兩段 code block", system_prompt)
+        self.assertIn("problem-decomposer", system_prompt)
 
 
 if __name__ == "__main__":

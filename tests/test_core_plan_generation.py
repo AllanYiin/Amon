@@ -32,6 +32,7 @@ class CorePlanGenerationTests(unittest.TestCase):
                                 "agent": {
                                     "prompt": "先查概念",
                                     "allowedTools": ["web.search"],
+                                    "skills": ["concept-alignment"],
                                 },
                             },
                         }
@@ -43,6 +44,7 @@ class CorePlanGenerationTests(unittest.TestCase):
             shutil.rmtree(temp_dir, ignore_errors=True)
         node = next(node for node in graph.nodes if isinstance(node, TaskNode))
         self.assertEqual(node.task_spec.agent.allowed_tools, ["web.search"])
+        self.assertEqual(node.task_spec.agent.skills, ["concept-alignment"])
 
     def test_generate_plan_docs_writes_v3_plan_and_todo_and_emits_event(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -56,11 +58,11 @@ class CorePlanGenerationTests(unittest.TestCase):
                     nodes=[
                         TaskNode(
                             id="task-1",
-                            title="任務",
+                            title="任務骨架",
                             task_spec=TaskSpec(
                                 executor="agent",
                                 agent=AgentTaskConfig(prompt="請完成", instructions="執行"),
-                                display=TaskDisplayMetadata(label="任務", summary="完成", todo_hint="done"),
+                                display=TaskDisplayMetadata(label="任務骨架", summary="切分待辦與依賴", todo_hint="done"),
                             ),
                         ),
                         ArtifactNode(id="artifact-task-1-todo", title="docs/TODO.md"),
@@ -73,14 +75,27 @@ class CorePlanGenerationTests(unittest.TestCase):
                 plan_payload = json.loads((project_path / "docs" / "plan.json").read_text(encoding="utf-8"))
                 self.assertEqual(plan_payload.get("version"), "taskgraph.v3")
                 todo_text = (project_path / "docs" / "TODO.md").read_text(encoding="utf-8")
-                self.assertIn("- [ ] task-1 任務", todo_text)
+                self.assertIn("- [ ] task-1 任務骨架", todo_text)
                 self.assertIn("- [ ] concept_alignment 概念對齊", todo_text)
+                self.assertIn("  - Skill: concept-alignment", todo_text)
+                self.assertIn("  - Skill: problem-decomposer", todo_text)
                 task_nodes = [node for node in plan.nodes if isinstance(node, TaskNode)]
                 self.assertEqual(task_nodes[0].id, "concept_alignment")
                 self.assertIn("web.search", task_nodes[0].task_spec.agent.allowed_tools)
+                self.assertEqual(task_nodes[0].task_spec.agent.skills, ["concept-alignment"])
+                self.assertEqual(task_nodes[1].task_spec.agent.skills, ["problem-decomposer"])
                 self.assertTrue(emit_mock.called)
             finally:
                 os.environ.pop("AMON_HOME", None)
+
+    def test_build_quick_todo_markdown_includes_bound_skills(self) -> None:
+        core = AmonCore(data_dir=Path(tempfile.mkdtemp()))
+        try:
+            todo = core._build_quick_todo_markdown("請幫我規劃上線流程", available_tools=[{"name": "web.search"}])
+        finally:
+            shutil.rmtree(core.data_dir, ignore_errors=True)
+        self.assertIn("  - Skill: concept-alignment", todo)
+        self.assertIn("  - Skill: problem-decomposer", todo)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,75 @@
+{
+  "skill_name": "problem-decomposer",
+  "evals": [
+    {
+      "id": 1,
+      "name": "cross-functional-project-breakdown",
+      "prompt": "這個跨部門資料平台專案很亂，請幫我拆成可執行報告，要有成功定義、WBS、依賴、關鍵路徑、驗收標準跟每週追蹤方式。",
+      "expected_output": "產出一份完整難題拆解報告，含問題類型判斷、成功狀態、工作包、依賴、風險與指標。",
+      "files": [],
+      "expectations": [
+        "指出這是交付或範疇型問題，並說明為何以 WBS 為主",
+        "列出可驗收的工作包與依賴",
+        "包含關鍵路徑與每週追蹤方式"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "systemic-problem-feedback-loop",
+      "prompt": "客服案件每隔幾週就暴增一次，修了 SOP 還是會復發。不要只給待辦，請幫我拆這個問題，找槓桿點跟執行方案。",
+      "expected_output": "辨識這是系統型問題，補回饋迴路、槓桿點與可執行工作項。",
+      "files": [],
+      "expectations": [
+        "不只給線性任務清單",
+        "包含回饋迴路或延遲描述",
+        "把槓桿點轉成具體行動與追蹤指標"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "research-poc-go-no-go",
+      "prompt": "我們想驗證一個新的推薦方法，但不確定值不值得做。請幫我拆成 3 個月內可完成的 Baseline、PoC、評估、Go/No-Go 計畫。",
+      "expected_output": "研究型拆解，包含 Baseline、PoC、評估方式、風險與決策點。",
+      "files": [],
+      "expectations": [
+        "明確要求或補出 Baseline",
+        "包含 PoC 與 Go/No-Go 標準",
+        "處理不確定性而非只給單一工期"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "negative-trigger-spec-request",
+      "prompt": "請把這份產品需求整理成技術 spec 與白話 spec。",
+      "expected_output": "不應由本 skill 主導，應交給 spec-organizer。",
+      "files": [],
+      "expectations": [
+        "辨識這是 spec 撰寫需求",
+        "不啟動完整難題拆解工作流"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "issue-tree-problem-framing",
+      "prompt": "我們電商最近業績掉很多，大家一直吵到底是流量、轉換還是客單價的問題。不要直接列待辦，請先幫我做問題拆解跟 issue tree，分清楚表象、根因假設跟後續對策。",
+      "expected_output": "先定義目標落差與根問題句，用 issue tree 做原因拆解，再標出待驗證假設與後續對策方向。",
+      "files": [],
+      "expectations": [
+        "先區分現象、目標落差與根因假設",
+        "issue tree 同層使用一致分類基準",
+        "不會把未驗證假設直接寫成已確定任務"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "negative-trigger-concept-only",
+      "prompt": "issue tree 是什麼？請用白話舉例說明。",
+      "expected_output": "不應啟動完整難題拆解工作流；這是概念介紹需求。",
+      "files": [],
+      "expectations": [
+        "辨識這是概念說明，不是落地拆解",
+        "不輸出完整工作包、依賴與排程"
+      ]
+    }
+  ]
+}

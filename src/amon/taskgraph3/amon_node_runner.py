@@ -58,6 +58,7 @@ class AmonNodeRunner:
             model=agent.model,
             system_prompt=agent.system_prompt,
             stream_handler=self.stream_handler,
+            skill_names=agent.skills or None,
             allowed_tools=agent.allowed_tools,
             conversation_history=conversation_history if isinstance(conversation_history, list) else None,
             run_id=self.run_id,
@@ -86,7 +87,17 @@ class AmonNodeRunner:
             payload = self._render_payload(spec.args, render_ctx)
             if not primary_path and isinstance(payload, dict) and isinstance(payload.get("path"), str):
                 primary_path = str(payload.get("path") or "")
-            result = self.core.run_tool(spec.name, payload, project_id=project_id, project_path=self.project_path)
+            result = self.core.run_tool(
+                spec.name,
+                payload,
+                project_id=project_id,
+                project_path=self.project_path,
+                stream_handler=self.stream_handler,
+                run_id=self.run_id,
+                node_id=node.id,
+                thread_id=self.thread_id,
+                request_id=self.request_id,
+            )
             if bool(result.get("is_error", False)):
                 raise RuntimeError(result.get("text") or f"tool={spec.name} execution failed")
             call_results.append({"name": spec.name, "payload": payload, "result": result})

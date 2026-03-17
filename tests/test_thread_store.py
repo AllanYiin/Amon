@@ -122,6 +122,44 @@ class ThreadSessionStoreTests(unittest.TestCase):
         self.assertEqual(payload.get("text_chars"), expected_chars)
         self.assertNotIn("text", payload)
 
+    def test_thread_session_event_log_summarizes_skill_and_tool_activity(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                project_id = "proj-log-003b"
+                thread_id = create_thread_session(project_id)
+                with patch("amon.chat.thread_store.log_event") as mock_log_event:
+                    append_event(
+                        thread_id,
+                        {
+                            "type": "skill_activity",
+                            "text": "concept-alignment",
+                            "project_id": project_id,
+                            "skill_name": "concept-alignment",
+                        },
+                    )
+                    append_event(
+                        thread_id,
+                        {
+                            "type": "tool_call",
+                            "text": "filesystem.read",
+                            "project_id": project_id,
+                            "tool_name": "filesystem.read",
+                            "stage": "complete",
+                            "status": "ok",
+                        },
+                    )
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+        chat_logs = [
+            call.args[0]
+            for call in mock_log_event.call_args_list
+            if isinstance(call.args[0], dict) and call.args[0].get("event") == "thread_session_event"
+        ]
+        self.assertEqual(chat_logs[0].get("summary"), "skill:concept-alignment")
+        self.assertEqual(chat_logs[1].get("summary"), "tool:filesystem.read:complete:ok")
+
     def test_create_thread_session_and_append_user_event(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir

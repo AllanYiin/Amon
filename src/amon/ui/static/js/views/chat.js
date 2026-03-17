@@ -369,6 +369,28 @@ export const CHAT_VIEW = {
               ctx.chatDeps.updateThinking({ status: "reasoning", brief: "收到 reasoning 摘要", verbose: data.text || "" });
               return;
             }
+            if (eventType === "skill") {
+              const skillName = String(data.name || "").trim() || "unknown-skill";
+              const skillSource = String(data.source || "").trim();
+              const skillLabel = skillSource ? `${skillName}（${skillSource}）` : skillName;
+              messageRenderer.appendTimelineStatus(`正在讀取 skill：${skillLabel}`);
+              ctx.chatDeps.updateThinking({ status: "skill", brief: `正在讀取 skill：${skillLabel}` });
+              return;
+            }
+            if (eventType === "tool_call") {
+              const toolName = String(data.name || "").trim() || "unknown-tool";
+              const stage = String(data.stage || "").trim().toLowerCase();
+              const status = String(data.status || "").trim().toLowerCase();
+              if (stage === "start") {
+                messageRenderer.appendTimelineStatus(`正在呼叫工具：${toolName}`);
+                ctx.chatDeps.updateThinking({ status: "tool_call", brief: `正在呼叫工具：${toolName}` });
+              } else {
+                const finalStatus = status || (data.is_error ? "error" : "ok");
+                messageRenderer.appendTimelineStatus(`工具完成：${toolName}（${finalStatus}）`);
+                ctx.chatDeps.updateThinking({ status: "tool_result", brief: `工具完成：${toolName}` });
+              }
+              return;
+            }
             if (eventType === "warning") {
               const warningKind = String(data.kind || "").toLowerCase();
               if (warningKind.includes("timeout")) {

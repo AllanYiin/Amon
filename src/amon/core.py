@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shlex
@@ -45,7 +46,13 @@ from .logging_utils import setup_logger
 from .llm_request_log import append_llm_request, build_llm_request_payload
 from .mcp_client import MCPClientError, MCPServerConfig, MCPStdioClient
 from .planning import generate_plan_with_llm
-from .models import ProviderError, build_provider, decode_reasoning_chunk, encode_reasoning_chunk
+from .models import (
+    ProviderError,
+    build_provider,
+    decode_reasoning_chunk,
+    encode_reasoning_chunk,
+    encode_stream_event,
+)
 from .project_registry import ProjectRegistry, load_project_config
 from .taskgraph3.amon_node_runner import AmonNodeRunner
 from .taskgraph3.payloads import (
@@ -555,6 +562,15 @@ class AmonCore:
             updated = set_config_value(current, key_path, value)
             write_yaml(config_path, updated)
 
+    @staticmethod
+    def _emit_stream_event(stream_handler, event_type: str, payload: dict[str, Any] | None = None) -> None:
+        if not callable(stream_handler):
+            return
+        try:
+            stream_handler(encode_stream_event(event_type, payload))
+        except Exception:
+            logging.getLogger(__name__).debug("stream event dropped: %s", event_type, exc_info=True)
+
     def run_agent_task(
         self,
         prompt: str,
@@ -592,6 +608,11 @@ class AmonCore:
             config=config,
             skill_names=skill_names,
             allowed_tools=allowed_tools,
+            stream_handler=stream_handler,
+            run_id=run_id,
+            node_id=node_id,
+            thread_id=thread_id,
+            request_id=request_id,
         )
         system_message = f"{base_system_message}\n\n{system_prompt}" if system_prompt else base_system_message
         user_prompt = prompt
@@ -605,6 +626,11 @@ class AmonCore:
             project_path=project_path,
             config=config,
             allowed_tools=allowed_tools,
+            stream_handler=stream_handler,
+            run_id=run_id,
+            node_id=node_id,
+            thread_id=thread_id,
+            request_id=request_id,
         )
         if web_context:
             messages.insert(1, {"role": "system", "content": web_context})
@@ -791,6 +817,11 @@ class AmonCore:
         project_path: Path | None,
         config: dict[str, Any],
         allowed_tools: list[str] | None = None,
+        stream_handler=None,
+        run_id: str | None = None,
+        node_id: str | None = None,
+        thread_id: str | None = None,
+        request_id: str | None = None,
     ) -> str:
         enabled = bool(config.get("amon", {}).get("auto_web_search", True))
         if not enabled:
@@ -813,6 +844,31 @@ class AmonCore:
             allow = tuple(dict.fromkeys((*policy.allow, "web.search", "web.fetch")))
             ask = tuple(rule for rule in policy.ask if rule not in {"web.search", "web.fetch"})
             registry.policy = ToolPolicy(allow=allow, ask=ask, deny=policy.deny)
+            tool_event_base = {
+                "name": "web.search",
+                "route": "builtin",
+                "source": "auto_web_search",
+                "run_id": run_id,
+                "node_id": node_id,
+                "thread_id": thread_id,
+                "request_id": request_id,
+            }
+            log_event(
+                {
+                    "level": "INFO",
+                    "event": "tool_call",
+                    "project_id": project_id,
+                    "run_id": run_id,
+                    "thread_id": thread_id,
+                    "node_id": node_id,
+                    "request_id": request_id,
+                    "tool_name": "web.search",
+                    "route": "builtin",
+                    "stage": "start",
+                    "source": "auto_web_search",
+                }
+            )
+            self._emit_stream_event(stream_handler, "tool_call", {**tool_event_base, "stage": "start", "status": "running"})
             result = registry.call(
                 ToolCall(
                     tool="web.search",
@@ -820,6 +876,34 @@ class AmonCore:
                     caller="agent",
                     project_id=project_id,
                 )
+            )
+            status = str((result.meta or {}).get("status") or ("error" if result.is_error else "ok"))
+            log_event(
+                {
+                    "level": "INFO",
+                    "event": "tool_call",
+                    "project_id": project_id,
+                    "run_id": run_id,
+                    "thread_id": thread_id,
+                    "node_id": node_id,
+                    "request_id": request_id,
+                    "tool_name": "web.search",
+                    "route": "builtin",
+                    "stage": "complete",
+                    "status": status,
+                    "source": "auto_web_search",
+                    "is_error": bool(result.is_error),
+                }
+            )
+            self._emit_stream_event(
+                stream_handler,
+                "tool_call",
+                {
+                    **tool_event_base,
+                    "stage": "complete",
+                    "status": status,
+                    "is_error": bool(result.is_error),
+                },
             )
             if result.is_error:
                 self.logger.info("自動 web.search 未提供結果：%s", result.meta.get("status"))
@@ -1051,6 +1135,7 @@ class AmonCore:
         """Generate TaskGraph v3 and materialize docs/plan.json + docs/TODO.md."""
         if available_tools is None:
             available_tools = self.describe_available_tools(project_id=project_id)
+        available_skills = self._merge_planning_available_skills(available_skills, project_path)
         planning_tools = self._select_planning_tools(message, available_tools)
 
         plan = generate_plan_with_llm(
@@ -1111,8 +1196,10 @@ class AmonCore:
             summary = (node.task_spec.display.summary or "").strip() if node.task_spec and node.task_spec.display else ""
             todo_hint = (node.task_spec.display.todo_hint or "").strip() if node.task_spec and node.task_spec.display else ""
             dod_summary = todo_hint or "（未提供 DoD）"
+            skill_summary = "、".join(self._task_skill_names(node)) or "（未綁定 skill）"
             lines.append(f"- [ ] {node.id} {node.title or (node.task_spec.display.label if node.task_spec and node.task_spec.display else '')}".rstrip())
             lines.append(f"  - Goal: {summary or '（未提供目標）'}")
+            lines.append(f"  - Skill: {skill_summary}")
             lines.append(f"  - DoD: {dod_summary}")
         return "\n".join(lines) + "\n"
 
@@ -1127,9 +1214,11 @@ class AmonCore:
             "",
             "- [ ] concept_alignment 概念對齊與關鍵概念查證",
             f"  - Goal: 先釐清「{concept_text}」的定義、邊界與常見歧義，再開始詳細規劃。",
+            "  - Skill: concept-alignment",
             "  - DoD: 產出關鍵概念、查詢方向、資料可信度與後續規劃注意事項。",
             "- [ ] taskgraph_outline 任務骨架與依賴切分",
             "  - Goal: 先切出主要任務節點、順序與完成條件。",
+            "  - Skill: problem-decomposer",
             "  - DoD: 每個節點都有目標、DoD、工具範圍與必要輸出。",
             "- [ ] taskgraph_detail TaskGraph v3 詳細設計",
             "  - Goal: 補全節點 prompt、可用工具、邊與執行順序。",
@@ -1294,9 +1383,15 @@ class AmonCore:
             for target_id in root_targets:
                 edges.append(GraphEdge(from_node="concept_alignment", to_node=target_id, edge_type="CONTROL", kind="DEPENDS_ON"))
         control_predecessors = self._build_control_predecessors(edges)
+        problem_decomposer_bound = False
         for node in nodes:
             if not isinstance(node, TaskNode) or node.task_spec.executor != "agent" or node.task_spec.agent is None:
                 continue
+            if node.id == "concept_alignment":
+                self._bind_agent_skills(node, "concept-alignment")
+            elif not problem_decomposer_bound and self._is_todo_planning_task(node):
+                self._bind_agent_skills(node, "problem-decomposer")
+                problem_decomposer_bound = True
             if node.id != "concept_alignment":
                 binding_spec = self._select_planner_context_binding(node.id, control_predecessors)
                 if binding_spec is not None:
@@ -1352,6 +1447,93 @@ class AmonCore:
             metadata=graph.metadata,
             runtime_capabilities=graph.runtime_capabilities,
         )
+
+    @staticmethod
+    def _planning_default_skill_names() -> list[str]:
+        return ["concept-alignment", "problem-decomposer"]
+
+    def _merge_planning_available_skills(
+        self,
+        available_skills: list[dict[str, Any]] | None,
+        project_path: Path | None,
+    ) -> list[dict[str, Any]]:
+        merged: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for skill in available_skills or []:
+            name = str(skill.get("name") or "").strip()
+            if name and name not in seen:
+                merged.append(skill)
+                seen.add(name)
+        for skill in self._load_skills(self._planning_default_skill_names(), project_path, ignore_missing=True):
+            name = str(skill.get("name") or "").strip()
+            if name and name not in seen:
+                merged.append(skill)
+                seen.add(name)
+        return merged
+
+    @staticmethod
+    def _bind_agent_skills(node: TaskNode, *skill_names: str) -> None:
+        if node.task_spec.agent is None:
+            return
+        existing = list(node.task_spec.agent.skills)
+        for skill_name in skill_names:
+            trimmed = str(skill_name).strip()
+            if trimmed and trimmed not in existing:
+                existing.append(trimmed)
+        node.task_spec.agent.skills = existing
+        if node.task_spec.display:
+            tags = list(node.task_spec.display.tags)
+            for skill_name in skill_names:
+                trimmed = str(skill_name).strip()
+                if trimmed and trimmed not in tags:
+                    tags.append(trimmed)
+            node.task_spec.display.tags = tags
+
+    @staticmethod
+    def _is_todo_planning_task(node: TaskNode) -> bool:
+        agent = node.task_spec.agent
+        if agent is None:
+            return False
+        normalized = unicodedata.normalize(
+            "NFKC",
+            " ".join(
+                filter(
+                    None,
+                    [
+                        node.id,
+                        node.title,
+                        node.task_spec.display.label if node.task_spec.display else "",
+                        node.task_spec.display.summary if node.task_spec.display else "",
+                        node.task_spec.display.todo_hint if node.task_spec.display else "",
+                        agent.prompt or "",
+                        agent.instructions or "",
+                    ],
+                )
+            ),
+        ).lower()
+        strong_tokens = {
+            "taskgraph_outline",
+            "todo",
+            "todolist",
+            "待辦",
+            "骨架",
+            "拆解",
+            "分解",
+            "依賴",
+            "wbs",
+            "issue tree",
+            "problem decomposition",
+            "problem-decomposer",
+        }
+        return any(token in normalized for token in strong_tokens)
+
+    @staticmethod
+    def _task_skill_names(node: TaskNode) -> list[str]:
+        if node.task_spec.agent is not None:
+            return [name for name in node.task_spec.agent.skills if str(name).strip()]
+        if node.task_spec.tool is not None:
+            return [name for name in node.task_spec.tool.skills if str(name).strip()]
+        return []
 
     @staticmethod
     def _build_control_predecessors(edges: list[GraphEdge]) -> dict[str, list[str]]:
@@ -2445,7 +2627,18 @@ class AmonCore:
     def get_skill(self, name: str, project_path: Path | None = None) -> dict[str, Any]:
         return self.load_skill(name, project_path=project_path)
 
-    def load_skill(self, name: str, project_path: Path | None = None) -> dict[str, Any]:
+    def load_skill(
+        self,
+        name: str,
+        project_path: Path | None = None,
+        *,
+        stream_handler=None,
+        project_id: str | None = None,
+        run_id: str | None = None,
+        node_id: str | None = None,
+        thread_id: str | None = None,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
         if project_path:
             skills = self.scan_skills(project_path)
         else:
@@ -2472,7 +2665,40 @@ class AmonCore:
                     self.logger.error("讀取技能檔案失敗：%s", exc, exc_info=True)
                     raise
                 references = self._list_skill_references(Path(skill["path"]).parent)
-            return {**skill, "content": content, "references": references}
+            loaded = {**skill, "content": content, "references": references}
+            resolved_project_id = project_id
+            if resolved_project_id is None and project_path:
+                resolved_project_id = self.resolve_project_identity(project_path)[0]
+            log_event(
+                {
+                    "level": "INFO",
+                    "event": "skill_load",
+                    "project_id": resolved_project_id,
+                    "run_id": run_id,
+                    "thread_id": thread_id,
+                    "node_id": node_id,
+                    "request_id": request_id,
+                    "skill_name": str(loaded.get("name") or name),
+                    "skill_source": loaded.get("source"),
+                    "skill_path": loaded.get("path"),
+                    "reference_count": len(references),
+                }
+            )
+            self._emit_stream_event(
+                stream_handler,
+                "skill",
+                {
+                    "name": str(loaded.get("name") or name),
+                    "source": loaded.get("source"),
+                    "path": loaded.get("path"),
+                    "reference_count": len(references),
+                    "run_id": run_id,
+                    "node_id": node_id,
+                    "thread_id": thread_id,
+                    "request_id": request_id,
+                },
+            )
+            return loaded
         raise KeyError(f"找不到技能：{name}")
 
     def load_project_config(self, project_path: Path) -> tuple[str, str, dict[str, Any]]:
@@ -2677,10 +2903,37 @@ class AmonCore:
         project_id: str | None = None,
         timeout_s: int | None = None,
         cancel_event: threading.Event | None = None,
+        stream_handler=None,
+        run_id: str | None = None,
+        node_id: str | None = None,
+        thread_id: str | None = None,
+        request_id: str | None = None,
     ) -> dict[str, Any]:
         route = "toolforge"
+        event_base = {
+            "name": tool_name,
+            "run_id": run_id,
+            "node_id": node_id,
+            "thread_id": thread_id,
+            "request_id": request_id,
+        }
         if ":" in tool_name:
             route = "mcp"
+            log_event(
+                {
+                    "level": "INFO",
+                    "event": "tool_call",
+                    "project_id": project_id,
+                    "run_id": run_id,
+                    "thread_id": thread_id,
+                    "node_id": node_id,
+                    "request_id": request_id,
+                    "tool_name": tool_name,
+                    "route": route,
+                    "stage": "start",
+                }
+            )
+            self._emit_stream_event(stream_handler, "tool_call", {**event_base, "route": route, "stage": "start", "status": "running"})
             server_name, actual_tool = tool_name.split(":", 1)
             result = self.call_mcp_tool(server_name, actual_tool, args)
         elif "." in tool_name:
@@ -2688,6 +2941,21 @@ class AmonCore:
             project_path = self.get_project_path(project_id) if project_id else Path.cwd()
             registry = build_registry(project_path)
             call = ToolCall(tool=tool_name, args=args, caller="graph", project_id=project_id)
+            log_event(
+                {
+                    "level": "INFO",
+                    "event": "tool_call",
+                    "project_id": project_id,
+                    "run_id": run_id,
+                    "thread_id": thread_id,
+                    "node_id": node_id,
+                    "request_id": request_id,
+                    "tool_name": tool_name,
+                    "route": route,
+                    "stage": "start",
+                }
+            )
+            self._emit_stream_event(stream_handler, "tool_call", {**event_base, "route": route, "stage": "start", "status": "running"})
             tool_result = registry.call(call)
             result = {
                 "is_error": bool(tool_result.is_error),
@@ -2702,6 +2970,11 @@ class AmonCore:
                 project_id=project_id,
                 timeout_s=timeout_s,
                 cancel_event=cancel_event,
+                stream_handler=stream_handler,
+                run_id=run_id,
+                node_id=node_id,
+                thread_id=thread_id,
+                request_id=request_id,
             )
 
         payload = {
@@ -2711,7 +2984,36 @@ class AmonCore:
             "is_error": bool(result.get("is_error", False)),
             "status": (result.get("meta") or {}).get("status"),
         }
+        if route in {"mcp", "builtin"}:
+            log_event(
+                {
+                    "level": "INFO",
+                    "event": "tool_call",
+                    "project_id": project_id,
+                    "run_id": run_id,
+                    "thread_id": thread_id,
+                    "node_id": node_id,
+                    "request_id": request_id,
+                    "tool_name": tool_name,
+                    "route": route,
+                    "stage": "complete",
+                    "status": payload["status"] or ("error" if payload["is_error"] else "ok"),
+                    "is_error": payload["is_error"],
+                }
+            )
         log_event({"level": "INFO", "event": "tool_dispatch", **payload})
+        if route in {"mcp", "builtin"}:
+            self._emit_stream_event(
+                stream_handler,
+                "tool_call",
+                {
+                    **event_base,
+                    "route": route,
+                    "stage": "complete",
+                    "status": payload["status"] or ("error" if payload["is_error"] else "ok"),
+                    "is_error": payload["is_error"],
+                },
+            )
         emit_event(
             {
                 "type": "tool_dispatch",
@@ -2857,11 +3159,51 @@ class AmonCore:
         project_path: Path | None = None,
         timeout_s: int | None = None,
         cancel_event: threading.Event | None = None,
+        stream_handler=None,
+        run_id: str | None = None,
+        node_id: str | None = None,
+        thread_id: str | None = None,
+        request_id: str | None = None,
     ) -> dict[str, Any]:
         self.ensure_base_structure()
         builtin_workspace = project_path or (Path(self.get_project(project_id).path) if project_id else Path.cwd())
         builtin_registry = build_registry(builtin_workspace)
         builtin_spec = builtin_registry.get_spec(tool_name)
+        route = "builtin" if builtin_spec is not None else "toolforge"
+        target_path = str(payload.get("path") or payload.get("root") or payload.get("cwd") or "") if isinstance(payload, dict) else ""
+        resolved_project_id = project_id
+        if resolved_project_id is None and project_path:
+            resolved_project_id = self.resolve_project_identity(project_path)[0]
+        log_event(
+            {
+                "level": "INFO",
+                "event": "tool_call",
+                "project_id": resolved_project_id,
+                "run_id": run_id,
+                "thread_id": thread_id,
+                "node_id": node_id,
+                "request_id": request_id,
+                "tool_name": tool_name,
+                "route": route,
+                "stage": "start",
+                "path": target_path or None,
+            }
+        )
+        self._emit_stream_event(
+            stream_handler,
+            "tool_call",
+            {
+                "name": tool_name,
+                "route": route,
+                "stage": "start",
+                "status": "running",
+                "path": target_path or None,
+                "run_id": run_id,
+                "node_id": node_id,
+                "thread_id": thread_id,
+                "request_id": request_id,
+            },
+        )
         if builtin_spec is not None:
             call_args = dict(payload)
             for key in ("path", "root", "cwd"):
@@ -2870,12 +3212,44 @@ class AmonCore:
                     call_args[key] = str((builtin_workspace / value).resolve())
             call = ToolCall(tool=tool_name, args=call_args, caller="taskgraph", project_id=project_id)
             result = builtin_registry.get_handler(tool_name)(call)
-            return {
+            normalized_result = {
                 "content": result.content,
                 "is_error": result.is_error,
                 "meta": result.meta,
                 "text": result.as_text(),
             }
+            log_event(
+                {
+                    "level": "INFO",
+                    "event": "tool_call",
+                    "project_id": resolved_project_id,
+                    "run_id": run_id,
+                    "thread_id": thread_id,
+                    "node_id": node_id,
+                    "request_id": request_id,
+                    "tool_name": tool_name,
+                    "route": route,
+                    "stage": "complete",
+                    "status": str((result.meta or {}).get("status") or ("error" if result.is_error else "ok")),
+                    "is_error": bool(result.is_error),
+                }
+            )
+            self._emit_stream_event(
+                stream_handler,
+                "tool_call",
+                {
+                    "name": tool_name,
+                    "route": route,
+                    "stage": "complete",
+                    "status": str((result.meta or {}).get("status") or ("error" if result.is_error else "ok")),
+                    "is_error": bool(result.is_error),
+                    "run_id": run_id,
+                    "node_id": node_id,
+                    "thread_id": thread_id,
+                    "request_id": request_id,
+                },
+            )
+            return normalized_result
         tool_dir, scope, project_path = self._resolve_tool_dir(tool_name, project_id)
         spec = load_tool_spec(tool_dir)
         project_allowed = self._resolve_project_allowed_paths(project_path)
@@ -2928,14 +3302,46 @@ class AmonCore:
                 timeout_s=timeout_s or 60,
                 cancel_event=cancel_event,
             )
+        final_project_id = self.resolve_project_identity(project_path)[0] if project_path else resolved_project_id
         log_event(
             {
                 "level": "INFO",
                 "event": "tool_run",
                 "tool_name": tool_name,
                 "scope": scope,
-                "project_id": self.resolve_project_identity(project_path)[0] if project_path else None,
+                "project_id": final_project_id,
             }
+        )
+        log_event(
+            {
+                "level": "INFO",
+                "event": "tool_call",
+                "project_id": final_project_id,
+                "run_id": run_id,
+                "thread_id": thread_id,
+                "node_id": node_id,
+                "request_id": request_id,
+                "tool_name": tool_name,
+                "route": route,
+                "stage": "complete",
+                "status": str((output.get("meta") or {}).get("status") or ("error" if output.get("is_error") else "ok")),
+                "is_error": bool(output.get("is_error", False)),
+            }
+        )
+        self._emit_stream_event(
+            stream_handler,
+            "tool_call",
+            {
+                "name": tool_name,
+                "route": route,
+                "stage": "complete",
+                "status": str((output.get("meta") or {}).get("status") or ("error" if output.get("is_error") else "ok")),
+                "is_error": bool(output.get("is_error", False)),
+                "run_id": run_id,
+                "node_id": node_id,
+                "thread_id": thread_id,
+                "request_id": request_id,
+            },
         )
         return output
 
@@ -3777,6 +4183,11 @@ class AmonCore:
         *,
         config: dict[str, Any] | None = None,
         skill_names: list[str] | None = None,
+        stream_handler=None,
+        run_id: str | None = None,
+        node_id: str | None = None,
+        thread_id: str | None = None,
+        request_id: str | None = None,
     ) -> str:
         config = config or self.load_config(project_path)
         selected = self._collect_skill_names(config, skill_names)
@@ -3798,7 +4209,23 @@ class AmonCore:
             seen.add(name)
             deduped_names.append(name)
 
-        skills: list[dict[str, Any]] = [by_name[name] for name in deduped_names if name in by_name]
+        skills: list[dict[str, Any]] = []
+        project_id = self.resolve_project_identity(project_path)[0] if project_path else None
+        for name in deduped_names:
+            if name not in by_name:
+                continue
+            skills.append(
+                self.load_skill(
+                    name,
+                    project_path=project_path,
+                    stream_handler=stream_handler,
+                    project_id=project_id,
+                    run_id=run_id,
+                    node_id=node_id,
+                    thread_id=thread_id,
+                    request_id=request_id,
+                )
+            )
         if not skills:
             return ""
         return self._format_skill_context(skills)
@@ -3811,6 +4238,11 @@ class AmonCore:
         config: dict[str, Any],
         skill_names: list[str] | None = None,
         allowed_tools: list[str] | None = None,
+        stream_handler=None,
+        run_id: str | None = None,
+        node_id: str | None = None,
+        thread_id: str | None = None,
+        request_id: str | None = None,
     ) -> str:
         system_message = default_system_prompt()
         tool_context = self._first_party_tool_context(project_path, allowed_tools=allowed_tools)
@@ -3821,6 +4253,11 @@ class AmonCore:
             project_path,
             config=config,
             skill_names=skill_names,
+            stream_handler=stream_handler,
+            run_id=run_id,
+            node_id=node_id,
+            thread_id=thread_id,
+            request_id=request_id,
         )
         if skill_context:
             system_message = f"{system_message}\n\n{skill_context}"

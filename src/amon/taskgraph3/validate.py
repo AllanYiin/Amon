@@ -294,6 +294,7 @@ def _extract_task_spec(payload: dict[str, Any], title: str) -> TaskSpec:
                 instructions="\n\n".join(instructions_parts) or "請完成此子任務。",
                 model=_optional_str(config.get("model")),
                 allowed_tools=allowed_tools,
+                skills=[skill for skill in primary_skills + fallback_skills if skill],
             ),
             input_bindings=input_bindings,
             artifacts=artifacts,

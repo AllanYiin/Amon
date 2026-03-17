@@ -16,6 +16,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from amon.core import AmonCore
+from amon.models import encode_stream_event
 from amon.ui_server import AmonUIHandler
 from http.server import ThreadingHTTPServer
 
@@ -456,6 +457,116 @@ class UIAsyncAPITests(unittest.TestCase):
                     self.assertTrue(assistant_events)
                     self.assertEqual(assistant_events[-1].get("run_id"), done_payload.get("run_id"))
                     self.assertEqual(assistant_events[-1].get("project_id"), project.project_id)
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
+    def test_chat_stream_emits_skill_and_tool_activity_events(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("stream-runtime-events")
+
+                def fake_run_graph_stream(
+                    prompt,
+                    project_path,
+                    project_id=None,
+                    model=None,
+                    llm_client=None,
+                    available_tools=None,
+                    available_skills=None,
+                    stream_handler=None,
+                    todo_handler=None,
+                    run_id=None,
+                    thread_id=None,
+                    conversation_history=None,
+                    request_id=None,
+                ):
+                    if stream_handler:
+                        stream_handler(
+                            encode_stream_event(
+                                "skill",
+                                {"name": "concept-alignment", "source": "builtin", "run_id": run_id},
+                            )
+                        )
+                        stream_handler(
+                            encode_stream_event(
+                                "tool_call",
+                                {"name": "filesystem.read", "route": "builtin", "stage": "start", "status": "running", "run_id": run_id},
+                            )
+                        )
+                        stream_handler(
+                            encode_stream_event(
+                                "tool_call",
+                                {"name": "filesystem.read", "route": "builtin", "stage": "complete", "status": "ok", "run_id": run_id},
+                            )
+                        )
+                    return (
+                        SimpleNamespace(run_id=run_id or "run-runtime-001", execution_route="planner", planner_enabled=True),
+                        "完成",
+                    )
+
+                handler = partial(
+                    AmonUIHandler,
+                    directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"),
+                    core=core,
+                )
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                with patch("amon.ui_server.decide_execution_mode", return_value="single"), patch.object(
+                    core,
+                    "run_graph_stream",
+                    side_effect=fake_run_graph_stream,
+                ):
+                    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                    conn.request(
+                        "GET",
+                        f"/v1/threads/stream?project_id={quote(project.project_id)}&message={quote('請幫我處理需求')}",
+                    )
+                    resp = conn.getresponse()
+                    self.assertEqual(resp.status, 200)
+
+                    event_type = ""
+                    seen_skill = None
+                    seen_tool_stages: list[str] = []
+                    done_payload = None
+                    for _ in range(240):
+                        raw_line = resp.fp.readline()
+                        if not raw_line:
+                            break
+                        decoded = raw_line.decode("utf-8", errors="ignore").strip()
+                        if decoded.startswith("event: "):
+                            event_type = decoded.split(":", 1)[1].strip()
+                        elif decoded.startswith("data: "):
+                            payload = json.loads(decoded.split(": ", 1)[1])
+                            if event_type == "skill" and seen_skill is None:
+                                seen_skill = payload
+                            elif event_type == "tool_call":
+                                seen_tool_stages.append(str(payload.get("stage") or ""))
+                            elif event_type == "done":
+                                done_payload = payload
+                                break
+
+                self.assertIsNotNone(seen_skill)
+                self.assertEqual(seen_skill.get("name"), "concept-alignment")
+                self.assertIn("start", seen_tool_stages)
+                self.assertIn("complete", seen_tool_stages)
+                self.assertIsNotNone(done_payload)
+                thread_id = str(done_payload.get("thread_id") or "").strip()
+                self.assertTrue(thread_id)
+                session_path = core.get_project_path(project.project_id) / ".amon" / "threads" / thread_id / "events.jsonl"
+                records = [json.loads(line) for line in session_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+                self.assertTrue(any(item.get("type") == "skill_activity" and item.get("skill_name") == "concept-alignment" for item in records))
+                self.assertTrue(any(item.get("type") == "tool_call" and item.get("tool_name") == "filesystem.read" for item in records))
             finally:
                 if server:
                     server.shutdown()

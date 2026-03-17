@@ -50,7 +50,7 @@ from amon.tooling.audit import default_audit_log_path
 from amon.tooling.types import ToolCall
 from .core import AmonCore, ProjectRecord
 from .logging import log_event
-from .models import decode_reasoning_chunk
+from .models import decode_reasoning_chunk, decode_stream_event
 from .skills import build_skill_injection_preview
 from .token_counter import TokenCountResult, count_non_dialogue_tokens, estimate_dialogue_tokens, extract_dialogue_input_tokens
 
@@ -2104,6 +2104,48 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
 
                 def stream_handler(token: str) -> None:
                     nonlocal streamed_token_count
+                    is_runtime_event, runtime_payload = decode_stream_event(token)
+                    if is_runtime_event:
+                        event_name = str(runtime_payload.get("event") or "").strip() or "notice"
+                        runtime_payload.setdefault("project_id", project_id)
+                        runtime_payload.setdefault("thread_id", thread_id)
+                        runtime_payload.setdefault("run_id", active_run_id or None)
+                        if event_name == "skill":
+                            skill_name = str(runtime_payload.get("name") or "").strip()
+                            if skill_name:
+                                send_event("skill", runtime_payload, run_id=active_run_id)
+                                append_event(
+                                    thread_id,
+                                    {
+                                        "type": "skill_activity",
+                                        "text": skill_name,
+                                        "project_id": project_id,
+                                        "run_id": active_run_id or None,
+                                        "skill_name": skill_name,
+                                        "skill_source": runtime_payload.get("source"),
+                                        "skill_path": runtime_payload.get("path"),
+                                    },
+                                )
+                            return
+                        if event_name == "tool_call":
+                            tool_name = str(runtime_payload.get("name") or "").strip()
+                            if tool_name:
+                                send_event("tool_call", runtime_payload, run_id=active_run_id)
+                                append_event(
+                                    thread_id,
+                                    {
+                                        "type": "tool_call",
+                                        "text": tool_name,
+                                        "project_id": project_id,
+                                        "run_id": active_run_id or None,
+                                        "tool_name": tool_name,
+                                        "route": runtime_payload.get("route"),
+                                        "stage": runtime_payload.get("stage"),
+                                        "status": runtime_payload.get("status"),
+                                        "path": runtime_payload.get("path"),
+                                    },
+                                )
+                            return
                     is_reasoning, reasoning_text = decode_reasoning_chunk(token)
                     if is_reasoning:
                         if not isinstance(reasoning_text, str) or reasoning_text == "":

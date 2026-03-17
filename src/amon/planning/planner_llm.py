@@ -179,6 +179,8 @@ def _planner_system_prompt(*, is_repair: bool) -> str:
             "2. ```mermaid ...```：與 JSON 對應的 Mermaid flowchart\n\n"
             "硬性規則：\n"
             "- 第 1 個 TASK 必須是「概念對齊」。\n"
+            "- 「概念對齊」節點的 PRIMARY skillBindings 必須包含 concept-alignment。\n"
+            "- 一開始負責規劃 TODO / 任務拆解 / task outline 的節點，PRIMARY skillBindings 必須包含 problem-decomposer。\n"
             "- 後續不得重複同質概念調研節點。\n"
             "- node.title 不得為空；若原本會是 None/空白，必須重寫成 <=10 個中文漢字的完整標題。\n"
             "- 嚴禁輸出任何 agent/persona/assignment/owner。\n"
@@ -197,6 +199,8 @@ def _planner_system_prompt(*, is_repair: bool) -> str:
         "固定第一步（硬性）：\n"
         "- 第 1 個 TASK 節點永遠是：title=\"概念對齊\"\n"
         "- 內容：上網查詢關鍵概念定義、背景知識、常見作法/風險、關鍵名詞對照。\n"
+        "- 此節點的 PRIMARY skillBindings 必須包含 concept-alignment。\n"
+        "- 一開始負責規劃 TODO / 任務拆解 / task outline 的節點，PRIMARY skillBindings 必須包含 problem-decomposer。\n"
         "- 後續不得再產生語意高度重複的概念/背景調研節點；除非是全新領域，且需在 constraints 寫明「新領域補充調研」理由。\n\n"
         "標題規則（硬性）：\n"
         "- 每個 node.title 必須非空。\n"
@@ -254,6 +258,8 @@ def _planner_user_prompt(
         "",
         "輸出要求（重申）：",
         "- 第 1 個 TASK 必須是「概念對齊」，且使用 web/search 類工具做概念查詢。",
+        "- 「概念對齊」節點的 PRIMARY skillBindings 必須包含 concept-alignment。",
+        "- 一開始負責規劃 TODO / 任務拆解 / task outline 的節點，PRIMARY skillBindings 必須包含 problem-decomposer。",
         "- 後續不得再出現同質概念調研節點。",
         "- node.title 不得為空；若原本會是 None，改寫成 <=10 個中文漢字標題句（不可截斷）。",
         "- 不得提 agent/persona/assignment/指派。",
@@ -324,6 +330,7 @@ def _minimal_plan(message: str) -> GraphDefinition:
                             "先做概念對齊，整理關鍵名詞定義、背景知識、常見作法、風險與後續規劃注意事項。"
                         ),
                         instructions="先完成概念對齊，再把摘要提供給下游規劃節點。",
+                        skills=["concept-alignment"],
                     ),
                     artifacts=[
                         ArtifactOutput(

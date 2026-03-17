@@ -120,6 +120,15 @@ def _build_thread_session_log_details(payload: dict[str, Any]) -> dict[str, Any]
         details["summary"] = f"plan:{text.strip() or 'unknown'}"
     elif event_type == "command_result" and isinstance(text, str):
         details["summary"] = _summarize_command_result(text)
+    elif event_type == "skill_activity":
+        skill_name = str(payload.get("skill_name") or text or "").strip() or "unknown"
+        details["summary"] = f"skill:{skill_name}"
+    elif event_type == "tool_call":
+        tool_name = str(payload.get("tool_name") or text or "").strip() or "unknown"
+        stage = str(payload.get("stage") or "").strip() or "unknown"
+        status = str(payload.get("status") or "").strip()
+        suffix = f":{status}" if status else ""
+        details["summary"] = f"tool:{tool_name}:{stage}{suffix}"
     elif event_type:
         details["summary"] = event_type
 

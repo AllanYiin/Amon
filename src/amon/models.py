@@ -20,6 +20,7 @@ class Provider(Protocol):
 
 
 _REASONING_CHUNK_PREFIX = "__AMON_REASONING__::"
+_STREAM_EVENT_PREFIX = "__AMON_EVENT__::"
 
 
 def encode_reasoning_chunk(text: str) -> str:
@@ -30,6 +31,26 @@ def decode_reasoning_chunk(token: str) -> tuple[bool, str]:
     if isinstance(token, str) and token.startswith(_REASONING_CHUNK_PREFIX):
         return True, token[len(_REASONING_CHUNK_PREFIX) :]
     return False, token
+
+
+def encode_stream_event(event_type: str, payload: dict[str, object] | None = None) -> str:
+    data = dict(payload or {})
+    data["event"] = str(event_type or "").strip() or "notice"
+    return f"{_STREAM_EVENT_PREFIX}{json.dumps(data, ensure_ascii=False)}"
+
+
+def decode_stream_event(token: str) -> tuple[bool, dict[str, object]]:
+    if not isinstance(token, str) or not token.startswith(_STREAM_EVENT_PREFIX):
+        return False, {}
+    raw_payload = token[len(_STREAM_EVENT_PREFIX) :]
+    try:
+        payload = json.loads(raw_payload)
+    except json.JSONDecodeError:
+        return False, {}
+    if not isinstance(payload, dict):
+        return False, {}
+    payload["event"] = str(payload.get("event") or "").strip() or "notice"
+    return True, payload
 
 
 def _extract_reasoning_text(delta: dict[str, object]) -> str:

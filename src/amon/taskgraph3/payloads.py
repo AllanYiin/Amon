@@ -16,6 +16,7 @@ class AgentTaskConfig:
     instructions: str | None = None
     model: str | None = None
     allowed_tools: list[str] = field(default_factory=list)
+    skills: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -183,6 +184,7 @@ def task_spec_to_payload(task_spec: TaskSpec) -> dict[str, Any]:
             "instructions": task_spec.agent.instructions,
             "model": task_spec.agent.model,
             "allowedTools": task_spec.agent.allowed_tools,
+            "skills": task_spec.agent.skills,
         }
     if task_spec.tool is not None:
         payload["tool"] = {
@@ -214,6 +216,7 @@ def _agent_from_payload(raw: Any) -> AgentTaskConfig | None:
         instructions=_optional_str(raw.get("instructions")),
         model=_optional_str(raw.get("model")),
         allowed_tools=[str(item) for item in (raw.get("allowedTools") or []) if str(item).strip()],
+        skills=[str(item) for item in (raw.get("skills") or raw.get("skillNames") or []) if str(item).strip()],
     )
 
 

@@ -54,6 +54,29 @@ export function createTimelineRenderer({ executionAccordion, executionTimeline, 
       updateExecutionStep("planning", { title: t("timeline.step.planning"), status: "running", details: t("timeline.planWaiting"), inferred: false });
       return;
     }
+    if (eventType === "skill") {
+      const skillName = String(data.name || "").trim() || "unknown-skill";
+      const skillSource = String(data.source || "").trim();
+      const detail = skillSource ? `正在讀取 skill：${skillName}（${skillSource}）` : `正在讀取 skill：${skillName}`;
+      updateExecutionStep("planning", { title: t("timeline.step.planning"), status: "running", details: detail, inferred: false });
+      return;
+    }
+    if (eventType === "tool_call") {
+      const toolName = String(data.name || "").trim() || "unknown-tool";
+      const stage = String(data.stage || "").trim().toLowerCase();
+      const status = String(data.status || "").trim().toLowerCase();
+      if (stage === "start") {
+        updateExecutionStep("tool_execution", { title: t("timeline.step.toolExecution"), status: "running", details: `正在呼叫 ${toolName}`, inferred: false });
+        return;
+      }
+      updateExecutionStep("tool_execution", {
+        title: t("timeline.step.toolExecution"),
+        status: status === "error" || status === "failed" ? "failed" : "succeeded",
+        details: `工具 ${toolName} 已完成（${status || "ok"}）`,
+        inferred: false,
+      });
+      return;
+    }
     if (eventType === "result") {
       updateExecutionStep("tool_execution", { title: t("timeline.step.toolExecution"), status: "succeeded", details: t("timeline.toolReturned"), inferred: false });
       return;

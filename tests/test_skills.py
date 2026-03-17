@@ -7,6 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from amon.core import AmonCore
+from amon.models import decode_stream_event
 
 
 class SkillsTests(unittest.TestCase):
@@ -103,6 +104,47 @@ class SkillsTests(unittest.TestCase):
                 self.assertIn("- review-skill：專注 code review", skill_message)
                 self.assertIn("## First-party tools", skill_message)
                 self.assertLess(skill_message.index("## First-party tools"), skill_message.index("## Skills (frontmatter)"))
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+    def test_resolve_skill_context_emits_skill_stream_event(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("技能事件測試")
+                project_path = Path(project.path)
+
+                skill_dir = Path(temp_dir) / "skills" / "review-skill"
+                skill_dir.mkdir(parents=True, exist_ok=True)
+                (skill_dir / "SKILL.md").write_text(
+                    "---\nname: review-skill\ndescription: 專注 code review\n---\n請專注 code review。",
+                    encoding="utf-8",
+                )
+
+                streamed: list[dict[str, object]] = []
+
+                def stream_handler(token: str) -> None:
+                    matched, payload = decode_stream_event(token)
+                    if matched:
+                        streamed.append(payload)
+
+                injected = core._resolve_skill_context(
+                    "/review-skill 請幫忙",
+                    project_path=project_path,
+                    stream_handler=stream_handler,
+                    run_id="run-skill-001",
+                    node_id="task-review",
+                    thread_id="thread-skill-001",
+                    request_id="req-skill-001",
+                )
+
+                self.assertIn("- review-skill：專注 code review", injected)
+                self.assertEqual(len(streamed), 1)
+                self.assertEqual(streamed[0]["event"], "skill")
+                self.assertEqual(streamed[0]["name"], "review-skill")
+                self.assertEqual(streamed[0]["run_id"], "run-skill-001")
             finally:
                 os.environ.pop("AMON_HOME", None)
 
