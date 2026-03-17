@@ -1,0 +1,41 @@
+{
+  "skill_name": "web-search-strategy",
+  "evals": [
+    {
+      "id": 1,
+      "name": "official-regulation-search",
+      "prompt": "請幫我查台灣電動滑板車上路的最新規定，優先官方法規、政府公告與主管機關資料，不要只給新聞整理。先給我搜尋策略，再列可信來源類型。",
+      "expected_output": "回覆先做查詢意圖分類，再提供多組查詢，優先政府與法規來源，並明講需要日期與地區範圍。",
+      "files": [],
+      "expectations": [
+        "回覆至少提供 2 組查詢或查詢族。",
+        "回覆優先官方或政府網域，而不是新聞站。",
+        "回覆有提到日期或最新資訊的查核需求。"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "annual-report-pdf",
+      "prompt": "幫我找某上市公司 2025 年 annual report PDF、investor relations 頁面，並說明應該怎麼設計搜尋關鍵字與檔案條件。",
+      "expected_output": "回覆使用公司名、年度、annual report / investor relations 等精確短語，並搭配站點或 PDF 檔案策略。",
+      "files": [],
+      "expectations": [
+        "回覆不會只把原句整段拿去搜尋。",
+        "回覆有提到檔案類型、站點限制或 IR 頁面。",
+        "回覆說明每組查詢的用途。"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "official-spec-and-ecosystem",
+      "prompt": "我要找 MCP protocol 的官方規格、入門教學與近兩年的實作參考，請先做多輪搜尋策略，不要只列連結。",
+      "expected_output": "回覆區分官方規格、原始專案文件、教學資源與實作參考，並提出第一輪與第二輪搜尋方向。",
+      "files": [],
+      "expectations": [
+        "回覆區分官方來源與二手整理。",
+        "回覆包含第一輪結果不足時的第二輪查詢方向。",
+        "回覆至少有一組查詢明確對應官方規格或原始專案文件。"
+      ]
+    }
+  ]
+}

@@ -22,12 +22,13 @@ amon-sandbox-runner = "amon_sandbox_runner.app:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
+include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-amon = ["ui/*.html", "ui/*.css", "ui/*.js", "resources/skills/*.skill"]
+amon = ["ui/*.html", "ui/*.css", "ui/*.js", "resources/skills/**/*"]
 
 
 [tool.pytest.ini_options]

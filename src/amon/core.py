@@ -77,7 +77,7 @@ from .tooling import (
 from .tooling.native import compute_tool_sha256, parse_native_manifest, scan_native_tools
 from .tooling.builtin import build_registry
 from .tooling.types import ToolCall
-from .skills import build_system_prefix_injection
+from .skills import build_skill_archive, build_system_prefix_injection
 from .token_counter import count_non_dialogue_tokens
 from .core_tool_templates import (
     render_native_tool_readme,
@@ -192,7 +192,7 @@ class AmonCore:
             except OSError as exc:
                 self.logger.error("建立排程資料失敗：%s", exc, exc_info=True)
                 raise
-        self._install_packaged_skill_archives()
+        self._ensure_global_skills_installed()
 
     def _sync_tool_registry(self, registry_path: Path) -> None:
         from .tooling.builtin import build_registry
@@ -258,47 +258,49 @@ class AmonCore:
             self.logger.error("寫入工具 registry 失敗：%s", exc, exc_info=True)
             raise
 
-    def _install_packaged_skill_archives(self) -> None:
-        try:
-            skills_package = importlib_resources.files("amon").joinpath("resources", "skills")
-            skill_archives = sorted(path for path in skills_package.iterdir() if path.name.endswith(".skill"))
-        except (ModuleNotFoundError, FileNotFoundError, OSError) as exc:
-            self.logger.warning("載入內建技能資源失敗：%s", exc, exc_info=True)
-            return
-
-        for archive_resource in skill_archives:
-            target_path = self.skills_dir / archive_resource.name
-            if target_path.exists():
-                continue
-            try:
-                with importlib_resources.as_file(archive_resource) as source_path:
-                    shutil.copy2(source_path, target_path)
-            except OSError as exc:
-                self.logger.warning("安裝內建技能封包失敗：%s", exc, exc_info=True)
-
     def initialize(self) -> None:
         try:
             self.ensure_base_structure()
-            self._ensure_global_skills_installed()
             self.scan_skills()
         except OSError as exc:
             self.logger.error("初始化 Amon 失敗：%s", exc, exc_info=True)
             raise
 
     def _ensure_global_skills_installed(self) -> None:
-        source_dir = Path(__file__).resolve().parent / "resources" / "skills"
-        if not source_dir.exists():
-            self.logger.warning("找不到內建 skills 來源資料夾：%s", source_dir)
+        try:
+            skills_package = importlib_resources.files("amon").joinpath("resources", "skills")
+        except (ModuleNotFoundError, FileNotFoundError, OSError) as exc:
+            self.logger.warning("找不到內建 skills 來源資料夾：%s", exc, exc_info=True)
             return
 
-        for source_file in source_dir.glob("*.skill"):
-            target_file = self.skills_dir / source_file.name
-            if target_file.exists():
-                continue
+        try:
+            bundled_entries = sorted(skills_package.iterdir(), key=lambda item: item.name)
+        except OSError as exc:
+            self.logger.warning("列出內建 skills 來源失敗：%s", exc, exc_info=True)
+            return
+
+        if not bundled_entries:
+            self.logger.warning("找不到內建 skills 來源資料夾：%s", skills_package)
+            return
+
+        for entry in bundled_entries:
             try:
-                shutil.copy2(source_file, target_file)
+                if entry.is_dir():
+                    target_file = self.skills_dir / f"{entry.name}.skill"
+                    if target_file.exists():
+                        continue
+                    with importlib_resources.as_file(entry) as source_dir:
+                        build_skill_archive(source_dir, target_file)
+                elif entry.is_file() and entry.name.endswith(".skill"):
+                    target_file = self.skills_dir / entry.name
+                    if target_file.exists():
+                        continue
+                    with importlib_resources.as_file(entry) as source_file:
+                        shutil.copy2(source_file, target_file)
+                else:
+                    continue
             except OSError as exc:
-                self.logger.error("安裝內建 skill 失敗：%s -> %s (%s)", source_file, target_file, exc, exc_info=True)
+                self.logger.error("安裝內建 skill 失敗：%s -> %s (%s)", entry, target_file, exc, exc_info=True)
                 raise
 
         self._deduplicate_global_skill_folders()

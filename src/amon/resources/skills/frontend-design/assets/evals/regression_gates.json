@@ -1,0 +1,4 @@
+{
+  "min_pass_rate": 0.85,
+  "must_pass": ["trigger-01", "trigger-02", "functional-02", "functional-03"]
+}

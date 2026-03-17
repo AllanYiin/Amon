@@ -1,1 +1,1 @@
-include src/amon/resources/skills/*.skill
+recursive-include src/amon/resources/skills *

@@ -1,0 +1,56 @@
+{
+  "skill_name": "concept-alignment",
+  "evals": [
+    {
+      "id": 1,
+      "name": "ai-act-prealignment",
+      "prompt": "我要評估歐盟 AI Act 對我們台灣 SaaS 產品的影響，但先不要做策略。先幫我做 concept alignment：定義關鍵概念、補背景知識、整理近期具體事件，必要時用 Mermaid 時間線圖。",
+      "expected_output": "以固定的 Concept Alignment 結構輸出，定義 AI Act、適用範圍、法域與關鍵角色，補上法規背景與近期具體事件，不直接寫策略。",
+      "files": [],
+      "expectations": [
+        "第一行是 `## Concept Alignment`",
+        "包含三個固定 `###` 標題且順序正確",
+        "引用至少一個官方或監管來源",
+        "明確寫出日期與法域",
+        "不直接產出合規策略或執行方案"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "battery-price-event-background",
+      "prompt": "我想研究台灣電價調整對電池儲能產業的影響，但現在先不要寫報告。請先做概念對齊，整理定義、背景知識、法規/數據/案例，還有近期重大影響的具體事件。",
+      "expected_output": "釐清電價調整、儲能、時間範圍與政策背景，補上數據與近期具體事件，必要時附時間線或因果圖。",
+      "files": [],
+      "expectations": [
+        "會釐清單位、期間與政策背景",
+        "會列出具體事件而非抽象趨勢",
+        "重要事實帶來源註記",
+        "不直接寫完整產業分析報告"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "rag-hallucination-research-prep",
+      "prompt": "我要做 RAG 幻覺降低方案，但先不要開始設計。先做概念對齊：查關鍵術語定義、研究論文、資料集、常見誤解和近期變化。",
+      "expected_output": "清楚定義 RAG、hallucination 等術語，整理研究與資料集，指出常見誤解，必要時用 Mermaid 表達概念結構，不直接做系統設計。",
+      "files": [],
+      "expectations": [
+        "術語定義會區分相近概念",
+        "包含論文或研究來源與摘要級整理",
+        "包含資料集或評估指標資訊",
+        "不直接輸出技術方案"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "should-not-trigger-direct-prd",
+      "prompt": "直接幫我寫一份新產品 PRD，不用先研究背景。",
+      "expected_output": "此 skill 不應主動攔下任務；若被測到，至少不應假裝自己已完成 PRD。",
+      "files": [],
+      "expectations": [
+        "不應把純 PRD 撰寫誤判成 concept alignment",
+        "不應在沒有研究要求下硬套三段式輸出"
+      ]
+    }
+  ]
+}

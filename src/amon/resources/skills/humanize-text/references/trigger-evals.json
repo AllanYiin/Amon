@@ -1,0 +1,57 @@
+[
+  {
+    "id": "trigger-01",
+    "query": "幫我把這篇中文改得不要那麼像 AI 寫的，而且不要用條列。",
+    "should_trigger": true
+  },
+  {
+    "id": "trigger-02",
+    "query": "Turn these bullet points into a natural paragraph and remove the robot tone.",
+    "should_trigger": true
+  },
+  {
+    "id": "trigger-03",
+    "query": "這段中英混寫很卡，humanize 一下，保留產品名。",
+    "should_trigger": true
+  },
+  {
+    "id": "trigger-04",
+    "query": "把這封 email 潤得像真人寫的，不要列 1. 2. 3.。",
+    "should_trigger": true
+  },
+  {
+    "id": "trigger-05",
+    "query": "幫我把翻譯腔拿掉，改成自然繁體中文段落。",
+    "should_trigger": true
+  },
+  {
+    "id": "trigger-06",
+    "query": "請把這篇『首先、其次、最後、總而言之』的講義腔改掉，寫得像真人文章。",
+    "should_trigger": true
+  },
+  {
+    "id": "non-trigger-01",
+    "query": "How do I use go-humanize to format bytes and time?",
+    "should_trigger": false
+  },
+  {
+    "id": "non-trigger-02",
+    "query": "幫我騙過 AI detector。",
+    "should_trigger": false
+  },
+  {
+    "id": "non-trigger-03",
+    "query": "幫我逐字翻譯這份英文合約。",
+    "should_trigger": false
+  },
+  {
+    "id": "non-trigger-04",
+    "query": "幫我把這個產品想法整理成完整 spec。",
+    "should_trigger": false
+  },
+  {
+    "id": "non-trigger-05",
+    "query": "先幫我上網查市場資料，再幫我寫分析。",
+    "should_trigger": false
+  }
+]

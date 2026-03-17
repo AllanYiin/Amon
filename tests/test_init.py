@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -55,7 +56,7 @@ class InitTests(unittest.TestCase):
 
             base_path = Path(temp_dir)
             source_dir = Path(__file__).resolve().parents[1] / "src" / "amon" / "resources" / "skills"
-            expected_skill_names = sorted(path.name for path in source_dir.glob("*.skill"))
+            expected_skill_names = sorted(f"{path.name}.skill" for path in source_dir.iterdir() if path.is_dir())
             installed_skill_names = sorted(path.name for path in (base_path / "skills").glob("*.skill"))
 
             self.assertEqual(expected_skill_names, installed_skill_names)
@@ -81,7 +82,22 @@ class InitTests(unittest.TestCase):
             index_path = base_path / "cache" / "skills" / "index.json"
             self.assertTrue(index_path.exists())
             index_content = index_path.read_text(encoding="utf-8")
-            self.assertIn("/skills/automation-scheduler.skill", index_content)
+            self.assertIn("automation-scheduler.skill", index_content)
+
+    def test_build_skill_archives_script_outputs_archives_from_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "dist"
+            script_path = Path(__file__).resolve().parents[1] / "scripts" / "build_skill_archives.py"
+            completed = subprocess.run(
+                [sys.executable, str(script_path), "--output", str(output_dir)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertIn("spec-to-tasks.skill", completed.stdout)
+            self.assertTrue((output_dir / "spec-to-tasks.skill").exists())
+            self.assertTrue((output_dir / "web-search-strategy.skill").exists())
 
 
 if __name__ == "__main__":

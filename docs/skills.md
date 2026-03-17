@@ -30,6 +30,9 @@ description: 將需求整理成條列摘要
 - 全域技能：`~/.amon/skills`
 - 專案技能：`<project>/.claude/skills`
 
+內建 first-party skills 的 repo 原始碼放在 `src/amon/resources/skills/<skill-name>/`。
+Amon 初始化時會將這些資料夾打包成 `<skill-name>.skill` 並安裝到全域技能目錄。
+
 掃描並更新索引：
 
 ```bash

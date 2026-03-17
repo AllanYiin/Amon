@@ -1,0 +1,42 @@
+{
+  "skill": "frontend-design",
+  "version": "3.2.0",
+  "evals": [
+    {
+      "id": "trigger-01",
+      "type": "trigger",
+      "prompt": "幫我做一個 SaaS landing page，風格要高級感、乾淨、現代",
+      "expect": "should_trigger"
+    },
+    {
+      "id": "trigger-02",
+      "type": "trigger",
+      "prompt": "把這個 React 表單設計得更漂亮、可讀性更好",
+      "expect": "should_trigger"
+    },
+    {
+      "id": "trigger-03",
+      "type": "trigger",
+      "prompt": "只需要寫一個後端 API 的資料驗證",
+      "expect": "should_not_trigger"
+    },
+    {
+      "id": "functional-01",
+      "type": "functional",
+      "prompt": "建立一個產品儀表板 UI（含 loading/empty/error state）",
+      "expect": "tokens_first + states_complete + accessibility_notes"
+    },
+    {
+      "id": "functional-02",
+      "type": "functional",
+      "prompt": "設計一個三步驟 SaaS onboarding flow，先給我 user journey 或 user flow，再產出頁面與檢查命令",
+      "expect": "journey_or_flow_artifact + system_status_visibility + gestalt_principles + audit_command"
+    },
+    {
+      "id": "functional-03",
+      "type": "functional",
+      "prompt": "幫我設計一組可重用的按鈕元件，除了程式碼還要有 guideline 文件，並檢查是否出現模糊 CTA 或 AI slop 樣式",
+      "expect": "guideline_sections + anti_pattern_scan + specific_cta_copy + reusable_component_rules"
+    }
+  ]
+}
