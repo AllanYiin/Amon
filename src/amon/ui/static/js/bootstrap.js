@@ -1818,6 +1818,67 @@ appStore.patch({ bootstrappedAt: Date.now() });
         elements.planRisk.innerHTML = "";
       }
 
+      function formatPlanListItem(item) {
+        if (typeof item === "string") {
+          return item;
+        }
+        if (item == null) {
+          return "";
+        }
+        if (typeof item !== "object") {
+          return String(item);
+        }
+        const action = String(item.action || "").trim();
+        const target = String(item.target || item.path || "").trim();
+        const detail = String(item.detail || "").trim();
+        if (action && target) {
+          return detail ? `${action} ${target} (${detail})` : `${action} ${target}`;
+        }
+        if (action) {
+          return detail ? `${action} (${detail})` : action;
+        }
+        if (target) {
+          return detail ? `${target} (${detail})` : target;
+        }
+        return JSON.stringify(item, null, 2);
+      }
+
+      function renderPlanList(container, items = []) {
+        if (!container) return;
+        container.innerHTML = "";
+        const normalizedItems = Array.isArray(items) ? items : [];
+        if (!normalizedItems.length) {
+          const emptyItem = document.createElement("li");
+          emptyItem.textContent = "無";
+          container.appendChild(emptyItem);
+          return;
+        }
+        normalizedItems.forEach((item) => {
+          const row = document.createElement("li");
+          row.textContent = formatPlanListItem(item);
+          container.appendChild(row);
+        });
+      }
+
+      function renderPlanRisk(plan = {}) {
+        if (!elements.planRisk) return;
+        elements.planRisk.innerHTML = "";
+        const risk = plan?.risk && typeof plan.risk === "object" ? plan.risk : {};
+        const level = String(risk.level || plan.risk || "").trim().toLowerCase();
+        const levelTone = ["low", "medium", "high"].includes(level) ? level : "unknown";
+        const badges = [];
+        if (level) {
+          badges.push(`<span class="risk-chip risk-chip--${escapeHtml(levelTone)}">risk: ${escapeHtml(level)}</span>`);
+        }
+        if (risk.scope) {
+          badges.push(`<span class="pill pill--neutral">scope: ${escapeHtml(String(risk.scope))}</span>`);
+        }
+        if (Object.prototype.hasOwnProperty.call(risk, "require_confirm")) {
+          badges.push(`<span class="pill ${risk.require_confirm ? "pill--warn" : "pill--success"}">${risk.require_confirm ? "需要確認" : "無需確認"}</span>`);
+        }
+        elements.planRisk.innerHTML = badges.join("");
+      }
+
       function setProjectState(projectId) {
         const previousProjectId = normalizeProjectIdForUi(state.projectId);
         if (previousProjectId) {
