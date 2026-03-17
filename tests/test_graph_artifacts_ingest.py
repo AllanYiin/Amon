@@ -35,7 +35,7 @@ class GraphArtifactsIngestTests(unittest.TestCase):
                         id="agent",
                         task_spec=TaskSpec(
                             executor="agent",
-                            agent=AgentTaskConfig(prompt="請輸出程式", skills=["problem-decomposer"]),
+                            agent=AgentTaskConfig(prompt="請輸出程式", skills=["codegen"]),
                         ),
                     )
                 ],
@@ -63,7 +63,7 @@ class GraphArtifactsIngestTests(unittest.TestCase):
             self.assertTrue(manifest_path.exists())
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             self.assertIn("workspace/a.py", manifest.get("files", {}))
-            self.assertEqual(runner.core.calls[0]["skill_names"], ["problem-decomposer"])
+            self.assertEqual(runner.core.calls[0]["skill_names"], ["codegen"])
 
             state = result.state
             node_output = state["nodes"]["agent"]["output"]
@@ -131,7 +131,9 @@ class GraphArtifactsIngestTests(unittest.TestCase):
 
             self.assertEqual(len(core.calls), 1)
             self.assertIn("概念摘要：TaskGraph v3", str(core.calls[0]["prompt"]))
-            self.assertEqual(core.calls[0]["conversation_history"], history)
+            conversation_history = core.calls[0]["conversation_history"]
+            self.assertEqual(conversation_history[:2], history)
+            self.assertTrue(any("前置概念摘要" in item["content"] for item in conversation_history[2:]))
             self.assertIsNone(core.calls[0]["skill_names"])
 
 

@@ -59,11 +59,11 @@ class CorePlanGenerationTests(unittest.TestCase):
                     nodes=[
                         TaskNode(
                             id="task-1",
-                            title="任務骨架",
+                            title="需求規格",
                             task_spec=TaskSpec(
                                 executor="agent",
                                 agent=AgentTaskConfig(prompt="請完成", instructions="執行"),
-                                display=TaskDisplayMetadata(label="任務骨架", summary="切分待辦與依賴", todo_hint="done"),
+                                display=TaskDisplayMetadata(label="需求規格", summary="完成需求規格", todo_hint="done"),
                             ),
                         ),
                         ArtifactNode(id="artifact-task-1-todo", title="docs/TODO.md"),
@@ -76,27 +76,28 @@ class CorePlanGenerationTests(unittest.TestCase):
                 plan_payload = json.loads((project_path / "docs" / "plan.json").read_text(encoding="utf-8"))
                 self.assertEqual(plan_payload.get("version"), "taskgraph.v3")
                 todo_text = (project_path / "docs" / "TODO.md").read_text(encoding="utf-8")
-                self.assertIn("- [ ] task-1 任務骨架", todo_text)
+                self.assertIn("- [ ] task-1 需求規格", todo_text)
                 self.assertIn("- [ ] concept_alignment 概念對齊", todo_text)
                 self.assertIn("  - Skill: concept-alignment", todo_text)
-                self.assertIn("  - Skill: problem-decomposer", todo_text)
+                self.assertIn("  - Skill: （未綁定 skill）", todo_text)
                 task_nodes = [node for node in plan.nodes if isinstance(node, TaskNode)]
                 self.assertEqual(task_nodes[0].id, "concept_alignment")
                 self.assertIn("web.search", task_nodes[0].task_spec.agent.allowed_tools)
                 self.assertEqual(task_nodes[0].task_spec.agent.skills, ["concept-alignment"])
-                self.assertEqual(task_nodes[1].task_spec.agent.skills, ["problem-decomposer"])
+                self.assertEqual(task_nodes[1].task_spec.agent.skills, [])
+                self.assertIn("[AMON_NODE_MODE=EXECUTION]", task_nodes[1].task_spec.agent.system_prompt or "")
                 self.assertTrue(emit_mock.called)
             finally:
                 os.environ.pop("AMON_HOME", None)
 
-    def test_build_quick_todo_markdown_includes_bound_skills(self) -> None:
+    def test_build_quick_todo_markdown_marks_planner_stage_as_internal(self) -> None:
         core = AmonCore(data_dir=Path(tempfile.mkdtemp()))
         try:
             todo = core._build_quick_todo_markdown("請幫我規劃上線流程", available_tools=[{"name": "web.search"}])
         finally:
             shutil.rmtree(core.data_dir, ignore_errors=True)
         self.assertIn("  - Skill: concept-alignment", todo)
-        self.assertIn("  - Skill: problem-decomposer", todo)
+        self.assertIn("  - Skill: planner-internal", todo)
 
     def test_write_graph_resolved_preserves_graph_id_for_taskgraph_v3(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -128,6 +129,67 @@ class CorePlanGenerationTests(unittest.TestCase):
             resolved_graph = core._to_taskgraph3_definition(resolved_payload)
             self.assertEqual(resolved_graph.id, "planner-fallback")
             self.assertEqual(resolved_graph.nodes[0].graph_id, "planner-fallback")
+
+    def test_postprocess_planner_graph_deduplicates_concept_tasks_and_serializes_roots(self) -> None:
+        core = AmonCore(data_dir=Path(tempfile.mkdtemp()))
+        try:
+            graph = GraphDefinition(
+                version="taskgraph.v3",
+                nodes=[
+                    TaskNode(
+                        id="concept_alignment",
+                        title="概念對齊",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="先查概念"),
+                            display=TaskDisplayMetadata(label="概念對齊", summary="查概念", todo_hint="完成概念摘要"),
+                        ),
+                    ),
+                    TaskNode(
+                        id="t1_concept_alignment",
+                        title="概念對齊",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="再次做概念對齊"),
+                            display=TaskDisplayMetadata(label="概念對齊", summary="重複概念", todo_hint="不應保留"),
+                        ),
+                    ),
+                    TaskNode(
+                        id="requirements",
+                        title="需求規格",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="整理需求"),
+                            display=TaskDisplayMetadata(label="需求規格", summary="需求", todo_hint="完成規格"),
+                        ),
+                    ),
+                    TaskNode(
+                        id="packaging",
+                        title="打包交付",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="完成打包"),
+                            display=TaskDisplayMetadata(label="打包交付", summary="打包", todo_hint="完成交付包"),
+                        ),
+                    ),
+                ],
+                edges=[],
+            )
+
+            processed = core._postprocess_planner_graph(graph, message="請規劃交付流程", available_tools=[{"name": "web.search"}])
+        finally:
+            shutil.rmtree(core.data_dir, ignore_errors=True)
+
+        task_ids = [node.id for node in processed.nodes if isinstance(node, TaskNode)]
+        self.assertEqual(task_ids.count("concept_alignment"), 1)
+        self.assertNotIn("t1_concept_alignment", task_ids)
+        control_pairs = {
+            (edge.from_node, edge.to_node)
+            for edge in processed.edges
+            if edge.edge_type == "CONTROL"
+        }
+        self.assertIn(("concept_alignment", "requirements"), control_pairs)
+        self.assertIn(("requirements", "packaging"), control_pairs)
 
 
 if __name__ == "__main__":

@@ -114,6 +114,28 @@ class TaskGraph3RuntimeSmokeTests(unittest.TestCase):
             self.assertIn("missing required key=value", str(result.state["nodes"]["a"]["error"]))
             self.assertEqual(result.state["nodes"]["b"]["status"], "queued")
 
+    def test_data_edges_also_gate_runtime_execution_order(self) -> None:
+        graph = GraphDefinition(
+            nodes=[
+                TaskNode(id="producer"),
+                TaskNode(id="consumer"),
+            ],
+            edges=[GraphEdge(from_node="producer", to_node="consumer", edge_type="DATA", kind="PRODUCES")],
+        )
+        execution_order: list[str] = []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = TaskGraph3Runtime(project_path=Path(tmp), graph=graph, run_id="run-data-deps")
+
+            def node_runner(node: TaskNode, _: dict[str, object]) -> str:
+                execution_order.append(node.id)
+                return node.id
+
+            result = runtime.run(node_runner)
+
+        self.assertEqual(result.state["status"], "succeeded")
+        self.assertEqual(execution_order, ["producer", "consumer"])
+
     def test_parallel_map_respects_max_concurrency_and_rate_limit(self) -> None:
         lock = threading.Lock()
         active = 0

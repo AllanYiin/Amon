@@ -19,6 +19,34 @@ from amon.taskgraph3.validate import graph_definition_from_payload
 logger = logging.getLogger(__name__)
 
 _CODE_BLOCK_RE = re.compile(r"```(?P<lang>[^\n`]*)\n(?P<content>.*?)```", re.DOTALL)
+_MAX_TASK_NODES = 8
+_PREFERRED_TASK_NODES = "4-6"
+_CONCEPT_TASK_TOKENS = ("concept_alignment", "concept alignment", "概念對齊")
+_SPEC_CLUSTER_TOKENS = (
+    "requirements",
+    "需求",
+    "prd",
+    "visual",
+    "視覺",
+    "architecture",
+    "架構",
+    "spec",
+    "規格",
+    "preset",
+    "預設",
+)
+_PACKAGING_TOKENS = ("packaging", "release", "bundle", "交付", "打包", "封裝", "驗收")
+_PLANNING_TASK_TOKENS = (
+    "taskgraph_outline",
+    "task outline",
+    "todo outline",
+    "todo",
+    "wbs",
+    "任務拆解",
+    "待辦拆解",
+    "問題拆解",
+    "骨架規劃",
+)
 
 
 class LLMClient(Protocol):
@@ -63,24 +91,36 @@ def generate_plan_with_llm(
             thread_id=thread_id,
             request_id=request_id,
         )
-        try:
-            return _loads_graph_definition_from_response(raw)
-        except ValueError as exc:
-            repaired = _request_plan(
+        repair_reason: str | None = None
+        previous_raw = raw
+        for _ in range(2):
+            try:
+                graph = _loads_graph_definition_from_response(previous_raw)
+                semantic_issues = _semantic_plan_issues(graph)
+                if not semantic_issues:
+                    return graph
+                repair_reason = "語義修復要求：\n- " + "\n- ".join(semantic_issues)
+            except ValueError as exc:
+                repair_reason = str(exc)
+            previous_raw = _request_plan(
                 client,
                 selected_model,
                 message=normalized,
                 available_tools=available_tools,
                 available_skills=available_skills,
-                repair_error=str(exc),
-                previous_raw=raw,
+                repair_error=repair_reason,
+                previous_raw=previous_raw,
                 project_path=project_path,
                 project_id=project_id,
                 run_id=run_id,
                 thread_id=thread_id,
                 request_id=request_id,
             )
-            return _loads_graph_definition_from_response(repaired)
+        graph = _loads_graph_definition_from_response(previous_raw)
+        semantic_issues = _semantic_plan_issues(graph)
+        if semantic_issues:
+            raise ValueError("planner 語義修復失敗：" + "; ".join(semantic_issues))
+        return graph
     except Exception as exc:  # noqa: BLE001
         logger.warning("LLM planner 失敗，改用最小計畫：%s", exc)
         return _minimal_plan(normalized)
@@ -180,8 +220,12 @@ def _planner_system_prompt(*, is_repair: bool) -> str:
             "硬性規則：\n"
             "- 第 1 個 TASK 必須是「概念對齊」。\n"
             "- 「概念對齊」節點的 PRIMARY skillBindings 必須包含 concept-alignment。\n"
-            "- 一開始負責規劃 TODO / 任務拆解 / task outline 的節點，PRIMARY skillBindings 必須包含 problem-decomposer。\n"
+            "- planner 已經在圖外完成任務拆解；GraphDefinition 內不得再出現 TODO / 任務拆解 / task outline / WBS 類 TASK。\n"
             "- 後續不得重複同質概念調研節點。\n"
+            f"- TASK 節點總數不得超過 {_MAX_TASK_NODES}，優先控制在 {_PREFERRED_TASK_NODES} 個；過細步驟要合併成較大的交付節點。\n"
+            "- 需求規格、PRD、系統架構、架構設計、視覺規格、預設參數若屬同一設計階段，必須合併成單一 TASK，透過多個 artifact 輸出，不可拆成多個連續規劃節點。\n"
+            "- 打包交付 / release / bundle / 驗收只能出現在後段，必須帶明確前置依賴，不可成為概念對齊之後的直接 root。\n"
+            "- 後續執行節點只負責完成當前交付，不可把整體問題再拆解一次，也不可重做概念對齊。\n"
             "- node.title 不得為空；若原本會是 None/空白，必須重寫成 <=10 個中文漢字的完整標題。\n"
             "- 嚴禁輸出任何 agent/persona/assignment/owner。\n"
             "- 除這兩段 code block 外不得輸出其他文字。\n"
@@ -200,8 +244,14 @@ def _planner_system_prompt(*, is_repair: bool) -> str:
         "- 第 1 個 TASK 節點永遠是：title=\"概念對齊\"\n"
         "- 內容：上網查詢關鍵概念定義、背景知識、常見作法/風險、關鍵名詞對照。\n"
         "- 此節點的 PRIMARY skillBindings 必須包含 concept-alignment。\n"
-        "- 一開始負責規劃 TODO / 任務拆解 / task outline 的節點，PRIMARY skillBindings 必須包含 problem-decomposer。\n"
+        "- planner 已在圖外完成拆題；graph 內不可再放 TODO / 任務拆解 / task outline / WBS 類節點。\n"
         "- 後續不得再產生語意高度重複的概念/背景調研節點；除非是全新領域，且需在 constraints 寫明「新領域補充調研」理由。\n\n"
+        "步驟切分規範（硬性）：\n"
+        f"- TASK 節點總數不得超過 {_MAX_TASK_NODES}；優先控制在 {_PREFERRED_TASK_NODES} 個。\n"
+        "- 優先用「較大但可驗收」的交付節點，不要把同一階段拆成大量微步驟。\n"
+        "- 同一設計階段內的需求規格、PRD、系統架構、架構設計、視覺規格、預設參數，應合併成 1 個 TASK，透過多個 artifacts 表達產出。\n"
+        "- 後續 TASK 是執行節點，不是重新拆題節點；不可在任何 TASK 再做 TODO 分解、WBS、任務骨架規劃或概念對齊。\n"
+        "- 打包交付 / release / bundle / 驗收必須位於後段，且要有明確依賴；不可直接接在概念對齊後面。\n\n"
         "標題規則（硬性）：\n"
         "- 每個 node.title 必須非空。\n"
         "- 若原本會產生 None/空白 title，必須改寫成 <=10 個中文漢字、語意完整的標題句，不可單純截斷。\n\n"
@@ -259,8 +309,12 @@ def _planner_user_prompt(
         "輸出要求（重申）：",
         "- 第 1 個 TASK 必須是「概念對齊」，且使用 web/search 類工具做概念查詢。",
         "- 「概念對齊」節點的 PRIMARY skillBindings 必須包含 concept-alignment。",
-        "- 一開始負責規劃 TODO / 任務拆解 / task outline 的節點，PRIMARY skillBindings 必須包含 problem-decomposer。",
+        "- planner 已在圖外完成拆題；graph 內不得再出現 TODO / 任務拆解 / task outline / WBS 類 TASK。",
         "- 後續不得再出現同質概念調研節點。",
+        f"- TASK 節點總數不得超過 {_MAX_TASK_NODES}，優先控制在 {_PREFERRED_TASK_NODES} 個。",
+        "- 同一設計階段的需求/PRD/系統架構/架構設計/視覺規格/預設參數要合併成較大的 TASK，不可拆成多個連續規劃節點。",
+        "- 後續 TASK 只執行本節點交付，不可重做整體拆題或概念對齊。",
+        "- 打包交付 / release / bundle / 驗收不得成為概念對齊後的直接 root，必須有明確前置依賴。",
         "- node.title 不得為空；若原本會是 None，改寫成 <=10 個中文漢字標題句（不可截斷）。",
         "- 不得提 agent/persona/assignment/指派。",
         "- 僅輸出兩段 code block：GraphDefinition JSON + Mermaid。",
@@ -313,6 +367,72 @@ def _normalize_available_skills(available_skills: list[dict[str, Any]] | None) -
     return result
 
 
+def _semantic_plan_issues(graph: GraphDefinition) -> list[str]:
+    task_nodes = [node for node in graph.nodes if isinstance(node, TaskNode)]
+    issues: list[str] = []
+    if len(task_nodes) > _MAX_TASK_NODES:
+        issues.append(f"TASK 節點過多（{len(task_nodes)} > {_MAX_TASK_NODES}），必須合併成較大的交付步驟。")
+    concept_nodes = [node for node in task_nodes if _is_concept_task(node)]
+    if len(concept_nodes) > 1:
+        issues.append("出現重複的概念對齊/背景調研 TASK，必須只保留 1 個。")
+    planning_nodes = [node for node in task_nodes if node.id != "concept_alignment" and _is_planning_task(node)]
+    if planning_nodes:
+        issues.append("planner 已在圖外完成拆題，graph 內不得再出現 TODO / 任務拆解 / WBS 類 TASK。")
+    spec_cluster_count = sum(1 for node in task_nodes if _is_spec_cluster_task(node))
+    if spec_cluster_count >= 3:
+        issues.append("需求/PRD/架構/視覺/預設參數被切成過多獨立 TASK，必須合併為同一設計階段節點。")
+    incoming_dependencies = _incoming_dependency_count(graph)
+    for node in task_nodes:
+        if node.id == "concept_alignment":
+            continue
+        if _is_packaging_task(node) and incoming_dependencies.get(node.id, 0) == 0:
+            issues.append("打包交付/release 類 TASK 缺少前置依賴，不可作為前段 root。")
+            break
+    return issues
+
+
+def _incoming_dependency_count(graph: GraphDefinition) -> dict[str, int]:
+    incoming = {node.id: 0 for node in graph.nodes}
+    for edge in graph.edges:
+        if edge.edge_type not in {"CONTROL", "DATA"}:
+            continue
+        incoming[edge.to_node] = incoming.get(edge.to_node, 0) + 1
+    return incoming
+
+
+def _normalize_task_text(node: TaskNode) -> str:
+    parts = [
+        node.id,
+        node.title,
+        node.task_spec.display.label if node.task_spec and node.task_spec.display else "",
+        node.task_spec.display.summary if node.task_spec and node.task_spec.display else "",
+        node.task_spec.display.todo_hint if node.task_spec and node.task_spec.display else "",
+        node.task_spec.agent.prompt if node.task_spec and node.task_spec.agent else "",
+        node.task_spec.agent.instructions if node.task_spec and node.task_spec.agent else "",
+    ]
+    return " ".join(str(item or "").strip().lower() for item in parts if str(item or "").strip())
+
+
+def _is_concept_task(node: TaskNode) -> bool:
+    normalized = _normalize_task_text(node)
+    return any(token in normalized for token in _CONCEPT_TASK_TOKENS)
+
+
+def _is_spec_cluster_task(node: TaskNode) -> bool:
+    normalized = _normalize_task_text(node)
+    return any(token in normalized for token in _SPEC_CLUSTER_TOKENS)
+
+
+def _is_packaging_task(node: TaskNode) -> bool:
+    normalized = _normalize_task_text(node)
+    return any(token in normalized for token in _PACKAGING_TOKENS)
+
+
+def _is_planning_task(node: TaskNode) -> bool:
+    normalized = _normalize_task_text(node)
+    return any(token in normalized for token in _PLANNING_TASK_TOKENS)
+
+
 def _minimal_plan(message: str) -> GraphDefinition:
     return GraphDefinition(
         id="planner-fallback",
@@ -352,19 +472,19 @@ def _minimal_plan(message: str) -> GraphDefinition:
             ArtifactNode(id="artifact-concept-summary", title="docs/concept_alignment.md"),
             TaskNode(
                 id="task-1",
-                title="初版規劃",
+                title="任務執行",
                 task_spec=TaskSpec(
                     executor="agent",
                     agent=AgentTaskConfig(
                         prompt=message,
-                        instructions="請延續前置概念對齊結果，產出最小可行 TODO 與交付骨架。",
+                        instructions="請延續前置概念對齊結果，直接完成最小可行交付。",
                     ),
                     artifacts=[ArtifactOutput(name="todo", media_type="text/markdown", description="最小任務清單", required=True)],
                     display=TaskDisplayMetadata(
-                        label="初版規劃",
-                        summary="根據概念摘要切出最小可執行任務骨架。",
-                        todo_hint="產出初版 TODO；標註依賴、輸出與待補資訊。",
-                        tags=["planning", "fallback"],
+                        label="任務執行",
+                        summary="根據概念摘要直接完成最小可行交付。",
+                        todo_hint="完成最小交付，並標註依賴、輸出與待補資訊。",
+                        tags=["execution", "fallback"],
                     ),
                     runnable=True,
                 ),

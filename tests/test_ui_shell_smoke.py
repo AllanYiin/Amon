@@ -68,6 +68,7 @@ class UIShellSmokeTests(unittest.TestCase):
         self.assertIn('id="inspector-artifacts"', html)
         self.assertIn('graph: "graph"', shell_js)
         self.assertIn('ctx.services.graph.listRuns', graph_view_js)
+        self.assertIn('const sortedNodes = [...viewModel.nodes].sort((left, right) => left.order - right.order);', graph_view_js)
 
     def test_project_and_single_pages_redirect_to_index_hash_routes(self) -> None:
         project_html = Path("src/amon/ui/project.html").read_text(encoding="utf-8")
@@ -249,6 +250,16 @@ class UIShellSmokeTests(unittest.TestCase):
             "src/amon/ui/static/js/views/tools.js",
         ]:
             self.assertTrue(Path(module_path).exists(), module_path)
+
+    def test_plan_card_renderers_exist_for_tool_policy_confirmation(self) -> None:
+        bootstrap_js = Path("src/amon/ui/static/js/bootstrap.js").read_text(encoding="utf-8")
+
+        self.assertIn("function formatPlanListItem(item)", bootstrap_js)
+        self.assertIn("function renderPlanList(container, items = [])", bootstrap_js)
+        self.assertIn('emptyItem.textContent = "無";', bootstrap_js)
+        self.assertIn("function renderPlanRisk(plan = {})", bootstrap_js)
+        self.assertIn('renderPlanList(elements.planCommands, plan.commands || []);', bootstrap_js)
+        self.assertIn('renderPlanList(elements.planPatches, plan.graph_patches || []);', bootstrap_js)
 
     def test_project_switch_uses_server_active_thread_and_hydration_token_guard(self) -> None:
         bootstrap_js = Path("src/amon/ui/static/js/bootstrap.js").read_text(encoding="utf-8")

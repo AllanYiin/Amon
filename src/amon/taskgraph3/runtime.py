@@ -415,9 +415,16 @@ class TaskGraph3Runtime:
     def _compile_control_graph(self, edges: list[GraphEdge]) -> tuple[dict[str, list[str]], dict[str, int]]:
         adjacency: dict[str, list[str]] = {node.id: [] for node in self.graph.nodes}
         incoming: dict[str, int] = {node.id: 0 for node in self.graph.nodes}
+        seen_pairs: set[tuple[str, str]] = set()
         for edge in edges:
-            if edge.edge_type != "CONTROL":
+            if edge.status != "active":
                 continue
+            if edge.edge_type not in {"CONTROL", "DATA"}:
+                continue
+            pair = (edge.from_node, edge.to_node)
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
             adjacency[edge.from_node].append(edge.to_node)
             incoming[edge.to_node] += 1
         return adjacency, incoming

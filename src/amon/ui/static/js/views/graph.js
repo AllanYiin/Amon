@@ -690,6 +690,7 @@ export const GRAPH_VIEW = {
       codeEl.textContent = formatJson(viewModel.graph || {});
       listEl.innerHTML = "";
       local.listNodeEls.clear();
+      const sortedNodes = [...viewModel.nodes].sort((left, right) => left.order - right.order);
 
       if (!viewModel.nodes.length) {
         listEl.innerHTML = '<li><p class="graph-empty-state">目前沒有可顯示的節點資料。</p></li>';
@@ -701,7 +702,7 @@ export const GRAPH_VIEW = {
         return;
       }
 
-      viewModel.nodes.forEach((nodeVm) => {
+      sortedNodes.forEach((nodeVm) => {
         const li = document.createElement("li");
         li.className = "graph-node-item";
         const btn = document.createElement("button");

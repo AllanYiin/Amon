@@ -66,7 +66,7 @@ from .taskgraph3.payloads import (
     task_spec_from_payload,
 )
 from .taskgraph3.runtime import TaskGraph3RunResult, TaskGraph3Runtime
-from .taskgraph3.schema import ArtifactNode, GateNode, GateRoute, GraphDefinition, GraphEdge, GroupNode, TaskNode
+from .taskgraph3.schema import ArtifactNode, BaseNode, GateNode, GateRoute, GraphDefinition, GraphEdge, GroupNode, TaskNode
 from .taskgraph3.serialize import dumps_graph_definition
 from .taskgraph3.validate import graph_definition_from_payload
 from .sandbox.service import run_sandbox_step
@@ -1216,10 +1216,10 @@ class AmonCore:
             f"  - Goal: 先釐清「{concept_text}」的定義、邊界與常見歧義，再開始詳細規劃。",
             "  - Skill: concept-alignment",
             "  - DoD: 產出關鍵概念、查詢方向、資料可信度與後續規劃注意事項。",
-            "- [ ] taskgraph_outline 任務骨架與依賴切分",
-            "  - Goal: 先切出主要任務節點、順序與完成條件。",
-            "  - Skill: problem-decomposer",
-            "  - DoD: 每個節點都有目標、DoD、工具範圍與必要輸出。",
+            "- [ ] planner_graph_design 規劃器產生執行圖",
+            "  - Goal: 由 planner 直接切出執行節點、依賴與交付物定義。",
+            "  - Skill: planner-internal",
+            "  - DoD: graph 內只留下可執行節點，不再包含任務拆解類 task。",
             "- [ ] taskgraph_detail TaskGraph v3 詳細設計",
             "  - Goal: 補全節點 prompt、可用工具、邊與執行順序。",
             "  - DoD: 產出可執行的 taskgraph.v3 JSON。",
@@ -1338,60 +1338,21 @@ class AmonCore:
         tool_names = {str(item.get("name") or "") for item in available_tools if str(item.get("name") or "").strip()}
         nodes = list(graph.nodes)
         edges = list(graph.edges)
-        incoming_control: dict[str, int] = {node.id: 0 for node in nodes}
-        for edge in edges:
-            if edge.edge_type == "CONTROL":
-                incoming_control[edge.to_node] = incoming_control.get(edge.to_node, 0) + 1
-        root_targets = [
-            node.id
-            for node in nodes
-            if node.id != "concept_alignment"
-            and node.node_type in {"TASK", "GATE", "GROUP"}
-            and incoming_control.get(node.id, 0) == 0
-        ]
-        if not any(node.id == "concept_alignment" for node in nodes):
-            keywords = self._extract_planning_keywords(message, limit=5)
-            keyword_text = "、".join(keywords) if keywords else "任務目標、限制條件、輸出格式"
-            concept_tools = [name for name in ("web.better_search", "web.search", "web.fetch") if name in tool_names]
-            nodes.insert(
-                0,
-                TaskNode(
-                    id="concept_alignment",
-                    title="概念對齊",
-                    task_spec=TaskSpec(
-                        executor="agent",
-                        agent=AgentTaskConfig(
-                            prompt=(
-                                "請先做概念對齊。"
-                                f"先抽取任務中的關鍵概念：{keyword_text}。"
-                                "請用關鍵字策略先搜尋並整理：名詞定義、範圍邊界、易混淆點、目前版本差異、"
-                                "接下來規劃 TaskGraph 時應注意的限制。"
-                                "若資料不足，請明確標記限制與待補證據。"
-                            ),
-                            instructions="輸出請使用繁體中文，並先給概念摘要，再給規劃注意事項。",
-                            allowed_tools=concept_tools,
-                        ),
-                        display=TaskDisplayMetadata(
-                            label="概念對齊",
-                            summary="先查證關鍵概念與限制，避免後續節點設計偏題。",
-                            todo_hint="完成關鍵概念、風險與查詢摘要。",
-                            tags=["concept_alignment", "research"],
-                        ),
-                    ),
-                ),
-            )
-            for target_id in root_targets:
-                edges.append(GraphEdge(from_node="concept_alignment", to_node=target_id, edge_type="CONTROL", kind="DEPENDS_ON"))
+        nodes, edges = self._deduplicate_concept_tasks(nodes, edges)
+        nodes, edges = self._ensure_concept_alignment_task(
+            nodes,
+            edges,
+            message=message,
+            tool_names=tool_names,
+        )
+        edges = self._stabilize_root_sequence(nodes, edges)
         control_predecessors = self._build_control_predecessors(edges)
-        problem_decomposer_bound = False
         for node in nodes:
             if not isinstance(node, TaskNode) or node.task_spec.executor != "agent" or node.task_spec.agent is None:
                 continue
             if node.id == "concept_alignment":
                 self._bind_agent_skills(node, "concept-alignment")
-            elif not problem_decomposer_bound and self._is_todo_planning_task(node):
-                self._bind_agent_skills(node, "problem-decomposer")
-                problem_decomposer_bound = True
+            self._apply_planner_node_focus(node)
             if node.id != "concept_alignment":
                 binding_spec = self._select_planner_context_binding(node.id, control_predecessors)
                 if binding_spec is not None:
@@ -1472,6 +1433,210 @@ class AmonCore:
         return merged
 
     @staticmethod
+    def _planner_text_tokens(node: TaskNode) -> str:
+        agent = node.task_spec.agent
+        return unicodedata.normalize(
+            "NFKC",
+            " ".join(
+                filter(
+                    None,
+                    [
+                        node.id,
+                        node.title,
+                        node.task_spec.display.label if node.task_spec.display else "",
+                        node.task_spec.display.summary if node.task_spec.display else "",
+                        node.task_spec.display.todo_hint if node.task_spec.display else "",
+                        agent.prompt if agent else "",
+                        agent.instructions if agent else "",
+                    ],
+                )
+            ),
+        ).lower()
+
+    def _is_concept_alignment_like_task(self, node: TaskNode) -> bool:
+        normalized = self._planner_text_tokens(node)
+        tokens = {"concept_alignment", "concept alignment", "概念對齊"}
+        return any(token in normalized for token in tokens)
+
+    def _deduplicate_concept_tasks(
+        self,
+        nodes: list[BaseNode],
+        edges: list[GraphEdge],
+    ) -> tuple[list[BaseNode], list[GraphEdge]]:
+        concept_nodes = [
+            node for node in nodes if isinstance(node, TaskNode) and self._is_concept_alignment_like_task(node)
+        ]
+        if len(concept_nodes) <= 1:
+            return nodes, edges
+        primary_id = "concept_alignment" if any(node.id == "concept_alignment" for node in concept_nodes) else concept_nodes[0].id
+        duplicate_ids = {node.id for node in concept_nodes if node.id != primary_id}
+        if not duplicate_ids:
+            return nodes, edges
+        retained_nodes = [node for node in nodes if node.id not in duplicate_ids]
+        retained_edges: list[GraphEdge] = []
+        seen_edges: set[tuple[str, str, str, str]] = set()
+
+        def _push_edge(candidate: GraphEdge) -> None:
+            signature = (candidate.from_node, candidate.to_node, candidate.edge_type, candidate.kind)
+            if candidate.from_node == candidate.to_node or signature in seen_edges:
+                return
+            seen_edges.add(signature)
+            retained_edges.append(candidate)
+
+        control_preds: dict[str, list[str]] = {}
+        control_succs: dict[str, list[str]] = {}
+        for edge in edges:
+            if edge.edge_type == "CONTROL":
+                if edge.to_node in duplicate_ids and edge.from_node not in duplicate_ids:
+                    control_preds.setdefault(edge.to_node, []).append(edge.from_node)
+                if edge.from_node in duplicate_ids and edge.to_node not in duplicate_ids:
+                    control_succs.setdefault(edge.from_node, []).append(edge.to_node)
+
+        for edge in edges:
+            if edge.from_node in duplicate_ids or edge.to_node in duplicate_ids:
+                if edge.edge_type == "DATA" and edge.from_node in duplicate_ids and edge.to_node not in duplicate_ids:
+                    replacement = GraphEdge(
+                        from_node=primary_id,
+                        to_node=edge.to_node,
+                        edge_type=edge.edge_type,
+                        kind=edge.kind,
+                        label=edge.label,
+                        status=edge.status,
+                        source_port_key=edge.source_port_key,
+                        target_port_key=edge.target_port_key,
+                        condition=edge.condition,
+                        mappings=list(edge.mappings),
+                        priority=edge.priority,
+                        metadata=edge.metadata,
+                    )
+                    _push_edge(replacement)
+                continue
+            _push_edge(edge)
+
+        for duplicate_id in sorted(duplicate_ids):
+            predecessors = control_preds.get(duplicate_id) or [primary_id]
+            successors = control_succs.get(duplicate_id) or []
+            if not successors:
+                continue
+            for predecessor in predecessors:
+                for successor in successors:
+                    _push_edge(
+                        GraphEdge(
+                            from_node=predecessor,
+                            to_node=successor,
+                            edge_type="CONTROL",
+                            kind="DEPENDS_ON",
+                        )
+                    )
+        return retained_nodes, retained_edges
+
+    def _ensure_concept_alignment_task(
+        self,
+        nodes: list[BaseNode],
+        edges: list[GraphEdge],
+        *,
+        message: str,
+        tool_names: set[str],
+    ) -> tuple[list[BaseNode], list[GraphEdge]]:
+        if any(node.id == "concept_alignment" for node in nodes):
+            return nodes, edges
+        keywords = self._extract_planning_keywords(message, limit=5)
+        keyword_text = "、".join(keywords) if keywords else "任務目標、限制條件、輸出格式"
+        concept_tools = [name for name in ("web.better_search", "web.search", "web.fetch") if name in tool_names]
+        concept_node = TaskNode(
+            id="concept_alignment",
+            title="概念對齊",
+            task_spec=TaskSpec(
+                executor="agent",
+                agent=AgentTaskConfig(
+                    prompt=(
+                        "請先做概念對齊。"
+                        f"先抽取任務中的關鍵概念：{keyword_text}。"
+                        "請用關鍵字策略先搜尋並整理：名詞定義、範圍邊界、易混淆點、目前版本差異、"
+                        "接下來規劃 TaskGraph 時應注意的限制。"
+                        "若資料不足，請明確標記限制與待補證據。"
+                    ),
+                    instructions="輸出請使用繁體中文，並先給概念摘要，再給規劃注意事項。",
+                    allowed_tools=concept_tools,
+                ),
+                display=TaskDisplayMetadata(
+                    label="概念對齊",
+                    summary="先查證關鍵概念與限制，避免後續節點設計偏題。",
+                    todo_hint="完成關鍵概念、風險與查詢摘要。",
+                    tags=["concept_alignment", "research"],
+                ),
+            ),
+        )
+        return [concept_node, *nodes], edges
+
+    @staticmethod
+    def _dependency_incoming_counts(nodes: list[BaseNode], edges: list[GraphEdge]) -> dict[str, int]:
+        incoming = {node.id: 0 for node in nodes}
+        for edge in edges:
+            if edge.edge_type not in {"CONTROL", "DATA"}:
+                continue
+            incoming[edge.to_node] = incoming.get(edge.to_node, 0) + 1
+        return incoming
+
+    def _stabilize_root_sequence(self, nodes: list[BaseNode], edges: list[GraphEdge]) -> list[GraphEdge]:
+        executable_ids = [
+            node.id for node in nodes if node.id != "concept_alignment" and node.node_type in {"TASK", "GATE", "GROUP"}
+        ]
+        if not executable_ids:
+            return edges
+        incoming = self._dependency_incoming_counts(nodes, edges)
+        root_ids = [node_id for node_id in executable_ids if incoming.get(node_id, 0) == 0]
+        if not root_ids:
+            return edges
+        seen_pairs = {
+            (edge.from_node, edge.to_node)
+            for edge in edges
+            if edge.edge_type == "CONTROL"
+        }
+        stabilized = list(edges)
+        previous_id = "concept_alignment" if any(node.id == "concept_alignment" for node in nodes) else None
+        for root_id in root_ids:
+            if previous_id and previous_id != root_id and (previous_id, root_id) not in seen_pairs:
+                stabilized.append(
+                    GraphEdge(
+                        from_node=previous_id,
+                        to_node=root_id,
+                        edge_type="CONTROL",
+                        kind="DEPENDS_ON",
+                    )
+                )
+                seen_pairs.add((previous_id, root_id))
+            previous_id = root_id
+        return stabilized
+
+    @staticmethod
+    def _append_agent_system_prompt(agent: AgentTaskConfig, addition: str) -> None:
+        if not addition:
+            return
+        current = str(agent.system_prompt or "").strip()
+        if addition in current:
+            return
+        agent.system_prompt = f"{current}\n\n{addition}".strip() if current else addition
+
+    def _apply_planner_node_focus(self, node: TaskNode) -> None:
+        agent = node.task_spec.agent
+        if agent is None:
+            return
+        if node.id == "concept_alignment":
+            self._append_agent_system_prompt(
+                agent,
+                "[AMON_NODE_MODE=CONCEPT]\n"
+                "你只負責概念對齊與必要查證，不要開始做完整 TODO 分解、架構設計或最終交付。",
+            )
+            return
+        self._append_agent_system_prompt(
+            agent,
+            "[AMON_NODE_MODE=EXECUTION]\n"
+            "你正在執行單一 TaskGraph 節點，不是重新做整體需求訪談、TODO 分解、WBS、PRD 總整理或概念對齊。"
+            "請沿用前置節點提供的摘要與產物，直接完成目前節點的明確交付物。",
+        )
+
+    @staticmethod
     def _bind_agent_skills(node: TaskNode, *skill_names: str) -> None:
         if node.task_spec.agent is None:
             return
@@ -1490,44 +1655,6 @@ class AmonCore:
             node.task_spec.display.tags = tags
 
     @staticmethod
-    def _is_todo_planning_task(node: TaskNode) -> bool:
-        agent = node.task_spec.agent
-        if agent is None:
-            return False
-        normalized = unicodedata.normalize(
-            "NFKC",
-            " ".join(
-                filter(
-                    None,
-                    [
-                        node.id,
-                        node.title,
-                        node.task_spec.display.label if node.task_spec.display else "",
-                        node.task_spec.display.summary if node.task_spec.display else "",
-                        node.task_spec.display.todo_hint if node.task_spec.display else "",
-                        agent.prompt or "",
-                        agent.instructions or "",
-                    ],
-                )
-            ),
-        ).lower()
-        strong_tokens = {
-            "taskgraph_outline",
-            "todo",
-            "todolist",
-            "待辦",
-            "骨架",
-            "拆解",
-            "分解",
-            "依賴",
-            "wbs",
-            "issue tree",
-            "problem decomposition",
-            "problem-decomposer",
-        }
-        return any(token in normalized for token in strong_tokens)
-
-    @staticmethod
     def _task_skill_names(node: TaskNode) -> list[str]:
         if node.task_spec.agent is not None:
             return [name for name in node.task_spec.agent.skills if str(name).strip()]
@@ -1539,7 +1666,7 @@ class AmonCore:
     def _build_control_predecessors(edges: list[GraphEdge]) -> dict[str, list[str]]:
         predecessors: dict[str, list[str]] = {}
         for edge in edges:
-            if edge.edge_type != "CONTROL":
+            if edge.edge_type not in {"CONTROL", "DATA"}:
                 continue
             predecessors.setdefault(edge.to_node, []).append(edge.from_node)
         return predecessors

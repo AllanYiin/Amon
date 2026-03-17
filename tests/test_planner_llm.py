@@ -73,11 +73,12 @@ class PlannerLLMTests(unittest.TestCase):
         self.assertIn('"toolId": "web.search"', payload)
         self.assertIn('"skillId": "spec-to-tasks"', payload)
         self.assertIn("concept-alignment", payload)
-        self.assertIn("problem-decomposer", payload)
         system_prompt = llm.calls[0][0]["content"]
         self.assertIn("嚴禁輸出任何 agent/persona/assignment", system_prompt)
         self.assertIn("只輸出兩段 code block", system_prompt)
-        self.assertIn("problem-decomposer", system_prompt)
+        self.assertIn("planner 已在圖外完成拆題；graph 內不可再放 TODO / 任務拆解 / task outline / WBS 類節點", system_prompt)
+        self.assertIn("TASK 節點總數不得超過 8", system_prompt)
+        self.assertIn("同一設計階段的需求/PRD/系統架構/架構設計/視覺規格/預設參數要合併", payload)
 
 
 if __name__ == "__main__":

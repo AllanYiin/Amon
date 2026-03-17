@@ -14,6 +14,9 @@ from .schema import TaskNode
 
 
 class AmonNodeRunner:
+    _CONTEXT_HISTORY_LIMIT = 3
+    _CONTEXT_TEXT_LIMIT = 1200
+
     def __init__(
         self,
         *,
@@ -51,7 +54,7 @@ class AmonNodeRunner:
         render_ctx = self._render_context(node, context)
         prompt_template = agent.prompt or agent.instructions or ""
         prompt = Template(prompt_template).safe_substitute(render_ctx)
-        conversation_history = render_ctx.get("conversation_history")
+        conversation_history = self._build_conversation_history(node, render_ctx, context)
         response = self.core.run_agent_task(
             prompt,
             project_path=self.project_path,
@@ -60,7 +63,7 @@ class AmonNodeRunner:
             stream_handler=self.stream_handler,
             skill_names=agent.skills or None,
             allowed_tools=agent.allowed_tools,
-            conversation_history=conversation_history if isinstance(conversation_history, list) else None,
+            conversation_history=conversation_history or None,
             run_id=self.run_id,
             node_id=node.id,
             thread_id=self.thread_id,
@@ -189,3 +192,72 @@ class AmonNodeRunner:
         if isinstance(payload, dict):
             return {key: self._render_payload(value, context) for key, value in payload.items()}
         return payload
+
+    def _build_conversation_history(
+        self,
+        node: TaskNode,
+        render_ctx: dict[str, Any],
+        runtime_context: dict[str, Any],
+    ) -> list[dict[str, str]]:
+        base_history = self._normalize_conversation_history(render_ctx.get("conversation_history"))
+        enriched = list(base_history)
+        seen_messages = {(item["role"], item["content"]) for item in enriched}
+        supplemental: list[dict[str, str]] = []
+
+        if node.id != "concept_alignment":
+            concept_summary = self._resolve_upstream_binding(runtime_context, "concept_alignment", "raw")
+            concept_text = self._normalize_context_excerpt(concept_summary)
+            if concept_text:
+                supplemental.append({"role": "assistant", "content": f"前置概念摘要：\n{concept_text}"})
+
+        for binding in node.task_spec.input_bindings:
+            if binding.source != "upstream" or not binding.from_node:
+                continue
+            source_node = str(binding.from_node)
+            if source_node == "concept_alignment":
+                continue
+            value = self._resolve_upstream_binding(runtime_context, source_node, binding.port or "raw")
+            excerpt = self._normalize_context_excerpt(value)
+            if not excerpt:
+                continue
+            supplemental.append({"role": "assistant", "content": f"前置節點 {source_node} 摘要：\n{excerpt}"})
+
+        for item in supplemental[: self._CONTEXT_HISTORY_LIMIT]:
+            signature = (item["role"], item["content"])
+            if signature in seen_messages:
+                continue
+            seen_messages.add(signature)
+            enriched.append(item)
+        return enriched
+
+    @staticmethod
+    def _normalize_conversation_history(history: Any) -> list[dict[str, str]]:
+        if not isinstance(history, list):
+            return []
+        normalized: list[dict[str, str]] = []
+        for item in history:
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role") or "").strip()
+            content = str(item.get("content") or "").strip()
+            if role not in {"user", "assistant"} or not content:
+                continue
+            normalized.append({"role": role, "content": content})
+        return normalized
+
+    def _normalize_context_excerpt(self, value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, dict):
+            if "raw" in value and isinstance(value.get("raw"), str):
+                text = str(value.get("raw") or "")
+            else:
+                text = json.dumps(value, ensure_ascii=False, indent=2)
+        elif isinstance(value, list):
+            text = json.dumps(value, ensure_ascii=False, indent=2)
+        else:
+            text = str(value)
+        cleaned = " ".join(text.split()).strip()
+        if len(cleaned) <= self._CONTEXT_TEXT_LIMIT:
+            return cleaned
+        return f"{cleaned[: self._CONTEXT_TEXT_LIMIT].rstrip()}…"
