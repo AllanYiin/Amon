@@ -1921,12 +1921,11 @@ class AmonCore:
     ) -> Path:
         graphs_dir = project_path / ".amon" / "graphs"
         graphs_dir.mkdir(parents=True, exist_ok=True)
-        resolved = {
-            "version": "taskgraph.v3",
-            "nodes": graph.get("nodes", []),
-            "edges": graph.get("edges", []),
-            "variables": variables,
-        }
+        resolved = dict(graph)
+        resolved["version"] = "taskgraph.v3"
+        resolved["nodes"] = graph.get("nodes", [])
+        resolved["edges"] = graph.get("edges", [])
+        resolved["variables"] = variables
         graph_path = graphs_dir / f"{mode}_graph.resolved.json"
         atomic_write_text(graph_path, json.dumps(resolved, ensure_ascii=False, indent=2))
         return graph_path

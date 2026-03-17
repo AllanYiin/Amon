@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from amon.core import AmonCore
 from amon.taskgraph3.payloads import AgentTaskConfig, TaskDisplayMetadata, TaskSpec
+from amon.taskgraph3.serialize import dumps_graph_definition
 from amon.taskgraph3.schema import ArtifactNode, GraphDefinition, GraphEdge, TaskNode
 
 
@@ -96,6 +97,37 @@ class CorePlanGenerationTests(unittest.TestCase):
             shutil.rmtree(core.data_dir, ignore_errors=True)
         self.assertIn("  - Skill: concept-alignment", todo)
         self.assertIn("  - Skill: problem-decomposer", todo)
+
+    def test_write_graph_resolved_preserves_graph_id_for_taskgraph_v3(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            core = AmonCore(data_dir=Path(temp_dir))
+            project_path = Path(temp_dir) / "project"
+            project_path.mkdir(parents=True, exist_ok=True)
+            plan = GraphDefinition(
+                id="planner-fallback",
+                version="taskgraph.v3",
+                nodes=[
+                    TaskNode(
+                        id="concept_alignment",
+                        title="概念對齊",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="先做概念對齊"),
+                            display=TaskDisplayMetadata(label="概念對齊", summary="summary", todo_hint="dod"),
+                        ),
+                    )
+                ],
+                edges=[],
+            )
+            payload = json.loads(dumps_graph_definition(plan))
+
+            graph_path = core._write_graph_resolved(project_path, payload, {}, mode="taskgraph.v3")
+
+            resolved_payload = json.loads(graph_path.read_text(encoding="utf-8"))
+            self.assertEqual(resolved_payload.get("id"), "planner-fallback")
+            resolved_graph = core._to_taskgraph3_definition(resolved_payload)
+            self.assertEqual(resolved_graph.id, "planner-fallback")
+            self.assertEqual(resolved_graph.nodes[0].graph_id, "planner-fallback")
 
 
 if __name__ == "__main__":
