@@ -1473,7 +1473,7 @@ class AmonCore:
 
     def _is_concept_alignment_like_task(self, node: TaskNode) -> bool:
         normalized = self._planner_identity_tokens(node)
-        tokens = {"concept_alignment", "concept alignment", "概念對齊"}
+        tokens = {"concept_alignment", "concept alignment", "概念對齊", "背景調研", "背景研究", "背景知識", "background research"}
         return any(token in normalized for token in tokens)
 
     def _is_spec_cluster_like_task(self, node: TaskNode) -> bool:
@@ -1563,6 +1563,39 @@ class AmonCore:
     ) -> tuple[list[BaseNode], list[GraphEdge]]:
         if any(node.id == "concept_alignment" for node in nodes):
             return nodes, edges
+        existing_concept = next(
+            (node for node in nodes if isinstance(node, TaskNode) and self._is_concept_alignment_like_task(node)),
+            None,
+        )
+        if existing_concept is not None:
+            previous_id = existing_concept.id
+            existing_concept.id = "concept_alignment"
+            existing_concept.title = "概念對齊"
+            existing_concept.task_spec.display.label = "概念對齊"
+            if not str(existing_concept.task_spec.display.summary or "").strip():
+                existing_concept.task_spec.display.summary = "先查證關鍵概念與限制，避免後續節點設計偏題。"
+            if not str(existing_concept.task_spec.display.todo_hint or "").strip():
+                existing_concept.task_spec.display.todo_hint = "完成關鍵概念、風險與查詢摘要。"
+            if existing_concept.task_spec.agent is not None:
+                existing_concept.task_spec.agent.instructions = self._merge_unique_text_segments(
+                    "輸出請先完成概念對齊，再把摘要提供給下游節點。",
+                    existing_concept.task_spec.agent.instructions or "",
+                )
+            rewritten_edges = [
+                self._clone_edge_with_nodes(
+                    edge,
+                    from_node="concept_alignment" if edge.from_node == previous_id else edge.from_node,
+                    to_node="concept_alignment" if edge.to_node == previous_id else edge.to_node,
+                )
+                for edge in edges
+            ]
+            for node in nodes:
+                if not isinstance(node, TaskNode):
+                    continue
+                for binding in node.task_spec.input_bindings:
+                    if binding.from_node == previous_id:
+                        binding.from_node = "concept_alignment"
+            return nodes, rewritten_edges
         keywords = self._extract_planning_keywords(message, limit=5)
         keyword_text = "、".join(keywords) if keywords else "任務目標、限制條件、輸出格式"
         concept_tools = [name for name in ("web.better_search", "web.search", "web.fetch") if name in tool_names]

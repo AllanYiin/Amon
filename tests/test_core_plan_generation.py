@@ -263,6 +263,47 @@ class CorePlanGenerationTests(unittest.TestCase):
         self.assertIn(("concept_alignment", "requirements"), control_pairs)
         self.assertIn(("requirements", "packaging"), control_pairs)
 
+    def test_postprocess_planner_graph_promotes_existing_background_research_task(self) -> None:
+        core = AmonCore(data_dir=Path(tempfile.mkdtemp()))
+        try:
+            graph = GraphDefinition(
+                version="taskgraph.v3",
+                nodes=[
+                    TaskNode(
+                        id="background_research",
+                        title="背景調研",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="先整理背景知識"),
+                            display=TaskDisplayMetadata(label="背景調研", summary="先查背景", todo_hint="完成背景摘要"),
+                        ),
+                    ),
+                    TaskNode(
+                        id="writer",
+                        title="內容產出",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="開始產出"),
+                            display=TaskDisplayMetadata(label="內容產出", summary="輸出內容", todo_hint="完成產出"),
+                        ),
+                    ),
+                ],
+                edges=[GraphEdge(from_node="background_research", to_node="writer", edge_type="CONTROL", kind="DEPENDS_ON")],
+            )
+
+            processed = core._postprocess_planner_graph(graph, message="請規劃交付流程", available_tools=[{"name": "web.search"}])
+        finally:
+            shutil.rmtree(core.data_dir, ignore_errors=True)
+
+        task_ids = [node.id for node in processed.nodes if isinstance(node, TaskNode)]
+        self.assertEqual(task_ids, ["concept_alignment", "writer"])
+        control_pairs = {
+            (edge.from_node, edge.to_node)
+            for edge in processed.edges
+            if edge.edge_type == "CONTROL"
+        }
+        self.assertIn(("concept_alignment", "writer"), control_pairs)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -23,7 +23,15 @@ logger = logging.getLogger(__name__)
 _CODE_BLOCK_RE = re.compile(r"```(?P<lang>[^\n`]*)\n(?P<content>.*?)```", re.DOTALL)
 _MAX_TASK_NODES = 8
 _PREFERRED_TASK_NODES = "4-6"
-_CONCEPT_TASK_TOKENS = ("concept_alignment", "concept alignment", "概念對齊")
+_CONCEPT_TASK_TOKENS = (
+    "concept_alignment",
+    "concept alignment",
+    "概念對齊",
+    "背景調研",
+    "背景研究",
+    "背景知識",
+    "background research",
+)
 _SPEC_CLUSTER_TOKENS = (
     "requirements",
     "需求",
@@ -231,7 +239,7 @@ def _planner_system_prompt(*, is_repair: bool) -> str:
             "1. ```json ...```：可被 Amon TaskGraph v3 parser/validator 接受的 GraphDefinition JSON\n"
             "2. ```mermaid ...```：與 JSON 對應的 Mermaid flowchart\n\n"
             "硬性規則：\n"
-            "- 第 1 個 TASK 必須是「概念對齊」。\n"
+            "- TASK 節點列表索引 0 的第一個 TASK 必須是「概念對齊」。\n"
             "- 「概念對齊」節點的 PRIMARY skillBindings 必須包含 concept-alignment。\n"
             "- planner 已經在圖外完成任務拆解；GraphDefinition 內不得再出現 TODO / 任務拆解 / task outline / WBS 類 TASK。\n"
             "- 後續不得重複同質概念調研節點。\n"
@@ -256,7 +264,7 @@ def _planner_system_prompt(*, is_repair: bool) -> str:
         "- 嚴禁輸出任何 agent/persona/assignment/指派/審查團等內容；也不要填 owner。\n"
         "- 輸出 JSON 必須可通過 Pydantic GraphDefinition 驗證：extra=\"forbid\"、所有 id 必須唯一、邊與 children 引用必須存在。\n\n"
         "固定第一步（硬性）：\n"
-        "- 第 1 個 TASK 節點永遠是：title=\"概念對齊\"\n"
+        "- TASK 節點列表中的第 0 個節點永遠是：title=\"概念對齊\"\n"
         "- 內容：上網查詢關鍵概念定義、背景知識、常見作法/風險、關鍵名詞對照。\n"
         "- 此節點的 PRIMARY skillBindings 必須包含 concept-alignment。\n"
         "- planner 已在圖外完成拆題；graph 內不可再放 TODO / 任務拆解 / task outline / WBS 類節點。\n"
@@ -325,7 +333,7 @@ def _planner_user_prompt(
         tools_json,
         "",
         "輸出要求（重申）：",
-        "- 第 1 個 TASK 必須是「概念對齊」，且使用 web/search 類工具做概念查詢。",
+        "- TASK 節點列表索引 0 的第一個 TASK 必須是「概念對齊」，且使用 web/search 類工具做概念查詢。",
         "- 「概念對齊」節點的 PRIMARY skillBindings 必須包含 concept-alignment。",
         "- planner 已在圖外完成拆題；graph 內不得再出現 TODO / 任務拆解 / task outline / WBS 類 TASK。",
         "- 後續不得再出現同質概念調研節點。",
