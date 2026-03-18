@@ -4,6 +4,7 @@ import { createStore } from "./state.js";
 import { applyI18n, t } from "./i18n.js";
 import { createToastManager } from "./ui/toast.js";
 import { createConfirmModal } from "./ui/modal.js";
+import { runBootstrapInitialization } from "./core/bootstrapInit.js";
 import { createInitialUiState } from "./store/app_state.js";
 import { collectElements } from "./store/elements.js";
 import { readStorage, writeStorage, removeStorage } from "./domain/storage.js";
@@ -3335,21 +3336,19 @@ appStore.patch({ bootstrappedAt: Date.now() });
       });
 
       (async () => {
-        try {
-          await loadProjects();
-          setProjectState(state.projectId);
-          await refreshUiPreferences(state.projectId);
-          updateThinking({ status: "idle", brief: "待命中；送出訊息後會顯示 Thinking、Plan 與工具事件" });
-          await hydrateSelectedProject();
-          const routeKey = resolveRouteFromHash();
-          if (!window.location.hash) {
-            navigateToRoute(routeKey);
-          } else {
-            await applyRoute(routeKey);
-          }
-        } catch (error) {
-          showToast(`初始化失敗：${error.message}`);
-        }
+        await runBootstrapInitialization({
+          loadProjects,
+          setProjectState,
+          refreshUiPreferences,
+          updateThinking,
+          hydrateSelectedProject,
+          resolveRouteFromHash,
+          navigateToRoute,
+          applyRoute,
+          showToast,
+          getProjectId: () => state.projectId,
+          hasLocationHash: () => Boolean(window.location.hash),
+        });
       })();
 
 registerGlobalErrorHandlers();
