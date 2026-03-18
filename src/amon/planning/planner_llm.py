@@ -236,8 +236,7 @@ def _planner_system_prompt(*, is_repair: bool) -> str:
             "你是「TaskGraph v3 Planner 修復器」。\n"
             "你只做任務拆解與圖定義修復，不做 agent/assignment/persona。\n"
             "請根據錯誤原因修正上一版 GraphDefinition，並重新輸出：\n"
-            "1. ```json ...```：可被 Amon TaskGraph v3 parser/validator 接受的 GraphDefinition JSON\n"
-            "2. ```mermaid ...```：與 JSON 對應的 Mermaid flowchart\n\n"
+            "1. ```json ...```：可被 Amon TaskGraph v3 parser/validator 接受的 GraphDefinition JSON\n\n"
             "硬性規則：\n"
             "- TASK 節點列表索引 0 的第一個 TASK 必須是「概念對齊」。\n"
             "- 「概念對齊」節點的 PRIMARY skillBindings 必須包含 concept-alignment。\n"
@@ -248,17 +247,18 @@ def _planner_system_prompt(*, is_repair: bool) -> str:
             "- 打包交付 / release / bundle / 驗收只能出現在後段，必須帶明確前置依賴，不可成為概念對齊之後的直接 root。\n"
             "- 後續執行節點只負責完成當前交付，不可把整體問題再拆解一次，也不可重做概念對齊。\n"
             "- node.title 不得為空；若原本會是 None/空白，必須重寫成 <=10 個中文漢字的完整標題。\n"
+            "- CONTROL 邊的方向必須是「前置節點 -> 依賴它的節點」，例如 concept_alignment -> design。\n"
+            "- DATA/PRODUCES 必須是「產生者 -> artifact」；DATA/CONSUMES 必須是「artifact -> 使用它的節點」。\n"
             "- 嚴禁輸出任何 agent/persona/assignment/owner。\n"
             "- 壞例子：概念對齊 -> 背景調研 -> 需求規格 -> PRD -> 架構設計 -> 視覺規格 -> 預設參數 -> 打包交付。\n"
             "- 好例子：概念對齊 -> 設計定義（需求/PRD/架構/視覺/預設參數合併） -> 原型實作/內容產出 -> 打包交付。\n"
-            "- 除這兩段 code block 外不得輸出其他文字。\n"
+            "- UI 不使用 Mermaid；不要輸出 Mermaid，也不要輸出任何 JSON 之外的補充文字。\n"
         )
     return (
         "# System Prompt - TaskGraph v3 Planner（只做任務拆解與圖定義；不做 agent/assignment）\n\n"
         "你是「TaskGraph v3 Planner」。\n"
         "目標：把使用者任務拆解成 TODO 子任務，並輸出可執行的 TaskGraph v3 圖定義：\n"
-        "(1) GraphDefinition JSON\n"
-        "(2) 對應 Mermaid flowchart\n\n"
+        "(1) GraphDefinition JSON\n\n"
         "範圍限制（硬性）：\n"
         "- 你只做「任務/步驟」規劃與 skill/tool 選擇。\n"
         "- 嚴禁輸出任何 agent/persona/assignment/指派/審查團等內容；也不要填 owner。\n"
@@ -286,18 +286,17 @@ def _planner_system_prompt(*, is_repair: bool) -> str:
         "- ExecutionMode：SINGLE | PARALLEL_MAP | RECURSIVE\n\n"
         "規劃準則（planner 決策規則）：\n"
         "- 節點粒度是子任務，不是功能清單或單一工具操作。\n"
-        "- 用 DEPENDS_ON 建立主要依賴；只有真的需要分支時才使用 GATE + ROUTE。\n"
+        "- 用 DEPENDS_ON 建立主要依賴；CONTROL 邊方向固定是「前置節點 -> 依賴它的節點」，例如 concept_alignment -> 設計定義；只有真的需要分支時才使用 GATE + ROUTE。\n"
         "- 每個 TASK 至少要有 objective + definitionOfDone（>=2 條）+ 主要 skillBindings（PRIMARY）。\n"
-        "- 若產出需要被下游使用，優先建立 ARTIFACT node 與 PRODUCES/CONSUMES，或用 MAPS 明確傳遞 vars/ports。\n"
+        "- 若產出需要被下游使用，優先建立 ARTIFACT node；DATA/PRODUCES 方向固定是「產生者 -> artifact」，DATA/CONSUMES 方向固定是「artifact -> 使用它的節點」，或用 MAPS 明確傳遞 vars/ports。\n"
         "- 只有在真的有外部呼叫量、事件量或即時性需求時才設定 rateLimit/streamLimit。\n\n"
         "正反例（硬性參考）：\n"
         "- 壞例子：概念對齊 -> 背景調研 -> 需求規格 -> PRD -> 架構設計 -> 視覺規格 -> 預設參數 -> 打包交付。\n"
         "- 好例子：概念對齊 -> 設計定義（把需求/PRD/架構/視覺/預設參數合併成同一節點） -> 實作/內容產出 -> 打包交付。\n\n"
         "輸出格式（硬性，違者視為失敗）：\n"
-        "- 只輸出兩段 code block：\n"
+        "- 只輸出一段 code block：\n"
         "  1) ```json ...```：GraphDefinition（純 JSON、無註解、雙引號）\n"
-        "  2) ```mermaid ...```：對應 Mermaid flowchart\n"
-        "- 除這兩段外不得輸出任何其他文字。\n"
+        "- UI 不使用 Mermaid；不要輸出 Mermaid，也不要輸出任何其他文字。\n"
     )
 
 
@@ -342,8 +341,10 @@ def _planner_user_prompt(
         "- 後續 TASK 只執行本節點交付，不可重做整體拆題或概念對齊。",
         "- 打包交付 / release / bundle / 驗收不得成為概念對齊後的直接 root，必須有明確前置依賴。",
         "- node.title 不得為空；若原本會是 None，改寫成 <=10 個中文漢字標題句（不可截斷）。",
+        "- CONTROL/DEPENDS_ON 的方向固定是前置節點 -> 依賴它的節點，例如 concept_alignment -> design。",
+        "- DATA/PRODUCES 的方向固定是產生者 -> artifact；DATA/CONSUMES 的方向固定是 artifact -> 使用它的節點。",
         "- 不得提 agent/persona/assignment/指派。",
-        "- 僅輸出兩段 code block：GraphDefinition JSON + Mermaid。",
+        "- 僅輸出一段 json code block；不要輸出 Mermaid。",
     ]
     if repair_error:
         sections.extend(

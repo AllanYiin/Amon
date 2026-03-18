@@ -46,6 +46,7 @@ from .logging_utils import setup_logger
 from .llm_request_log import append_llm_request, build_llm_request_payload
 from .mcp_client import MCPClientError, MCPServerConfig, MCPStdioClient
 from .planning import generate_plan_with_llm, semantic_plan_issues
+from .planning.planner_llm import _minimal_plan
 from .models import (
     ProviderError,
     build_provider,
@@ -66,7 +67,7 @@ from .taskgraph3.payloads import (
     task_spec_from_payload,
 )
 from .taskgraph3.runtime import TaskGraph3RunResult, TaskGraph3Runtime
-from .taskgraph3.schema import ArtifactNode, BaseNode, GateNode, GateRoute, GraphDefinition, GraphEdge, GroupNode, TaskNode
+from .taskgraph3.schema import ArtifactNode, BaseNode, GateNode, GateRoute, GraphDefinition, GraphEdge, GroupNode, TaskNode, validate_graph_definition
 from .taskgraph3.serialize import dumps_graph_definition
 from .taskgraph3.validate import graph_definition_from_payload
 from .sandbox.service import run_sandbox_step
@@ -1150,13 +1151,31 @@ class AmonCore:
             thread_id=thread_id,
             request_id=request_id,
         )
-        plan = self._postprocess_planner_graph(plan, message=message, available_tools=planning_tools)
-        postprocess_issues = semantic_plan_issues(plan)
-        if postprocess_issues:
-            raise ValueError("planner 後處理後仍不合法：" + "; ".join(postprocess_issues))
+        try:
+            plan = self._postprocess_planner_graph(plan, message=message, available_tools=planning_tools)
+            postprocess_issues = semantic_plan_issues(plan)
+            if postprocess_issues:
+                raise ValueError("planner 後處理後仍不合法：" + "; ".join(postprocess_issues))
+            plan_json = dumps_graph_definition(plan)
+        except ValueError as exc:
+            if "CYCLE_DETECTED" not in str(exc):
+                raise
+            log_event(
+                {
+                    "level": "WARNING",
+                    "event": "planner_postprocess_cycle_fallback",
+                    "project_id": project_id or self.resolve_project_identity(project_path)[0],
+                    "payload": {"objective": message, "reason": str(exc)},
+                }
+            )
+            plan = self._postprocess_planner_graph(
+                _minimal_plan(message),
+                message=message,
+                available_tools=planning_tools,
+            )
+            plan_json = dumps_graph_definition(plan)
         docs_dir = project_path / "docs"
         docs_dir.mkdir(parents=True, exist_ok=True)
-        plan_json = dumps_graph_definition(plan)
         todo_markdown = self._render_todo_markdown_from_v3(plan, objective=message)
 
         plan_path = docs_dir / "plan.json"
@@ -1349,6 +1368,7 @@ class AmonCore:
             tool_names=tool_names,
         )
         nodes, edges = self._merge_spec_cluster_tasks(nodes, edges)
+        edges = self._normalize_planner_edge_directions(nodes, edges)
         nodes, edges = self._promote_concept_alignment_to_entry(nodes, edges)
         edges = self._stabilize_root_sequence(nodes, edges)
         control_predecessors = self._build_control_predecessors(edges)
@@ -1397,7 +1417,7 @@ class AmonCore:
                 ),
                 available_tools,
             )
-        return GraphDefinition(
+        processed = GraphDefinition(
             id=graph.id,
             version=graph.version,
             name=graph.name,
@@ -1413,6 +1433,61 @@ class AmonCore:
             metadata=graph.metadata,
             runtime_capabilities=graph.runtime_capabilities,
         )
+        try:
+            validate_graph_definition(processed)
+            return processed
+        except ValueError as exc:
+            if "CYCLE_DETECTED" not in str(exc):
+                raise
+        repaired_edges = self._linearize_planner_control_edges(processed.nodes, processed.edges)
+        repaired = GraphDefinition(
+            id=graph.id,
+            version=graph.version,
+            name=graph.name,
+            description=graph.description,
+            status=graph.status,
+            created_at=graph.created_at,
+            updated_at=graph.updated_at,
+            created_by=graph.created_by,
+            updated_by=graph.updated_by,
+            entity_version=graph.entity_version,
+            nodes=nodes,
+            edges=repaired_edges,
+            metadata=graph.metadata,
+            runtime_capabilities=graph.runtime_capabilities,
+        )
+        validate_graph_definition(repaired)
+        return repaired
+
+    @staticmethod
+    def _linearize_planner_control_edges(
+        nodes: list[BaseNode],
+        edges: list[GraphEdge],
+    ) -> list[GraphEdge]:
+        preserved: list[GraphEdge] = []
+        seen_pairs: set[tuple[str, str]] = set()
+        for edge in edges:
+            if edge.edge_type == "CONTROL" and edge.kind in {"DEPENDS_ON", "SOFT_DEPENDS"}:
+                continue
+            preserved.append(edge)
+            if edge.edge_type == "CONTROL":
+                seen_pairs.add((edge.from_node, edge.to_node))
+
+        executable_ids = [node.id for node in nodes if node.node_type in {"TASK", "GATE", "GROUP"}]
+        previous_id: str | None = None
+        for node_id in executable_ids:
+            if previous_id and previous_id != node_id and (previous_id, node_id) not in seen_pairs:
+                preserved.append(
+                    GraphEdge(
+                        from_node=previous_id,
+                        to_node=node_id,
+                        edge_type="CONTROL",
+                        kind="DEPENDS_ON",
+                    )
+                )
+                seen_pairs.add((previous_id, node_id))
+            previous_id = node_id
+        return preserved
 
     @staticmethod
     def _planning_default_skill_names() -> list[str]:
@@ -1456,6 +1531,22 @@ class AmonCore:
         ).lower()
 
     @staticmethod
+    def _planner_brief_identity_tokens(node: TaskNode) -> str:
+        return unicodedata.normalize(
+            "NFKC",
+            " ".join(
+                filter(
+                    None,
+                    [
+                        node.id,
+                        node.title,
+                        node.task_spec.display.label if node.task_spec.display else "",
+                    ],
+                )
+            ),
+        ).lower()
+
+    @staticmethod
     def _planner_text_tokens(node: TaskNode) -> str:
         agent = node.task_spec.agent
         return unicodedata.normalize(
@@ -1473,13 +1564,29 @@ class AmonCore:
         ).lower()
 
     def _is_concept_alignment_like_task(self, node: TaskNode) -> bool:
-        normalized = self._planner_identity_tokens(node)
+        normalized = self._planner_brief_identity_tokens(node)
         tokens = {"concept_alignment", "concept alignment", "概念對齊", "背景調研", "背景研究", "背景知識", "background research"}
         return any(token in normalized for token in tokens)
 
     def _is_spec_cluster_like_task(self, node: TaskNode) -> bool:
-        normalized = self._planner_identity_tokens(node)
-        tokens = {"requirements", "需求", "prd", "visual", "視覺", "architecture", "架構", "spec", "規格", "preset", "預設"}
+        normalized = self._planner_brief_identity_tokens(node)
+        tokens = {
+            "requirements",
+            "需求",
+            "prd",
+            "visual",
+            "視覺",
+            "architecture",
+            "架構",
+            "spec",
+            "規格",
+            "preset",
+            "預設",
+            "design",
+            "設計",
+            "definition",
+            "定義",
+        }
         return any(token in normalized for token in tokens)
 
     def _deduplicate_concept_tasks(
@@ -1653,6 +1760,55 @@ class AmonCore:
             if binding.source != "upstream"
         ]
         return nodes, filtered_edges
+
+    @staticmethod
+    def _normalize_planner_edge_directions(
+        nodes: list[BaseNode],
+        edges: list[GraphEdge],
+    ) -> list[GraphEdge]:
+        if not edges:
+            return edges
+
+        node_index = {node.id: index for index, node in enumerate(nodes)}
+        node_map = {node.id: node for node in nodes}
+        dependency_edges = [
+            edge
+            for edge in edges
+            if edge.status == "active"
+            and edge.edge_type == "CONTROL"
+            and edge.kind in {"DEPENDS_ON", "SOFT_DEPENDS"}
+            and edge.from_node in node_index
+            and edge.to_node in node_index
+        ]
+        backward_dependencies = sum(
+            1 for edge in dependency_edges if node_index[edge.from_node] > node_index[edge.to_node]
+        )
+        forward_dependencies = sum(
+            1 for edge in dependency_edges if node_index[edge.from_node] < node_index[edge.to_node]
+        )
+        reverse_control_dependencies = backward_dependencies > forward_dependencies
+
+        normalized: list[GraphEdge] = []
+        for edge in edges:
+            from_node = edge.from_node
+            to_node = edge.to_node
+            source_node = node_map.get(from_node)
+            target_node = node_map.get(to_node)
+
+            if reverse_control_dependencies and edge.edge_type == "CONTROL" and edge.kind in {"DEPENDS_ON", "SOFT_DEPENDS"}:
+                from_node, to_node = to_node, from_node
+            elif edge.edge_type == "DATA" and edge.kind == "CONSUMES":
+                if isinstance(source_node, TaskNode) and isinstance(target_node, ArtifactNode):
+                    from_node, to_node = to_node, from_node
+            elif edge.edge_type == "DATA" and edge.kind == "PRODUCES":
+                if isinstance(source_node, ArtifactNode) and isinstance(target_node, TaskNode):
+                    from_node, to_node = to_node, from_node
+
+            if from_node == edge.from_node and to_node == edge.to_node:
+                normalized.append(edge)
+                continue
+            normalized.append(AmonCore._clone_edge_with_nodes(edge, from_node=from_node, to_node=to_node))
+        return normalized
 
     @staticmethod
     def _merge_unique_text_segments(*segments: str) -> str:

@@ -90,6 +90,60 @@ class CorePlanGenerationTests(unittest.TestCase):
             finally:
                 os.environ.pop("AMON_HOME", None)
 
+    def test_generate_plan_docs_repairs_cycle_before_serialization(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            core = AmonCore(data_dir=Path(temp_dir))
+            record = core.create_project("plan-cycle-fallback")
+            project_path = core.get_project_path(record.project_id)
+            cyclic_plan = GraphDefinition(
+                version="taskgraph.v3",
+                nodes=[
+                    TaskNode(
+                        id="concept_alignment",
+                        title="概念對齊",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="先查概念"),
+                            display=TaskDisplayMetadata(label="概念對齊", summary="查概念", todo_hint="完成概念摘要"),
+                        ),
+                    ),
+                    TaskNode(
+                        id="design",
+                        title="設計定義",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="完成設計"),
+                            display=TaskDisplayMetadata(label="設計定義", summary="完成設計", todo_hint="完成設計"),
+                        ),
+                    ),
+                    TaskNode(
+                        id="implement",
+                        title="核心實作",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="完成實作"),
+                            display=TaskDisplayMetadata(label="核心實作", summary="完成實作", todo_hint="完成實作"),
+                        ),
+                    ),
+                ],
+                edges=[
+                    GraphEdge(from_node="concept_alignment", to_node="design", edge_type="CONTROL", kind="DEPENDS_ON"),
+                    GraphEdge(from_node="design", to_node="implement", edge_type="CONTROL", kind="DEPENDS_ON"),
+                    GraphEdge(from_node="implement", to_node="design", edge_type="CONTROL", kind="DEPENDS_ON"),
+                ],
+            )
+
+            with patch("amon.core.generate_plan_with_llm", return_value=cyclic_plan):
+                plan = core.generate_plan_docs("請為我開發一個3d煙火模擬器", project_path=project_path, project_id=record.project_id)
+
+            validate_graph_definition(plan)
+            control_pairs = [
+                (edge.from_node, edge.to_node)
+                for edge in plan.edges
+                if edge.edge_type == "CONTROL" and edge.kind == "DEPENDS_ON"
+            ]
+            self.assertEqual(control_pairs, [("concept_alignment", "design"), ("design", "implement")])
+
     def test_build_quick_todo_markdown_marks_planner_stage_as_internal(self) -> None:
         core = AmonCore(data_dir=Path(tempfile.mkdtemp()))
         try:
@@ -392,6 +446,240 @@ class CorePlanGenerationTests(unittest.TestCase):
         self.assertIn(("concept_alignment", "writer"), control_pairs)
         self.assertNotIn(("writer", "concept_alignment"), control_pairs)
         self.assertFalse(concept.task_spec.input_bindings)
+
+    def test_postprocess_planner_graph_normalizes_reversed_dependency_edge_directions(self) -> None:
+        core = AmonCore(data_dir=Path(tempfile.mkdtemp()))
+        try:
+            graph = GraphDefinition(
+                version="taskgraph.v3",
+                nodes=[
+                    TaskNode(
+                        id="concept_alignment",
+                        title="概念對齊",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="先查概念"),
+                            display=TaskDisplayMetadata(label="概念對齊", summary="查概念", todo_hint="完成概念摘要"),
+                        ),
+                    ),
+                    TaskNode(
+                        id="design",
+                        title="設計定義",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="整理設計"),
+                            display=TaskDisplayMetadata(label="設計定義", summary="整理設計", todo_hint="完成設計"),
+                        ),
+                    ),
+                    TaskNode(
+                        id="implement",
+                        title="核心實作",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="完成實作"),
+                            display=TaskDisplayMetadata(label="核心實作", summary="完成實作", todo_hint="完成實作"),
+                        ),
+                    ),
+                    ArtifactNode(id="artifact-research", title="調研對齊文"),
+                    ArtifactNode(id="artifact-spec", title="產品技術規格"),
+                ],
+                edges=[
+                    GraphEdge(from_node="design", to_node="concept_alignment", edge_type="CONTROL", kind="DEPENDS_ON"),
+                    GraphEdge(from_node="implement", to_node="design", edge_type="CONTROL", kind="DEPENDS_ON"),
+                    GraphEdge(from_node="concept_alignment", to_node="artifact-research", edge_type="DATA", kind="PRODUCES"),
+                    GraphEdge(from_node="design", to_node="artifact-research", edge_type="DATA", kind="CONSUMES"),
+                    GraphEdge(from_node="design", to_node="artifact-spec", edge_type="DATA", kind="PRODUCES"),
+                    GraphEdge(from_node="implement", to_node="artifact-spec", edge_type="DATA", kind="CONSUMES"),
+                ],
+            )
+
+            processed = core._postprocess_planner_graph(
+                graph,
+                message="請為我開發一個3d煙火模擬器",
+                available_tools=[{"name": "web.search"}],
+            )
+        finally:
+            shutil.rmtree(core.data_dir, ignore_errors=True)
+
+        validate_graph_definition(processed)
+        edges = {(edge.from_node, edge.to_node, edge.edge_type, edge.kind) for edge in processed.edges}
+        self.assertIn(("concept_alignment", "design", "CONTROL", "DEPENDS_ON"), edges)
+        self.assertIn(("design", "implement", "CONTROL", "DEPENDS_ON"), edges)
+        self.assertIn(("artifact-research", "design", "DATA", "CONSUMES"), edges)
+        self.assertIn(("artifact-spec", "implement", "DATA", "CONSUMES"), edges)
+        self.assertNotIn(("design", "concept_alignment", "CONTROL", "DEPENDS_ON"), edges)
+        self.assertNotIn(("implement", "design", "CONTROL", "DEPENDS_ON"), edges)
+
+    def test_postprocess_planner_graph_does_not_merge_execution_tasks_into_spec_cluster(self) -> None:
+        core = AmonCore(data_dir=Path(tempfile.mkdtemp()))
+        try:
+            graph = GraphDefinition(
+                version="taskgraph.v3",
+                nodes=[
+                    TaskNode(
+                        id="concept_alignment",
+                        title="概念對齊",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="先查概念"),
+                            display=TaskDisplayMetadata(label="概念對齊", summary="查概念", todo_hint="完成概念摘要"),
+                        ),
+                    ),
+                    TaskNode(
+                        id="task_design_definition",
+                        title="設計定義",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="完成設計"),
+                            display=TaskDisplayMetadata(
+                                label="設計定義",
+                                summary="產出設計文件與預設參數",
+                                todo_hint="完成設計稿",
+                            ),
+                        ),
+                    ),
+                    TaskNode(
+                        id="task_core_implementation",
+                        title="核心實作",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="完成實作"),
+                            display=TaskDisplayMetadata(
+                                label="核心實作",
+                                summary="完成可運行版本並支援參數調整",
+                                todo_hint="完成實作與調參",
+                            ),
+                        ),
+                    ),
+                    TaskNode(
+                        id="task_interaction_tuning",
+                        title="互動調參",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="完成互動"),
+                            display=TaskDisplayMetadata(
+                                label="互動調參",
+                                summary="讓使用者能調整視覺與物理參數",
+                                todo_hint="完成互動與調參",
+                            ),
+                        ),
+                    ),
+                    TaskNode(
+                        id="task_quality_packaging",
+                        title="測試交付",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="完成測試交付"),
+                            display=TaskDisplayMetadata(
+                                label="測試交付",
+                                summary="完成效能測試報告與交付包",
+                                todo_hint="完成測試與交付",
+                            ),
+                        ),
+                    ),
+                ],
+                edges=[
+                    GraphEdge(from_node="concept_alignment", to_node="task_design_definition", edge_type="CONTROL", kind="DEPENDS_ON"),
+                    GraphEdge(from_node="task_design_definition", to_node="task_core_implementation", edge_type="CONTROL", kind="DEPENDS_ON"),
+                    GraphEdge(from_node="task_core_implementation", to_node="task_interaction_tuning", edge_type="CONTROL", kind="DEPENDS_ON"),
+                    GraphEdge(from_node="task_interaction_tuning", to_node="task_quality_packaging", edge_type="CONTROL", kind="DEPENDS_ON"),
+                ],
+            )
+
+            processed = core._postprocess_planner_graph(
+                graph,
+                message="請為我開發一個3d煙火模擬器",
+                available_tools=[{"name": "web.search"}],
+            )
+        finally:
+            shutil.rmtree(core.data_dir, ignore_errors=True)
+
+        validate_graph_definition(processed)
+        task_ids = [node.id for node in processed.nodes if isinstance(node, TaskNode)]
+        self.assertEqual(
+            task_ids,
+            [
+                "concept_alignment",
+                "task_design_definition",
+                "task_core_implementation",
+                "task_interaction_tuning",
+                "task_quality_packaging",
+            ],
+        )
+
+    def test_postprocess_planner_graph_linearizes_control_edges_when_cycle_remains(self) -> None:
+        core = AmonCore(data_dir=Path(tempfile.mkdtemp()))
+        try:
+            graph = GraphDefinition(
+                version="taskgraph.v3",
+                nodes=[
+                    TaskNode(
+                        id="concept_alignment",
+                        title="概念對齊",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="先查概念"),
+                            display=TaskDisplayMetadata(label="概念對齊", summary="查概念", todo_hint="完成概念摘要"),
+                        ),
+                    ),
+                    TaskNode(
+                        id="design",
+                        title="設計定義",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="完成設計"),
+                            display=TaskDisplayMetadata(label="設計定義", summary="完成設計", todo_hint="完成設計"),
+                        ),
+                    ),
+                    TaskNode(
+                        id="implement",
+                        title="核心實作",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="完成實作"),
+                            display=TaskDisplayMetadata(label="核心實作", summary="完成實作", todo_hint="完成實作"),
+                        ),
+                    ),
+                    TaskNode(
+                        id="optimize",
+                        title="效能優化",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="完成優化"),
+                            display=TaskDisplayMetadata(label="效能優化", summary="完成優化", todo_hint="完成優化"),
+                        ),
+                    ),
+                ],
+                edges=[
+                    GraphEdge(from_node="concept_alignment", to_node="design", edge_type="CONTROL", kind="DEPENDS_ON"),
+                    GraphEdge(from_node="design", to_node="implement", edge_type="CONTROL", kind="DEPENDS_ON"),
+                    GraphEdge(from_node="implement", to_node="optimize", edge_type="CONTROL", kind="DEPENDS_ON"),
+                    GraphEdge(from_node="optimize", to_node="design", edge_type="CONTROL", kind="DEPENDS_ON"),
+                ],
+            )
+
+            processed = core._postprocess_planner_graph(
+                graph,
+                message="請為我開發一個3d煙火模擬器",
+                available_tools=[{"name": "web.search"}],
+            )
+        finally:
+            shutil.rmtree(core.data_dir, ignore_errors=True)
+
+        validate_graph_definition(processed)
+        control_pairs = [
+            (edge.from_node, edge.to_node)
+            for edge in processed.edges
+            if edge.edge_type == "CONTROL" and edge.kind == "DEPENDS_ON"
+        ]
+        self.assertEqual(
+            control_pairs,
+            [
+                ("concept_alignment", "design"),
+                ("design", "implement"),
+                ("implement", "optimize"),
+            ],
+        )
 
 
 if __name__ == "__main__":

@@ -106,11 +106,14 @@ class PlannerLLMTests(unittest.TestCase):
         self.assertIn("concept-alignment", payload)
         system_prompt = llm.calls[0][0]["content"]
         self.assertIn("嚴禁輸出任何 agent/persona/assignment", system_prompt)
-        self.assertIn("只輸出兩段 code block", system_prompt)
+        self.assertIn("只輸出一段 code block", system_prompt)
+        self.assertIn("CONTROL 邊方向固定是「前置節點 -> 依賴它的節點」", system_prompt)
+        self.assertIn("DATA/PRODUCES 方向固定是「產生者 -> artifact」", system_prompt)
         self.assertIn("planner 已在圖外完成拆題；graph 內不可再放 TODO / 任務拆解 / task outline / WBS 類節點", system_prompt)
         self.assertIn("TASK 節點總數不得超過 8", system_prompt)
         self.assertIn("好例子：概念對齊 -> 設計定義", system_prompt)
         self.assertIn("同一設計階段的需求/PRD/系統架構/架構設計/視覺規格/預設參數要合併", payload)
+        self.assertIn("僅輸出一段 json code block；不要輸出 Mermaid。", payload)
 
 
 if __name__ == "__main__":
