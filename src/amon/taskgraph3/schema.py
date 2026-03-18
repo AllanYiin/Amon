@@ -512,8 +512,6 @@ class GraphDefinition(BaseEntity):
 
     def sync_relationships(self) -> None:
         edge_ids = self.edge_ids or self.derived_edge_ids()
-        node_ids = self.node_ids or self.derived_node_ids()
-        agent_ids = self.agent_ids or self.derived_agent_ids()
         edge_id_map: dict[tuple[str, str, int], str] = {}
         for index, edge in enumerate(self.edges):
             if not edge.id:
@@ -532,13 +530,11 @@ class GraphDefinition(BaseEntity):
         for node in self.nodes:
             if not node.graph_id:
                 node.graph_id = self.id
-            if not node.upstream_edge_ids:
-                node.upstream_edge_ids = list(incoming.get(node.id, []))
-            if not node.downstream_edge_ids:
-                node.downstream_edge_ids = list(outgoing.get(node.id, []))
-        self.node_ids = node_ids
+            node.upstream_edge_ids = list(incoming.get(node.id, []))
+            node.downstream_edge_ids = list(outgoing.get(node.id, []))
+        self.node_ids = self.derived_node_ids()
         self.edge_ids = [edge.id for edge in self.edges]
-        self.agent_ids = agent_ids
+        self.agent_ids = self.derived_agent_ids()
         if not self.entry_node_ids:
             self.entry_node_ids = self.derived_entry_node_ids()
         if not self.latest_run_id and self.graph_runs:

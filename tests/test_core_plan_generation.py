@@ -304,6 +304,43 @@ class CorePlanGenerationTests(unittest.TestCase):
         }
         self.assertIn(("concept_alignment", "writer"), control_pairs)
 
+    def test_postprocess_planner_graph_refreshes_stale_edge_relationship_ids_after_concept_rename(self) -> None:
+        core = AmonCore(data_dir=Path(tempfile.mkdtemp()))
+        try:
+            graph = GraphDefinition(
+                version="taskgraph.v3",
+                nodes=[
+                    TaskNode(
+                        id="background_research",
+                        title="背景調研",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="先整理背景知識"),
+                            display=TaskDisplayMetadata(label="背景調研", summary="先查背景", todo_hint="完成背景摘要"),
+                        ),
+                    ),
+                    TaskNode(
+                        id="writer",
+                        title="內容產出",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="開始產出"),
+                            display=TaskDisplayMetadata(label="內容產出", summary="輸出內容", todo_hint="完成產出"),
+                        ),
+                    ),
+                ],
+                edges=[GraphEdge(from_node="background_research", to_node="writer", edge_type="CONTROL", kind="DEPENDS_ON")],
+            )
+            dumps_graph_definition(graph)
+
+            processed = core._postprocess_planner_graph(graph, message="請規劃交付流程", available_tools=[{"name": "web.search"}])
+            payload = json.loads(dumps_graph_definition(processed))
+        finally:
+            shutil.rmtree(core.data_dir, ignore_errors=True)
+
+        writer_payload = next(node for node in payload["nodes"] if node["id"] == "writer")
+        self.assertEqual(writer_payload["upstreamEdgeIds"], ["concept_alignment->writer:0"])
+
 
 if __name__ == "__main__":
     unittest.main()
