@@ -51,6 +51,7 @@ from .models import (
     ProviderError,
     build_provider,
     decode_reasoning_chunk,
+    decode_stream_event,
     encode_reasoning_chunk,
     encode_stream_event,
 )
@@ -603,6 +604,12 @@ class AmonCore:
         provider_cfg = config.get("providers", {}).get(provider_name, {})
         provider_model = model or provider_cfg.get("default_model") or provider_cfg.get("model")
         provider = build_provider(provider_cfg, model=provider_model)
+        normalized_history = self._normalize_chat_history(conversation_history)
+        model_tools, tool_alias_map = self._build_model_tool_specs(
+            project_id=project_id,
+            allowed_tools=allowed_tools,
+        )
+        supports_structured_tools = callable(getattr(provider, "run_tool_conversation", None))
         base_system_message = self._build_system_message(
             prompt,
             project_path,
@@ -620,7 +627,7 @@ class AmonCore:
         if prompt.startswith("/"):
             user_prompt = " ".join(prompt.split()[1:]).strip()
         messages = [{"role": "system", "content": system_message}]
-        messages.extend(self._normalize_chat_history(conversation_history))
+        messages.extend(normalized_history)
         messages.append({"role": "user", "content": user_prompt or prompt})
         web_context = self._auto_web_search_context(
             user_prompt or prompt,
@@ -654,9 +661,12 @@ class AmonCore:
             metadata={
                 "mode": mode,
                 "session_id": session_id,
-                "history_count": len(self._normalize_chat_history(conversation_history)),
+                "history_count": len(normalized_history),
                 "has_web_context": bool(web_context),
                 "has_custom_system_prompt": bool(system_prompt),
+                "allowed_tool_count": len(model_tools),
+                "structured_tool_calling": bool(model_tools and supports_structured_tools),
+                "allowed_tools": [tool_alias_map.get(item["function"]["name"], item["function"]["name"]) for item in model_tools],
             },
         )
         log_event(
@@ -680,39 +690,102 @@ class AmonCore:
             },
             session_id=session_id,
         )
-        try:
-            for index, token in enumerate(provider.generate_stream(messages, model=provider_model)):
-                is_reasoning, reasoning_text = decode_reasoning_chunk(token)
-                if is_reasoning:
-                    if stream_handler:
-                        stream_handler(token)
-                    self._append_session_event(
-                        session_path,
-                        {
-                            "event": "reasoning_chunk",
-                            "index": index,
-                            "content": reasoning_text,
-                            "provider": provider_name,
-                            "model": provider_model,
-                        },
-                        session_id=session_id,
-                    )
-                    continue
-                print(token, end="", flush=True)
-                response_text += token
+        stream_index = 0
+
+        def relay_stream_token(token: str) -> None:
+            nonlocal response_text, stream_index
+            is_event, event_payload = decode_stream_event(token)
+            if is_event:
+                if stream_handler:
+                    stream_handler(token)
+                event_name = str(event_payload.get("event") or "").strip() or "notice"
+                self._append_session_event(
+                    session_path,
+                    {
+                        "event": event_name,
+                        "index": stream_index,
+                        "provider": provider_name,
+                        "model": provider_model,
+                        "payload": event_payload,
+                    },
+                    session_id=session_id,
+                )
+                stream_index += 1
+                return
+            is_reasoning, reasoning_text = decode_reasoning_chunk(token)
+            if is_reasoning:
                 if stream_handler:
                     stream_handler(token)
                 self._append_session_event(
                     session_path,
                     {
-                        "event": "chunk",
-                        "index": index,
-                        "content": token,
+                        "event": "reasoning_chunk",
+                        "index": stream_index,
+                        "content": reasoning_text,
                         "provider": provider_name,
                         "model": provider_model,
                     },
                     session_id=session_id,
                 )
+                stream_index += 1
+                return
+            print(token, end="", flush=True)
+            response_text += token
+            if stream_handler:
+                stream_handler(token)
+            self._append_session_event(
+                session_path,
+                {
+                    "event": "chunk",
+                    "index": stream_index,
+                    "content": token,
+                    "provider": provider_name,
+                    "model": provider_model,
+                },
+                session_id=session_id,
+            )
+            stream_index += 1
+        try:
+            if model_tools and supports_structured_tools:
+                def execute_model_tool(alias_name: str, tool_args: dict[str, Any]) -> dict[str, Any]:
+                    actual_tool_name = tool_alias_map.get(alias_name)
+                    if not actual_tool_name:
+                        return {
+                            "is_error": True,
+                            "meta": {"status": "not_found"},
+                            "content_text": f"找不到對應工具 alias：{alias_name}",
+                        }
+                    try:
+                        return self.call_tool_unified(
+                            actual_tool_name,
+                            tool_args,
+                            project_id=project_id,
+                            project_path=project_path,
+                            stream_handler=relay_stream_token,
+                            run_id=run_id,
+                            node_id=node_id,
+                            thread_id=thread_id,
+                            request_id=request_id,
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        self.logger.warning("tool execution failed: tool=%s error=%s", actual_tool_name, exc, exc_info=True)
+                        return {
+                            "is_error": True,
+                            "meta": {"status": "error"},
+                            "content_text": f"工具執行失敗：{actual_tool_name}：{exc}",
+                        }
+
+                tool_result = provider.run_tool_conversation(
+                    messages=messages,
+                    model=provider_model,
+                    tools=model_tools,
+                    execute_tool=execute_model_tool,
+                    stream_handler=relay_stream_token,
+                )
+                response_text = str(tool_result.get("text") or response_text)
+            else:
+                for token in provider.generate_stream(messages, model=provider_model):
+                    relay_stream_token(token)
             print("")
         except ProviderError as exc:
             self.logger.error("模型執行失敗：%s", exc, exc_info=True)
@@ -810,6 +883,89 @@ class AmonCore:
                 continue
             normalized.append({"role": role, "content": cleaned})
         return normalized
+
+    def _build_model_tool_specs(
+        self,
+        *,
+        project_id: str | None,
+        allowed_tools: list[str] | None,
+    ) -> tuple[list[dict[str, Any]], dict[str, str]]:
+        if not allowed_tools:
+            return [], {}
+        requested_tools = [str(name).strip() for name in allowed_tools if str(name).strip()]
+        if not requested_tools:
+            return [], {}
+        available_by_name = {
+            str(item.get("name") or "").strip(): item
+            for item in self.describe_available_tools(project_id=project_id)
+            if isinstance(item, dict) and str(item.get("name") or "").strip()
+        }
+        model_tools: list[dict[str, Any]] = []
+        alias_map: dict[str, str] = {}
+        used_aliases: set[str] = set()
+        for actual_name in requested_tools:
+            tool_spec = available_by_name.get(actual_name)
+            if not isinstance(tool_spec, dict):
+                continue
+            alias_name = self._make_model_tool_alias(
+                actual_name,
+                source=str(tool_spec.get("source") or ""),
+                used_aliases=used_aliases,
+            )
+            alias_map[alias_name] = actual_name
+            description = self._build_model_tool_description(tool_spec)
+            model_tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": alias_name,
+                        "description": description,
+                        "parameters": self._normalize_model_tool_schema(tool_spec.get("input_schema")),
+                    },
+                }
+            )
+        return model_tools, alias_map
+
+    @staticmethod
+    def _build_model_tool_description(tool_spec: dict[str, Any]) -> str:
+        actual_name = str(tool_spec.get("name") or "").strip()
+        source = str(tool_spec.get("source") or "tool").strip() or "tool"
+        description = str(tool_spec.get("description") or "").strip()
+        prefix = f"來源={source}；真實工具名={actual_name}。"
+        return f"{prefix} {description}".strip()
+
+    @staticmethod
+    def _normalize_model_tool_schema(schema: Any) -> dict[str, Any]:
+        if not isinstance(schema, dict):
+            return {"type": "object", "properties": {}}
+        normalized = dict(schema)
+        properties = normalized.get("properties")
+        required = normalized.get("required")
+        if normalized.get("type") != "object":
+            normalized["type"] = "object"
+        if not isinstance(properties, dict):
+            normalized["properties"] = {}
+        if isinstance(required, list):
+            normalized["required"] = [item for item in required if isinstance(item, str)]
+        elif "required" in normalized:
+            normalized.pop("required", None)
+        return normalized
+
+    @staticmethod
+    def _make_model_tool_alias(tool_name: str, *, source: str, used_aliases: set[str]) -> str:
+        source_label = (source or "tool").strip().lower()
+        if source_label == "toolforge":
+            source_label = "cli"
+        safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", tool_name).strip("_") or "tool"
+        digest = hashlib.md5(f"{source_label}:{tool_name}".encode("utf-8")).hexdigest()[:8]
+        prefix = f"{source_label}_"
+        max_base_len = max(8, 63 - len(prefix) - len(digest) - 1)
+        alias = f"{prefix}{safe_name[:max_base_len]}_{digest}"
+        while alias in used_aliases:
+            digest = hashlib.md5(f"{source_label}:{tool_name}:{len(used_aliases)}".encode("utf-8")).hexdigest()[:8]
+            alias = f"{prefix}{safe_name[:max_base_len]}_{digest}"
+        used_aliases.add(alias)
+        return alias
 
     def _auto_web_search_context(
         self,
@@ -3329,15 +3485,23 @@ class AmonCore:
         elif not isinstance(result, dict):
             result = {"content": [{"type": "text", "text": str(result)}], "isError": False}
         is_error = bool(result.get("isError") or result.get("is_error"))
+        content = result.get("content")
+        normalized_content = content if isinstance(content, list) else [{"type": "json", "data": result}]
         formatted_result = {
             "data": result,
             "is_error": is_error,
             "meta": {"status": "error" if is_error else "ok"},
+            "content": normalized_content,
+            "content_text": ToolResult(
+                content=normalized_content,
+                is_error=is_error,
+                meta={"status": "error" if is_error else "ok"},
+            ).as_text(),
         }
         formatted_result["data_prompt"] = self._format_mcp_result(full_tool, result)
 
         audit_result = ToolResult(
-            content=list(result.get("content") or []),
+            content=normalized_content,
             is_error=is_error,
             meta=formatted_result["meta"],
         )
@@ -3353,40 +3517,13 @@ class AmonCore:
         )
         return formatted_result
 
-        raw = result if isinstance(result, dict) else {"result": result}
-        is_error = bool(raw.get("is_error") or raw.get("isError"))
-        content = raw.get("content")
-        normalized_content = content if isinstance(content, list) else [{"type": "json", "data": raw}]
-        audit_result = ToolResult(
-            content=normalized_content,
-            is_error=is_error,
-            meta={"status": "error" if is_error else "ok"},
-        )
-        audit_sink.record(call, audit_result, "allow", duration_ms=_duration_ms(), source="mcp")
-        log_event(
-            {
-                "level": "INFO",
-                "event": "mcp_tool_call",
-                "server": server_name,
-                "tool": tool_name,
-                "is_error": is_error,
-            }
-        )
-        return {
-            "is_error": is_error,
-            "meta": {"status": "error" if is_error else "ok"},
-            "data": raw,
-            "content": normalized_content,
-            "content_text": audit_result.as_text(),
-            "data_prompt": json.dumps(raw, ensure_ascii=False),
-        }
-
 
     def call_tool_unified(
         self,
         tool_name: str,
         args: dict[str, Any],
         project_id: str | None = None,
+        project_path: Path | None = None,
         timeout_s: int | None = None,
         cancel_event: threading.Event | None = None,
         stream_handler=None,
@@ -3424,8 +3561,8 @@ class AmonCore:
             result = self.call_mcp_tool(server_name, actual_tool, args)
         elif "." in tool_name:
             route = "builtin"
-            project_path = self.get_project_path(project_id) if project_id else Path.cwd()
-            registry = build_registry(project_path)
+            workspace_root = project_path or (self.get_project_path(project_id) if project_id else Path.cwd())
+            registry = build_registry(workspace_root)
             call = ToolCall(tool=tool_name, args=args, caller="graph", project_id=project_id)
             log_event(
                 {
@@ -3454,6 +3591,7 @@ class AmonCore:
                 tool_name,
                 args,
                 project_id=project_id,
+                project_path=project_path,
                 timeout_s=timeout_s,
                 cancel_event=cancel_event,
                 stream_handler=stream_handler,

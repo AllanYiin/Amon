@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from amon.core import AmonCore
+from amon.mcp_client import MCPServerConfig
 from amon.tooling.types import ToolResult
 
 
@@ -60,6 +61,44 @@ class ToolDispatchTests(unittest.TestCase):
                 payload = emit_mock.call_args.args[0]["payload"]
                 self.assertEqual(payload["route"], "toolforge")
                 self.assertEqual(payload["status"], "denied")
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+    def test_call_mcp_tool_returns_content_text(self) -> None:
+        class _FakeClient:
+            def __init__(self, command) -> None:
+                self.command = command
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb) -> None:
+                return None
+
+            def call_tool(self, name, arguments):
+                return {
+                    "content": [{"type": "text", "text": f"echo:{arguments.get('text', '')}"}],
+                    "isError": False,
+                }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore(data_dir=Path(temp_dir))
+                with patch.object(
+                    core,
+                    "load_config",
+                    return_value={"mcp": {"allowed_tools": ["server:echo"]}},
+                ), patch.object(
+                    core,
+                    "_load_mcp_servers",
+                    return_value=[MCPServerConfig(name="server", transport="stdio", command=["fake-mcp"])],
+                ), patch("amon.core.MCPStdioClient", _FakeClient):
+                    result = core.call_mcp_tool("server", "echo", {"text": "hello"})
+
+                self.assertFalse(result["is_error"])
+                self.assertEqual(result["content_text"], "echo:hello")
+                self.assertEqual(result["meta"]["status"], "ok")
             finally:
                 os.environ.pop("AMON_HOME", None)
 

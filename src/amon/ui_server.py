@@ -35,6 +35,7 @@ from amon.chat.thread_store import (
     thread_session_exists,
     create_thread_session,
     ensure_thread_session,
+    handoff_thread_session,
     load_latest_thread_id,
     load_latest_run_context,
 )
@@ -361,6 +362,84 @@ def _is_duplicate_project_create(
     active_name = " ".join(active_project.name.split()).lower()
     active_project_id = active_project.project_id.lower()
     return requested_name in {active_name, active_project_id}
+
+
+def _extract_created_project_payload(result: dict[str, Any]) -> dict[str, Any] | None:
+    if not isinstance(result, dict):
+        return None
+    nested = result.get("result")
+    if not isinstance(nested, dict):
+        return None
+    project = nested.get("project")
+    if not isinstance(project, dict):
+        return None
+    project_id = str(project.get("project_id") or "").strip()
+    if not project_id:
+        return None
+    return project
+
+
+def _handoff_project_create_thread(
+    *,
+    source_project_id: str,
+    source_thread_id: str,
+    target_project_id: str,
+) -> tuple[str, dict[str, Any]]:
+    if not source_thread_id:
+        target_thread_id = create_thread_session(target_project_id)
+        handoff_payload = {
+            "source_project_id": source_project_id,
+            "source_thread_id": None,
+            "target_project_id": target_project_id,
+            "target_thread_id": target_thread_id,
+            "mode": "new_thread_without_source",
+        }
+        log_event(
+            {
+                "level": "INFO",
+                "event": "ui_chat_stream_thread_handoff_completed",
+                **handoff_payload,
+                "project_id": target_project_id,
+                "thread_id": target_thread_id,
+            }
+        )
+        return target_thread_id, handoff_payload
+
+    try:
+        handoff_payload = handoff_thread_session(source_project_id, target_project_id, source_thread_id)
+    except Exception as exc:  # noqa: BLE001
+        target_thread_id = create_thread_session(target_project_id)
+        handoff_payload = {
+            "source_project_id": source_project_id,
+            "source_thread_id": source_thread_id,
+            "target_project_id": target_project_id,
+            "target_thread_id": target_thread_id,
+            "mode": "new_thread_fallback",
+            "error": str(exc),
+        }
+        log_event(
+            {
+                "level": "WARNING",
+                "event": "ui_chat_stream_thread_handoff_failed",
+                **handoff_payload,
+                "project_id": target_project_id,
+                "thread_id": target_thread_id,
+            }
+        )
+        return target_thread_id, handoff_payload
+
+    handoff_payload = dict(handoff_payload)
+    handoff_payload.setdefault("mode", "moved")
+    log_event(
+        {
+            "level": "INFO",
+            "event": "ui_chat_stream_thread_handoff_completed",
+            **handoff_payload,
+            "project_id": target_project_id,
+            "thread_id": handoff_payload.get("target_thread_id"),
+        }
+    )
+    return str(handoff_payload.get("target_thread_id") or "").strip(), handoff_payload
 
 
 class AmonThreadingHTTPServer(ThreadingHTTPServer):
@@ -1970,7 +2049,11 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             )
             route_intent_ms = int((time.monotonic() - route_started_at) * 1000)
             execution_mode_ms = 0
-            if turn_bundle.short_continuation and router_result.type != "chat_response":
+            if turn_bundle.short_continuation and router_result.type not in {
+                "chat_response",
+                "command_plan",
+                "graph_patch_plan",
+            }:
                 log_event(
                     {
                         "level": "INFO",
@@ -1993,6 +2076,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             if router_result.type in {"command_plan", "graph_patch_plan"}:
                 command_name, args = _resolve_command_plan_from_router(message, router_result)
                 active_project = self.core.get_project(project_id) if project_id else None
+                thread_handoff_payload: dict[str, Any] | None = None
                 if _is_duplicate_project_create(active_project=active_project, command_name=command_name, args=args):
                     append_event(
                         thread_id,
@@ -2043,6 +2127,25 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         "command": command_name,
                     },
                 )
+                created_project_payload = _extract_created_project_payload(result)
+                if result.get("status") == "ok" and command_name == "projects.create" and created_project_payload:
+                    source_project_id = project_id
+                    source_thread_id = thread_id
+                    project_id = str(created_project_payload.get("project_id") or "").strip() or project_id
+                    thread_id, thread_handoff_payload = _handoff_project_create_thread(
+                        source_project_id=source_project_id,
+                        source_thread_id=source_thread_id,
+                        target_project_id=project_id,
+                    )
+                    send_event(
+                        "notice",
+                        {
+                            "text": f"Amon：已建立新專案「{created_project_payload.get('name') or project_id}」，並接手目前對話。",  # noqa: E501
+                            "project_id": project_id,
+                            "thread_id": thread_id,
+                            "thread_handoff": thread_handoff_payload,
+                        },
+                    )
                 if result.get("status") == "confirm_required":
                     plan_card = result.get("plan_card") or ""
                     append_event(
@@ -2069,8 +2172,14 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         {"status": "confirm_required", "thread_id": thread_id, "project_id": project_id},
                     )
                     return
-                send_event("result", result)
-                send_event("done", {"status": "ok", "thread_id": thread_id, "project_id": project_id})
+                result_payload = dict(result)
+                if thread_handoff_payload:
+                    result_payload["thread_handoff"] = thread_handoff_payload
+                send_event("result", result_payload)
+                done_payload = {"status": "ok", "thread_id": thread_id, "project_id": project_id}
+                if thread_handoff_payload:
+                    done_payload["thread_handoff"] = thread_handoff_payload
+                send_event("done", done_payload)
                 return
             if router_result.type == "chat_response":
                 if should_emit_bootstrap_notices:
