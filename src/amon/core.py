@@ -1349,6 +1349,7 @@ class AmonCore:
             tool_names=tool_names,
         )
         nodes, edges = self._merge_spec_cluster_tasks(nodes, edges)
+        nodes, edges = self._promote_concept_alignment_to_entry(nodes, edges)
         edges = self._stabilize_root_sequence(nodes, edges)
         control_predecessors = self._build_control_predecessors(edges)
         for node in nodes:
@@ -1624,6 +1625,34 @@ class AmonCore:
             ),
         )
         return [concept_node, *nodes], edges
+
+    @staticmethod
+    def _promote_concept_alignment_to_entry(
+        nodes: list[BaseNode],
+        edges: list[GraphEdge],
+    ) -> tuple[list[BaseNode], list[GraphEdge]]:
+        concept_node = next(
+            (node for node in nodes if isinstance(node, TaskNode) and node.id == "concept_alignment"),
+            None,
+        )
+        if concept_node is None:
+            return nodes, edges
+
+        filtered_edges = [
+            edge
+            for edge in edges
+            if not (
+                edge.status == "active"
+                and edge.to_node == "concept_alignment"
+                and edge.edge_type in {"CONTROL", "DATA"}
+            )
+        ]
+        concept_node.task_spec.input_bindings = [
+            binding
+            for binding in concept_node.task_spec.input_bindings
+            if binding.source != "upstream"
+        ]
+        return nodes, filtered_edges
 
     @staticmethod
     def _merge_unique_text_segments(*segments: str) -> str:

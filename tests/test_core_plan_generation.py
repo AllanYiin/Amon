@@ -10,9 +10,9 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from amon.core import AmonCore
-from amon.taskgraph3.payloads import AgentTaskConfig, TaskDisplayMetadata, TaskSpec
+from amon.taskgraph3.payloads import AgentTaskConfig, InputBinding, TaskDisplayMetadata, TaskSpec
 from amon.taskgraph3.serialize import dumps_graph_definition
-from amon.taskgraph3.schema import ArtifactNode, GraphDefinition, GraphEdge, TaskNode
+from amon.taskgraph3.schema import ArtifactNode, GraphDefinition, GraphEdge, TaskNode, validate_graph_definition
 
 
 class CorePlanGenerationTests(unittest.TestCase):
@@ -340,6 +340,58 @@ class CorePlanGenerationTests(unittest.TestCase):
 
         writer_payload = next(node for node in payload["nodes"] if node["id"] == "writer")
         self.assertEqual(writer_payload["upstreamEdgeIds"], ["concept_alignment->writer:0"])
+
+    def test_postprocess_planner_graph_promotes_concept_alignment_to_entry_without_cycle(self) -> None:
+        core = AmonCore(data_dir=Path(tempfile.mkdtemp()))
+        try:
+            graph = GraphDefinition(
+                version="taskgraph.v3",
+                nodes=[
+                    TaskNode(
+                        id="background_research",
+                        title="背景調研",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="先整理背景知識"),
+                            input_bindings=[
+                                InputBinding(
+                                    source="upstream",
+                                    key="stale_context",
+                                    from_node="writer",
+                                    port="raw",
+                                )
+                            ],
+                            display=TaskDisplayMetadata(label="背景調研", summary="先查背景", todo_hint="完成背景摘要"),
+                        ),
+                    ),
+                    TaskNode(
+                        id="writer",
+                        title="內容產出",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="開始產出"),
+                            display=TaskDisplayMetadata(label="內容產出", summary="輸出內容", todo_hint="完成產出"),
+                        ),
+                    ),
+                ],
+                edges=[GraphEdge(from_node="writer", to_node="background_research", edge_type="CONTROL", kind="DEPENDS_ON")],
+            )
+
+            processed = core._postprocess_planner_graph(graph, message="請規劃交付流程", available_tools=[{"name": "web.search"}])
+        finally:
+            shutil.rmtree(core.data_dir, ignore_errors=True)
+
+        validate_graph_definition(processed)
+        concept = next(node for node in processed.nodes if isinstance(node, TaskNode) and node.id == "concept_alignment")
+        control_pairs = {
+            (edge.from_node, edge.to_node)
+            for edge in processed.edges
+            if edge.edge_type == "CONTROL"
+        }
+
+        self.assertIn(("concept_alignment", "writer"), control_pairs)
+        self.assertNotIn(("writer", "concept_alignment"), control_pairs)
+        self.assertFalse(concept.task_spec.input_bindings)
 
 
 if __name__ == "__main__":
