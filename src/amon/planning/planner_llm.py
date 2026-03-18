@@ -57,6 +57,16 @@ _PLANNING_TASK_TOKENS = (
     "問題拆解",
     "骨架規劃",
 )
+_PLANNER_INTERNAL_SKILL_TOKENS = (
+    "problem-decomposer",
+    "issue tree",
+    "wbs",
+    "問題拆解",
+    "任務拆解",
+    "待辦拆解",
+    "task outline",
+    "taskgraph_outline",
+)
 _REPAIRABLE_SEMANTIC_ISSUES = {
     "出現重複的概念對齊/背景調研 TASK，必須只保留 1 個。",
     "需求/PRD/架構/視覺/預設參數被切成過多獨立 TASK，必須合併為同一設計階段節點。",
@@ -243,9 +253,18 @@ def _planner_system_prompt(*, is_repair: bool) -> str:
             "- planner 已經在圖外完成任務拆解；GraphDefinition 內不得再出現 TODO / 任務拆解 / task outline / WBS 類 TASK。\n"
             "- 後續不得重複同質概念調研節點。\n"
             f"- TASK 節點總數不得超過 {_MAX_TASK_NODES}，優先控制在 {_PREFERRED_TASK_NODES} 個；過細步驟要合併成較大的交付節點。\n"
+            "- 根據上下文構成以及執行角色相似程度來切分。\n"
+            "- 執行角色是任務的天然分界；若主執行者、權限、side effect、獨立審核或重跑需求不同，必須拆成不同 TASK。\n"
+            "- 目前節點的上下文若近似於前一節點上下文加前一節點輸出，且只是連續推進同一目標，應與前一節點合併為單一 TASK，透過多個 artifact 表達不同產出。\n"
+            "- 目前節點的上下文若只是前一節點上下文的嚴格子集合，且母節點只是等待子任務完成，應優先表達為 GROUP / children，而不是額外平鋪成兄弟 TASK。\n"
             "- 需求規格、PRD、系統架構、架構設計、視覺規格、預設參數若屬同一設計階段，必須合併成單一 TASK，透過多個 artifact 輸出，不可拆成多個連續規劃節點。\n"
             "- 打包交付 / release / bundle / 驗收只能出現在後段，必須帶明確前置依賴，不可成為概念對齊之後的直接 root。\n"
             "- 後續執行節點只負責完成當前交付，不可把整體問題再拆解一次，也不可重做概念對齊。\n"
+            "- 問題拆解 / WBS / issue tree 類 skill 屬於 planner 內部能力；不要把這類 skill 放進任何 task 的 skillBindings。\n"
+            "- Task 是可由單一主執行者直接完成、且有明確 objective 與 definitionOfDone 的工作單元。\n"
+            "- Artifact 是 TASK 產出的文件、資料、程式碼、報告、規格或交付包；Artifact 不是執行工作，不可把「測試報告」「規格文件」「交付包」直接當成 TASK。\n"
+            "- Milestone 是時點或狀態檢查，不是 TaskGraph v3 NodeType；不可建立 milestone node，也不可用 milestone 名稱取代真正工作。像「交付客戶」「核准通過」「上線完成」若只是狀態/時點，應改表達為驗收條件、artifact 完成或依賴關係。\n"
+            "- 母任務更接近任務群組概念；若某上位節點只是在等所有子任務完成，應使用 GROUP，而不是再包一層沒有獨立工作的 TASK。\n"
             "- node.title 不得為空；若原本會是 None/空白，必須重寫成 <=10 個中文漢字的完整標題。\n"
             "- CONTROL 邊的方向必須是「前置節點 -> 依賴它的節點」，例如 concept_alignment -> design。\n"
             "- DATA/PRODUCES 必須是「產生者 -> artifact」；DATA/CONSUMES 必須是「artifact -> 使用它的節點」。\n"
@@ -272,9 +291,19 @@ def _planner_system_prompt(*, is_repair: bool) -> str:
         "步驟切分規範（硬性）：\n"
         f"- TASK 節點總數不得超過 {_MAX_TASK_NODES}；優先控制在 {_PREFERRED_TASK_NODES} 個。\n"
         "- 優先用「較大但可驗收」的交付節點，不要把同一階段拆成大量微步驟。\n"
+        "- 根據上下文構成以及執行角色相似程度來切分。\n"
+        "- 執行角色是任務的天然分界；若主執行者、權限、side effect、獨立審核或重跑需求不同，必須拆成不同 TASK。\n"
+        "- 子任務的上文若只是母任務上文的子集合，拆分才有意義；如果目前節點上下文近似於前一節點上下文加前一節點輸出，且只是連續推進同一目標，應與前一節點合併。\n"
+        "- 如果目前節點上下文只是前一節點上下文的嚴格子集合，且母節點只是等待全部子任務完成，應優先用 GROUP / children 表達，而不是額外平鋪成兄弟 TASK。\n"
         "- 同一設計階段內的需求規格、PRD、系統架構、架構設計、視覺規格、預設參數，應合併成 1 個 TASK，透過多個 artifacts 表達產出。\n"
         "- 後續 TASK 是執行節點，不是重新拆題節點；不可在任何 TASK 再做 TODO 分解、WBS、任務骨架規劃或概念對齊。\n"
         "- 打包交付 / release / bundle / 驗收必須位於後段，且要有明確依賴；不可直接接在概念對齊後面。\n\n"
+        "節點辨識與邊界（硬性）：\n"
+        "- Task 是可由單一主執行者直接完成、且有明確 objective 與 definitionOfDone 的工作單元。\n"
+        "- Artifact 是被 TASK 產出、引用、審查或交付的資訊／檔案／程式碼／報告／規格；Artifact 不是執行工作，不可把「測試報告」「規格文件」「交付包」直接當成 TASK。\n"
+        "- Milestone 是時點或狀態檢查，不是 TaskGraph v3 NodeType；不可建立 milestone node，也不可用 milestone 名稱取代真正工作。像「交付客戶」「核准通過」「上線完成」若只是狀態/時點，應改表達為驗收條件、artifact 完成或依賴關係。\n"
+        "- 母任務其實更接近任務群組概念；若上位節點只是在等待所有子任務完成，應使用 GROUP。只有當上位節點需要主動整合全部子輸出時，才建立真正的 TASK。\n"
+        "- 問題拆解 / WBS / issue tree 類 skill 屬於 planner 內部能力；不要把這類 skill 放進任何 task 的 skillBindings。\n\n"
         "標題規則（硬性）：\n"
         "- 每個 node.title 必須非空。\n"
         "- 若原本會產生 None/空白 title，必須改寫成 <=10 個中文漢字、語意完整的標題句，不可單純截斷。\n\n"
@@ -382,6 +411,8 @@ def _normalize_available_skills(available_skills: list[dict[str, Any]] | None) -
     for item in available_skills or []:
         if not isinstance(item, dict):
             continue
+        if _is_planner_internal_skill(item):
+            continue
         skill_name = str(item.get("name") or "")
         result.append(
             {
@@ -392,6 +423,20 @@ def _normalize_available_skills(available_skills: list[dict[str, Any]] | None) -
             }
         )
     return result
+
+
+def _is_planner_internal_skill(item: dict[str, Any]) -> bool:
+    parts = [
+        str(item.get("name") or "").strip().lower(),
+        str(item.get("description") or "").strip().lower(),
+    ]
+    targets = item.get("targets") or item.get("inject_to") or []
+    if isinstance(targets, list):
+        parts.extend(str(target).strip().lower() for target in targets)
+    normalized = " ".join(part for part in parts if part)
+    if not normalized:
+        return False
+    return any(token in normalized for token in _PLANNER_INTERNAL_SKILL_TOKENS)
 
 
 def _semantic_plan_issues(graph: GraphDefinition) -> list[str]:

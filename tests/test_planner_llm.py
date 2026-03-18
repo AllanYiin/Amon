@@ -96,13 +96,17 @@ class PlannerLLMTests(unittest.TestCase):
             "請規劃",
             llm_client=llm,
             available_tools=[{"tool_name": "web.search", "when_to_use": "查詢", "args_schema_hint": {"query": "x"}}],
-            available_skills=[{"name": "spec-to-tasks", "description": "拆解規格", "targets": ["planning"]}],
+            available_skills=[
+                {"name": "problem-decomposer", "description": "做問題拆解、issue tree、WBS", "targets": ["planning"]},
+                {"name": "frontend-design", "description": "做介面設計", "targets": ["ui"]},
+            ],
         )
         payload = llm.calls[0][1]["content"]
         self.assertIn("任務描述：", payload)
         self.assertIn("可用 Skills", payload)
         self.assertIn('"toolId": "web.search"', payload)
-        self.assertIn('"skillId": "spec-to-tasks"', payload)
+        self.assertIn('"skillId": "frontend-design"', payload)
+        self.assertNotIn('"skillId": "problem-decomposer"', payload)
         self.assertIn("concept-alignment", payload)
         system_prompt = llm.calls[0][0]["content"]
         self.assertIn("嚴禁輸出任何 agent/persona/assignment", system_prompt)
@@ -112,6 +116,12 @@ class PlannerLLMTests(unittest.TestCase):
         self.assertIn("planner 已在圖外完成拆題；graph 內不可再放 TODO / 任務拆解 / task outline / WBS 類節點", system_prompt)
         self.assertIn("TASK 節點總數不得超過 8", system_prompt)
         self.assertIn("好例子：概念對齊 -> 設計定義", system_prompt)
+        self.assertIn("根據上下文構成以及執行角色相似程度來切分", system_prompt)
+        self.assertIn("執行角色是任務的天然分界", system_prompt)
+        self.assertIn("Task 是可由單一主執行者直接完成", system_prompt)
+        self.assertIn("Artifact 是被 TASK 產出、引用、審查或交付的資訊", system_prompt)
+        self.assertIn("Milestone 是時點或狀態檢查，不是 TaskGraph v3 NodeType", system_prompt)
+        self.assertIn("問題拆解 / WBS / issue tree 類 skill 屬於 planner 內部能力", system_prompt)
         self.assertIn("同一設計階段的需求/PRD/系統架構/架構設計/視覺規格/預設參數要合併", payload)
         self.assertIn("僅輸出一段 json code block；不要輸出 Mermaid。", payload)
 
