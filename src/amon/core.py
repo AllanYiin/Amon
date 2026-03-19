@@ -59,6 +59,7 @@ from .project_registry import ProjectRegistry, load_project_config
 from .taskgraph3.amon_node_runner import AmonNodeRunner
 from .taskgraph3.payloads import (
     AgentTaskConfig,
+    ArtifactOutput,
     InputBinding,
     SandboxRunConfig,
     TaskDisplayMetadata,
@@ -1525,6 +1526,7 @@ class AmonCore:
         )
         nodes, edges = self._merge_spec_cluster_tasks(nodes, edges)
         edges = self._normalize_planner_edge_directions(nodes, edges)
+        nodes, edges = self._collapse_planner_artifact_nodes(nodes, edges)
         nodes, edges = self._promote_concept_alignment_to_entry(nodes, edges)
         edges = self._stabilize_root_sequence(nodes, edges)
         control_predecessors = self._build_control_predecessors(edges)
@@ -2084,6 +2086,102 @@ class AmonCore:
         return retained_nodes, retained_edges
 
     @staticmethod
+    def _guess_artifact_media_type(title: str) -> str | None:
+        normalized = str(title or "").strip().lower()
+        if normalized.endswith(".md"):
+            return "text/markdown"
+        if normalized.endswith(".json"):
+            return "application/json"
+        if normalized.endswith(".txt"):
+            return "text/plain"
+        if normalized.endswith(".html"):
+            return "text/html"
+        if normalized.endswith(".zip"):
+            return "application/zip"
+        return None
+
+    @classmethod
+    def _artifact_output_from_node(cls, artifact_node: ArtifactNode) -> ArtifactOutput:
+        title = str(artifact_node.title or artifact_node.id or "").strip()
+        name = Path(title).stem.strip() if title else ""
+        if not name:
+            name = str(artifact_node.id or "artifact").strip() or "artifact"
+        description = title or None
+        return ArtifactOutput(
+            name=name,
+            media_type=cls._guess_artifact_media_type(title),
+            description=description,
+            required=False,
+        )
+
+    def _collapse_planner_artifact_nodes(
+        self,
+        nodes: list[BaseNode],
+        edges: list[GraphEdge],
+    ) -> tuple[list[BaseNode], list[GraphEdge]]:
+        artifact_nodes = [node for node in nodes if isinstance(node, ArtifactNode)]
+        if not artifact_nodes:
+            return nodes, edges
+
+        artifact_ids = {node.id for node in artifact_nodes}
+        task_nodes = {
+            node.id: node
+            for node in nodes
+            if isinstance(node, TaskNode)
+        }
+        control_pairs = {
+            (edge.from_node, edge.to_node)
+            for edge in edges
+            if edge.edge_type == "CONTROL"
+        }
+        additional_edges: list[GraphEdge] = []
+
+        for artifact_node in artifact_nodes:
+            producers: list[str] = []
+            consumers: list[str] = []
+            for edge in edges:
+                if edge.to_node == artifact_node.id and edge.from_node in task_nodes:
+                    producers.append(edge.from_node)
+                elif edge.from_node == artifact_node.id and edge.to_node in task_nodes:
+                    consumers.append(edge.to_node)
+            if not producers:
+                continue
+
+            for producer_id in producers:
+                task_node = task_nodes[producer_id]
+                artifact_output = self._artifact_output_from_node(artifact_node)
+                if not any(
+                    existing.name == artifact_output.name
+                    and existing.media_type == artifact_output.media_type
+                    and existing.description == artifact_output.description
+                    for existing in task_node.task_spec.artifacts
+                ):
+                    task_node.task_spec.artifacts.append(artifact_output)
+
+            for producer_id in producers:
+                for consumer_id in consumers:
+                    if producer_id == consumer_id or (producer_id, consumer_id) in control_pairs:
+                        continue
+                    additional_edges.append(
+                        GraphEdge(
+                            from_node=producer_id,
+                            to_node=consumer_id,
+                            edge_type="CONTROL",
+                            kind="DEPENDS_ON",
+                        )
+                    )
+                    control_pairs.add((producer_id, consumer_id))
+
+        retained_nodes = [node for node in nodes if node.id not in artifact_ids]
+        retained_edges = [
+            edge
+            for edge in edges
+            if edge.from_node not in artifact_ids and edge.to_node not in artifact_ids
+        ]
+        retained_edges.extend(additional_edges)
+        return retained_nodes, retained_edges
+
+    @staticmethod
     def _dependency_incoming_counts(nodes: list[BaseNode], edges: list[GraphEdge]) -> dict[str, int]:
         incoming = {node.id: 0 for node in nodes}
         for edge in edges:
@@ -2579,13 +2677,45 @@ class AmonCore:
             return ""
         state = json.loads(state_path.read_text(encoding="utf-8"))
         project_path = run_dir.parents[2]
-        for node_state in state.get("nodes", {}).values():
+        resolved_nodes_by_id: dict[str, dict[str, Any]] = {}
+        resolved_path = run_dir / "graph.resolved.json"
+        if resolved_path.exists():
+            try:
+                resolved_payload = json.loads(resolved_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                resolved_payload = {}
+            for node_payload in resolved_payload.get("nodes", []):
+                if isinstance(node_payload, dict) and str(node_payload.get("id") or "").strip():
+                    resolved_nodes_by_id[str(node_payload.get("id") or "").strip()] = node_payload
+
+        preferred_path_text = ""
+        latest_path_text = ""
+        latest_agent_raw = ""
+        for node_id, node_state in state.get("nodes", {}).items():
             output = node_state.get("output") or {}
             output_path = output.get("output_path") or output.get("path")
             if output_path:
                 target = project_path / output_path
                 if target.exists():
-                    return target.read_text(encoding="utf-8")
+                    text = target.read_text(encoding="utf-8")
+                    latest_path_text = text
+                    if target.name.lower().startswith("final"):
+                        preferred_path_text = text
+            node_payload = resolved_nodes_by_id.get(str(node_id or "").strip())
+            task_spec = node_payload.get("taskSpec") if isinstance(node_payload, dict) else None
+            executor = str(task_spec.get("executor") or "").strip().lower() if isinstance(task_spec, dict) else ""
+            if executor == "agent":
+                raw_text = output.get("raw") if isinstance(output, dict) else ""
+                if not isinstance(raw_text, str) or not raw_text.strip():
+                    raw_text = output.get("raw_output") if isinstance(output, dict) else ""
+                if isinstance(raw_text, str) and raw_text.strip():
+                    latest_agent_raw = raw_text
+        if preferred_path_text:
+            return preferred_path_text
+        if latest_agent_raw:
+            return latest_agent_raw
+        if latest_path_text:
+            return latest_path_text
         return ""
 
     def _sync_team_tasks(self, project_path: Path, tasks_dir: Path, docs_dir: Path) -> None:

@@ -81,10 +81,13 @@ class CorePlanGenerationTests(unittest.TestCase):
                 self.assertIn("  - Skill: concept-alignment", todo_text)
                 self.assertIn("  - Skill: （未綁定 skill）", todo_text)
                 task_nodes = [node for node in plan.nodes if isinstance(node, TaskNode)]
+                self.assertFalse(any(isinstance(node, ArtifactNode) for node in plan.nodes))
                 self.assertEqual(task_nodes[0].id, "concept_alignment")
                 self.assertIn("web.search", task_nodes[0].task_spec.agent.allowed_tools)
                 self.assertEqual(task_nodes[0].task_spec.agent.skills, ["concept-alignment"])
                 self.assertEqual(task_nodes[1].task_spec.agent.skills, [])
+                self.assertEqual(task_nodes[1].task_spec.artifacts[0].name, "TODO")
+                self.assertEqual(task_nodes[1].task_spec.artifacts[0].media_type, "text/markdown")
                 self.assertIn("[AMON_NODE_MODE=EXECUTION]", task_nodes[1].task_spec.agent.system_prompt or "")
                 self.assertTrue(emit_mock.called)
             finally:
@@ -503,10 +506,13 @@ class CorePlanGenerationTests(unittest.TestCase):
 
         validate_graph_definition(processed)
         edges = {(edge.from_node, edge.to_node, edge.edge_type, edge.kind) for edge in processed.edges}
+        self.assertFalse(any(isinstance(node, ArtifactNode) for node in processed.nodes))
         self.assertIn(("concept_alignment", "design", "CONTROL", "DEPENDS_ON"), edges)
         self.assertIn(("design", "implement", "CONTROL", "DEPENDS_ON"), edges)
-        self.assertIn(("artifact-research", "design", "DATA", "CONSUMES"), edges)
-        self.assertIn(("artifact-spec", "implement", "DATA", "CONSUMES"), edges)
+        concept_node = next(node for node in processed.nodes if isinstance(node, TaskNode) and node.id == "concept_alignment")
+        design_node = next(node for node in processed.nodes if isinstance(node, TaskNode) and node.id == "design")
+        self.assertTrue(any(artifact.name == "調研對齊文" for artifact in concept_node.task_spec.artifacts))
+        self.assertTrue(any(artifact.name == "產品技術規格" for artifact in design_node.task_spec.artifacts))
         self.assertNotIn(("design", "concept_alignment", "CONTROL", "DEPENDS_ON"), edges)
         self.assertNotIn(("implement", "design", "CONTROL", "DEPENDS_ON"), edges)
 

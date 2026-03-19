@@ -6,7 +6,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from amon.planning.planner_llm import generate_plan_with_llm
-from amon.taskgraph3.schema import ArtifactNode, TaskNode
+from amon.taskgraph3.schema import TaskNode
 
 
 class _MockLLM:
@@ -56,7 +56,7 @@ class PlannerLLMTests(unittest.TestCase):
         plan = generate_plan_with_llm("請規劃", llm_client=llm)
         self.assertEqual(plan.version, "taskgraph.v3")
         self.assertEqual(plan.nodes[0].id, "concept_alignment")
-        self.assertTrue(any(isinstance(node, ArtifactNode) for node in plan.nodes))
+        self.assertTrue(all(isinstance(node, TaskNode) for node in plan.nodes))
 
     def test_generate_plan_with_llm_fallback_emits_observability_event(self) -> None:
         llm = _MockLLM(["not-json", "still-not-json"])
@@ -112,7 +112,7 @@ class PlannerLLMTests(unittest.TestCase):
         self.assertIn("嚴禁輸出任何 agent/persona/assignment", system_prompt)
         self.assertIn("只輸出一段 code block", system_prompt)
         self.assertIn("CONTROL 邊方向固定是「前置節點 -> 依賴它的節點」", system_prompt)
-        self.assertIn("DATA/PRODUCES 方向固定是「產生者 -> artifact」", system_prompt)
+        self.assertIn("不得建立 ARTIFACT node", system_prompt)
         self.assertIn("planner 已在圖外完成拆題；graph 內不可再放 TODO / 任務拆解 / task outline / WBS 類節點", system_prompt)
         self.assertIn("TASK 節點總數不得超過 8", system_prompt)
         self.assertIn("好例子：概念對齊 -> 設計定義", system_prompt)
@@ -123,6 +123,7 @@ class PlannerLLMTests(unittest.TestCase):
         self.assertIn("Milestone 是時點或狀態檢查，不是 TaskGraph v3 NodeType", system_prompt)
         self.assertIn("問題拆解 / WBS / issue tree 類 skill 屬於 planner 內部能力", system_prompt)
         self.assertIn("同一設計階段的需求/PRD/系統架構/架構設計/視覺規格/預設參數要合併", payload)
+        self.assertIn("artifact 是 TASK 內資訊；不得建立獨立 ARTIFACT node", payload)
         self.assertIn("僅輸出一段 json code block；不要輸出 Mermaid。", payload)
 
 

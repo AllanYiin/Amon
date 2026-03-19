@@ -263,11 +263,12 @@ def _planner_system_prompt(*, is_repair: bool) -> str:
             "- 問題拆解 / WBS / issue tree 類 skill 屬於 planner 內部能力；不要把這類 skill 放進任何 task 的 skillBindings。\n"
             "- Task 是可由單一主執行者直接完成、且有明確 objective 與 definitionOfDone 的工作單元。\n"
             "- Artifact 是 TASK 產出的文件、資料、程式碼、報告、規格或交付包；Artifact 不是執行工作，不可把「測試報告」「規格文件」「交付包」直接當成 TASK。\n"
-            "- Milestone 是時點或狀態檢查，不是 TaskGraph v3 NodeType；不可建立 milestone node，也不可用 milestone 名稱取代真正工作。像「交付客戶」「核准通過」「上線完成」若只是狀態/時點，應改表達為驗收條件、artifact 完成或依賴關係。\n"
+            "- 在 planner 產生的 graph 中，不得建立 ARTIFACT node；artifact 一律寫入對應 TASK 的 taskSpec.artifacts，並作為該 TASK 的內部資訊。\n"
+            "- Milestone 是時點或狀態檢查，不是 TaskGraph v3 NodeType；不可建立 milestone node，也不可用 milestone 名稱取代真正工作。像「交付客戶」「核准通過」「上線完成」若只是狀態/時點，應改表達為 task 的驗收條件、taskSpec.artifacts 完成或依賴關係。\n"
             "- 母任務更接近任務群組概念；若某上位節點只是在等所有子任務完成，應使用 GROUP，而不是再包一層沒有獨立工作的 TASK。\n"
             "- node.title 不得為空；若原本會是 None/空白，必須重寫成 <=10 個中文漢字的完整標題。\n"
             "- CONTROL 邊的方向必須是「前置節點 -> 依賴它的節點」，例如 concept_alignment -> design。\n"
-            "- DATA/PRODUCES 必須是「產生者 -> artifact」；DATA/CONSUMES 必須是「artifact -> 使用它的節點」。\n"
+            "- 不要用 DATA 邊把 artifact 拉成獨立節點；下游依賴請用 CONTROL 邊與 inputBindings/ports 表達。\n"
             "- 嚴禁輸出任何 agent/persona/assignment/owner。\n"
             "- 壞例子：概念對齊 -> 背景調研 -> 需求規格 -> PRD -> 架構設計 -> 視覺規格 -> 預設參數 -> 打包交付。\n"
             "- 好例子：概念對齊 -> 設計定義（需求/PRD/架構/視覺/預設參數合併） -> 原型實作/內容產出 -> 打包交付。\n"
@@ -301,7 +302,8 @@ def _planner_system_prompt(*, is_repair: bool) -> str:
         "節點辨識與邊界（硬性）：\n"
         "- Task 是可由單一主執行者直接完成、且有明確 objective 與 definitionOfDone 的工作單元。\n"
         "- Artifact 是被 TASK 產出、引用、審查或交付的資訊／檔案／程式碼／報告／規格；Artifact 不是執行工作，不可把「測試報告」「規格文件」「交付包」直接當成 TASK。\n"
-        "- Milestone 是時點或狀態檢查，不是 TaskGraph v3 NodeType；不可建立 milestone node，也不可用 milestone 名稱取代真正工作。像「交付客戶」「核准通過」「上線完成」若只是狀態/時點，應改表達為驗收條件、artifact 完成或依賴關係。\n"
+        "- 在 planner 產生的 graph 中，不得建立 ARTIFACT node；artifact 一律寫入對應 TASK 的 taskSpec.artifacts，並作為該 TASK 的內部資訊。\n"
+        "- Milestone 是時點或狀態檢查，不是 TaskGraph v3 NodeType；不可建立 milestone node，也不可用 milestone 名稱取代真正工作。像「交付客戶」「核准通過」「上線完成」若只是狀態/時點，應改表達為 task 的驗收條件、taskSpec.artifacts 完成或依賴關係。\n"
         "- 母任務其實更接近任務群組概念；若上位節點只是在等待所有子任務完成，應使用 GROUP。只有當上位節點需要主動整合全部子輸出時，才建立真正的 TASK。\n"
         "- 問題拆解 / WBS / issue tree 類 skill 屬於 planner 內部能力；不要把這類 skill 放進任何 task 的 skillBindings。\n\n"
         "標題規則（硬性）：\n"
@@ -317,7 +319,7 @@ def _planner_system_prompt(*, is_repair: bool) -> str:
         "- 節點粒度是子任務，不是功能清單或單一工具操作。\n"
         "- 用 DEPENDS_ON 建立主要依賴；CONTROL 邊方向固定是「前置節點 -> 依賴它的節點」，例如 concept_alignment -> 設計定義；只有真的需要分支時才使用 GATE + ROUTE。\n"
         "- 每個 TASK 至少要有 objective + definitionOfDone（>=2 條）+ 主要 skillBindings（PRIMARY）。\n"
-        "- 若產出需要被下游使用，優先建立 ARTIFACT node；DATA/PRODUCES 方向固定是「產生者 -> artifact」，DATA/CONSUMES 方向固定是「artifact -> 使用它的節點」，或用 MAPS 明確傳遞 vars/ports。\n"
+        "- 若 TASK 會產出文件、程式碼、報告或交付包，請寫入 taskSpec.artifacts；不要建立獨立 ARTIFACT node。下游依賴請用 CONTROL 邊，必要時再用 inputBindings/ports 傳遞。\n"
         "- 只有在真的有外部呼叫量、事件量或即時性需求時才設定 rateLimit/streamLimit。\n\n"
         "正反例（硬性參考）：\n"
         "- 壞例子：概念對齊 -> 背景調研 -> 需求規格 -> PRD -> 架構設計 -> 視覺規格 -> 預設參數 -> 打包交付。\n"
@@ -369,9 +371,10 @@ def _planner_user_prompt(
         "- 同一設計階段的需求/PRD/系統架構/架構設計/視覺規格/預設參數要合併成較大的 TASK，不可拆成多個連續規劃節點。",
         "- 後續 TASK 只執行本節點交付，不可重做整體拆題或概念對齊。",
         "- 打包交付 / release / bundle / 驗收不得成為概念對齊後的直接 root，必須有明確前置依賴。",
+        "- artifact 是 TASK 內資訊；不得建立獨立 ARTIFACT node，請寫入 taskSpec.artifacts。",
+        "- milestone 是 TASK 內的驗收/狀態資訊，不得建立 milestone node。",
         "- node.title 不得為空；若原本會是 None，改寫成 <=10 個中文漢字標題句（不可截斷）。",
         "- CONTROL/DEPENDS_ON 的方向固定是前置節點 -> 依賴它的節點，例如 concept_alignment -> design。",
-        "- DATA/PRODUCES 的方向固定是產生者 -> artifact；DATA/CONSUMES 的方向固定是 artifact -> 使用它的節點。",
         "- 不得提 agent/persona/assignment/指派。",
         "- 僅輸出一段 json code block；不要輸出 Mermaid。",
     ]
@@ -556,7 +559,6 @@ def _minimal_plan(message: str) -> GraphDefinition:
                     runnable=True,
                 ),
             ),
-            ArtifactNode(id="artifact-concept-summary", title="docs/concept_alignment.md"),
             TaskNode(
                 id="task-1",
                 title="任務執行",
@@ -576,12 +578,9 @@ def _minimal_plan(message: str) -> GraphDefinition:
                     runnable=True,
                 ),
             ),
-            ArtifactNode(id="artifact-task-1-todo", title="docs/TODO.md"),
         ],
         edges=[
-            GraphEdge(from_node="concept_alignment", to_node="artifact-concept-summary", edge_type="DATA", kind="PRODUCES"),
             GraphEdge(from_node="concept_alignment", to_node="task-1", edge_type="CONTROL", kind="DEPENDS_ON"),
-            GraphEdge(from_node="task-1", to_node="artifact-task-1-todo", edge_type="DATA", kind="PRODUCES"),
         ],
     )
 
