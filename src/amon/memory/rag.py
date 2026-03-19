@@ -5,7 +5,17 @@ import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Callable, Iterable, Protocol, Sequence
+
+from .model_store import (
+    JINA_EMBEDDINGS_V5_REVISION,
+    JINA_RERANKER_V3_FILES,
+    JINA_RERANKER_V3_REVISION,
+    LocalModelStore,
+    ModelSpec,
+    default_onnx_files,
+)
 
 
 def _dot(left: Sequence[float], right: Sequence[float]) -> float:
@@ -292,12 +302,18 @@ class JinaOnnxTextNanoRetrievalEmbedder:
         self,
         model_id: str = "jinaai/jina-embeddings-v5-text-nano-retrieval",
         *,
+        revision: str = JINA_EMBEDDINGS_V5_REVISION,
         provider: str = "CPUExecutionProvider",
         file_name: str = "model.onnx",
+        model_store: LocalModelStore | None = None,
+        model_dir: str | Path | None = None,
     ) -> None:
         self.model_id = model_id
+        self.revision = revision
         self.provider = provider
         self.file_name = file_name
+        self.model_store = model_store or LocalModelStore()
+        self.model_dir = Path(model_dir).expanduser() if model_dir else None
         self._tokenizer = None
         self._model = None
         self._torch = None
@@ -311,12 +327,20 @@ class JinaOnnxTextNanoRetrievalEmbedder:
             from transformers import AutoTokenizer
         except ImportError as exc:
             raise RuntimeError(
-                "使用 Jina ONNX embedder 需要安裝 optimum[onnxruntime]、transformers 與 torch。"
+                "使用 Jina ONNX embedder 需要安裝 optimum-onnx[onnxruntime]、transformers 與 torch。"
             ) from exc
         self._torch = torch
-        self._tokenizer = AutoTokenizer.from_pretrained(self.model_id, trust_remote_code=True)
+        local_model_dir = self.model_dir or self.model_store.ensure_model(
+            ModelSpec(
+                repo_id=self.model_id,
+                revision=self.revision,
+                files=default_onnx_files(self.file_name),
+            )
+        )
+        self.model_dir = Path(local_model_dir)
+        self._tokenizer = AutoTokenizer.from_pretrained(str(self.model_dir), trust_remote_code=True)
         self._model = ORTModelForFeatureExtraction.from_pretrained(
-            self.model_id,
+            str(self.model_dir),
             subfolder="onnx",
             file_name=self.file_name,
             provider=self.provider,
@@ -345,12 +369,18 @@ class JinaRerankerV3:
         self,
         model_id: str = "jinaai/jina-reranker-v3",
         *,
+        revision: str = JINA_RERANKER_V3_REVISION,
         max_length: int = 1024,
         device: str | None = None,
+        model_store: LocalModelStore | None = None,
+        model_dir: str | Path | None = None,
     ) -> None:
         self.model_id = model_id
+        self.revision = revision
         self.max_length = max_length
         self.device = device
+        self.model_store = model_store or LocalModelStore()
+        self.model_dir = Path(model_dir).expanduser() if model_dir else None
         self._tokenizer = None
         self._model = None
         self._torch = None
@@ -366,9 +396,17 @@ class JinaRerankerV3:
         self._torch = torch
         runtime_device = self.device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.device = runtime_device
-        self._tokenizer = AutoTokenizer.from_pretrained(self.model_id, trust_remote_code=True)
+        local_model_dir = self.model_dir or self.model_store.ensure_model(
+            ModelSpec(
+                repo_id=self.model_id,
+                revision=self.revision,
+                files=JINA_RERANKER_V3_FILES,
+            )
+        )
+        self.model_dir = Path(local_model_dir)
+        self._tokenizer = AutoTokenizer.from_pretrained(str(self.model_dir), trust_remote_code=True)
         self._model = AutoModelForSequenceClassification.from_pretrained(
-            self.model_id,
+            str(self.model_dir),
             trust_remote_code=True,
             torch_dtype="auto",
         ).to(runtime_device)

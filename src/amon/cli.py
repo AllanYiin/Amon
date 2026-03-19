@@ -20,6 +20,7 @@ from .core import AmonCore
 from .events import emit_event
 from .fs.safety import make_change_plan, require_confirm
 from .mcp_client import MCPClientError
+from .memory import LocalModelStore, list_known_models, resolve_model_specs
 from .taskgraph3.schema import GraphDefinition, GraphEdge, TaskNode, validate_graph_definition
 from .taskgraph3.serialize import dumps_graph_definition
 from .sandbox import (
@@ -132,6 +133,17 @@ def build_parser() -> argparse.ArgumentParser:
     mcp_allow.add_argument("tool", help="tool 名稱")
     mcp_deny = mcp_sub.add_parser("deny", help="移除 MCP tool 權限")
     mcp_deny.add_argument("tool", help="tool 名稱")
+
+    models_parser = subparsers.add_parser("models", help="模型快取管理")
+    models_sub = models_parser.add_subparsers(dest="models_command")
+    models_pull = models_sub.add_parser("pull", help="下載內建模型到 Amon 管理目錄")
+    models_pull.add_argument(
+        "targets",
+        nargs="*",
+        default=["all"],
+        help=f"模型名稱，可選：all、{', '.join(list_known_models())}、embedding、reranker",
+    )
+    models_pull.add_argument("--cache-dir", help="覆寫模型快取目錄")
 
     tools_parser = subparsers.add_parser("tools", help="工具管理")
     tools_sub = tools_parser.add_subparsers(dest="tools_command")
@@ -357,6 +369,8 @@ def main() -> None:
             _handle_skills(core, args)
         elif args.command == "mcp":
             _handle_mcp(core, args)
+        elif args.command == "models":
+            _handle_models(core, args)
         elif args.command == "tools":
             _handle_tools(core, args)
         elif args.command == "toolforge":
@@ -646,6 +660,17 @@ def _handle_mcp(core: AmonCore, args: argparse.Namespace) -> None:
         print("已更新 MCP tool 權限")
         return
     raise ValueError("請指定 MCP 指令")
+
+
+def _handle_models(core: AmonCore, args: argparse.Namespace) -> None:
+    if args.models_command == "pull":
+        cache_dir = Path(args.cache_dir).expanduser() if args.cache_dir else core.cache_dir / "models"
+        store = LocalModelStore(cache_dir)
+        for name, spec in resolve_model_specs(args.targets):
+            model_dir = store.ensure_model(spec)
+            print(f"{name}｜{model_dir}")
+        return
+    raise ValueError("請指定 models 指令")
 
 
 def _handle_tools(core: AmonCore, args: argparse.Namespace) -> None:

@@ -1,6 +1,10 @@
-import tomllib
 import unittest
 from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    tomllib = None
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -9,8 +13,29 @@ REQUIREMENTS_FILE = ROOT / "requirements.txt"
 
 
 def _read_pyproject_dependencies() -> set[str]:
-    pyproject = tomllib.loads(PYPROJECT_FILE.read_text(encoding="utf-8"))
-    return set(pyproject.get("project", {}).get("dependencies", []))
+    content = PYPROJECT_FILE.read_text(encoding="utf-8")
+    if tomllib is not None:
+        pyproject = tomllib.loads(content)
+        return set(pyproject.get("project", {}).get("dependencies", []))
+    return _read_pyproject_dependencies_fallback(content)
+
+
+def _read_pyproject_dependencies_fallback(content: str) -> set[str]:
+    dependencies = set()
+    in_dependencies = False
+    for raw_line in content.splitlines():
+        line = raw_line.strip().rstrip(",")
+        if not in_dependencies:
+            if line == "dependencies = [":
+                in_dependencies = True
+            continue
+        if line == "]":
+            break
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith('"') and line.endswith('"'):
+            dependencies.add(line[1:-1])
+    return dependencies
 
 
 def _read_requirements_lines() -> set[str]:
