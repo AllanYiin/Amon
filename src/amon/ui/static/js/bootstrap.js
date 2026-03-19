@@ -2765,15 +2765,27 @@ appStore.patch({ bootstrappedAt: Date.now() });
         const eventProjectId = normalizeProjectIdForUi(data.project_id);
         const eventThreadId = String(data.thread_id || "").trim();
         const activeProjectId = normalizeProjectIdForUi(state.projectId);
+        const handoff = data.thread_handoff && typeof data.thread_handoff === "object" ? data.thread_handoff : null;
+        const handoffSourceProjectId = normalizeProjectIdForUi(handoff?.source_project_id);
+        const handoffTargetProjectId = normalizeProjectIdForUi(handoff?.target_project_id);
+        const shouldForceSwitchProject = Boolean(
+          handoff &&
+          eventProjectId &&
+          handoffTargetProjectId === eventProjectId &&
+          (!activeProjectId || activeProjectId === handoffSourceProjectId || activeProjectId === eventProjectId)
+        );
 
-        // 僅在「無專案模式」下，才讓事件自動切換專案，避免切換專案後被舊串流事件覆寫。
-        if (eventProjectId && !activeProjectId) {
+        if (shouldForceSwitchProject) {
+          setProjectState(eventProjectId);
+          projectChanged = true;
+        } else if (eventProjectId && !activeProjectId) {
+          // 僅在「無專案模式」下，才讓事件自動切換專案，避免切換專案後被舊串流事件覆寫。
           setProjectState(eventProjectId);
           projectChanged = true;
         }
 
         const latestActiveProjectId = normalizeProjectIdForUi(state.projectId);
-        const shouldApplyToActiveProject = !eventProjectId || eventProjectId === latestActiveProjectId;
+        const shouldApplyToActiveProject = shouldForceSwitchProject || !eventProjectId || eventProjectId === latestActiveProjectId;
         if (shouldApplyToActiveProject && eventThreadId) {
           state.activeThreadId = eventThreadId;
         }

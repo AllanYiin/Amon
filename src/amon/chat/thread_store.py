@@ -194,6 +194,81 @@ def ensure_thread_session(project_id: str, thread_id: str | None = None) -> tupl
     return create_thread_session(project_id), "new"
 
 
+def handoff_thread_session(source_project_id: str, target_project_id: str, thread_id: str) -> dict[str, Any]:
+    """Move an existing thread session into another project and activate it there."""
+    validate_project_id(source_project_id)
+    validate_project_id(target_project_id)
+    validate_identifier(thread_id, "thread_id")
+    _migrate_legacy_sessions_if_needed(source_project_id)
+    _migrate_legacy_sessions_if_needed(target_project_id)
+
+    if source_project_id == target_project_id:
+        _write_project_state(target_project_id, {"schema_version": 1, "active_thread_id": thread_id})
+        return {
+            "source_project_id": source_project_id,
+            "target_project_id": target_project_id,
+            "source_thread_id": thread_id,
+            "target_thread_id": thread_id,
+            "mode": "noop_same_project",
+        }
+
+    source_thread_dir = _thread_dir_path(source_project_id, thread_id)
+    if not source_thread_dir.exists():
+        raise FileNotFoundError(f"找不到 thread：{source_project_id}/{thread_id}")
+
+    target_thread_id = thread_id
+    if thread_session_exists(target_project_id, target_thread_id):
+        target_thread_id = uuid.uuid4().hex
+    target_thread_dir = _thread_dir_path(target_project_id, target_thread_id)
+    target_thread_dir.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        shutil.move(str(source_thread_dir), str(target_thread_dir))
+        rollup = _load_rollup(target_project_id, target_thread_id)
+        rollup["project_id"] = target_project_id
+        rollup["thread_id"] = target_thread_id
+        _write_thread_rollup(target_project_id, rollup)
+        _upsert_thread_index(target_project_id, target_thread_id, rollup)
+        _remove_thread_index_entry(source_project_id, thread_id)
+        _write_project_state(target_project_id, {"schema_version": 1, "active_thread_id": target_thread_id})
+        _reassign_source_active_thread_after_handoff(source_project_id, thread_id)
+    except OSError as exc:
+        log_event(
+            {
+                "event": "thread_session_handoff_failed",
+                "level": "ERROR",
+                "project_id": target_project_id,
+                "thread_id": target_thread_id,
+                "source_project_id": source_project_id,
+                "source_thread_id": thread_id,
+                "target_project_id": target_project_id,
+                "target_thread_id": target_thread_id,
+                "error": str(exc),
+            }
+        )
+        raise
+
+    log_event(
+        {
+            "event": "thread_session_handoff_completed",
+            "project_id": target_project_id,
+            "thread_id": target_thread_id,
+            "source_project_id": source_project_id,
+            "source_thread_id": thread_id,
+            "target_project_id": target_project_id,
+            "target_thread_id": target_thread_id,
+            "reused_thread_id": target_thread_id == thread_id,
+        }
+    )
+    return {
+        "source_project_id": source_project_id,
+        "target_project_id": target_project_id,
+        "source_thread_id": thread_id,
+        "target_thread_id": target_thread_id,
+        "mode": "moved",
+    }
+
+
 def load_recent_dialogue(project_id: str, thread_id: str, limit: int = 12) -> list[dict[str, str]]:
     """Load recent user/assistant dialogue turns for contextual continuity."""
     if not thread_id:
@@ -538,6 +613,67 @@ def _upsert_thread_index(project_id: str, thread_id: str, rollup: dict[str, Any]
         reverse=True,
     )
     atomic_write_text(path, json.dumps(index_payload, ensure_ascii=False, indent=2) + "\n")
+
+
+def _remove_thread_index_entry(project_id: str, thread_id: str) -> None:
+    path = _threads_index_path(project_id)
+    if not path.exists():
+        return
+    index_payload = {"schema_version": 1, "project_id": project_id, "threads": []}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            index_payload.update(raw)
+    except (OSError, ValueError, json.JSONDecodeError):
+        pass
+    threads = index_payload.get("threads")
+    if isinstance(threads, list):
+        index_payload["threads"] = [
+            item
+            for item in threads
+            if isinstance(item, dict) and str(item.get("thread_id") or "").strip() != thread_id
+        ]
+    atomic_write_text(path, json.dumps(index_payload, ensure_ascii=False, indent=2) + "\n")
+
+
+def _reassign_source_active_thread_after_handoff(project_id: str, moved_thread_id: str) -> None:
+    state = _load_project_state(project_id)
+    active_thread_id = str(state.get("active_thread_id") or "").strip()
+    if active_thread_id and active_thread_id != moved_thread_id:
+        return
+    fallback_thread_id = _pick_latest_available_thread_id(project_id)
+    _write_project_state(project_id, {"schema_version": 1, "active_thread_id": fallback_thread_id})
+
+
+def _pick_latest_available_thread_id(project_id: str) -> str | None:
+    candidates: list[str] = []
+    index_path = _threads_index_path(project_id)
+    if index_path.exists():
+        try:
+            payload = json.loads(index_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            payload = {}
+        threads = payload.get("threads") if isinstance(payload, dict) else None
+        if isinstance(threads, list):
+            candidates.extend(
+                str(item.get("thread_id") or "").strip()
+                for item in threads
+                if isinstance(item, dict) and str(item.get("thread_id") or "").strip()
+            )
+    for thread_id in candidates:
+        if thread_session_exists(project_id, thread_id):
+            return thread_id
+    threads_dir = _resolve_project_path(project_id) / ".amon" / "threads"
+    if not threads_dir.exists():
+        return None
+    fallback_dirs = sorted(
+        [path for path in threads_dir.iterdir() if path.is_dir() and (path / "events.jsonl").exists()],
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    if not fallback_dirs:
+        return None
+    return fallback_dirs[0].name
 
 
 def _migrate_legacy_sessions_if_needed(project_id: str) -> None:

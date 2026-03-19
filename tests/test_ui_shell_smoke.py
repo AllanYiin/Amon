@@ -294,6 +294,17 @@ class UIShellSmokeTests(unittest.TestCase):
         self.assertIn('async getProjectThreadHistory(projectId, threadId = "")', thread_service_js)
         self.assertIn("/threads/", thread_service_js)
 
+    def test_bootstrap_can_force_project_switch_when_thread_handoff_event_arrives(self) -> None:
+        bootstrap_js = Path("src/amon/ui/static/js/bootstrap.js").read_text(encoding="utf-8")
+
+        self.assertIn("const handoff = data.thread_handoff", bootstrap_js)
+        self.assertIn("const handoffSourceProjectId = normalizeProjectIdForUi(handoff?.source_project_id);", bootstrap_js)
+        self.assertIn("const handoffTargetProjectId = normalizeProjectIdForUi(handoff?.target_project_id);", bootstrap_js)
+        self.assertIn("const shouldForceSwitchProject = Boolean(", bootstrap_js)
+        self.assertIn("handoffTargetProjectId === eventProjectId", bootstrap_js)
+        self.assertIn("activeProjectId === handoffSourceProjectId", bootstrap_js)
+        self.assertIn("const shouldApplyToActiveProject = shouldForceSwitchProject || !eventProjectId || eventProjectId === latestActiveProjectId;", bootstrap_js)
+
 
     def test_chat_view_stream_paths_use_thread_endpoints(self) -> None:
         chat_view_js = Path("src/amon/ui/static/js/views/chat.js").read_text(encoding="utf-8")

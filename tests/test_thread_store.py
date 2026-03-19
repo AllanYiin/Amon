@@ -16,6 +16,7 @@ from amon.chat.thread_store import (
     build_prompt_with_history,
     create_thread_session,
     ensure_thread_session,
+    handoff_thread_session,
     thread_session_exists,
     load_latest_thread_id,
     load_latest_run_context,
@@ -468,6 +469,50 @@ class ThreadSessionStoreTests(unittest.TestCase):
 
             self.assertEqual(ensured_source, "active")
             self.assertEqual(ensured_thread_id, second_thread_id)
+
+    def test_handoff_thread_session_moves_thread_into_new_project_and_updates_active_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                source_project_id = "proj-handoff-src"
+                target_project_id = "proj-handoff-dst"
+                thread_id = create_thread_session(source_project_id)
+                append_event(thread_id, {"type": "user", "text": "請建立新專案", "project_id": source_project_id})
+                append_event(
+                    thread_id,
+                    {
+                        "type": "assistant",
+                        "text": "已收到，準備切到新專案。",
+                        "project_id": source_project_id,
+                        "run_id": "run-handoff-001",
+                    },
+                )
+
+                payload = handoff_thread_session(source_project_id, target_project_id, thread_id)
+                self.assertEqual(payload["source_project_id"], source_project_id)
+                self.assertEqual(payload["target_project_id"], target_project_id)
+                self.assertEqual(payload["source_thread_id"], thread_id)
+                self.assertEqual(payload["target_thread_id"], thread_id)
+                self.assertFalse(thread_session_exists(source_project_id, thread_id))
+                self.assertTrue(thread_session_exists(target_project_id, thread_id))
+                self.assertIsNone(load_latest_thread_id(source_project_id))
+                self.assertEqual(load_latest_thread_id(target_project_id), thread_id)
+                self.assertEqual(
+                    load_recent_dialogue(target_project_id, thread_id),
+                    [
+                        {"role": "user", "content": "請建立新專案"},
+                        {"role": "assistant", "content": "已收到，準備切到新專案。"},
+                    ],
+                )
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+            log_path = Path(temp_dir) / "logs" / "amon.log"
+            log_rows = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            handoff_logs = [row for row in log_rows if row.get("event") == "thread_session_handoff_completed"]
+            self.assertTrue(handoff_logs)
+            self.assertEqual(handoff_logs[-1].get("source_project_id"), source_project_id)
+            self.assertEqual(handoff_logs[-1].get("target_project_id"), target_project_id)
 
 
 if __name__ == "__main__":
