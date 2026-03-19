@@ -15,6 +15,69 @@
     <script src="static/vendor/svg-pan-zoom/svg-pan-zoom.min.js"></script>
     <script src="static/vendor/chart.js/chart.umd.min.js"></script>
     <script>
+      window.__AMON_UI_HTTP_BASE__ =
+        window.location.protocol === "file:" ? "http://127.0.0.1:8000" : "";
+    </script>
+    <script>
+      (function guardFileProtocolEntry() {
+        if (window.location.protocol !== "file:") return;
+
+        const httpBase = String(window.__AMON_UI_HTTP_BASE__ || "http://127.0.0.1:8000").replace(/\/+$/, "");
+        const httpEntry = `${httpBase}/#/chat`;
+
+        function renderFileProtocolNotice(message, level) {
+          const daemonPill = document.getElementById("shell-daemon-status");
+          if (daemonPill) {
+            daemonPill.textContent = level === "success" ? "Daemon：準備切換" : "Daemon：請改用 UI Server";
+            daemonPill.title = message;
+            daemonPill.classList.remove("pill--neutral", "pill--success", "pill--warning");
+            daemonPill.classList.add(level === "success" ? "pill--success" : "pill--warning");
+          }
+
+          const sendButton = document.getElementById("chat-send");
+          if (sendButton) {
+            sendButton.disabled = true;
+            sendButton.title = message;
+          }
+
+          const input = document.getElementById("chat-input");
+          if (input) {
+            input.disabled = true;
+            input.placeholder = message;
+          }
+
+          const timeline = document.getElementById("timeline");
+          if (!timeline || timeline.querySelector("[data-file-protocol-guard='true']")) return;
+          const row = document.createElement("article");
+          row.dataset.fileProtocolGuard = "true";
+          row.className = "timeline-status timeline-status--warning";
+          row.textContent = message;
+          timeline.appendChild(row);
+        }
+
+        window.addEventListener("DOMContentLoaded", async () => {
+          try {
+            await fetch(`${httpBase}/health`, {
+              mode: "no-cors",
+              cache: "no-store",
+            });
+            renderFileProtocolNotice("偵測到你是直接開啟 index.html；瀏覽器不會載入 UI 模組，正在切換到本機 UI server。", "success");
+            window.setTimeout(() => {
+              window.location.replace(httpEntry);
+            }, 350);
+            return;
+          } catch (_error) {
+            // noop: fall through to the actionable local guidance below.
+          }
+
+          renderFileProtocolNotice(
+            "你目前是直接開啟 index.html（file://）。這個模式不會載入前端模組，所以 UI 不會有反應；請先執行「amon ui --port 8000」或雙擊 run_app.bat，再從 http://127.0.0.1:8000/#/chat 開啟。",
+            "warning"
+          );
+        });
+      })();
+    </script>
+    <script>
       (function ensureSvgPanZoom() {
         if (!window.svgPanZoom) {
           console.error("[ui] svg-pan-zoom local vendor script is unavailable.");
@@ -51,7 +114,7 @@
             <div class="shell-topbar__group">
               <span class="shell-brand">Amon UI</span>
               <span class="shell-status shell-status--run pill pill--neutral" id="shell-run-status" title="尚未有 Run" data-i18n="status.run.idle" data-i18n-attr="title:tooltip.runIdle">尚未有 Run</span>
-              <span class="shell-status shell-status--daemon pill pill--neutral" id="shell-daemon-status" title="尚未連線 daemon" data-i18n="status.daemon.idle" data-i18n-attr="title:tooltip.daemonIdle">尚未連線</span>
+              <span class="shell-status shell-status--daemon pill pill--neutral" id="shell-daemon-status" title="尚未建立串流，送出任務後會開始連線" data-i18n="status.daemon.idle" data-i18n-attr="title:tooltip.daemonIdle">待命中</span>
               <span class="shell-status shell-status--budget pill pill--neutral" id="shell-budget-status">Budget：NT$ 0 / NT$ 5,000</span>
             </div>
             <div class="shell-topbar__actions">
@@ -905,7 +968,7 @@
       </section>
     </aside>
 
-    <script src="/event_stream_client.js"></script>
-    <script type="module" src="/static/js/app.js"></script>
+    <script src="event_stream_client.js"></script>
+    <script type="module" src="static/js/app.js"></script>
   </body>
 </html>

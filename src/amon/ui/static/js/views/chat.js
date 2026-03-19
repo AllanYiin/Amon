@@ -6,6 +6,7 @@ import { buildPreviewForFiles, revoke as revokeInlinePreviewUrl } from "./chat/r
 import { renderInlineArtifactsList, renderInlineArtifactStreamingHint, showInlineArtifactPreview } from "../layout/inlineArtifactsBinder.js";
 import { hasConcreteProjectId, normalizeProjectIdForUi } from "../domain/projectId.js";
 import { logViewInitDebug } from "../utils/debug.js";
+import { resolveAppUrl, resolveWsUrl } from "../api.js";
 
 const { EventStreamClient } = window.AmonUIEventStream || {};
 
@@ -190,20 +191,51 @@ export const CHAT_VIEW = {
       });
     };
 
-    const updateDaemonStatus = (status, transport) => {
+    const setDaemonPill = (text, level, title) => {
       const layoutState = store.getState().layout || {};
-      if (status === "connected") {
-        store.patch({
-          layout: {
-            ...layoutState,
-            daemonPill: {
-              text: `Daemon：${t("status.daemon.healthy")}`,
-              level: ctx.chatDeps.mapDaemonStatusLevel("connected"),
-              title: "daemon 已連線",
-            },
+      store.patch({
+        layout: {
+          ...layoutState,
+          daemonPill: {
+            text,
+            level,
+            title,
           },
-        });
+        },
+      });
+    };
+
+    const updateDaemonStatus = (status, transport) => {
+      const transportLabel = ctx.chatDeps.formatUnknownValue(transport, "未知傳輸");
+      if (status === "connecting") {
+        setDaemonPill("Daemon：建立串流中", "neutral", `正在建立 ${transportLabel} 串流`);
+      } else if (status === "connected") {
+        setDaemonPill(
+          `Daemon：${t("status.daemon.healthy")}`,
+          ctx.chatDeps.mapDaemonStatusLevel("connected"),
+          `串流已建立（${transportLabel}）`
+        );
       } else if (status === "reconnecting") {
+        setDaemonPill(
+          `Daemon：${t("status.daemon.reconnecting")}`,
+          ctx.chatDeps.mapDaemonStatusLevel("reconnecting"),
+          "daemon 連線中斷，正在重試"
+        );
+      } else if (status === "stopped") {
+        setDaemonPill("Daemon：已就緒", "success", "串流已結束，等待下一次請求");
+      } else if (status === "error") {
+        if (streamCompleted || receivedSoftWarning) {
+          return;
+        }
+        setDaemonPill(
+          `Daemon：${t("status.daemon.unavailable")}`,
+          ctx.chatDeps.mapDaemonStatusLevel("error"),
+          "daemon 未連線或不可用"
+        );
+        ui.toast?.show("串流連線失敗，輸入框已恢復可編輯，請重新送出。", { type: "danger", duration: 9000 });
+        stopStream();
+      }
+      if (status === "reconnecting") {
         store.patch({
           layout: {
             ...layoutState,
@@ -220,22 +252,6 @@ export const CHAT_VIEW = {
             duration: 7000,
           });
         }
-      } else if (status === "error") {
-        if (streamCompleted || receivedSoftWarning) {
-          return;
-        }
-        store.patch({
-          layout: {
-            ...layoutState,
-            daemonPill: {
-              text: `Daemon：${t("status.daemon.unavailable")}`,
-              level: ctx.chatDeps.mapDaemonStatusLevel("error"),
-              title: "daemon 未連線或不可用",
-            },
-          },
-        });
-        ui.toast?.show("串流連線失敗，輸入框已恢復可編輯，請重新送出。", { type: "danger", duration: 9000 });
-        stopStream();
       }
     };
 
@@ -292,7 +308,7 @@ export const CHAT_VIEW = {
       const activeProjectId = getConcreteProjectId() || null;
       if (messageLength > 1800) {
         try {
-          const response = await fetch("/v1/threads/stream/init", {
+          const response = await fetch(resolveAppUrl("/v1/threads/stream/init"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             signal: streamAbortController.signal,
@@ -335,10 +351,9 @@ export const CHAT_VIEW = {
           if (params.project_id) query.set("project_id", params.project_id);
           if (params.thread_id) query.set("thread_id", params.thread_id);
           if (lastEventId) query.set("last_event_id", lastEventId);
-          return `/v1/threads/stream?${query.toString()}`;
+          return resolveAppUrl(`/v1/threads/stream?${query.toString()}`);
         },
         wsUrlBuilder: (params, lastEventId) => {
-          const protocol = window.location.protocol === "https:" ? "wss" : "ws";
           const query = new URLSearchParams();
           if (params.stream_token) {
             query.set("stream_token", params.stream_token);
@@ -348,7 +363,7 @@ export const CHAT_VIEW = {
           if (params.project_id) query.set("project_id", params.project_id);
           if (params.thread_id) query.set("thread_id", params.thread_id);
           if (lastEventId) query.set("last_event_id", lastEventId);
-          return `${protocol}://${window.location.host}/v1/threads/stream?${query.toString()}`;
+          return resolveWsUrl(`/v1/threads/stream?${query.toString()}`);
         },
         onStatusChange: ({ status, transport }) => updateDaemonStatus(status, transport),
         onEvent: async (eventType, data) => {

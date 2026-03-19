@@ -26,7 +26,8 @@ class UIShellSmokeTests(unittest.TestCase):
             'id="artifacts-inline-preview"',
             'id="artifacts-inline-preview-frame"',
             'id="artifacts-list-details"',
-            'script type="module" src="/static/js/app.js"',
+            'script type="module" src="static/js/app.js"',
+            'script src="event_stream_client.js"',
         ]:
             self.assertIn(token, html)
 
@@ -198,7 +199,9 @@ class UIShellSmokeTests(unittest.TestCase):
         self.assertIn('id="copy-run-id"', html)
         self.assertIn('mapDaemonStatusLevel', bootstrap_js)
         self.assertIn('createHeaderLayout', bootstrap_js)
-        self.assertIn('daemonPill: { text: "Daemon：尚未連線"', bootstrap_js)
+        self.assertIn('daemonPill: { text: `Daemon：${t("status.daemon.idle")}`', bootstrap_js)
+        self.assertIn('await syncDaemonAvailability();', bootstrap_js)
+        self.assertIn('setDaemonPill("Daemon：已就緒", "success"', bootstrap_js)
         self.assertIn('.context-resizer', css)
         self.assertIn('.context-waffle', css)
 
@@ -219,6 +222,8 @@ class UIShellSmokeTests(unittest.TestCase):
 
         self.assertIn('import { bootstrapApp } from "./bootstrap.js";', app_js)
         self.assertIn("bootstrapApp();", app_js)
+        self.assertIn("ui_bootstrap_failed", app_js)
+        self.assertIn('document.getElementById("shell-daemon-status")', app_js)
 
         # entry 檔不應含 view/render 細節
         self.assertNotIn("createHashRouter", app_js)
@@ -250,6 +255,21 @@ class UIShellSmokeTests(unittest.TestCase):
             "src/amon/ui/static/js/views/tools.js",
         ]:
             self.assertTrue(Path(module_path).exists(), module_path)
+
+    def test_ui_supports_file_protocol_launcher_by_falling_back_to_local_http_base(self) -> None:
+        html = Path("src/amon/ui/index.html").read_text(encoding="utf-8")
+        api_js = Path("src/amon/ui/static/js/api.js").read_text(encoding="utf-8")
+        chat_js = Path("src/amon/ui/static/js/views/chat.js").read_text(encoding="utf-8")
+
+        self.assertIn('window.location.protocol === "file:" ? "http://127.0.0.1:8000" : ""', html)
+        self.assertIn("guardFileProtocolEntry", html)
+        self.assertIn('window.location.replace(httpEntry);', html)
+        self.assertIn('fetch(`${httpBase}/health`', html)
+        self.assertIn("請先執行「amon ui --port 8000」或雙擊 run_app.bat", html)
+        self.assertIn("export function resolveAppUrl", api_js)
+        self.assertIn("export function resolveWsUrl", api_js)
+        self.assertIn("resolveAppUrl(`/v1/threads/stream?", chat_js)
+        self.assertIn("return resolveWsUrl(`/v1/threads/stream?", chat_js)
 
     def test_plan_card_renderers_exist_for_tool_policy_confirmation(self) -> None:
         bootstrap_js = Path("src/amon/ui/static/js/bootstrap.js").read_text(encoding="utf-8")
@@ -309,7 +329,7 @@ class UIShellSmokeTests(unittest.TestCase):
     def test_chat_view_stream_paths_use_thread_endpoints(self) -> None:
         chat_view_js = Path("src/amon/ui/static/js/views/chat.js").read_text(encoding="utf-8")
         self.assertIn('"/v1/threads/stream/init"', chat_view_js)
-        self.assertIn('return `/v1/threads/stream?${query.toString()}`;', chat_view_js)
+        self.assertIn('return resolveAppUrl(`/v1/threads/stream?${query.toString()}`);', chat_view_js)
         self.assertIn('query.set("thread_id", params.thread_id);', chat_view_js)
         self.assertIn('thread_id: appState.activeThreadId', chat_view_js)
         self.assertIn("persistWhileStreaming: true", chat_view_js)

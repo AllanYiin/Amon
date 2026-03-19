@@ -1,3 +1,5 @@
+import { resolveAppUrl } from "../api.js";
+
 function normalizeArtifact(artifact = {}) {
   return {
     ...artifact,
@@ -21,7 +23,7 @@ export function createArtifactsService({ api }) {
       return (payload.artifacts || []).map(normalizeArtifact);
     },
     getArtifactUrl(runId, artifactId) {
-      return `/v1/runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(artifactId)}`;
+      return resolveAppUrl(`/v1/runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(artifactId)}`);
     },
   };
 }

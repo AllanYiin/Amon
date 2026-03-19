@@ -1,3 +1,5 @@
+import { resolveAppUrl } from "../api.js";
+
 export function createLogsService({ api }) {
   return {
     getLogs(runId, projectId = "") {
@@ -8,7 +10,7 @@ export function createLogsService({ api }) {
     },
     streamLogs(runId) {
       const query = runId ? `?run_id=${encodeURIComponent(runId)}` : "";
-      return new EventSource(`/v1/logs/stream${query}`);
+      return new EventSource(resolveAppUrl(`/v1/logs/stream${query}`));
     },
   };
 }

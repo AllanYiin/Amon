@@ -86,7 +86,11 @@ amon toolforge verify
 # 啟動 UI 預覽（瀏覽 http://localhost:8000）
 amon ui --port 8000
 
+# Windows 雙擊入口（會先啟動 UI server，再開啟 http://127.0.0.1:8000/#/chat）
+run_app.bat
+
 > UI 唯一入口為 `src/amon/ui/index.html`（以 hash route 切換），`project.html` / `single.html` 僅保留導向用途。
+> 請不要直接雙擊 `src/amon/ui/index.html` 用 `file://` 開啟；Chrome/Edge 在這種模式下不會載入前端 ES modules，畫面會看起來像「尚未連線、所有按鈕都沒反應」。
 > 前端模組分層、維護方式、手動回歸清單與回滾策略請參考 `docs/frontend-architecture.md`。
 
 # 互動式 Chat

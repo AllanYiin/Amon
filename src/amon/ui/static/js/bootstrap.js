@@ -1,4 +1,4 @@
-import { requestJson } from "./api.js";
+import { requestJson, resolveAppUrl } from "./api.js";
 import { createHashRouter } from "./router.js";
 import { createStore } from "./state.js";
 import { applyI18n, t } from "./i18n.js";
@@ -34,7 +34,7 @@ import { logUiDebug } from "./utils/debug.js";
 export function bootstrapApp() {
 const { EventStreamClient, createUiEventStore } = window.AmonUIEventStream || {};
 if (!EventStreamClient || !createUiEventStore) {
-  throw new Error("AmonUIEventStream 尚未載入，請確認 /event_stream_client.js");
+  throw new Error("AmonUIEventStream 尚未載入，請確認 event_stream_client.js");
 }
 applyI18n(document);
 const appStore = createStore({ locale: "zh-TW" });
@@ -316,7 +316,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
           projectId: state.projectId,
           projects: [],
           runPill: { text: t("status.run.idle"), level: "neutral", title: t("tooltip.runIdle") },
-          daemonPill: { text: "Daemon：尚未連線", level: "neutral", title: t("tooltip.daemonIdle") },
+          daemonPill: { text: `Daemon：${t("status.daemon.idle")}`, level: "neutral", title: t("tooltip.daemonIdle") },
           budgetPill: "Budget：NT$ 0.00 / NT$ 5,000",
           inspector: {
             collapsed: isMobileViewport,
@@ -789,7 +789,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
         if (state.projectId) {
           params.set("project_id", state.projectId);
         }
-        const source = new EventSource(`/v1/billing/stream?${params.toString()}`);
+      const source = new EventSource(resolveAppUrl(`/v1/billing/stream?${params.toString()}`));
         source.addEventListener("usage_updated", (event) => {
           state.billingSummary = JSON.parse(event.data || "{}");
           renderBillPage();
@@ -1517,6 +1517,42 @@ appStore.patch({ bootstrappedAt: Date.now() });
         showToast,
         showConfirmModal: (options) => confirmModal.open(options),
       };
+
+      function setDaemonPill(text, level = "neutral", title = "") {
+        const layoutState = appStore.getState().layout || {};
+        appStore.patch({
+          layout: {
+            ...layoutState,
+            daemonPill: {
+              text,
+              level,
+              title,
+            },
+          },
+        });
+      }
+
+      async function syncDaemonAvailability({ showFailureToast = false } = {}) {
+        try {
+          const payload = await requestJson("/health", {
+            timeoutMs: 5000,
+            headers: { Accept: "application/json" },
+          });
+          const queueDepth = Number(payload?.queue_depth);
+          const queueLabel = Number.isFinite(queueDepth) ? `，佇列深度 ${queueDepth}` : "";
+          setDaemonPill("Daemon：已就緒", "success", `UI server 可用，等待建立串流${queueLabel}`);
+          return true;
+        } catch (error) {
+          const detail = error?.message || String(error || "未知錯誤");
+          setDaemonPill("Daemon：不可用", "danger", `無法連到 UI server：${detail}`);
+          if (showFailureToast) {
+            showToast(`UI server 連線失敗：${detail}`, 9000, "warning");
+          }
+          return false;
+        }
+      }
+
+      window.amonUiDebug.syncDaemonAvailability = syncDaemonAvailability;
 
       function renderStoreSummary(storeState) {
         const runStatusRaw = storeState.run?.status || (state.streaming ? "running" : "idle");
@@ -3039,7 +3075,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
           elements.artifactPreviewBody.appendChild(frame);
         } else if (isTextLikeMime(mime) || isMarkdownPath(artifact.name || artifact.path || "")) {
           try {
-            const response = await fetch(artifact.url);
+      const response = await fetch(resolveAppUrl(artifact.url));
             if (!response.ok) throw new Error("讀取失敗");
             const text = await response.text();
             const wrapper = document.createElement("div");
@@ -3350,6 +3386,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
       });
 
       (async () => {
+        await syncDaemonAvailability();
         await runBootstrapInitialization({
           loadProjects,
           setProjectState,
