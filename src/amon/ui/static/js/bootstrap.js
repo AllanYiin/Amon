@@ -2739,6 +2739,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
       }
 
       function closeNodeDrawer() {
+        state.graphSelectedNodeId = null;
         elements.graphNodeDrawer.hidden = true;
       }
 
@@ -3324,6 +3325,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
       elements.artifactsGoLogs?.addEventListener("click", () => navigateToRoute("logs"));
       elements.artifactsDownloadChat?.addEventListener("click", () => void downloadProjectHistory());
       elements.artifactPreviewClose?.addEventListener("click", closeArtifactPreview);
+      elements.graphNodeClose?.addEventListener("click", closeNodeDrawer);
       elements.artifactPreviewModal?.addEventListener("click", (event) => {
         if (event.target === elements.artifactPreviewModal) closeArtifactPreview();
       });

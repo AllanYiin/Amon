@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import threading
@@ -66,6 +67,124 @@ class CoreStreamHandlerTests(unittest.TestCase):
                     mock_run_graph.call_args.kwargs.get("variables"),
                     {"conversation_history": history},
                 )
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+    def test_load_graph_primary_output_falls_back_to_last_agent_raw_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("graph-raw-output")
+                project_path = Path(project.path)
+                run_dir = project_path / ".amon" / "runs" / "run-raw-output"
+                run_dir.mkdir(parents=True, exist_ok=True)
+                (run_dir / "graph.resolved.json").write_text(
+                    json.dumps(
+                        {
+                            "nodes": [
+                                {"id": "research", "taskSpec": {"executor": "agent"}},
+                                {"id": "writer", "taskSpec": {"executor": "agent"}},
+                            ]
+                        },
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+                (run_dir / "state.json").write_text(
+                    json.dumps(
+                        {
+                            "nodes": {
+                                "research": {"output": {"raw": "研究摘要"}},
+                                "writer": {"output": {"raw": "最終整理結果"}},
+                            }
+                        },
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+
+                self.assertEqual(core._load_graph_primary_output(run_dir), "最終整理結果")
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+    def test_load_graph_primary_output_prefers_final_artifact_over_intermediate_raw_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("graph-final-artifact")
+                project_path = Path(project.path)
+                run_dir = project_path / ".amon" / "runs" / "run-final-artifact"
+                run_dir.mkdir(parents=True, exist_ok=True)
+                final_path = project_path / "docs" / "final.md"
+                final_path.parent.mkdir(parents=True, exist_ok=True)
+                final_path.write_text("正式最終稿", encoding="utf-8")
+                (run_dir / "graph.resolved.json").write_text(
+                    json.dumps(
+                        {
+                            "nodes": [
+                                {"id": "writer", "taskSpec": {"executor": "agent"}},
+                                {"id": "write_final", "taskSpec": {"executor": "tool"}},
+                            ]
+                        },
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+                (run_dir / "state.json").write_text(
+                    json.dumps(
+                        {
+                            "nodes": {
+                                "writer": {"output": {"raw": "中間草稿"}},
+                                "write_final": {"output": {"path": "docs/final.md"}},
+                            }
+                        },
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+
+                self.assertEqual(core._load_graph_primary_output(run_dir), "正式最終稿")
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+    def test_load_graph_primary_output_reads_structured_agent_port_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("graph-port-output")
+                project_path = Path(project.path)
+                run_dir = project_path / ".amon" / "runs" / "run-port-output"
+                run_dir.mkdir(parents=True, exist_ok=True)
+                (run_dir / "graph.resolved.json").write_text(
+                    json.dumps(
+                        {
+                            "nodes": [
+                                {"id": "writer", "taskSpec": {"executor": "agent"}},
+                            ]
+                        },
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+                (run_dir / "state.json").write_text(
+                    json.dumps(
+                        {
+                            "nodes": {
+                                "writer": {"output": {"raw": "", "ports": {"final_text": "來自 ports 的最終文字"}}},
+                            }
+                        },
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+
+                self.assertEqual(core._load_graph_primary_output(run_dir), "來自 ports 的最終文字")
             finally:
                 os.environ.pop("AMON_HOME", None)
 

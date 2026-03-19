@@ -2691,6 +2691,7 @@ class AmonCore:
         preferred_path_text = ""
         latest_path_text = ""
         latest_agent_raw = ""
+        latest_port_text = ""
         for node_id, node_state in state.get("nodes", {}).items():
             output = node_state.get("output") or {}
             output_path = output.get("output_path") or output.get("path")
@@ -2710,10 +2711,22 @@ class AmonCore:
                     raw_text = output.get("raw_output") if isinstance(output, dict) else ""
                 if isinstance(raw_text, str) and raw_text.strip():
                     latest_agent_raw = raw_text
+                ports = output.get("ports") if isinstance(output, dict) else None
+                if isinstance(ports, dict):
+                    for key in ("final_text", "text", "message", "content", "answer"):
+                        candidate = ports.get(key)
+                        if isinstance(candidate, str) and candidate.strip():
+                            latest_port_text = candidate
+                    if not latest_port_text and len(ports) == 1:
+                        only_value = next(iter(ports.values()))
+                        if isinstance(only_value, str) and only_value.strip():
+                            latest_port_text = only_value
         if preferred_path_text:
             return preferred_path_text
         if latest_agent_raw:
             return latest_agent_raw
+        if latest_port_text:
+            return latest_port_text
         if latest_path_text:
             return latest_path_text
         return ""

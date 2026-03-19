@@ -38,6 +38,11 @@ class GraphDrawerFlowContractTests(unittest.TestCase):
         self.assertNotIn("function nodeStatusLabel(status)", bootstrap_js)
         self.assertIn("nodeVm.statusUi.label", bootstrap_js)
 
+    def test_bootstrap_binds_legacy_graph_drawer_close_button(self) -> None:
+        bootstrap_js = Path("src/amon/ui/static/js/bootstrap.js").read_text(encoding="utf-8")
+        self.assertIn('elements.graphNodeClose?.addEventListener("click", closeNodeDrawer);', bootstrap_js)
+        self.assertIn("state.graphSelectedNodeId = null;", bootstrap_js)
+
     def test_event_stream_client_registers_node_update_events(self) -> None:
         stream_js = Path("src/amon/ui/event_stream_client.js").read_text(encoding="utf-8")
         self.assertIn('"node.update"', stream_js)
