@@ -335,6 +335,13 @@ class UIShellSmokeTests(unittest.TestCase):
         self.assertIn("persistWhileStreaming: true", chat_view_js)
         self.assertNotIn('/v1/chat/stream', chat_view_js)
 
+    def test_chat_view_surfaces_submit_failures_instead_of_silent_rejection(self) -> None:
+        chat_view_js = Path("src/amon/ui/static/js/views/chat.js").read_text(encoding="utf-8")
+        self.assertIn('console.error("chat_start_stream_failed", error);', chat_view_js)
+        self.assertIn('messageRenderer.appendTimelineStatus(`送出失敗：${detail}`);', chat_view_js)
+        self.assertIn('setDaemonPill("Daemon：送出失敗", "danger", detail);', chat_view_js)
+        self.assertIn('ui.toast?.show(`送出失敗：${detail}`', chat_view_js)
+
     def test_bootstrap_keeps_chat_view_mounted_while_streaming(self) -> None:
         bootstrap_js = Path("src/amon/ui/static/js/bootstrap.js").read_text(encoding="utf-8")
         self.assertIn("if (state.streaming && viewDef?.persistWhileStreaming)", bootstrap_js)

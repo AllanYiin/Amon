@@ -88,6 +88,42 @@ class PlannerLLMTests(unittest.TestCase):
         self.assertEqual(plan.id, "graph-2")
         self.assertEqual([node.id for node in plan.nodes if isinstance(node, TaskNode)][0], "concept_alignment")
 
+    def test_generate_plan_with_llm_repairs_repairable_semantic_issues(self) -> None:
+        llm = _MockLLM([
+            "```json\n"
+            '{"graphId":"graph-2","name":"規劃圖","version":"taskgraph.v3","createdAt":"2026-03-16T00:00:00Z","createdBy":"planner","nodes":[{"id":"concept_alignment","type":"TASK","title":"概念對齊","objective":"查關鍵概念","definitionOfDone":["完成概念摘要","整理風險"],"skillBindings":[{"skillId":"concept-alignment","role":"PRIMARY","config":{"tools":["web.search"]}}],"execution":{"mode":"SINGLE"}},{"id":"requirements","type":"TASK","title":"需求規格","objective":"整理需求","definitionOfDone":["完成需求","完成規格"],"execution":{"mode":"SINGLE"}},{"id":"architecture","type":"TASK","title":"架構設計","objective":"整理架構","definitionOfDone":["完成架構","完成限制"],"execution":{"mode":"SINGLE"}},{"id":"visual","type":"TASK","title":"視覺規格","objective":"整理視覺","definitionOfDone":["完成視覺","完成風格"],"execution":{"mode":"SINGLE"}}],"edges":[{"id":"edge-1","type":"CONTROL","from":"concept_alignment","to":"requirements","kind":"DEPENDS_ON"},{"id":"edge-2","type":"CONTROL","from":"requirements","to":"architecture","kind":"DEPENDS_ON"},{"id":"edge-3","type":"CONTROL","from":"architecture","to":"visual","kind":"DEPENDS_ON"}]}\n'
+            "```\n",
+            "```json\n"
+            '{"graphId":"graph-2-repaired","name":"規劃圖","version":"taskgraph.v3","createdAt":"2026-03-16T00:00:00Z","createdBy":"planner","nodes":[{"id":"concept_alignment","type":"TASK","title":"概念對齊","objective":"查關鍵概念","definitionOfDone":["完成概念摘要","整理風險"],"skillBindings":[{"skillId":"concept-alignment","role":"PRIMARY","config":{"tools":["web.search"]}}],"execution":{"mode":"SINGLE"}},{"id":"design_definition","type":"TASK","title":"設計定義","objective":"整合需求、架構與視覺規格","definitionOfDone":["完成需求規格","完成架構說明","完成視覺方向"],"execution":{"mode":"SINGLE"}}],"edges":[{"id":"edge-1","type":"CONTROL","from":"concept_alignment","to":"design_definition","kind":"DEPENDS_ON"}]}\n'
+            "```\n",
+        ])
+
+        plan = generate_plan_with_llm("請規劃創意遊戲", llm_client=llm)
+
+        self.assertEqual(plan.id, "graph-2-repaired")
+        self.assertEqual(
+            [node.id for node in plan.nodes if isinstance(node, TaskNode)],
+            ["concept_alignment", "design_definition"],
+        )
+        self.assertEqual(len(llm.calls), 2)
+
+    def test_generate_plan_with_llm_preserves_last_valid_graph_when_repair_response_is_invalid(self) -> None:
+        llm = _MockLLM([
+            "```json\n"
+            '{"graphId":"graph-2","name":"規劃圖","version":"taskgraph.v3","createdAt":"2026-03-16T00:00:00Z","createdBy":"planner","nodes":[{"id":"concept_alignment","type":"TASK","title":"概念對齊","objective":"查關鍵概念","definitionOfDone":["完成概念摘要","整理風險"],"skillBindings":[{"skillId":"concept-alignment","role":"PRIMARY","config":{"tools":["web.search"]}}],"execution":{"mode":"SINGLE"}},{"id":"requirements","type":"TASK","title":"需求規格","objective":"整理需求","definitionOfDone":["完成需求","完成規格"],"execution":{"mode":"SINGLE"}},{"id":"architecture","type":"TASK","title":"架構設計","objective":"整理架構","definitionOfDone":["完成架構","完成限制"],"execution":{"mode":"SINGLE"}},{"id":"visual","type":"TASK","title":"視覺規格","objective":"整理視覺","definitionOfDone":["完成視覺","完成風格"],"execution":{"mode":"SINGLE"}}],"edges":[{"id":"edge-1","type":"CONTROL","from":"concept_alignment","to":"requirements","kind":"DEPENDS_ON"},{"id":"edge-2","type":"CONTROL","from":"requirements","to":"architecture","kind":"DEPENDS_ON"},{"id":"edge-3","type":"CONTROL","from":"architecture","to":"visual","kind":"DEPENDS_ON"}]}\n'
+            "```\n",
+            "not-json",
+        ])
+
+        plan = generate_plan_with_llm("請規劃創意遊戲", llm_client=llm)
+
+        self.assertEqual(plan.id, "graph-2")
+        self.assertEqual(
+            [node.id for node in plan.nodes if isinstance(node, TaskNode)],
+            ["concept_alignment", "requirements", "architecture", "visual"],
+        )
+        self.assertEqual(len(llm.calls), 3)
+
     def test_generate_plan_with_llm_payload_contains_simplified_tools_skills(self) -> None:
         llm = _MockLLM([
             '{"version":"taskgraph.v3","nodes":[{"id":"task-1","node_type":"TASK","title":"做事","taskSpec":{"executor":"agent","agent":{"prompt":"完成","instructions":"執行"},"artifacts":[{"name":"todo","mediaType":"text/markdown","description":"待辦","required":true}],"display":{"label":"做事","summary":"測試","todoHint":"done","tags":[]},"runnable":true}},{"id":"artifact-task-1-todo","node_type":"ARTIFACT","title":"docs/TODO.md"}],"edges":[{"from":"task-1","to":"artifact-task-1-todo","edge_type":"DATA","kind":"EMITS"}]}',

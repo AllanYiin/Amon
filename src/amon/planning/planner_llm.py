@@ -118,13 +118,15 @@ def generate_plan_with_llm(
         )
         repair_reason: str | None = None
         previous_raw = raw
+        last_valid_graph: GraphDefinition | None = None
         for _ in range(2):
             try:
                 graph = _loads_graph_definition_from_response(previous_raw)
-                fatal_issues = _fatal_semantic_plan_issues(graph)
-                if not fatal_issues:
+                last_valid_graph = graph
+                semantic_issues = _semantic_plan_issues(graph)
+                if not semantic_issues:
                     return graph
-                repair_reason = "語義修復要求：\n- " + "\n- ".join(fatal_issues)
+                repair_reason = "語義修復要求：\n- " + "\n- ".join(semantic_issues)
             except ValueError as exc:
                 repair_reason = str(exc)
             previous_raw = _request_plan(
@@ -141,11 +143,17 @@ def generate_plan_with_llm(
                 thread_id=thread_id,
                 request_id=request_id,
             )
-        graph = _loads_graph_definition_from_response(previous_raw)
-        fatal_issues = _fatal_semantic_plan_issues(graph)
-        if fatal_issues:
-            raise ValueError("planner 語義修復失敗：" + "; ".join(fatal_issues))
-        return graph
+        try:
+            graph = _loads_graph_definition_from_response(previous_raw)
+            last_valid_graph = graph
+            semantic_issues = _semantic_plan_issues(graph)
+            if semantic_issues:
+                raise ValueError("planner 語義修復失敗：" + "; ".join(semantic_issues))
+            return graph
+        except ValueError:
+            if last_valid_graph is not None and not _fatal_semantic_plan_issues(last_valid_graph):
+                return last_valid_graph
+            raise
     except Exception as exc:  # noqa: BLE001
         _record_planner_fallback(
             error=exc,

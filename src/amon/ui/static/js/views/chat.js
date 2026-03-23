@@ -277,238 +277,249 @@ export const CHAT_VIEW = {
     };
 
     const startStream = async (message, attachments = []) => {
-      stopStream();
-      streamCompleted = false;
-      receivedSoftWarning = false;
-      streamAbortController = new AbortController();
-      artifactParser.reset();
-      inlineFiles.clear();
-      inlinePreviewUrls.forEach((url) => revokeInlinePreviewUrl(url));
-      inlinePreviewUrls.clear();
-      appState.inlineArtifacts = [];
-      appState.inlineArtifactFiles = {};
-      appState.inlineArtifactStreamingHint = "";
-      activateArtifactsTab({ collapsed: true });
-      renderInlineArtifactStreamingHint(elements, "");
-      ctx.chatDeps.resetPlanCard();
+      try {
+        stopStream();
+        streamCompleted = false;
+        receivedSoftWarning = false;
+        streamAbortController = new AbortController();
+        artifactParser.reset();
+        inlineFiles.clear();
+        inlinePreviewUrls.forEach((url) => revokeInlinePreviewUrl(url));
+        inlinePreviewUrls.clear();
+        appState.inlineArtifacts = [];
+        appState.inlineArtifactFiles = {};
+        appState.inlineArtifactStreamingHint = "";
+        activateArtifactsTab({ collapsed: true });
+        renderInlineArtifactStreamingHint(elements, "");
+        ctx.chatDeps.resetPlanCard();
 
-      const finalMessage = `${message}${buildAttachmentSummary(attachments)}`;
-      messageRenderer.appendMessage("user", finalMessage);
-      messageRenderer.appendTimelineStatus("訊息已送出，等待事件回傳中...");
-      setStreamStatus("已送出任務，正在等待規劃器回應…");
-      ctx.chatDeps.updateThinking({ status: "processing", brief: "需求已送出，等待 reasoning 摘要" });
-      timelineRenderer.updateExecutionStep("thinking", { title: "Thinking", status: "running", details: "訊息已送出，等待模型分析" });
-      timelineRenderer.updateExecutionStep("planning", { title: "Planning", status: "pending", details: "尚未開始規劃" });
-      timelineRenderer.updateExecutionStep("tool_execution", { title: "Tool execution", status: "pending", details: "等待工具呼叫" });
-      timelineRenderer.updateExecutionStep("node_status", { title: "Node 狀態", status: "pending", details: "等待 run/node 事件", inferred: true });
-      setStreaming(true);
+        const finalMessage = `${message}${buildAttachmentSummary(attachments)}`;
+        messageRenderer.appendMessage("user", finalMessage);
+        messageRenderer.appendTimelineStatus("訊息已送出，等待事件回傳中...");
+        setStreamStatus("已送出任務，正在等待規劃器回應…");
+        ctx.chatDeps.updateThinking({ status: "processing", brief: "需求已送出，等待 reasoning 摘要" });
+        timelineRenderer.updateExecutionStep("thinking", { title: "Thinking", status: "running", details: "訊息已送出，等待模型分析" });
+        timelineRenderer.updateExecutionStep("planning", { title: "Planning", status: "pending", details: "尚未開始規劃" });
+        timelineRenderer.updateExecutionStep("tool_execution", { title: "Tool execution", status: "pending", details: "等待工具呼叫" });
+        timelineRenderer.updateExecutionStep("node_status", { title: "Node 狀態", status: "pending", details: "等待 run/node 事件", inferred: true });
+        setStreaming(true);
 
-      const messageLength = finalMessage.length;
-      let streamToken = null;
-      const activeProjectId = getConcreteProjectId() || null;
-      if (messageLength > 1800) {
-        try {
-          const response = await fetch(resolveAppUrl("/v1/threads/stream/init"), {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            signal: streamAbortController.signal,
-            body: JSON.stringify({
-              message: finalMessage,
-              project_id: activeProjectId,
-              thread_id: appState.activeThreadId,
-            }),
-          });
-          if (!response.ok) {
-            throw new Error(`stream init failed: ${response.status}`);
-          }
-          const payload = await response.json();
-          streamToken = payload.stream_token || null;
-          if (!streamToken) {
-            throw new Error("stream token missing");
-          }
-        } catch (error) {
-          if (streamAbortController?.signal.aborted || error?.name === "AbortError") {
+        const messageLength = finalMessage.length;
+        let streamToken = null;
+        const activeProjectId = getConcreteProjectId() || null;
+        if (messageLength > 1800) {
+          try {
+            const response = await fetch(resolveAppUrl("/v1/threads/stream/init"), {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              signal: streamAbortController.signal,
+              body: JSON.stringify({
+                message: finalMessage,
+                project_id: activeProjectId,
+                thread_id: appState.activeThreadId,
+              }),
+            });
+            if (!response.ok) {
+              throw new Error(`stream init failed: ${response.status}`);
+            }
+            const payload = await response.json();
+            streamToken = payload.stream_token || null;
+            if (!streamToken) {
+              throw new Error("stream token missing");
+            }
+          } catch (error) {
+            if (streamAbortController?.signal.aborted || error?.name === "AbortError") {
+              stopStream();
+              return;
+            }
+            ui.toast?.show("訊息較長，初始化串流失敗，請稍後重試。", { type: "danger", duration: 9000 });
             stopStream();
             return;
           }
-          ui.toast?.show("訊息較長，初始化串流失敗，請稍後重試。", { type: "danger", duration: 9000 });
-          stopStream();
-          return;
         }
-      }
 
-      appState.streamClient = new EventStreamClient({
-        preferSSE: true,
-        // Allow short transient SSE hiccups to recover before showing a fatal toast.
-        maxReconnectAttempts: 3,
-        sseUrlBuilder: (params, lastEventId) => {
-          const query = new URLSearchParams();
-          if (params.stream_token) {
-            query.set("stream_token", params.stream_token);
-          } else {
-            query.set("message", params.message);
-          }
-          if (params.project_id) query.set("project_id", params.project_id);
-          if (params.thread_id) query.set("thread_id", params.thread_id);
-          if (lastEventId) query.set("last_event_id", lastEventId);
-          return resolveAppUrl(`/v1/threads/stream?${query.toString()}`);
-        },
-        wsUrlBuilder: (params, lastEventId) => {
-          const query = new URLSearchParams();
-          if (params.stream_token) {
-            query.set("stream_token", params.stream_token);
-          } else {
-            query.set("message", params.message);
-          }
-          if (params.project_id) query.set("project_id", params.project_id);
-          if (params.thread_id) query.set("thread_id", params.thread_id);
-          if (lastEventId) query.set("last_event_id", lastEventId);
-          return resolveWsUrl(`/v1/threads/stream?${query.toString()}`);
-        },
-        onStatusChange: ({ status, transport }) => updateDaemonStatus(status, transport),
-        onEvent: async (eventType, data) => {
-          if (streamAbortController?.signal.aborted) return;
-          try {
-            appState.uiStore.applyEvent(eventType, data);
-            ctx.bus?.emit?.("stream:event", { eventType, data });
-            await ctx.chatDeps.applySessionFromEvent(data);
-            if (hasConcreteProjectId(appState.projectId) && ["result", "done", "notice"].includes(eventType)) {
-              await ctx.chatDeps.loadContext();
+        appState.streamClient = new EventStreamClient({
+          preferSSE: true,
+          // Allow short transient SSE hiccups to recover before showing a fatal toast.
+          maxReconnectAttempts: 3,
+          sseUrlBuilder: (params, lastEventId) => {
+            const query = new URLSearchParams();
+            if (params.stream_token) {
+              query.set("stream_token", params.stream_token);
+            } else {
+              query.set("message", params.message);
             }
-            timelineRenderer.applyExecutionEvent(eventType, data);
-            if (eventType === "reasoning") {
-              const reasoningText = String(data.text || "").trim();
-              if (reasoningText) {
-                setStreamStatus(reasoningText);
+            if (params.project_id) query.set("project_id", params.project_id);
+            if (params.thread_id) query.set("thread_id", params.thread_id);
+            if (lastEventId) query.set("last_event_id", lastEventId);
+            return resolveAppUrl(`/v1/threads/stream?${query.toString()}`);
+          },
+          wsUrlBuilder: (params, lastEventId) => {
+            const query = new URLSearchParams();
+            if (params.stream_token) {
+              query.set("stream_token", params.stream_token);
+            } else {
+              query.set("message", params.message);
+            }
+            if (params.project_id) query.set("project_id", params.project_id);
+            if (params.thread_id) query.set("thread_id", params.thread_id);
+            if (lastEventId) query.set("last_event_id", lastEventId);
+            return resolveWsUrl(`/v1/threads/stream?${query.toString()}`);
+          },
+          onStatusChange: ({ status, transport }) => updateDaemonStatus(status, transport),
+          onEvent: async (eventType, data) => {
+            if (streamAbortController?.signal.aborted) return;
+            try {
+              appState.uiStore.applyEvent(eventType, data);
+              ctx.bus?.emit?.("stream:event", { eventType, data });
+              await ctx.chatDeps.applySessionFromEvent(data);
+              if (hasConcreteProjectId(appState.projectId) && ["result", "done", "notice"].includes(eventType)) {
+                await ctx.chatDeps.loadContext();
               }
-              ctx.chatDeps.updateThinking({ status: "reasoning", brief: "收到 reasoning 摘要", verbose: data.text || "" });
-              return;
-            }
-            if (eventType === "skill") {
-              const skillName = String(data.name || "").trim() || "unknown-skill";
-              const skillSource = String(data.source || "").trim();
-              const skillLabel = skillSource ? `${skillName}（${skillSource}）` : skillName;
-              messageRenderer.appendTimelineStatus(`正在讀取 skill：${skillLabel}`);
-              ctx.chatDeps.updateThinking({ status: "skill", brief: `正在讀取 skill：${skillLabel}` });
-              return;
-            }
-            if (eventType === "tool_call") {
-              const toolName = String(data.name || "").trim() || "unknown-tool";
-              const stage = String(data.stage || "").trim().toLowerCase();
-              const status = String(data.status || "").trim().toLowerCase();
-              if (stage === "start") {
-                messageRenderer.appendTimelineStatus(`正在呼叫工具：${toolName}`);
-                ctx.chatDeps.updateThinking({ status: "tool_call", brief: `正在呼叫工具：${toolName}` });
-              } else {
-                const finalStatus = status || (data.is_error ? "error" : "ok");
-                messageRenderer.appendTimelineStatus(`工具完成：${toolName}（${finalStatus}）`);
-                ctx.chatDeps.updateThinking({ status: "tool_result", brief: `工具完成：${toolName}` });
+              timelineRenderer.applyExecutionEvent(eventType, data);
+              if (eventType === "reasoning") {
+                const reasoningText = String(data.text || "").trim();
+                if (reasoningText) {
+                  setStreamStatus(reasoningText);
+                }
+                ctx.chatDeps.updateThinking({ status: "reasoning", brief: "收到 reasoning 摘要", verbose: data.text || "" });
+                return;
               }
-              return;
-            }
-            if (eventType === "warning") {
-              const warningKind = String(data.kind || "").toLowerCase();
-              if (warningKind.includes("timeout")) {
-                receivedSoftWarning = true;
+              if (eventType === "skill") {
+                const skillName = String(data.name || "").trim() || "unknown-skill";
+                const skillSource = String(data.source || "").trim();
+                const skillLabel = skillSource ? `${skillName}（${skillSource}）` : skillName;
+                messageRenderer.appendTimelineStatus(`正在讀取 skill：${skillLabel}`);
+                ctx.chatDeps.updateThinking({ status: "skill", brief: `正在讀取 skill：${skillLabel}` });
+                return;
               }
-              ui.toast?.show(data.message || "系統回覆較慢，仍在繼續處理。", { type: "warning", duration: 7000 });
-              return;
-            }
-            if (eventType === "token") {
-              messageRenderer.applyTokenChunk(data.text || "");
-              applyInlineArtifactEvents(artifactParser.feed(data.text || ""));
-              return;
-            }
-            if (eventType === "notice") {
-              if (data.text) {
-                setStreamStatus(String(data.text).replace(/^Amon：/, "").trim());
-                messageRenderer.appendMessage("agent", data.text);
+              if (eventType === "tool_call") {
+                const toolName = String(data.name || "").trim() || "unknown-tool";
+                const stage = String(data.stage || "").trim().toLowerCase();
+                const status = String(data.status || "").trim().toLowerCase();
+                if (stage === "start") {
+                  messageRenderer.appendTimelineStatus(`正在呼叫工具：${toolName}`);
+                  ctx.chatDeps.updateThinking({ status: "tool_call", brief: `正在呼叫工具：${toolName}` });
+                } else {
+                  const finalStatus = status || (data.is_error ? "error" : "ok");
+                  messageRenderer.appendTimelineStatus(`工具完成：${toolName}（${finalStatus}）`);
+                  ctx.chatDeps.updateThinking({ status: "tool_result", brief: `工具完成：${toolName}` });
+                }
+                return;
               }
-              return;
-            }
-            if (eventType === "todo") {
-              const markdown = String(data.markdown || "").trim();
-              if (markdown) {
-                messageRenderer.appendMessage("agent", markdown);
-                messageRenderer.appendTimelineStatus("已產出 TODO 初稿，開始概念對齊與詳細規劃。");
+              if (eventType === "warning") {
+                const warningKind = String(data.kind || "").toLowerCase();
+                if (warningKind.includes("timeout")) {
+                  receivedSoftWarning = true;
+                }
+                ui.toast?.show(data.message || "系統回覆較慢，仍在繼續處理。", { type: "warning", duration: 7000 });
+                return;
+              }
+              if (eventType === "token") {
+                messageRenderer.applyTokenChunk(data.text || "");
+                applyInlineArtifactEvents(artifactParser.feed(data.text || ""));
+                return;
+              }
+              if (eventType === "notice") {
+                if (data.text) {
+                  setStreamStatus(String(data.text).replace(/^Amon：/, "").trim());
+                  messageRenderer.appendMessage("agent", data.text);
+                }
+                return;
+              }
+              if (eventType === "todo") {
+                const markdown = String(data.markdown || "").trim();
+                if (markdown) {
+                  messageRenderer.appendMessage("agent", markdown);
+                  messageRenderer.appendTimelineStatus("已產出 TODO 初稿，開始概念對齊與詳細規劃。");
+                  if (hasConcreteProjectId(appState.projectId)) {
+                    await ctx.chatDeps.loadContext();
+                  }
+                }
+                return;
+              }
+              if (eventType === "plan") {
+                ctx.chatDeps.showPlanCard(data);
+                messageRenderer.appendMessage("agent", "已產生 Plan Card，請確認。");
+                return;
+              }
+              if (eventType === "result") {
+                ctx.chatDeps.updateThinking({ status: "tool_result", brief: "已收到工具結果" });
+                messageRenderer.appendMessage("agent", `\n\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``);
+                return;
+              }
+              if (eventType === "error") {
+                artifactParser.feed("\n");
+                applyInlineArtifactEvents(artifactParser.finalizeClosedArtifacts());
+                ctx.chatDeps.updateThinking({ status: "error", brief: data.message || "流程失敗" });
+                ui.toast?.show(data.message || "串流失敗", { type: "danger", duration: 9000 });
+                stopStream();
+                return;
+              }
+              if (eventType === "done") {
+                artifactParser.feed("\n");
+                applyInlineArtifactEvents(artifactParser.finalizeClosedArtifacts());
+                streamCompleted = true;
+                await ctx.chatDeps.applySessionFromEvent(data);
+                const doneStatus = data.status || "ok";
+                if (doneStatus !== "ok" && doneStatus !== "confirm_required" && doneStatus !== "warning" && doneStatus !== "project_required") {
+                  messageRenderer.appendMessage("agent", `流程結束（${doneStatus}）。我已收到你的訊息，請調整描述後再送出，我會持續回應。`);
+                  messageRenderer.appendTimelineStatus(`流程狀態：${doneStatus}`);
+                }
+                if (data.final_text) {
+                  messageRenderer.appendMessage("agent", data.final_text);
+                }
+                const phaseMetrics = data.phase_metrics || {};
+                const totalMs = Number(phaseMetrics.total_ms || 0);
+                if (totalMs > 0) {
+                  messageRenderer.appendTimelineStatus(`規劃與執行耗時約 ${(totalMs / 1000).toFixed(1)} 秒。`);
+                  const routeMs = Number(phaseMetrics.route_intent_ms || 0);
+                  const executionModeMs = Number(phaseMetrics.execution_mode_ms || 0);
+                  const segments = [
+                    ["路由", routeMs],
+                    [executionModeMs > 0 && executionModeMs === routeMs ? "模式判斷(併入路由)" : "模式判斷", executionModeMs],
+                    ["TODO 初稿", Number(phaseMetrics.todo_bootstrap_ms || 0)],
+                    ["詳細規劃", Number(phaseMetrics.plan_generation_ms || 0)],
+                    ["編譯圖", Number(phaseMetrics.compile_graph_ms || 0)],
+                    ["執行圖", Number(phaseMetrics.run_graph_ms || 0)],
+                  ]
+                    .filter(([, value]) => value > 0)
+                    .map(([label, value]) => `${label} ${(value / 1000).toFixed(1)}s`);
+                  if (segments.length) {
+                    messageRenderer.appendTimelineStatus(`耗時拆解：${segments.join("｜")}`);
+                  }
+                }
+                ctx.chatDeps.updateThinking({ status: doneStatus === "ok" ? "done" : doneStatus, brief: doneStatus === "ok" ? "流程已完成" : `流程結束：${doneStatus}` });
+                stopStream();
+                await ctx.chatDeps.loadProjects();
                 if (hasConcreteProjectId(appState.projectId)) {
                   await ctx.chatDeps.loadContext();
+                  ctx.chatDeps.appendArtifactsHintToTimeline(appState.runArtifacts.length);
                 }
               }
-              return;
+            } catch (error) {
+              console.error("stream_event_error", error);
+              ui.toast?.show(`事件處理失敗：${error.message || error}`, { type: "danger", duration: 9000 });
             }
-            if (eventType === "plan") {
-              ctx.chatDeps.showPlanCard(data);
-              messageRenderer.appendMessage("agent", "已產生 Plan Card，請確認。");
-              return;
-            }
-            if (eventType === "result") {
-              ctx.chatDeps.updateThinking({ status: "tool_result", brief: "已收到工具結果" });
-              messageRenderer.appendMessage("agent", `\n\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``);
-              return;
-            }
-            if (eventType === "error") {
-              artifactParser.feed("\n");
-              applyInlineArtifactEvents(artifactParser.finalizeClosedArtifacts());
-              ctx.chatDeps.updateThinking({ status: "error", brief: data.message || "流程失敗" });
-              ui.toast?.show(data.message || "串流失敗", { type: "danger", duration: 9000 });
-              stopStream();
-              return;
-            }
-            if (eventType === "done") {
-              artifactParser.feed("\n");
-              applyInlineArtifactEvents(artifactParser.finalizeClosedArtifacts());
-              streamCompleted = true;
-              await ctx.chatDeps.applySessionFromEvent(data);
-              const doneStatus = data.status || "ok";
-              if (doneStatus !== "ok" && doneStatus !== "confirm_required" && doneStatus !== "warning" && doneStatus !== "project_required") {
-                messageRenderer.appendMessage("agent", `流程結束（${doneStatus}）。我已收到你的訊息，請調整描述後再送出，我會持續回應。`);
-                messageRenderer.appendTimelineStatus(`流程狀態：${doneStatus}`);
-              }
-              if (data.final_text) {
-                messageRenderer.appendMessage("agent", data.final_text);
-              }
-              const phaseMetrics = data.phase_metrics || {};
-              const totalMs = Number(phaseMetrics.total_ms || 0);
-              if (totalMs > 0) {
-                messageRenderer.appendTimelineStatus(`規劃與執行耗時約 ${(totalMs / 1000).toFixed(1)} 秒。`);
-                const routeMs = Number(phaseMetrics.route_intent_ms || 0);
-                const executionModeMs = Number(phaseMetrics.execution_mode_ms || 0);
-                const segments = [
-                  ["路由", routeMs],
-                  [executionModeMs > 0 && executionModeMs === routeMs ? "模式判斷(併入路由)" : "模式判斷", executionModeMs],
-                  ["TODO 初稿", Number(phaseMetrics.todo_bootstrap_ms || 0)],
-                  ["詳細規劃", Number(phaseMetrics.plan_generation_ms || 0)],
-                  ["編譯圖", Number(phaseMetrics.compile_graph_ms || 0)],
-                  ["執行圖", Number(phaseMetrics.run_graph_ms || 0)],
-                ]
-                  .filter(([, value]) => value > 0)
-                  .map(([label, value]) => `${label} ${(value / 1000).toFixed(1)}s`);
-                if (segments.length) {
-                  messageRenderer.appendTimelineStatus(`耗時拆解：${segments.join("｜")}`);
-                }
-              }
-              ctx.chatDeps.updateThinking({ status: doneStatus === "ok" ? "done" : doneStatus, brief: doneStatus === "ok" ? "流程已完成" : `流程結束：${doneStatus}` });
-              stopStream();
-              await ctx.chatDeps.loadProjects();
-              if (hasConcreteProjectId(appState.projectId)) {
-                await ctx.chatDeps.loadContext();
-                ctx.chatDeps.appendArtifactsHintToTimeline(appState.runArtifacts.length);
-              }
-            }
-          } catch (error) {
-            console.error("stream_event_error", error);
-            ui.toast?.show(`事件處理失敗：${error.message || error}`, { type: "danger", duration: 9000 });
-          }
-        },
-      });
+          },
+        });
 
-      appState.streamClient.start({
-        message: streamToken ? "" : finalMessage,
-        stream_token: streamToken,
-        project_id: activeProjectId,
-        thread_id: appState.activeThreadId,
-      });
+        appState.streamClient.start({
+          message: streamToken ? "" : finalMessage,
+          stream_token: streamToken,
+          project_id: activeProjectId,
+          thread_id: appState.activeThreadId,
+        });
+      } catch (error) {
+        const detail = error?.message || String(error || "未知錯誤");
+        console.error("chat_start_stream_failed", error);
+        messageRenderer.appendTimelineStatus(`送出失敗：${detail}`);
+        ctx.chatDeps.updateThinking({ status: "error", brief: `送出失敗：${detail}` });
+        setStreamStatus(`送出失敗：${detail}`);
+        setDaemonPill("Daemon：送出失敗", "danger", detail);
+        ui.toast?.show(`送出失敗：${detail}`, { type: "danger", duration: 9000 });
+        stopStream();
+      }
     };
 
     const unbindInput = inputBar.bind();
