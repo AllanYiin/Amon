@@ -16,6 +16,7 @@ from amon.fs.atomic import append_jsonl, atomic_write_text
 from amon.events import emit_event
 from amon.logging import log_event
 from amon.tooling import load_tool_spec, validate_inputs_schema
+from amon.triggers.hook_service import submit_hook_run_request
 
 from .matcher import match
 from .state import HookStateStore
@@ -168,6 +169,25 @@ def process_event(
                 store.decrement_inflight(hook.hook_id)
             continue
 
+        if hook.action.type == "run.request":
+            store.increment_inflight(hook.hook_id)
+            try:
+                store.record_trigger(hook.hook_id, current_time, dedupe_key)
+                action_id = enqueue(
+                    {
+                        "hook_id": hook.hook_id,
+                        "action_type": hook.action.type,
+                        "action_args": args,
+                        "event": event,
+                    }
+                )
+                results.append({"hook_id": hook.hook_id, "status": "queued", "action_id": action_id})
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Hook %s 佇列 run request 失敗：%s", hook.hook_id, exc, exc_info=True)
+                results.append({"hook_id": hook.hook_id, "status": "failed", "error": str(exc)})
+                store.decrement_inflight(hook.hook_id)
+            continue
+
         results.append({"hook_id": hook.hook_id, "status": "skipped", "reason": "unsupported_action"})
 
     return results
@@ -238,6 +258,23 @@ def execute_hook_action(
                 }
             )
             return {"hook_id": hook_id, "status": "executed", "result": result}
+        if action_type == "run.request":
+            result = submit_hook_run_request(
+                hook_id=hook_id,
+                action_args=args,
+                event=event,
+                data_dir=data_dir,
+            )
+            log_event(
+                {
+                    "event": "hook_action_executed",
+                    "hook_id": hook_id,
+                    "action_type": action_type,
+                    "event_id": event.get("event_id"),
+                    "run_id": (result or {}).get("run", {}).get("id"),
+                }
+            )
+            return {"hook_id": hook_id, "status": str((result or {}).get("status") or "executed"), "result": result}
         return {"hook_id": hook_id, "status": "skipped", "reason": "unsupported_action"}
     except Exception as exc:  # noqa: BLE001
         logger.error("Hook %s 執行 action 失敗：%s", hook_id, exc, exc_info=True)

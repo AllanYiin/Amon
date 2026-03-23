@@ -238,8 +238,13 @@ def _emit_schedule_fired(
 ) -> dict[str, Any]:
     payload = {
         "schedule_id": schedule.get("schedule_id"),
+        "project_id": schedule.get("project_id"),
         "template_id": schedule.get("template_id"),
+        "workflow_ref": schedule.get("workflow_ref"),
         "vars": schedule.get("vars") or {},
+        "cooldown_seconds": schedule.get("cooldown_seconds"),
+        "max_active_runs": schedule.get("max_active_runs"),
+        "max_queue_depth": schedule.get("max_queue_depth"),
         "scheduled_for": scheduled_for.isoformat(timespec="seconds"),
         "fired_at": fired_at.isoformat(timespec="seconds"),
     }

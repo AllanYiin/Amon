@@ -117,6 +117,7 @@ class WorkspaceService:
         labels: list[str] | None = None,
         notes: str | None = None,
         pin: bool = False,
+        trigger: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         selected_workflow = str(workflow_ref or "").strip() or None
         selected_template = str(template_ref or "").strip() or None
@@ -143,6 +144,7 @@ class WorkspaceService:
             workflow_ref=selected_workflow,
             template_ref=selected_template,
             status="compiled",
+            trigger=trigger,
             snapshot_refs=snapshot_refs,
             metadata={"variables": runtime_vars},
             labels=labels,
