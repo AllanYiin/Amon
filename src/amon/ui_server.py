@@ -2020,6 +2020,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
 
     def _handle_project_run_stream(self, *, project_id: str, run_id: str) -> None:
         service = WorkspaceService(self.core, project_id)
+        last_event_id_raw = str(self.headers.get("Last-Event-ID") or "").strip()
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
@@ -2028,15 +2029,21 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
 
         sent_count = 0
         idle_rounds = 0
+        resume_applied = False
         while idle_rounds < 40:
             payload = service.get_run(run_id)
             events = payload.get("events") if isinstance(payload, dict) else []
             if not isinstance(events, list):
                 events = []
+            if not resume_applied:
+                sent_count = self._resolve_run_stream_offset(events, last_event_id_raw)
+                resume_applied = True
             if sent_count < len(events):
-                for event in events[sent_count:]:
+                for index, event in enumerate(events[sent_count:], start=sent_count):
                     event_name = str(event.get("event") or event.get("type") or "message").strip() or "message"
+                    event_id = self._project_run_stream_event_id(event, index)
                     data = json.dumps(event, ensure_ascii=False).encode("utf-8")
+                    self.wfile.write(f"id: {event_id}\n".encode("utf-8"))
                     self.wfile.write(f"event: {event_name}\n".encode("utf-8"))
                     self.wfile.write(b"data: " + data + b"\n\n")
                     self.wfile.flush()
@@ -2060,6 +2067,23 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         self.wfile.write(b"event: done\n")
         self.wfile.write(b"data: " + done + b"\n\n")
         self.wfile.flush()
+
+    @staticmethod
+    def _project_run_stream_event_id(event: dict[str, Any], index: int) -> str:
+        raw = str(event.get("event_id") or event.get("id") or "").strip()
+        return raw or str(index + 1)
+
+    def _resolve_run_stream_offset(self, events: list[dict[str, Any]], last_event_id_raw: str) -> int:
+        if not last_event_id_raw:
+            return 0
+        for index, event in enumerate(events):
+            if self._project_run_stream_event_id(event, index) == last_event_id_raw:
+                return index + 1
+        try:
+            numeric = int(last_event_id_raw)
+        except (TypeError, ValueError):
+            return 0
+        return max(numeric, 0)
 
     def _build_tools_catalog(self, project_id: str | None, *, refresh_mcp: bool = False) -> dict[str, Any]:
         project_path = self.core.get_project_path(project_id) if project_id else None
