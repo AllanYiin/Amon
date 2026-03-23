@@ -12,6 +12,7 @@ EXECUTOR_TYPES = {"llm", "tool", "sandbox", "human_gate", "subgraph"}
 @dataclass
 class ExecutorBinding(VersionedEntity):
     type: str = "llm"
+    capabilities: list[str] = field(default_factory=list)
     agent_profile_ref: str | None = None
     tool_plan: dict[str, Any] = field(default_factory=dict)
     tool_invocation_mode: str | None = None
@@ -27,6 +28,7 @@ class ExecutorBinding(VersionedEntity):
         *,
         executor_id: str,
         executor_type: str,
+        capabilities: list[str] | None = None,
         agent_profile_ref: str | None = None,
         tool_plan: dict[str, Any] | None = None,
         tool_invocation_mode: str | None = None,
@@ -40,6 +42,7 @@ class ExecutorBinding(VersionedEntity):
         return cls(
             id=executor_id,
             type=executor_type,
+            capabilities=[str(item) for item in (capabilities or (tool_plan or {}).get("capabilities", [])) if str(item).strip()],
             agent_profile_ref=agent_profile_ref,
             tool_plan=copy_mapping(tool_plan),
             tool_invocation_mode=tool_invocation_mode,
@@ -63,8 +66,12 @@ class ExecutorBinding(VersionedEntity):
         ]:
             if key in changes and changes[key] is not None:
                 setattr(self, key, changes[key])
+        if "capabilities" in changes and changes["capabilities"] is not None:
+            self.capabilities = [str(item) for item in changes["capabilities"] if str(item).strip()]
         if "tool_plan" in changes and changes["tool_plan"] is not None:
             self.tool_plan = copy_mapping(changes["tool_plan"])
+            if "capabilities" not in changes and self.tool_plan.get("capabilities") is not None:
+                self.capabilities = [str(item) for item in self.tool_plan.get("capabilities", []) if str(item).strip()]
         if "retry_policy" in changes and changes["retry_policy"] is not None:
             self.retry_policy = copy_mapping(changes["retry_policy"])
         if "approval_policy" in changes and changes["approval_policy"] is not None:
@@ -87,6 +94,7 @@ class ExecutorBinding(VersionedEntity):
             "id": self.id,
             "version": self.version,
             "type": self.type,
+            "capabilities": list(self.capabilities),
             "agent_profile_ref": self.agent_profile_ref,
             "tool_plan": copy_mapping(self.tool_plan),
             "tool_invocation_mode": self.tool_invocation_mode,
@@ -107,6 +115,7 @@ class ExecutorBinding(VersionedEntity):
             id=str(payload.get("id") or ""),
             version=int(payload.get("version") or 1),
             type=str(payload.get("type") or "llm"),
+            capabilities=[str(item) for item in (payload.get("capabilities") or []) if str(item).strip()],
             agent_profile_ref=payload.get("agent_profile_ref"),
             tool_plan=copy_mapping(payload.get("tool_plan")),
             tool_invocation_mode=payload.get("tool_invocation_mode"),
@@ -119,6 +128,8 @@ class ExecutorBinding(VersionedEntity):
             created_at=created_at,
             updated_at=str(payload.get("updated_at") or created_at),
         )
+        if not entity.capabilities and entity.tool_plan.get("capabilities") is not None:
+            entity.capabilities = [str(item) for item in entity.tool_plan.get("capabilities", []) if str(item).strip()]
         if entity.type not in EXECUTOR_TYPES:
             raise ValueError(f"不合法的 executor type：{entity.type}")
         if entity.status not in DEFINITION_STATUSES:

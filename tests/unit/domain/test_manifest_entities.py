@@ -43,11 +43,13 @@ class ManifestEntityTests(unittest.TestCase):
         executor = ExecutorBinding.create(
             executor_id="exec.research",
             executor_type="llm",
+            capabilities=["web_research"],
             agent_profile_ref="agent.researcher",
             tool_policy_ref="policy.readonly",
             status="active",
         )
         self.assertTrue(executor.streaming_required)
+        self.assertEqual(executor.capabilities, ["web_research"])
 
     def test_manifest_roundtrip_and_reference_validation(self) -> None:
         manifest = AmonManifest(
@@ -74,6 +76,7 @@ class ManifestEntityTests(unittest.TestCase):
                 "exec.researcher": ExecutorBinding.create(
                     executor_id="exec.researcher",
                     executor_type="llm",
+                    capabilities=["concept_alignment"],
                     agent_profile_ref="agent.researcher",
                     status="active",
                 )

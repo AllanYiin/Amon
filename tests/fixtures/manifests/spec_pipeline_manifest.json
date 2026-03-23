@@ -1,0 +1,110 @@
+{
+  "version": "amon.manifest.v1",
+  "project": {
+    "id": "project.demo",
+    "name": "Demo"
+  },
+  "tasks": {
+    "task.concept_alignment": {
+      "id": "task.concept_alignment",
+      "version": 1,
+      "title": "概念對齊",
+      "goal": "整理關鍵概念與風險",
+      "required_capabilities": ["concept_alignment", "web_research"],
+      "input_contract": {
+        "ports": [
+          {"name": "request", "type": "string"}
+        ]
+      },
+      "output_contract": {
+        "ports": [
+          {"name": "summary", "type": "markdown", "description": "研究摘要", "required": true}
+        ]
+      },
+      "acceptance_criteria": ["列出定義", "標示風險"],
+      "side_effect_class": "read_only",
+      "status": "active",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    }
+  },
+  "agent_profiles": {
+    "agent.researcher.v1": {
+      "id": "agent.researcher.v1",
+      "version": 1,
+      "name": "Researcher",
+      "purpose": "蒐集整理資料",
+      "system_prompt": "你是嚴謹的研究型角色。",
+      "default_skills": ["concept-alignment", "source-synthesis"],
+      "model_policy": {
+        "provider": "openai",
+        "model": "gpt-4.1-mini",
+        "streaming_required": true
+      },
+      "memory_policy": "project_scoped",
+      "output_style": "markdown",
+      "status": "active",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    }
+  },
+  "executors": {
+    "exec.researcher_llm": {
+      "id": "exec.researcher_llm",
+      "version": 1,
+      "type": "llm",
+      "capabilities": ["concept_alignment", "web_research"],
+      "agent_profile_ref": "agent.researcher.v1",
+      "tool_plan": {},
+      "tool_invocation_mode": "delegated",
+      "tool_policy_ref": "policy.readonly_web",
+      "timeout_s": 180,
+      "retry_policy": {},
+      "approval_policy": {},
+      "streaming_required": true,
+      "status": "active",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    }
+  },
+  "workflows": {
+    "workflow.spec_pipeline": {
+      "id": "workflow.spec_pipeline",
+      "version": 1,
+      "name": "Spec Pipeline",
+      "nodes": [
+        {
+          "id": "concept_alignment",
+          "task_ref": "task.concept_alignment",
+          "executor_ref": "exec.researcher_llm",
+          "depends_on": [],
+          "condition": null,
+          "input_mapping": {},
+          "output_mapping": {},
+          "status": "valid"
+        }
+      ],
+      "routes": [],
+      "output_bindings": {},
+      "status": "active",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    }
+  },
+  "templates": {},
+  "tool_policies": {
+    "policy.readonly_web": {
+      "id": "policy.readonly_web",
+      "version": 1,
+      "allowed_tools": ["web.search"],
+      "allowed_paths": [],
+      "allow_network": true,
+      "delegated_allowed": true,
+      "side_effect_ceiling": "read_only",
+      "approval_rules": {},
+      "status": "active",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    }
+  }
+}

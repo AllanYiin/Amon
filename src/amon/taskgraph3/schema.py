@@ -623,6 +623,10 @@ def validate_graph_definition(graph: GraphDefinition) -> None:
                 raise ValueError(
                     f"gate.routes.on_outcome 不合法：node_id={gate.id}, on_outcome={route.on_outcome}"
                 )
+            if route.on_outcome not in _ALLOWED_GATE_OUTCOMES:
+                raise ValueError(
+                    f"gate.routes.on_outcome 不合法：node_id={gate.id}, on_outcome={route.on_outcome}"
+                )
             if route.to_node not in node_ids:
                 raise ValueError(
                     f"gate.routes.to_node 指向不存在節點：node_id={gate.id}, to_node={route.to_node}"

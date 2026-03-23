@@ -1,0 +1,220 @@
+{
+  "agentIds": [],
+  "agents": [],
+  "archivedAt": null,
+  "canvas": {
+    "nodePositions": {},
+    "selectedIds": [],
+    "viewport": {
+      "x": 0.0,
+      "y": 0.0,
+      "zoom": 1.0
+    }
+  },
+  "createdAt": "2026-01-01T00:00:00Z",
+  "createdBy": null,
+  "description": "compiled from amon.manifest.v1",
+  "edgeIds": [],
+  "edges": [],
+  "entityVersion": 1,
+  "entryNodeIds": [
+    "concept_alignment"
+  ],
+  "graphRuns": [],
+  "id": "workflow.spec_pipeline",
+  "kind": "graph",
+  "lastOpenedAt": null,
+  "latestRunId": null,
+  "metadata": {
+    "snapshotPins": {
+      "agent:agent.researcher.v1": {
+        "kind": "agent_profile",
+        "ref": "agent.researcher.v1",
+        "version": 1
+      },
+      "executor:exec.researcher_llm": {
+        "kind": "executor",
+        "ref": "exec.researcher_llm",
+        "version": 1
+      },
+      "task:task.concept_alignment": {
+        "kind": "task",
+        "ref": "task.concept_alignment",
+        "version": 1
+      },
+      "tool_policy:policy.readonly_web": {
+        "kind": "tool_policy",
+        "ref": "policy.readonly_web",
+        "version": 1
+      },
+      "workflow": {
+        "kind": "workflow",
+        "ref": "workflow.spec_pipeline",
+        "version": 1
+      }
+    },
+    "source_manifest_version": "amon.manifest.v1",
+    "workflow_ref": "workflow.spec_pipeline"
+  },
+  "name": "Spec Pipeline",
+  "nodeIds": [
+    "concept_alignment"
+  ],
+  "nodeRuns": [],
+  "nodes": [
+    {
+      "agentId": null,
+      "config": {},
+      "createdAt": "2026-01-01T00:00:00Z",
+      "createdBy": null,
+      "description": "整理關鍵概念與風險",
+      "downstreamEdgeIds": [],
+      "error": null,
+      "execution": "SINGLE",
+      "executionPolicy": {
+        "maxRetries": 0,
+        "retryable": true,
+        "runCondition": {
+          "expression": null,
+          "type": "always"
+        },
+        "skipIfDisabledInputs": null,
+        "timeoutMs": 300000
+      },
+      "graphId": "workflow.spec_pipeline",
+      "id": "concept_alignment",
+      "inputBindings": [],
+      "inputPorts": [
+        {
+          "dataType": "any",
+          "key": "request",
+          "label": "request",
+          "multi": false,
+          "required": false
+        }
+      ],
+      "lastFailedAt": null,
+      "lastRunId": null,
+      "lastSucceededAt": null,
+      "metadata": {
+        "executor_ref": "exec.researcher_llm",
+        "executor_version": 1,
+        "required_capabilities": [
+          "concept_alignment",
+          "web_research"
+        ],
+        "streaming_required": true,
+        "task_ref": "task.concept_alignment",
+        "task_version": 1
+      },
+      "name": "概念對齊",
+      "node_type": "TASK",
+      "outputContract": {
+        "ports": [
+          {
+            "extractor": null,
+            "jsonSchema": null,
+            "name": "summary",
+            "parser": null,
+            "typeRef": "markdown"
+          }
+        ]
+      },
+      "outputPorts": [
+        {
+          "dataType": "any",
+          "key": "summary",
+          "label": "summary",
+          "multi": false,
+          "required": false
+        }
+      ],
+      "outputs": null,
+      "policy": {
+        "rateLimit": null,
+        "streamLimit": null
+      },
+      "promptTemplate": "整理關鍵概念與風險",
+      "status": "ready",
+      "taskSpec": {
+        "agent": {
+          "allowedTools": [
+            "web.search"
+          ],
+          "instructions": "目標：整理關鍵概念與風險\n\n驗收條件：\n- 列出定義\n- 標示風險\n\n需要能力：\n- concept_alignment\n- web_research\n\n角色目的：蒐集整理資料\n\n工具模式：delegated\n\n允許工具：\n- web.search",
+          "model": "gpt-4.1-mini",
+          "prompt": "整理關鍵概念與風險",
+          "skills": [
+            "concept-alignment",
+            "source-synthesis"
+          ],
+          "systemPrompt": "你是嚴謹的研究型角色。"
+        },
+        "artifacts": [
+          {
+            "description": "研究摘要",
+            "mediaType": "markdown",
+            "name": "summary",
+            "required": true
+          }
+        ],
+        "display": {
+          "label": "概念對齊",
+          "summary": "整理關鍵概念與風險",
+          "tags": [
+            "concept_alignment",
+            "web_research"
+          ],
+          "todoHint": "列出定義"
+        },
+        "executor": "agent",
+        "inputBindings": [
+          {
+            "fromNode": null,
+            "key": "request",
+            "port": null,
+            "source": "variable",
+            "value": null
+          }
+        ],
+        "nonRunnableReason": null,
+        "runnable": true,
+        "sandboxRun": null,
+        "tool": null
+      },
+      "title": "概念對齊",
+      "type": "llm",
+      "uiState": {
+        "collapsed": false,
+        "color": null,
+        "height": null,
+        "icon": null,
+        "width": null
+      },
+      "updatedAt": "2026-01-01T00:00:00Z",
+      "updatedBy": null,
+      "upstreamEdgeIds": [],
+      "version": 1
+    }
+  ],
+  "runtimeCapabilities": {
+    "supports_control_edges": true,
+    "supports_data_edges": true,
+    "supports_parallel_map": true,
+    "supports_recursive": true,
+    "supports_task_boundaries": true,
+    "supports_task_guardrails": true
+  },
+  "settings": {
+    "allowCycles": false,
+    "autoSave": true,
+    "concurrencyLimit": 1,
+    "persistRunHistory": true,
+    "runMode": "manual"
+  },
+  "status": "draft",
+  "tags": null,
+  "updatedAt": "2026-01-01T00:00:00Z",
+  "updatedBy": null,
+  "version": "taskgraph.v3"
+}
