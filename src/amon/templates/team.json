@@ -1,0 +1,15 @@
+{
+  "id": "team",
+  "name": "team",
+  "description": "多角色 Teamworks 協作模板",
+  "builder": "team",
+  "parameters": {
+    "prompt": {
+      "type": "string",
+      "required": true
+    }
+  },
+  "defaults": {
+    "mode": "team"
+  }
+}

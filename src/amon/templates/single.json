@@ -1,0 +1,15 @@
+{
+  "id": "single",
+  "name": "single",
+  "description": "單節點工作流程模板",
+  "builder": "single",
+  "parameters": {
+    "prompt": {
+      "type": "string",
+      "required": true
+    }
+  },
+  "defaults": {
+    "mode": "single"
+  }
+}
