@@ -1,0 +1,15 @@
+{
+  "id": "self_critique",
+  "name": "self_critique",
+  "description": "草稿、平行評論、整合定稿模板",
+  "builder": "self_critique",
+  "parameters": {
+    "prompt": {
+      "type": "string",
+      "required": true
+    }
+  },
+  "defaults": {
+    "mode": "self_critique"
+  }
+}

@@ -1,201 +1,46 @@
 # Amon
 
-* 規格整理：[`SPEC_v1.1.3.md`](SPEC_v1.1.3.md)
+Amon 是一套以專案為中心的本地 AI 工作台。當前主線架構已收斂為：
 
-## CLI 快速開始
+`amon.manifest.v1 -> planner / binder / compiler -> compiled taskgraph.v3 -> TaskGraph3Runtime`
 
-### 安裝模式（重要）
+這代表：
+- 手寫與持久化來源逐步收斂到 `amon.manifest.v1`
+- `TaskGraph3Runtime` 仍是唯一正式執行 substrate
+- `single`、`self_critique`、`team` 已轉成 template library，不再是 runtime primitive
+- LLM 節點、planner、模板節點都必須以 streaming event 對 UI / CLI 輸出
+
+詳細規格見 [SPEC_v1.2.2.md](D:/PycharmProjects/Amon/SPEC_v1.2.2.md)。
+
+## 文件地圖
+
+- 快速開始與 repo 入口：本文件
+- vNext 規格： [SPEC_v1.2.2.md](D:/PycharmProjects/Amon/SPEC_v1.2.2.md)
+- migration： [docs/migration_manifest_v1.md](D:/PycharmProjects/Amon/docs/migration_manifest_v1.md)
+- runtime： [docs/runtime_vnext.md](D:/PycharmProjects/Amon/docs/runtime_vnext.md)
+- tool policy： [docs/tool_policy.md](D:/PycharmProjects/Amon/docs/tool_policy.md)
+- workspace UI： [docs/ui_workspace.md](D:/PycharmProjects/Amon/docs/ui_workspace.md)
+- template 撰寫： [docs/template_authoring.md](D:/PycharmProjects/Amon/docs/template_authoring.md)
+- 已知限制： [docs/known_limits.md](D:/PycharmProjects/Amon/docs/known_limits.md)
+- 發版檢查： [RELEASE_CHECKLIST.md](D:/PycharmProjects/Amon/RELEASE_CHECKLIST.md)
+
+## 安裝
 
 ```bash
-# 只安裝 Amon CLI（不含 sandbox runner 服務依賴）
 pip install -e .
+```
 
-# 安裝 Amon CLI + sandbox runner 服務依賴（FastAPI / uvicorn）
+若要使用 sandbox runner 相關能力：
+
+```bash
 pip install -e .[sandbox-runner]
-
-# 若在離線/受限網路環境（例如公司 Proxy）安裝失敗，改用：
-python -m pip install --no-build-isolation -e ".[sandbox-runner]"
 ```
 
-> 注意：`pip install -e.`（少一個空白）是錯誤寫法，請使用 `pip install -e .`。
-> 若看到 `Could not find a version that satisfies the requirement setuptools>=40.8.0`，通常是 pip 無法連到套件來源；請先確認 `pip config list` 的 index/proxy 設定，或改用上方 `--no-build-isolation` 指令重試。
+必要環境變數與 staged rollout flags 可參考 [.env.example](D:/PycharmProjects/Amon/.env.example)。
 
-```bash
-# 安裝套件
-pip install -e .
+## Feature Flags
 
-# 初始化 Amon 資料夾（~/.amon）
-amon init
-
-# 建立專案
-amon project create "2026Q1 市場研究"
-
-# 列出專案
-amon project list
-
-# 更新專案名稱
-amon project update <project_id> --name "新版專案名稱"
-
-# 刪除（移至回收桶）與還原
-amon project delete <project_id>
-amon project restore <project_id>
-
-# 讀寫設定（global 或專案）
-amon config get providers.openai.model
-amon config set providers.openai.model '"gpt-5.2"'
-amon config get amon.provider --project <project_id>
-amon config set amon.provider '"openai"' --project <project_id>
-amon config show --project <project_id>
-
-# 掃描技能索引
-amon skills scan
-amon skills list
-amon skills show <skill_name>
-
-# 單一模式執行
-amon run --prompt "請用繁體中文摘要以下內容..." --project <project_id>
-
-# 列出 MCP server 設定
-amon mcp list
-amon mcp allow local-tools:echo
-amon mcp deny local-tools:echo
-
-# 列出 MCP tools（使用快取）
-amon tools mcp-list
-
-# 重新抓取 MCP tools
-amon tools mcp-list --refresh
-
-# 呼叫 MCP tool
-amon tools mcp-call local-tools:echo --args '{"text":"hello"}'
-
-# 工具管理（native/builtin）
-amon tools list
-amon tools list --builtin
-amon tools forge --project <project_id> --name "市場摘要" --spec "讀取資料並生成摘要"
-amon tools test my_tool
-amon tools register my_tool
-amon tools run my_tool --args '{"input":"example"}'
-amon tools call native:hello --args '{"name":"Amon"}'
-
-# Toolforge（建立/安裝/驗證原生工具）
-amon toolforge init my_tool
-amon toolforge install ./my_tool
-amon toolforge verify
-
-# 啟動 UI 預覽（瀏覽 http://localhost:8000）
-amon ui --port 8000
-
-# Windows 雙擊入口（會先啟動 UI server，再開啟 http://127.0.0.1:8000/#/chat）
-run_app.bat
-
-> UI 唯一入口為 `src/amon/ui/index.html`（以 hash route 切換），`project.html` / `single.html` 僅保留導向用途。
-> 請不要直接雙擊 `src/amon/ui/index.html` 用 `file://` 開啟；Chrome/Edge 在這種模式下不會載入前端 ES modules，畫面會看起來像「尚未連線、所有按鈕都沒反應」。
-> 前端模組分層、維護方式、手動回歸清單與回滾策略請參考 `docs/frontend-architecture.md`。
-
-# 互動式 Chat
-amon chat --project <project_id>
-
-# 檔案安全操作
-amon fs delete ./report.pdf
-amon fs restore <trash_id>
-
-# 匯出專案（zip）
-amon export --project <project_id> --out ./export.zip
-
-# 內建評測
-amon eval --suite basic
-
-# 系統診斷
-amon doctor
-
-# Graph 執行與模板（僅支援 taskgraph.v3）
-
-> TaskGraph v3 已是唯一機制。`TaskGraph3Runtime` 是唯一 production runtime；不再提供 legacy/v2 graph 遷移或相容執行入口。
-amon graph run --project <project_id> --graph ./graph.v3.json
-amon graph template create --project <project_id> --run <run_id>
-amon graph template parametrize --template <template_id> --path "$.nodes[0].prompt" --var_name topic
-
-# Hooks / Schedules / Jobs
-amon hooks list
-amon hooks add <hook_id> --file ./hook.yaml
-amon hooks enable <hook_id>
-amon hooks disable <hook_id>
-amon hooks delete <hook_id>
-
-amon schedules list
-amon schedules add --payload '{"cron":"0 9 * * *","action":"graph.run","args":{"template_id":"daily"}}'
-amon schedules run-now <schedule_id>
-amon schedules enable <schedule_id>
-amon schedules disable <schedule_id>
-amon schedules delete <schedule_id>
-
-amon jobs list
-amon jobs start <job_id>
-amon jobs stop <job_id>
-amon jobs restart <job_id>
-amon jobs status <job_id>
-
-# 啟動常駐服務
-amon daemon --tick-interval 5
-
-# 使用外部 sandbox runner 執行程式
-amon sandbox exec --language python --code-file ./script.py --in data/input.txt=./fixtures/input.txt --out-dir ./sandbox-out
-
-# 列出 / 檢查 / 執行自動存檔 artifacts
-amon artifacts list
-amon artifacts check workspace/app.py
-amon artifacts run workspace/app.py --language auto --args --name demo
-```
-
-> 提醒：模型金鑰需放在環境變數中（例如 `OPENAI_API_KEY`）。  
-
-
-## 自動存檔 code fence（Artifacts）
-
-當 `amon run` / `amon chat` 的模型回覆包含以下格式，Amon 會自動把程式碼落地到專案 `workspace/`：
-
-```text
-<lang> file=workspace/app.py
-print("hello")
-```
-
-你可以透過 CLI 進一步操作：
-
-- `amon artifacts list`：從 `.amon/artifacts/manifest.json` 列出檔案、狀態、更新時間、語言。
-- `amon artifacts check [path]`：重跑語法檢查並更新 manifest。
-- `amon artifacts run path [--language auto] [--args ...]`：使用 sandbox runner 執行指定檔案。
-
-若 manifest 中該檔案狀態為 `invalid`，`amon artifacts run` 會先提示先執行 `amon artifacts check`，並顯示最近一次語法錯誤摘要。
-
-## 功能更新摘要
-
-* 新增工具管理：支援 toolforge 原生工具與內建工具的列出、呼叫與測試。
-* 新增 Graph 執行與模板化能力，可用於重複任務與參數化流程。
-* 新增 Hooks/Schedules/Jobs 與 daemon 常駐服務，支援事件觸發、排程與背景工作。
-* 新增檔案安全操作、專案匯出、系統診斷與內建評測指令。
-
-## vNext 骨架（Stage 0）
-
-目前已新增一組與既有 runtime 並行的 vNext 骨架，目的在於承接後續 `amon.manifest.v1 -> binder / compiler -> compiled taskgraph.v3` 重構，不直接改寫現有 `TaskGraph3Runtime`。
-
-```text
-src/amon/
-├─ application/
-├─ config/
-│  └─ feature_flags.py
-├─ domain/
-├─ interfaces/
-│  ├─ api/
-│  └─ cli/
-├─ runtime_vnext/
-├─ storage/
-└─ templates/
-```
-
-### vNext Feature Flags
-
-以下 feature flags 預設皆為關閉，需由環境變數顯式啟用：
+vNext 目前仍採 flag 控制，預設皆關閉：
 
 ```text
 AMON_VNEXT_MANIFEST=0
@@ -204,127 +49,94 @@ AMON_VNEXT_RUNTIME=0
 AMON_VNEXT_UI=0
 ```
 
-範例可參考 repo 根目錄的 `.env.example`。
+## 快速開始
+
+### 1. 初始化與建立專案
+
+```bash
+amon init
+amon project create "Amon vNext Demo"
+```
+
+### 2. 啟用 vNext 路徑
+
+```bash
+set AMON_VNEXT_MANIFEST=1
+set AMON_VNEXT_BINDER=1
+set AMON_VNEXT_RUNTIME=1
+set AMON_VNEXT_UI=1
+```
+
+PowerShell 可改用：
+
+```powershell
+$env:AMON_VNEXT_MANIFEST = "1"
+$env:AMON_VNEXT_BINDER = "1"
+$env:AMON_VNEXT_RUNTIME = "1"
+$env:AMON_VNEXT_UI = "1"
+```
+
+### 3. 用 workspace CLI 建 definition / run
+
+```bash
+amon workspace projects summary --project <project_id>
+amon workspace definitions list --project <project_id> --kind workflows
+amon workspace runs create --project <project_id> --template single --variables "{\"prompt\":\"請整理目前 repo 的 vNext 狀態\"}"
+amon workspace runs stream --project <project_id> --run <run_id> --follow
+```
+
+### 4. 驗證 UI 啟動路徑
+
+```bash
+amon ui --port 8000
+```
+
+目前這個命令在現況 repo 可能立即結束而不會常駐前景，請把它視為「待確認的啟動入口」，不要假設已可穩定啟用 UI server。限制說明見 [docs/known_limits.md](D:/PycharmProjects/Amon/docs/known_limits.md)。
+
+UI 主工作台與 streaming / preview / confirmation 的互動說明見 [docs/ui_workspace.md](D:/PycharmProjects/Amon/docs/ui_workspace.md)。
+
+## canonical manifest 與 examples
+
+- manifest example： [examples/manifests/spec_pipeline.manifest.json](D:/PycharmProjects/Amon/examples/manifests/spec_pipeline.manifest.json)
+- template examples： [examples/templates/single.template.json](D:/PycharmProjects/Amon/examples/templates/single.template.json)、 [examples/templates/self_critique.template.json](D:/PycharmProjects/Amon/examples/templates/self_critique.template.json)、 [examples/templates/team.template.json](D:/PycharmProjects/Amon/examples/templates/team.template.json)
+
+## 目前完成狀態
+
+- Stage 0：vNext 骨架與 feature flags
+- Stage 1：manifest v1 domain model 與 storage
+- Stage 2：planner / binder / compiler
+- Stage 3：runtime dispatcher、tool policy、confirmation、audit
+- Stage 4：template library 與 preset compatibility
+- Stage 5：checkpoint / resume / preview / UI state
+- Stage 6：workspace API / CLI / UI
+- Stage 7：hooks / schedules / jobs 全部改走標準 run request
+- Stage 8：contract tests、failure injection、run stream reconnect
 
 ## 測試
 
-```bash
-# Smoke tests（index.html 不得回退 jsdelivr + Graph Mermaid 缺失分支）
-python -m unittest tests.test_ui_graph_frontend_smoke
+最小必要檢查：
 
-# vNext skeleton smoke tests
+```bash
+python -m compileall src tests
+python -m unittest \
+  tests.test_thread_continuation_guard \
+  tests.test_thread_continuation_flow \
+  tests.test_ui_thread_stream_init \
+  tests.test_thread_store
 python -m unittest tests.smoke.test_vnext_imports
-python -m unittest tests.unit.test_feature_flags
+python -m unittest tests.smoke.test_vnext_ui_smoke
+python -m unittest tests.smoke.test_vnext_examples_smoke
 ```
 
-## 外部 Sandbox Runner 整合（shared runner）
+完整 `python -m unittest discover -s tests -p "test_*.py"` 在目前 repo 仍可能逾時，詳見 [docs/known_limits.md](D:/PycharmProjects/Amon/docs/known_limits.md)。
 
-詳細維運文件請見：`docs/sandbox_runner.md`（包含 threat model、限制清單、rootless 建議路徑、docker-compose 風險與錯誤排除）。
+## 相容性原則
 
-1. 安裝 runner 依賴並啟動：
+- 舊 `taskgraph.v3` graph 仍可作為 compiled artifact 執行
+- 新 manifest source 一律先 compile 再跑
+- 舊 preset 入口保留相容轉發，但內部已走 template instantiate
+- unresolved refs 一律 compile-time fail-fast，不允許 runtime 猜測補洞
 
-```bash
-pip install -e .[sandbox-runner]
-amon-sandbox-runner
-```
+## 舊文件
 
-2. （可選）在 `~/.amon/config.yaml` 設定 runner 位址與金鑰環境變數：
-
-```yaml
-sandbox:
-  runner:
-    base_url: http://127.0.0.1:8088
-    timeout_s: 30
-    api_key_env: SANDBOX_RUNNER_API_KEY
-```
-
-3. 用 CLI 呼叫 runner `/run`：
-
-```bash
-amon sandbox exec \
-  --language python \
-  --code-file ./script.py \
-  --in data/input.txt=./fixtures/input.txt \
-  --out-dir ./sandbox-out
-```
-
-`--out-dir` 會把 runner 回傳的 `output_files`（base64）解碼落地，方便直接檢查輸出檔案。
-
-## 目錄結構（~/.amon）
-
-```
-~/.amon/
-├─ projects/        # 專案資料
-├─ trash/           # 回收桶 + manifest.json
-├─ logs/            # amon.log + billing.log
-├─ cache/           # 索引快取
-│  └─ mcp/          # MCP tools 快取
-├─ skills/          # 全域 skills
-├─ python_env/      # 共用 Python 環境
-└─ node_env/        # 共用 Node 環境
-```
-
-## 設定檔與優先順序
-
-* 全域設定：`~/.amon/config.yaml`
-* 專案設定：`<project>/amon.project.yaml`
-
-## MCP 行為補充
-
-* MCP tools 清單預設會讀取 `~/.amon/cache/mcp/<server>.json` 快取，使用 `amon tools mcp-list --refresh` 強制重新抓取。
-* 若設定 `mcp.allowed_tools`，僅允許清單內的工具被呼叫（格式支援 `server:tool` 或 `server.*`）。
-* 優先順序：專案設定 > 全域設定 > 預設值
-
-### 設定範例（節錄）
-
-```yaml
-amon:
-  provider: openai
-providers:
-  openai:
-    type: openai_compatible
-    base_url: https://api.openai.com/v1
-    model: gpt-5.2
-    api_key_env: OPENAI_API_KEY
-skills:
-  global_dir: ~/.amon/skills
-  project_dir_rel: .claude/skills
-mcp:
-  servers:
-    local-tools:
-      type: http
-      endpoint: http://localhost:8080
-  allowed_tools:
-    - filesystem.read
-```
-
-## Skills 結構與掃描行為
-
-* Skill 目錄：每個 skill 是一個資料夾，包含 `SKILL.md`。
-* `SKILL.md` 需包含 YAML frontmatter，至少有 `name` 與 `description`。
-* 可選擇建立 `references/` 目錄放補充檔案（掃描時只列出清單，不讀取大檔）。
-* Amon 內建 first-party skills 在 repo 內以 `src/amon/resources/skills/<skill-name>/` 資料夾形式維護；初始化安裝時會轉成 `<skill-name>.skill`。
-* `amon skills scan` 會掃描全域與專案目錄並寫入快取索引：
-  - 全域：`~/.amon/skills`
-  - 專案：`<project>/.claude/skills`
-  - 索引：`~/.amon/cache/skills/index.json`
-
-範例：
-
-```
-<skill_dir>/
-├─ SKILL.md
-└─ references/
-   └─ diagram.png
-```
-
-# Vibe Coding 開發規範
-
-本專案遵循 Vibe Coding 的安全開發原則，並以繁體中文與台灣用語為優先介面語系。
-
-### **修改原則**
-  若是對既有專案做修改，理解此次改動的關鍵目的，在完成此目的的前提下：
-  - 只能改動與bug或重構直接相關的區塊
-  - 不得改變任何對外可觀察行為（characterization/contract tests 必須全過）
-  - 除非特別要求指定，儘量不破壞原有 API / 資料結構 / 前端路由。
-  - 不要把整個架構翻掉，除非使用者明說要重構或換技術。
+repo 內仍保留較早期的 cutover、sandbox、MCP、policy、UI refactor 文件。若你在追歷史脈絡，可從 [docs](D:/PycharmProjects/Amon/docs) 往下查；若你要的是目前 vNext 入口，優先看本 README 與上方文件地圖。
