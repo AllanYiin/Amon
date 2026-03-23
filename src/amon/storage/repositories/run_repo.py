@@ -73,6 +73,9 @@ class RunRepository:
     def load_snapshot_manifest(self, run_id: str) -> dict[str, Any]:
         return read_json(self._run_dir(run_id) / "snapshot.manifest.json", default={})
 
+    def load_compiled_graph(self, run_id: str) -> dict[str, Any]:
+        return read_json(self._run_dir(run_id) / "compiled.taskgraph.v3.json", default={})
+
     def list_resumable_runs(self) -> list[RunRecord]:
         results: list[RunRecord] = []
         for run_dir in sorted(self.runs_dir.iterdir()) if self.runs_dir.exists() else []:
