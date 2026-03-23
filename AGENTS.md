@@ -49,3 +49,9 @@ amon ui --port 8000
 ## 5) 續聊回歸防線（CI）
 - GitHub Actions `Chat Continuation Guard` 會在 PR 自動執行，失敗即阻擋合併。
 - 新增續聊相關變更時，請優先擴充 deterministic 測試（禁止依賴外部模型隨機輸出）。
+
+## 6) vNext 重構骨架（Stage 0）
+- vNext 新模組一律放在平行命名空間：`amon.domain`、`amon.application`、`amon.storage`、`amon.interfaces`、`amon.runtime_vnext`、`amon.templates`。
+- 既有 production runtime 仍以 `taskgraph.v3` / `TaskGraph3Runtime` 為準；未經明確接線，不得讓 vNext 骨架改變現有 CLI / UI 對外行為。
+- vNext feature flags：`AMON_VNEXT_MANIFEST`、`AMON_VNEXT_BINDER`、`AMON_VNEXT_RUNTIME`、`AMON_VNEXT_UI`，預設皆關閉。
+- 若後續階段需接入 manifest / binder / compiler，必須先走 feature flag，再補對應 smoke tests。

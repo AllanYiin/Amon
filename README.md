@@ -175,11 +175,46 @@ print("hello")
 * 新增 Hooks/Schedules/Jobs 與 daemon 常駐服務，支援事件觸發、排程與背景工作。
 * 新增檔案安全操作、專案匯出、系統診斷與內建評測指令。
 
+## vNext 骨架（Stage 0）
+
+目前已新增一組與既有 runtime 並行的 vNext 骨架，目的在於承接後續 `amon.manifest.v1 -> binder / compiler -> compiled taskgraph.v3` 重構，不直接改寫現有 `TaskGraph3Runtime`。
+
+```text
+src/amon/
+├─ application/
+├─ config/
+│  └─ feature_flags.py
+├─ domain/
+├─ interfaces/
+│  ├─ api/
+│  └─ cli/
+├─ runtime_vnext/
+├─ storage/
+└─ templates/
+```
+
+### vNext Feature Flags
+
+以下 feature flags 預設皆為關閉，需由環境變數顯式啟用：
+
+```text
+AMON_VNEXT_MANIFEST=0
+AMON_VNEXT_BINDER=0
+AMON_VNEXT_RUNTIME=0
+AMON_VNEXT_UI=0
+```
+
+範例可參考 repo 根目錄的 `.env.example`。
+
 ## 測試
 
 ```bash
 # Smoke tests（index.html 不得回退 jsdelivr + Graph Mermaid 缺失分支）
 python -m unittest tests.test_ui_graph_frontend_smoke
+
+# vNext skeleton smoke tests
+python -m unittest tests.smoke.test_vnext_imports
+python -m unittest tests.unit.test_feature_flags
 ```
 
 ## 外部 Sandbox Runner 整合（shared runner）

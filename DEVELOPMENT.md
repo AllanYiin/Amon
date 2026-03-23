@@ -68,6 +68,37 @@ amon project list
 
 並確認沒有把 legacy/v2 執行路徑重新當成主路徑。
 
+## vNext Stage 0 骨架
+
+目前 repo 已預留 vNext 平行結構，但尚未接管 production runtime：
+
+```text
+src/amon/application/
+src/amon/config/feature_flags.py
+src/amon/domain/
+src/amon/interfaces/api/
+src/amon/interfaces/cli/
+src/amon/runtime_vnext/
+src/amon/storage/
+src/amon/templates/
+```
+
+Feature flags 皆由環境變數控制，預設值如下：
+
+```text
+AMON_VNEXT_MANIFEST=0
+AMON_VNEXT_BINDER=0
+AMON_VNEXT_RUNTIME=0
+AMON_VNEXT_UI=0
+```
+
+最小驗證指令：
+
+```bash
+python -m unittest tests.unit.test_feature_flags
+python -m unittest tests.smoke.test_vnext_imports
+```
+
 ## 5) 啟動 UI（預覽）
 ```bash
 amon ui --port 8000

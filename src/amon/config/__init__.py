@@ -10,8 +10,8 @@ from typing import Any, Mapping
 
 import yaml
 
-from .fs.atomic import atomic_write_text
-from .fs.safety import validate_project_id
+from ..fs.atomic import atomic_write_text
+from ..fs.safety import validate_project_id
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "amon": {
@@ -303,3 +303,24 @@ class ConfigLoader:
                 if str(amon_cfg.get("project_id") or "").strip() == project_id:
                     return config_path
         return direct_path
+
+
+from .feature_flags import DEFAULT_FEATURE_FLAGS, FeatureFlags, load_feature_flags
+
+__all__ = [
+    "ConfigLoader",
+    "ConfigResolution",
+    "DEFAULT_CONFIG",
+    "DEFAULT_FEATURE_FLAGS",
+    "FeatureFlags",
+    "annotate_config",
+    "deep_merge",
+    "default_system_prompt",
+    "get_config_value",
+    "load_feature_flags",
+    "normalize_system_prompt_aliases",
+    "read_yaml",
+    "resolve_system_prompt",
+    "set_config_value",
+    "write_yaml",
+]
