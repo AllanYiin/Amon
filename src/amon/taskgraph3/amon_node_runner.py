@@ -8,6 +8,9 @@ from string import Template
 from typing import Any
 
 from amon.artifacts.store import ingest_artifacts
+from amon.config.feature_flags import load_feature_flags
+from amon.models import encode_stream_event
+from amon.runtime_vnext import ExecutorDispatcher, RuntimeExecutionContext
 from amon.sandbox.service import run_sandbox_step
 
 from .schema import TaskNode
@@ -39,6 +42,22 @@ class AmonNodeRunner:
     def run_task(self, node: TaskNode, context: dict[str, Any]) -> dict[str, Any]:
         if not node.task_spec.runnable:
             raise ValueError(node.task_spec.non_runnable_reason or f"node={node.id} task_spec not runnable")
+        if load_feature_flags().runtime:
+            runtime_context = RuntimeExecutionContext(
+                core=self.core,
+                project_path=self.project_path,
+                run_id=self.run_id,
+                variables=self.variables,
+                stream_handler=self.stream_handler,
+                request_id=self.request_id,
+                thread_id=self.thread_id,
+                event_sink=self._emit_runtime_event,
+                render_context=self._render_context,
+                render_payload=self._render_payload,
+                build_conversation_history=self._build_conversation_history,
+            )
+            dispatcher = ExecutorDispatcher(project_path=self.project_path)
+            return dispatcher.dispatch(node, context, runtime_context)
         executor = node.task_spec.executor
         if executor == "agent":
             return self._run_agent(node, context)
@@ -136,6 +155,15 @@ class AmonNodeRunner:
             overwrite=False,
         )
         return {"raw_output": json.dumps(result, ensure_ascii=False), **result}
+
+    def _emit_runtime_event(self, event: dict[str, Any]) -> None:
+        if not callable(self.stream_handler):
+            return
+        event_name = str(event.get("event") or "").strip()
+        payload = event.get("payload")
+        if not event_name or not isinstance(payload, dict):
+            return
+        self.stream_handler(encode_stream_event(event_name, payload))
 
     def _render_context(self, node: TaskNode, context: dict[str, Any]) -> dict[str, Any]:
         render_ctx = {**self.variables, **context, "run_id": self.run_id}
