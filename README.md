@@ -58,6 +58,13 @@ amon init
 amon project create "Amon vNext Demo"
 ```
 
+列出與查看專案：
+
+```bash
+amon project list
+amon project show <project_id>
+```
+
 ### 2. 啟用 vNext 路徑
 
 ```bash
@@ -82,18 +89,94 @@ $env:AMON_VNEXT_UI = "1"
 amon workspace projects summary --project <project_id>
 amon workspace definitions list --project <project_id> --kind workflows
 amon workspace runs create --project <project_id> --template single --variables "{\"prompt\":\"請整理目前 repo 的 vNext 狀態\"}"
-amon workspace runs stream --project <project_id> --run <run_id> --follow
+amon workspace runs stream --project <project_id> <run_id> --follow
 ```
 
-### 4. 驗證 UI 啟動路徑
+### 4. 啟動 UI
 
 ```bash
 amon ui --port 8000
 ```
 
-目前這個命令在現況 repo 可能立即結束而不會常駐前景，請把它視為「待確認的啟動入口」，不要假設已可穩定啟用 UI server。限制說明見 [docs/known_limits.md](D:/PycharmProjects/Amon/docs/known_limits.md)。
-
 UI 主工作台與 streaming / preview / confirmation 的互動說明見 [docs/ui_workspace.md](D:/PycharmProjects/Amon/docs/ui_workspace.md)。
+
+## 常用指令範例
+
+### Project / Config
+
+```bash
+amon project list
+amon project show <project_id>
+amon project update <project_id> --name "New Name"
+amon config show --project <project_id>
+amon config get providers.openai.model --project <project_id>
+```
+
+### 單次執行與互動
+
+```bash
+amon run --project <project_id> --mode single --prompt "請整理 docs 與 examples 現況"
+amon run --project <project_id> --mode self_critique --prompt "請寫一份 migration 摘要"
+amon run --project <project_id> --mode team --prompt "請拆解 vNext 收尾工作"
+amon chat --project <project_id>
+```
+
+### Workspace Definitions
+
+```bash
+amon workspace definitions list --project <project_id> --kind tasks
+amon workspace definitions list --project <project_id> --kind agents
+amon workspace definitions list --project <project_id> --kind executors
+amon workspace definitions list --project <project_id> --kind workflows
+amon workspace definitions get --project <project_id> --kind workflows <workflow_id>
+amon workspace definitions create --project <project_id> --kind workflows --file workflow.json
+amon workspace definitions update --project <project_id> --kind workflows <workflow_id> --file workflow.json
+amon workspace definitions delete --project <project_id> --kind workflows <workflow_id>
+```
+
+### Workspace Runs
+
+```bash
+amon workspace runs list --project <project_id>
+amon workspace runs get --project <project_id> <run_id>
+amon workspace runs create --project <project_id> --workflow workflow.spec_pipeline --variables "{}"
+amon workspace runs create --project <project_id> --template single --variables "{\"prompt\":\"請整理目前 repo 的 vNext 狀態\"}"
+amon workspace runs resume --project <project_id> <run_id>
+amon workspace runs cancel --project <project_id> <run_id>
+amon workspace runs archive --project <project_id> <run_id>
+amon workspace runs stream --project <project_id> <run_id> --follow
+```
+
+### Upload / Preview / Confirmation
+
+```bash
+amon workspace uploads list --project <project_id>
+amon workspace uploads add --project <project_id> .\\sample.pdf --notes "需求附件"
+amon workspace uploads get --project <project_id> <asset_id>
+amon workspace uploads preview --project <project_id> <asset_id>
+amon workspace confirmations list --project <project_id>
+amon workspace confirmations approve --project <project_id> <confirmation_id>
+amon workspace confirmations reject --project <project_id> <confirmation_id>
+```
+
+### Trigger 與 Daemon
+
+```bash
+amon hooks list
+amon schedules list
+amon jobs list
+amon daemon --tick-interval 5
+```
+
+### Tool / Artifact / Sandbox
+
+```bash
+amon tools list --project <project_id>
+amon tools mcp-list --refresh
+amon artifacts list --project <project_id>
+amon artifacts check --project <project_id>
+amon sandbox run --project <project_id> --language python --code-file .\\script.py --output-prefix docs
+```
 
 ## canonical manifest 與 examples
 
