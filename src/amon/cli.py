@@ -14,6 +14,13 @@ from pathlib import Path
 
 import yaml
 
+from .interfaces.cli import (
+    handle_workspace_confirmations,
+    handle_workspace_definitions,
+    handle_workspace_projects,
+    handle_workspace_runs,
+    handle_workspace_uploads,
+)
 from .artifacts import ensure_manifest, resolve_workspace_target, run_validators, update_manifest_for_file
 from .config import ConfigLoader
 from .core import AmonCore
@@ -329,6 +336,96 @@ def build_parser() -> argparse.ArgumentParser:
     sandbox_run.add_argument("--output-prefix", help="輸出前綴（僅允許 docs/ 或 audits/）")
     sandbox_run.add_argument("--timeout-s", type=int, help="覆蓋此次執行 timeout（秒）")
 
+    workspace_parser = subparsers.add_parser("workspace", help="vNext workspace 管理")
+    workspace_sub = workspace_parser.add_subparsers(dest="workspace_command")
+
+    workspace_projects = workspace_sub.add_parser("projects", help="workspace 專案摘要")
+    workspace_projects_sub = workspace_projects.add_subparsers(dest="workspace_projects_command")
+    workspace_projects_summary = workspace_projects_sub.add_parser("summary", help="顯示專案摘要")
+    workspace_projects_summary.add_argument("--project", required=True, help="指定專案 ID")
+
+    workspace_definitions = workspace_sub.add_parser("definitions", help="workspace definitions 管理")
+    workspace_definitions_sub = workspace_definitions.add_subparsers(dest="workspace_definitions_command")
+    workspace_definitions_list = workspace_definitions_sub.add_parser("list", help="列出 definitions")
+    workspace_definitions_list.add_argument("--project", required=True, help="指定專案 ID")
+    workspace_definitions_list.add_argument("--kind", required=True, choices=["tasks", "agents", "executors", "workflows", "templates", "tool-policies"])
+    workspace_definitions_get = workspace_definitions_sub.add_parser("get", help="讀取 definition")
+    workspace_definitions_get.add_argument("--project", required=True, help="指定專案 ID")
+    workspace_definitions_get.add_argument("--kind", required=True, choices=["tasks", "agents", "executors", "workflows", "templates", "tool-policies"])
+    workspace_definitions_get.add_argument("entity_id", help="definition ID")
+    workspace_definitions_create = workspace_definitions_sub.add_parser("create", help="建立 definition")
+    workspace_definitions_create.add_argument("--project", required=True, help="指定專案 ID")
+    workspace_definitions_create.add_argument("--kind", required=True, choices=["tasks", "agents", "executors", "workflows", "templates", "tool-policies"])
+    workspace_definitions_create.add_argument("--file", required=True, help="JSON 檔案")
+    workspace_definitions_update = workspace_definitions_sub.add_parser("update", help="更新 definition")
+    workspace_definitions_update.add_argument("--project", required=True, help="指定專案 ID")
+    workspace_definitions_update.add_argument("--kind", required=True, choices=["tasks", "agents", "executors", "workflows", "templates", "tool-policies"])
+    workspace_definitions_update.add_argument("entity_id", help="definition ID")
+    workspace_definitions_update.add_argument("--file", required=True, help="JSON 檔案")
+    workspace_definitions_delete = workspace_definitions_sub.add_parser("delete", help="刪除 definition")
+    workspace_definitions_delete.add_argument("--project", required=True, help="指定專案 ID")
+    workspace_definitions_delete.add_argument("--kind", required=True, choices=["tasks", "agents", "executors", "workflows", "templates", "tool-policies"])
+    workspace_definitions_delete.add_argument("entity_id", help="definition ID")
+
+    workspace_runs = workspace_sub.add_parser("runs", help="workspace runs 管理")
+    workspace_runs_sub = workspace_runs.add_subparsers(dest="workspace_runs_command")
+    workspace_runs_list = workspace_runs_sub.add_parser("list", help="列出 runs")
+    workspace_runs_list.add_argument("--project", required=True, help="指定專案 ID")
+    workspace_runs_get = workspace_runs_sub.add_parser("get", help="讀取 run")
+    workspace_runs_get.add_argument("--project", required=True, help="指定專案 ID")
+    workspace_runs_get.add_argument("run_id", help="run ID")
+    workspace_runs_create = workspace_runs_sub.add_parser("create", help="建立 run")
+    workspace_runs_create.add_argument("--project", required=True, help="指定專案 ID")
+    workspace_runs_create.add_argument("--workflow", help="workflow ref")
+    workspace_runs_create.add_argument("--template", help="template ref")
+    workspace_runs_create.add_argument("--variables", default="{}", help="JSON 格式的變數")
+    workspace_runs_create.add_argument("--notes", help="備註")
+    workspace_runs_create.add_argument("--execute", action="store_true", help="建立後立即執行")
+    workspace_runs_resume = workspace_runs_sub.add_parser("resume", help="續跑 run")
+    workspace_runs_resume.add_argument("--project", required=True, help="指定專案 ID")
+    workspace_runs_resume.add_argument("run_id", help="run ID")
+    workspace_runs_resume.add_argument("--execute", action="store_true", help="續跑後立即執行")
+    workspace_runs_cancel = workspace_runs_sub.add_parser("cancel", help="取消 run")
+    workspace_runs_cancel.add_argument("--project", required=True, help="指定專案 ID")
+    workspace_runs_cancel.add_argument("run_id", help="run ID")
+    workspace_runs_archive = workspace_runs_sub.add_parser("archive", help="封存 run")
+    workspace_runs_archive.add_argument("--project", required=True, help="指定專案 ID")
+    workspace_runs_archive.add_argument("run_id", help="run ID")
+    workspace_runs_stream = workspace_runs_sub.add_parser("stream", help="串流顯示 run 事件")
+    workspace_runs_stream.add_argument("--project", required=True, help="指定專案 ID")
+    workspace_runs_stream.add_argument("run_id", help="run ID")
+    workspace_runs_stream.add_argument("--follow", action="store_true", help="持續追蹤事件")
+
+    workspace_uploads = workspace_sub.add_parser("uploads", help="workspace uploads 管理")
+    workspace_uploads_sub = workspace_uploads.add_subparsers(dest="workspace_uploads_command")
+    workspace_uploads_list = workspace_uploads_sub.add_parser("list", help="列出 uploads")
+    workspace_uploads_list.add_argument("--project", required=True, help="指定專案 ID")
+    workspace_uploads_add = workspace_uploads_sub.add_parser("add", help="建立 upload")
+    workspace_uploads_add.add_argument("--project", required=True, help="指定專案 ID")
+    workspace_uploads_add.add_argument("path", help="來源檔案路徑")
+    workspace_uploads_add.add_argument("--notes", help="備註")
+    workspace_uploads_get = workspace_uploads_sub.add_parser("get", help="讀取 upload")
+    workspace_uploads_get.add_argument("--project", required=True, help="指定專案 ID")
+    workspace_uploads_get.add_argument("asset_id", help="asset ID")
+    workspace_uploads_preview = workspace_uploads_sub.add_parser("preview", help="讀取 preview")
+    workspace_uploads_preview.add_argument("--project", required=True, help="指定專案 ID")
+    workspace_uploads_preview.add_argument("asset_id", help="asset ID")
+    workspace_uploads_delete = workspace_uploads_sub.add_parser("delete", help="刪除 upload")
+    workspace_uploads_delete.add_argument("--project", required=True, help="指定專案 ID")
+    workspace_uploads_delete.add_argument("asset_id", help="asset ID")
+
+    workspace_confirmations = workspace_sub.add_parser("confirmations", help="workspace confirmations 管理")
+    workspace_confirmations_sub = workspace_confirmations.add_subparsers(dest="workspace_confirmations_command")
+    workspace_confirmations_list = workspace_confirmations_sub.add_parser("list", help="列出 confirmations")
+    workspace_confirmations_list.add_argument("--project", required=True, help="指定專案 ID")
+    workspace_confirmations_list.add_argument("--run-id", help="run ID")
+    workspace_confirmations_approve = workspace_confirmations_sub.add_parser("approve", help="批准 confirmation")
+    workspace_confirmations_approve.add_argument("--project", required=True, help="指定專案 ID")
+    workspace_confirmations_approve.add_argument("confirmation_id", help="confirmation ID")
+    workspace_confirmations_reject = workspace_confirmations_sub.add_parser("reject", help="拒絕 confirmation")
+    workspace_confirmations_reject.add_argument("--project", required=True, help="指定專案 ID")
+    workspace_confirmations_reject.add_argument("confirmation_id", help="confirmation ID")
+
     return parser
 
 
@@ -403,6 +500,8 @@ def main() -> None:
             _handle_artifacts(core, args)
         elif args.command == "sandbox":
             _handle_sandbox(core, args)
+        elif args.command == "workspace":
+            _handle_workspace(core, args)
         else:
             parser.print_help()
     except Exception as exc:  # noqa: BLE001
@@ -488,6 +587,25 @@ def _handle_project(core: AmonCore, args: argparse.Namespace) -> None:
         return
 
     raise ValueError("請指定專案指令")
+
+
+def _handle_workspace(core: AmonCore, args: argparse.Namespace) -> None:
+    if args.workspace_command == "projects":
+        handle_workspace_projects(core, args)
+        return
+    if args.workspace_command == "definitions":
+        handle_workspace_definitions(core, args)
+        return
+    if args.workspace_command == "runs":
+        handle_workspace_runs(core, args)
+        return
+    if args.workspace_command == "uploads":
+        handle_workspace_uploads(core, args)
+        return
+    if args.workspace_command == "confirmations":
+        handle_workspace_confirmations(core, args)
+        return
+    raise ValueError("請指定 workspace 指令")
 
 
 def _handle_config(core: AmonCore, args: argparse.Namespace) -> None:

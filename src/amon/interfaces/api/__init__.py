@@ -1,3 +1,5 @@
 """Local API surface for Amon vNext."""
 
-__all__ = []
+from . import routes
+
+__all__ = ["routes"]

@@ -76,6 +76,10 @@ class PreviewService:
         asset = self.upload_repo.get(asset_id)
         payload = asset.to_dict()
         payload["preview"] = dict(asset.metadata)
+        if asset.preview_ref and asset.metadata.get("preview_kind") == "inline_text":
+            preview_path = Path(asset.preview_ref)
+            if preview_path.exists():
+                payload["preview"]["text"] = preview_path.read_text(encoding="utf-8", errors="replace")
         return payload
 
     def _write_text_preview(self, asset: UploadAsset, source_path: Path, *, max_lines: int) -> tuple[Path, dict[str, Any]]:
@@ -232,4 +236,3 @@ def _read_jpeg_dimensions(handle) -> tuple[int | None, int | None]:
             return None, None
         segment_length = struct.unpack(">H", segment_length_bytes)[0]
         handle.seek(segment_length - 2, 1)
-

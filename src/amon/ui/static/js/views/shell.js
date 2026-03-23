@@ -1,5 +1,6 @@
 export const routeToShellView = {
   chat: "chat",
+  workspace: "workspace",
   context: "context",
   graph: "graph",
   tools: "tools-skills",
@@ -23,6 +24,7 @@ export function switchShellView({ view, state, elements, closeBillingStream }) {
   }
   state.shellView = view;
   elements.chatLayout.hidden = view !== "chat";
+  elements.workspacePage.hidden = view !== "workspace";
   elements.contextPage.hidden = view !== "context";
   elements.graphPage.hidden = view !== "graph";
   elements.toolsSkillsPage.hidden = view !== "tools-skills";

@@ -45,10 +45,39 @@ from amon.daemon.queue import get_queue_depth
 from amon.events import emit_event
 from amon.jobs.runner import start_job
 from amon.artifacts.store import ingest_artifacts
+from amon.application import WorkspaceService
 from amon.llm_request_log import load_recent_llm_requests
 from amon.observability import ensure_correlation_fields, normalize_project_id
 from amon.tooling.audit import default_audit_log_path
 from amon.tooling.types import ToolCall
+from amon.interfaces.api.routes import (
+    approve_confirmation as vnext_approve_confirmation,
+    archive_run as vnext_archive_run,
+    cancel_run as vnext_cancel_run,
+    create_definition as vnext_create_definition,
+    create_project as vnext_create_project,
+    create_run as vnext_create_run,
+    create_upload as vnext_create_upload,
+    delete_definition as vnext_delete_definition,
+    delete_project as vnext_delete_project,
+    delete_upload as vnext_delete_upload,
+    get_definition as vnext_get_definition,
+    get_project_summary as vnext_get_project_summary,
+    get_run as vnext_get_run,
+    get_run_events as vnext_get_run_events,
+    get_upload as vnext_get_upload,
+    get_upload_preview as vnext_get_upload_preview,
+    list_confirmations as vnext_list_confirmations,
+    list_definitions as vnext_list_definitions,
+    list_projects as vnext_list_projects,
+    list_uploads as vnext_list_uploads,
+    reject_confirmation as vnext_reject_confirmation,
+    restore_project as vnext_restore_project,
+    resume_run as vnext_resume_run,
+    update_definition as vnext_update_definition,
+    update_project as vnext_update_project,
+    update_upload as vnext_update_upload,
+)
 from .core import AmonCore, ProjectRecord
 from .logging import log_event
 from .models import decode_reasoning_chunk, decode_stream_event
@@ -806,8 +835,12 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/v1/projects":
             params = parse_qs(parsed.query)
             include_deleted = params.get("include_deleted", ["false"])[0].lower() == "true"
-            records = self._list_projects_for_ui(include_deleted=include_deleted)
-            self._send_json(200, {"projects": records})
+            try:
+                payload = vnext_list_projects(self.core, include_deleted=include_deleted)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, payload)
             return
         if parsed.path == "/v1/runs":
             params = parse_qs(parsed.query)
@@ -818,6 +851,160 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 self._handle_error(exc, status=500)
                 return
             self._send_json(200, {"runs": runs})
+            return
+        if parsed.path.startswith("/v1/projects/") and parsed.path.endswith("/runs") and "/runs/" not in parsed.path:
+            project_id = self._get_path_segment(parsed.path, 2)
+            if not project_id:
+                self._send_json(400, {"message": "無效的 project_id"})
+                return
+            try:
+                payload = {"runs": self._list_runs_for_ui(project_id)}
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, payload)
+            return
+        if parsed.path.startswith("/v1/projects/") and "/runs/" in parsed.path and parsed.path.endswith("/stream"):
+            project_id = self._get_path_segment(parsed.path, 2)
+            run_id = self._get_path_segment(parsed.path, 4)
+            if not project_id or not run_id:
+                self._send_json(400, {"message": "缺少 project_id 或 run_id"})
+                return
+            try:
+                self._handle_project_run_stream(project_id=project_id, run_id=run_id)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+            return
+        if parsed.path.startswith("/v1/projects/") and "/runs/" in parsed.path and parsed.path.endswith("/events"):
+            project_id = self._get_path_segment(parsed.path, 2)
+            run_id = self._get_path_segment(parsed.path, 4)
+            if not project_id or not run_id:
+                self._send_json(400, {"message": "缺少 project_id 或 run_id"})
+                return
+            try:
+                payload = vnext_get_run_events(self.core, project_id, run_id)
+            except FileNotFoundError as exc:
+                self._handle_error(exc, status=404)
+                return
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, payload)
+            return
+        if parsed.path.startswith("/v1/projects/") and "/runs/" in parsed.path:
+            project_id = self._get_path_segment(parsed.path, 2)
+            run_id = self._get_path_segment(parsed.path, 4)
+            if parsed.path.count("/") == 5 and project_id and run_id:
+                try:
+                    payload = vnext_get_run(self.core, project_id, run_id)
+                except FileNotFoundError as exc:
+                    self._handle_error(exc, status=404)
+                    return
+                except Exception as exc:  # noqa: BLE001
+                    self._handle_error(exc, status=500)
+                    return
+                self._send_json(200, payload)
+                return
+        if parsed.path.startswith("/v1/projects/") and parsed.path.endswith("/confirmations"):
+            project_id = self._get_path_segment(parsed.path, 2)
+            if not project_id:
+                self._send_json(400, {"message": "無效的 project_id"})
+                return
+            params = parse_qs(parsed.query)
+            run_id = params.get("run_id", [""])[0].strip() or None
+            try:
+                payload = vnext_list_confirmations(self.core, project_id, run_id=run_id)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, payload)
+            return
+        if parsed.path.startswith("/v1/projects/") and parsed.path.endswith("/uploads") and "/uploads/" not in parsed.path:
+            project_id = self._get_path_segment(parsed.path, 2)
+            if not project_id:
+                self._send_json(400, {"message": "無效的 project_id"})
+                return
+            try:
+                payload = vnext_list_uploads(self.core, project_id)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, payload)
+            return
+        if parsed.path.startswith("/v1/projects/") and "/uploads/" in parsed.path and parsed.path.endswith("/preview"):
+            project_id = self._get_path_segment(parsed.path, 2)
+            asset_id = self._get_path_segment(parsed.path, 4)
+            if not project_id or not asset_id:
+                self._send_json(400, {"message": "缺少 project_id 或 asset_id"})
+                return
+            try:
+                payload = vnext_get_upload_preview(self.core, project_id, asset_id)
+            except FileNotFoundError as exc:
+                self._handle_error(exc, status=404)
+                return
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, payload)
+            return
+        if parsed.path.startswith("/v1/projects/") and "/uploads/" in parsed.path:
+            project_id = self._get_path_segment(parsed.path, 2)
+            asset_id = self._get_path_segment(parsed.path, 4)
+            if parsed.path.count("/") == 5 and project_id and asset_id:
+                try:
+                    payload = vnext_get_upload(self.core, project_id, asset_id)
+                except FileNotFoundError as exc:
+                    self._handle_error(exc, status=404)
+                    return
+                except Exception as exc:  # noqa: BLE001
+                    self._handle_error(exc, status=500)
+                    return
+                self._send_json(200, payload)
+                return
+        if self._is_vnext_definition_collection(parsed.path):
+            project_id = self._get_path_segment(parsed.path, 2)
+            definition_kind = self._get_path_segment(parsed.path, 3)
+            if not project_id or not definition_kind:
+                self._send_json(400, {"message": "缺少 project_id 或 definition kind"})
+                return
+            try:
+                payload = vnext_list_definitions(self.core, project_id, definition_kind)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, payload)
+            return
+        if self._is_vnext_definition_item(parsed.path):
+            project_id = self._get_path_segment(parsed.path, 2)
+            definition_kind = self._get_path_segment(parsed.path, 3)
+            entity_id = self._get_path_segment(parsed.path, 4)
+            if not project_id or not definition_kind or not entity_id:
+                self._send_json(400, {"message": "缺少 project_id、definition kind 或 entity_id"})
+                return
+            try:
+                payload = vnext_get_definition(self.core, project_id, definition_kind, entity_id)
+            except FileNotFoundError as exc:
+                self._handle_error(exc, status=404)
+                return
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, payload)
+            return
+        if parsed.path.startswith("/v1/projects/") and parsed.path.count("/") == 3:
+            project_id = self._get_path_segment(parsed.path, 2)
+            if not project_id:
+                self._send_json(400, {"message": "無效的 project_id"})
+                return
+            try:
+                payload = vnext_get_project_summary(self.core, project_id)
+            except KeyError as exc:
+                self._handle_error(exc, status=404)
+                return
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=500)
+                return
+            self._send_json(200, payload)
             return
         if parsed.path.startswith("/v1/runs/") and parsed.path.endswith("/graph"):
             run_id = self._get_path_segment(parsed.path, 2)
@@ -1382,6 +1569,124 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             token = _create_thread_stream_token(message=message, project_id=project_id, thread_id=thread_id)
             self._send_json(201, {"stream_token": token, "ttl_s": _CHAT_STREAM_INIT_TTL_S})
             return
+        if self._is_vnext_definition_collection(parsed.path):
+            payload = self._read_json()
+            if payload is None:
+                return
+            project_id = self._get_path_segment(parsed.path, 2)
+            definition_kind = self._get_path_segment(parsed.path, 3)
+            if not project_id or not definition_kind:
+                self._send_json(400, {"message": "缺少 project_id 或 definition kind"})
+                return
+            try:
+                result = vnext_create_definition(self.core, project_id, definition_kind, payload)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=400)
+                return
+            self._send_json(201, result)
+            return
+        if parsed.path.startswith("/v1/projects/") and parsed.path.endswith("/runs") and "/runs/" not in parsed.path:
+            payload = self._read_json()
+            if payload is None:
+                return
+            project_id = self._get_path_segment(parsed.path, 2)
+            if not project_id:
+                self._send_json(400, {"message": "無效的 project_id"})
+                return
+            try:
+                result = vnext_create_run(self.core, _TASK_MANAGER, project_id, payload)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=400)
+                return
+            self._send_json(202 if result.get("request_id") else 201, result)
+            return
+        if parsed.path.startswith("/v1/projects/") and "/runs/" in parsed.path and parsed.path.endswith("/resume"):
+            project_id = self._get_path_segment(parsed.path, 2)
+            run_id = self._get_path_segment(parsed.path, 4)
+            payload = self._read_json() or {}
+            if not project_id or not run_id:
+                self._send_json(400, {"message": "缺少 project_id 或 run_id"})
+                return
+            try:
+                result = vnext_resume_run(
+                    self.core,
+                    _TASK_MANAGER,
+                    project_id,
+                    run_id,
+                    execute=bool(payload.get("execute", True)),
+                )
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=400)
+                return
+            self._send_json(202 if result.get("request_id") else 200, result)
+            return
+        if parsed.path.startswith("/v1/projects/") and "/runs/" in parsed.path and parsed.path.endswith("/cancel"):
+            project_id = self._get_path_segment(parsed.path, 2)
+            run_id = self._get_path_segment(parsed.path, 4)
+            if not project_id or not run_id:
+                self._send_json(400, {"message": "缺少 project_id 或 run_id"})
+                return
+            try:
+                result = vnext_cancel_run(self.core, project_id, run_id)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=400)
+                return
+            self._send_json(200, result)
+            return
+        if parsed.path.startswith("/v1/projects/") and "/runs/" in parsed.path and parsed.path.endswith("/archive"):
+            project_id = self._get_path_segment(parsed.path, 2)
+            run_id = self._get_path_segment(parsed.path, 4)
+            if not project_id or not run_id:
+                self._send_json(400, {"message": "缺少 project_id 或 run_id"})
+                return
+            try:
+                result = vnext_archive_run(self.core, project_id, run_id)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=400)
+                return
+            self._send_json(200, result)
+            return
+        if parsed.path.startswith("/v1/projects/") and parsed.path.endswith("/uploads") and "/uploads/" not in parsed.path:
+            payload = self._read_json()
+            if payload is None:
+                return
+            project_id = self._get_path_segment(parsed.path, 2)
+            if not project_id:
+                self._send_json(400, {"message": "無效的 project_id"})
+                return
+            try:
+                result = vnext_create_upload(self.core, project_id, payload)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=400)
+                return
+            self._send_json(201, result)
+            return
+        if parsed.path.startswith("/v1/projects/") and "/confirmations/" in parsed.path and parsed.path.endswith("/approve"):
+            project_id = self._get_path_segment(parsed.path, 2)
+            confirmation_id = self._get_path_segment(parsed.path, 4)
+            if not project_id or not confirmation_id:
+                self._send_json(400, {"message": "缺少 project_id 或 confirmation_id"})
+                return
+            try:
+                result = vnext_approve_confirmation(self.core, project_id, confirmation_id)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=400)
+                return
+            self._send_json(200, result)
+            return
+        if parsed.path.startswith("/v1/projects/") and "/confirmations/" in parsed.path and parsed.path.endswith("/reject"):
+            project_id = self._get_path_segment(parsed.path, 2)
+            confirmation_id = self._get_path_segment(parsed.path, 4)
+            if not project_id or not confirmation_id:
+                self._send_json(400, {"message": "缺少 project_id 或 confirmation_id"})
+                return
+            try:
+                result = vnext_reject_confirmation(self.core, project_id, confirmation_id)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=400)
+                return
+            self._send_json(200, result)
+            return
         if parsed.path.startswith("/v1/projects/") and parsed.path.endswith("/threads"):
             payload = self._read_json()
             if payload is None:
@@ -1536,19 +1841,15 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             payload = self._read_json()
             if payload is None:
                 return
-            name = str(payload.get("name", "")).strip()
-            if not name:
-                self._send_json(400, {"message": "請提供專案名稱"})
-                return
             try:
-                record = self.core.create_project(name)
+                result = vnext_create_project(self.core, payload)
             except FileExistsError as exc:
                 self._handle_error(exc, status=409)
                 return
             except Exception as exc:  # noqa: BLE001
-                self._handle_error(exc, status=500)
+                self._handle_error(exc, status=400)
                 return
-            self._send_json(201, {"project": record.to_dict()})
+            self._send_json(201, result)
             return
         if parsed.path.startswith("/v1/projects/") and parsed.path.endswith("/restore"):
             project_id = self._get_path_segment(parsed.path, 2)
@@ -1556,7 +1857,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 self._send_json(400, {"message": "無效的 project_id"})
                 return
             try:
-                record = self.core.restore_project(project_id)
+                result = vnext_restore_project(self.core, project_id)
             except (KeyError, ValueError, FileExistsError) as exc:
                 status = 404 if isinstance(exc, KeyError) else 400
                 self._handle_error(exc, status=status)
@@ -1564,7 +1865,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             except Exception as exc:  # noqa: BLE001
                 self._handle_error(exc, status=500)
                 return
-            self._send_json(200, {"project": record.to_dict()})
+            self._send_json(200, result)
             return
         self._send_json(404, {"message": "找不到 API 路徑"})
 
@@ -1591,6 +1892,39 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
 
     def _handle_api_patch(self) -> None:
         parsed = urlparse(self.path)
+        if self._is_vnext_definition_item(parsed.path):
+            project_id = self._get_path_segment(parsed.path, 2)
+            definition_kind = self._get_path_segment(parsed.path, 3)
+            entity_id = self._get_path_segment(parsed.path, 4)
+            if not project_id or not definition_kind or not entity_id:
+                self._send_json(400, {"message": "缺少 project_id、definition kind 或 entity_id"})
+                return
+            payload = self._read_json()
+            if payload is None:
+                return
+            try:
+                result = vnext_update_definition(self.core, project_id, definition_kind, entity_id, payload)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=400)
+                return
+            self._send_json(200, result)
+            return
+        if parsed.path.startswith("/v1/projects/") and "/uploads/" in parsed.path:
+            project_id = self._get_path_segment(parsed.path, 2)
+            asset_id = self._get_path_segment(parsed.path, 4)
+            if not project_id or not asset_id:
+                self._send_json(400, {"message": "缺少 project_id 或 asset_id"})
+                return
+            payload = self._read_json()
+            if payload is None:
+                return
+            try:
+                result = vnext_update_upload(self.core, project_id, asset_id, payload)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=400)
+                return
+            self._send_json(200, result)
+            return
         if parsed.path.startswith("/v1/projects/"):
             project_id = self._get_path_segment(parsed.path, 2)
             if not project_id:
@@ -1604,26 +1938,53 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 self._send_json(400, {"message": "請提供新的專案名稱"})
                 return
             try:
-                record = self.core.update_project_name(project_id, name)
+                result = vnext_update_project(self.core, project_id, payload)
             except KeyError as exc:
                 self._handle_error(exc, status=404)
                 return
             except Exception as exc:  # noqa: BLE001
-                self._handle_error(exc, status=500)
+                self._handle_error(exc, status=400)
                 return
-            self._send_json(200, {"project": record.to_dict()})
+            self._send_json(200, result)
             return
         self._send_json(404, {"message": "找不到 API 路徑"})
 
     def _handle_api_delete(self) -> None:
         parsed = urlparse(self.path)
+        if self._is_vnext_definition_item(parsed.path):
+            project_id = self._get_path_segment(parsed.path, 2)
+            definition_kind = self._get_path_segment(parsed.path, 3)
+            entity_id = self._get_path_segment(parsed.path, 4)
+            if not project_id or not definition_kind or not entity_id:
+                self._send_json(400, {"message": "缺少 project_id、definition kind 或 entity_id"})
+                return
+            try:
+                result = vnext_delete_definition(self.core, project_id, definition_kind, entity_id)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=400)
+                return
+            self._send_json(200, result)
+            return
+        if parsed.path.startswith("/v1/projects/") and "/uploads/" in parsed.path:
+            project_id = self._get_path_segment(parsed.path, 2)
+            asset_id = self._get_path_segment(parsed.path, 4)
+            if not project_id or not asset_id:
+                self._send_json(400, {"message": "缺少 project_id 或 asset_id"})
+                return
+            try:
+                result = vnext_delete_upload(self.core, project_id, asset_id)
+            except Exception as exc:  # noqa: BLE001
+                self._handle_error(exc, status=400)
+                return
+            self._send_json(200, result)
+            return
         if parsed.path.startswith("/v1/projects/"):
             project_id = self._get_path_segment(parsed.path, 2)
             if not project_id:
                 self._send_json(400, {"message": "無效的 project_id"})
                 return
             try:
-                record = self.core.delete_project(project_id)
+                result = vnext_delete_project(self.core, project_id)
             except (KeyError, ValueError) as exc:
                 status = 404 if isinstance(exc, KeyError) else 400
                 self._handle_error(exc, status=status)
@@ -1631,9 +1992,74 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             except Exception as exc:  # noqa: BLE001
                 self._handle_error(exc, status=500)
                 return
-            self._send_json(200, {"project": record.to_dict()})
+            self._send_json(200, result)
             return
         self._send_json(404, {"message": "找不到 API 路徑"})
+
+    def _is_vnext_definition_collection(self, path: str) -> bool:
+        segments = [segment for segment in str(path or "").split("/") if segment]
+        return len(segments) == 4 and segments[:2] == ["v1", "projects"] and segments[3] in {
+            "tasks",
+            "agents",
+            "executors",
+            "workflows",
+            "templates",
+            "tool-policies",
+        }
+
+    def _is_vnext_definition_item(self, path: str) -> bool:
+        segments = [segment for segment in str(path or "").split("/") if segment]
+        return len(segments) == 5 and segments[:2] == ["v1", "projects"] and segments[3] in {
+            "tasks",
+            "agents",
+            "executors",
+            "workflows",
+            "templates",
+            "tool-policies",
+        }
+
+    def _handle_project_run_stream(self, *, project_id: str, run_id: str) -> None:
+        service = WorkspaceService(self.core, project_id)
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
+
+        sent_count = 0
+        idle_rounds = 0
+        while idle_rounds < 40:
+            payload = service.get_run(run_id)
+            events = payload.get("events") if isinstance(payload, dict) else []
+            if not isinstance(events, list):
+                events = []
+            if sent_count < len(events):
+                for event in events[sent_count:]:
+                    event_name = str(event.get("event") or event.get("type") or "message").strip() or "message"
+                    data = json.dumps(event, ensure_ascii=False).encode("utf-8")
+                    self.wfile.write(f"event: {event_name}\n".encode("utf-8"))
+                    self.wfile.write(b"data: " + data + b"\n\n")
+                    self.wfile.flush()
+                sent_count = len(events)
+                idle_rounds = 0
+            else:
+                idle_rounds += 1
+
+            run_payload = payload.get("run") if isinstance(payload, dict) else {}
+            status = str(run_payload.get("status") or "").strip().lower() if isinstance(run_payload, dict) else ""
+            if status in {"succeeded", "failed", "cancelled", "rolled_back", "archived"} and sent_count >= len(events):
+                done = json.dumps({"run_id": run_id, "status": status or "completed", "event_count": sent_count}, ensure_ascii=False).encode("utf-8")
+                self.wfile.write(b"event: done\n")
+                self.wfile.write(b"data: " + done + b"\n\n")
+                self.wfile.flush()
+                return
+
+            time.sleep(0.25)
+
+        done = json.dumps({"run_id": run_id, "status": "stream_timeout", "event_count": sent_count}, ensure_ascii=False).encode("utf-8")
+        self.wfile.write(b"event: done\n")
+        self.wfile.write(b"data: " + done + b"\n\n")
+        self.wfile.flush()
 
     def _build_tools_catalog(self, project_id: str | None, *, refresh_mcp: bool = False) -> dict[str, Any]:
         project_path = self.core.get_project_path(project_id) if project_id else None

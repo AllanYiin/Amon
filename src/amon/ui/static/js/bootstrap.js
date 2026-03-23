@@ -15,6 +15,7 @@ import { createServices } from "./domain/services.js";
 import { registerGlobalErrorHandlers } from "./domain/error_boundary.js";
 import { routeToShellView, switchShellView } from "./views/shell.js";
 import { CHAT_VIEW } from "./views/chat.js";
+import { WORKSPACE_VIEW } from "./views/workspace.js";
 import { CONTEXT_VIEW } from "./views/context.js";
 import { GRAPH_VIEW } from "./views/graph.js";
 import { DOCS_VIEW } from "./views/docs.js";
@@ -375,6 +376,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
 
       const VIEW_ROOTS = {
         chat: elements.chatLayout,
+        workspace: elements.workspacePage,
         context: elements.contextPage,
         graph: elements.graphPage,
         "tools-skills": elements.toolsSkillsPage,
@@ -386,6 +388,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
 
       const SHELL_VIEW_HANDLERS = [
         CHAT_VIEW,
+        WORKSPACE_VIEW,
         CONTEXT_VIEW,
         GRAPH_VIEW,
         DOCS_VIEW,

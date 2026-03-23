@@ -125,6 +125,7 @@
 
           <nav class="shell-view-tabs segmented" id="shell-nav" aria-label="功能頁籤">
             <a class="shell-nav__item shell-nav__link segmented__item" data-shell-view="chat" data-route="chat" data-icon="chat" href="#/chat" data-i18n="nav.chat">對話</a>
+            <a class="shell-nav__item shell-nav__link segmented__item" data-shell-view="workspace" data-route="workspace" data-icon="space_dashboard" href="#/workspace">工作台</a>
             <a class="shell-nav__item shell-nav__link segmented__item" data-shell-view="context" data-route="context" data-icon="dashboard" href="#/context" data-i18n="nav.context">情境</a>
             <a class="shell-nav__item shell-nav__link segmented__item" data-shell-view="graph" data-route="graph" data-icon="hub" href="#/graph" data-i18n="nav.graph">流程圖</a>
             <a class="shell-nav__item shell-nav__link segmented__item" data-shell-view="tools-skills" data-route="tools" data-icon="build" href="#/tools" data-i18n="nav.tools">工具與技能</a>
@@ -294,6 +295,77 @@
           </section>
             </aside>
           </div>
+
+          <section class="main-card card workspace-page amon-ref-page" id="workspace-page" hidden>
+            <header class="workspace-page__header">
+              <div>
+                <p class="tools-skills-page__eyebrow">vNext Workspace</p>
+                <h2>專案工作台</h2>
+                <p class="subtitle" id="workspace-status">請先選擇專案</p>
+              </div>
+              <div class="workspace-page__actions">
+                <button type="button" class="btn btn--secondary secondary-btn" id="workspace-refresh">重新整理</button>
+              </div>
+            </header>
+            <div class="workspace-grid">
+              <section class="workspace-card">
+                <h3>Run 控制</h3>
+                <label class="field-label">
+                  <span>Workflow</span>
+                  <select id="workspace-workflow-select"></select>
+                </label>
+                <label class="field-label">
+                  <span>Template</span>
+                  <select id="workspace-template-select"></select>
+                </label>
+                <label class="field-label checkbox-row">
+                  <input type="checkbox" id="workspace-run-execute" />
+                  <span>建立後立即執行</span>
+                </label>
+                <div class="workspace-actions">
+                  <button type="button" class="btn btn--primary primary-btn" id="workspace-run-start">建立 Run</button>
+                  <button type="button" class="btn btn--secondary secondary-btn" id="workspace-run-resume">Resume</button>
+                </div>
+                <label class="field-label">
+                  <span>Run ID</span>
+                  <input type="text" id="workspace-run-id" placeholder="run id" />
+                </label>
+                <pre id="workspace-run-meta" class="workspace-pre">{}</pre>
+              </section>
+              <section class="workspace-card">
+                <h3>Streaming Output</h3>
+                <div id="workspace-stream" class="workspace-stream" aria-live="polite"></div>
+              </section>
+              <section class="workspace-card">
+                <h3>Definitions</h3>
+                <pre id="workspace-definitions-summary" class="workspace-pre">{}</pre>
+                <pre id="workspace-definitions-list" class="workspace-pre workspace-pre--tall">{}</pre>
+              </section>
+              <section class="workspace-card">
+                <h3>Uploads</h3>
+                <label class="field-label">
+                  <span>本機路徑</span>
+                  <input type="text" id="workspace-upload-path" placeholder="D:\\path\\to\\file.md" />
+                </label>
+                <label class="field-label">
+                  <span>備註</span>
+                  <input type="text" id="workspace-upload-notes" placeholder="上傳說明" />
+                </label>
+                <button type="button" class="btn btn--secondary secondary-btn" id="workspace-upload-add">新增 Upload</button>
+                <div id="workspace-uploads-list" class="workspace-list"></div>
+              </section>
+              <section class="workspace-card">
+                <h3>Preview</h3>
+                <strong id="workspace-preview-title">尚未選擇預覽</strong>
+                <p id="workspace-preview-meta" class="muted">preview metadata</p>
+                <pre id="workspace-preview-body" class="workspace-pre workspace-pre--tall">{}</pre>
+              </section>
+              <section class="workspace-card">
+                <h3>Confirmations</h3>
+                <div id="workspace-confirmations-list" class="workspace-confirmations"></div>
+              </section>
+            </div>
+          </section>
 
 
           <section class="main-card card bill-page amon-ref-page amon-ref-page--billing" id="bill-page" hidden>

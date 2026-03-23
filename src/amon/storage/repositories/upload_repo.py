@@ -36,6 +36,12 @@ class UploadRepository:
     def get(self, asset_id: str) -> UploadAsset:
         return UploadAsset.from_dict(read_json(self._metadata_path(asset_id), default={}))
 
+    def list(self) -> list[UploadAsset]:
+        results: list[UploadAsset] = []
+        for path in sorted(self.metadata_dir.glob("*.json")):
+            results.append(UploadAsset.from_dict(read_json(path, default={})))
+        return results
+
     def save_preview(self, asset_id: str, preview_name: str, content: str) -> UploadAsset:
         preview_path = self.previews_dir / preview_name
         preview_path.write_text(content, encoding="utf-8")

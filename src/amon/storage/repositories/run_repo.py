@@ -39,6 +39,15 @@ class RunRepository:
     def get(self, run_id: str) -> RunRecord:
         return RunRecord.from_dict(read_json(self._run_dir(run_id) / "run.json", default={}))
 
+    def list(self) -> list[RunRecord]:
+        results: list[RunRecord] = []
+        for run_dir in sorted(self.runs_dir.iterdir()) if self.runs_dir.exists() else []:
+            run_file = run_dir / "run.json"
+            if not run_file.exists():
+                continue
+            results.append(RunRecord.from_dict(read_json(run_file, default={})))
+        return results
+
     def save_checkpoint_metadata(self, run_id: str, checkpoint_id: str, payload: dict[str, Any]) -> Path:
         path = self._run_dir(run_id) / "checkpoints" / f"{checkpoint_id}.json"
         write_json(path, payload)
