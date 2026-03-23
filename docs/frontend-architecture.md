@@ -168,6 +168,6 @@ src/amon/ui/
 
 因此它仍不是 OpenAI 參數本身的原樣回放，而是「Amon 對 reasoning 串流欄位的 UI 呈現」。
 
-## 附錄：Phase 5.2 第二段拆分
+## 附錄：維護原則
 
-- 詳細執行步驟請見：`docs/phase5-second-split-instructions.md`。
+- 若要再拆 `bootstrap.js` / `views/*` / `domain/*` 邊界，請直接以本文件與 `src/amon/ui/static/js/` 現況為準，不再回頭依賴舊 phase instructions。

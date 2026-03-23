@@ -58,15 +58,17 @@ amon init
 amon project list
 ```
 
-## TaskGraph v3 文件維護（Phase 0 起）
+## vNext 文件維護
 
-當調整 TaskGraph 相關程式時，需同步檢查：
+當調整 manifest / binder / compiler / runtime_vnext / templates 相關程式時，需同步檢查：
 
-- `docs/migration_v3.md`
-- `docs/refactor/taskgraph_v3_cutover.md`
-- `docs/refactor/taskgraph_v3_forbidden_legacy_refs.md`
+- `SPEC_v1.2.2.md`
+- `docs/migration_manifest_v1.md`
+- `docs/runtime_vnext.md`
+- `docs/template_authoring.md`
+- `docs/tool_policy.md`
 
-並確認沒有把 legacy/v2 執行路徑重新當成主路徑。
+並確認沒有把 inline runtime payload、preset-specific runtime branch、或 trigger bypass path 重新引回主路徑。
 
 ## vNext Stage 0 骨架
 
@@ -103,4 +105,4 @@ python -m unittest tests.smoke.test_vnext_imports
 ```bash
 amon ui --port 8000
 ```
-瀏覽器開啟：`http://localhost:8000`
+目前此命令在 repo 現況下可能立即結束；啟動路徑與限制請先看 `docs/known_limits.md`。

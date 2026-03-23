@@ -28,5 +28,3 @@ python -m unittest tests.smoke.test_vnext_examples_smoke
 2. 確認 examples JSON 可解析
 3. 確認 `amon ui --port 8000` 的實際啟動方式
 4. 確認已知限制已更新到 [docs/known_limits.md](D:/PycharmProjects/Amon/docs/known_limits.md)
-
-詳細 smoke 項目可參考舊版 [docs/release-checklist.md](D:/PycharmProjects/Amon/docs/release-checklist.md)。

@@ -72,5 +72,5 @@ Tool policy 把「能不能用工具」從 prompt 與 runtime 細節中抽離，
 
 ## 相關文件
 
-- 舊版 policy 總覽： [docs/policy.md](D:/PycharmProjects/Amon/docs/policy.md)
+- 規格總覽： [SPEC_v1.2.2.md](D:/PycharmProjects/Amon/SPEC_v1.2.2.md)
 - 實作： [src/amon/runtime_vnext/tool_policy_engine.py](D:/PycharmProjects/Amon/src/amon/runtime_vnext/tool_policy_engine.py)
