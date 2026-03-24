@@ -4,16 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from amon.domain import AmonManifest, ExecutorBinding, TaskDefinition, is_compilable_executor_type
+from amon.domain import AmonManifest, ExecutorBinding, TaskDefinition, ToolPolicy, is_compilable_executor_type
 
-
-_SIDE_EFFECT_ORDER = {
-    "read_only": 0,
-    "workspace_write": 1,
-    "destructive_write": 2,
-    "external_network": 3,
-    "sandbox_exec": 4,
-}
+from .executor_policy_compatibility import evaluate_executor_policy_compatibility
 
 _EXECUTOR_TYPE_PRIORITY = {
     "llm": 0,
@@ -30,12 +23,13 @@ class CapabilityMatch:
 
 
 class CapabilityRegistry:
-    def __init__(self, executors: dict[str, ExecutorBinding]) -> None:
+    def __init__(self, executors: dict[str, ExecutorBinding], tool_policies: dict[str, ToolPolicy] | None = None) -> None:
         self._executors = executors
+        self._tool_policies = tool_policies or {}
 
     @classmethod
     def from_manifest(cls, manifest: AmonManifest) -> "CapabilityRegistry":
-        return cls(executors=dict(manifest.executors))
+        return cls(executors=dict(manifest.executors), tool_policies=dict(manifest.tool_policies))
 
     def candidates_for_task(self, task: TaskDefinition) -> list[CapabilityMatch]:
         required = {item for item in task.required_capabilities if item}
@@ -48,9 +42,10 @@ class CapabilityRegistry:
             declared = {item for item in executor.capabilities if item}
             if required and not required.issubset(declared):
                 continue
-            match = CapabilityMatch(executor=executor, covered_capabilities=declared)
-            if self._sort_key(match, task)[0] >= 99:
+            compatibility = evaluate_executor_policy_compatibility(task, executor, self._tool_policies)
+            if not compatibility.allowed:
                 continue
+            match = CapabilityMatch(executor=executor, covered_capabilities=declared)
             matches.append(match)
         matches.sort(key=lambda item: self._sort_key(item, task))
         return matches
@@ -63,20 +58,23 @@ class CapabilityRegistry:
         executor = match.executor
         type_penalty = _EXECUTOR_TYPE_PRIORITY.get(str(executor.type or "").strip().lower(), 99)
         streaming_penalty = 0 if executor.streaming_required else 1
-        side_effect_penalty = self._side_effect_distance(task.side_effect_class, executor)
+        effective = evaluate_executor_policy_compatibility(task, executor, self._tool_policies).effective_policy
+        side_effect_penalty = self._side_effect_distance(task.side_effect_class, effective.side_effect_ceiling if effective else "read_only")
         coverage_penalty = len(match.covered_capabilities - set(task.required_capabilities))
         return (side_effect_penalty, type_penalty + streaming_penalty, coverage_penalty, executor.id)
 
-    def _side_effect_distance(self, side_effect_class: str, executor: ExecutorBinding) -> int:
-        target = _SIDE_EFFECT_ORDER.get(side_effect_class or "read_only", 0)
-        if executor.type == "llm":
-            ceiling = _SIDE_EFFECT_ORDER.get("read_only", 0)
-        elif executor.type == "tool":
-            ceiling = _SIDE_EFFECT_ORDER.get("workspace_write", 1)
-        elif executor.type == "sandbox":
-            ceiling = _SIDE_EFFECT_ORDER.get("sandbox_exec", 4)
-        else:
-            ceiling = target
-        if ceiling < target:
-            return 99
-        return ceiling - target
+    @staticmethod
+    def _side_effect_distance(side_effect_class: str, ceiling: str) -> int:
+        target_value = _side_effect_value(side_effect_class)
+        ceiling_value = _side_effect_value(ceiling)
+        return max(0, ceiling_value - target_value)
+
+
+def _side_effect_value(name: str) -> int:
+    return {
+        "read_only": 0,
+        "workspace_write": 1,
+        "destructive_write": 2,
+        "external_network": 3,
+        "sandbox_exec": 4,
+    }.get(str(name or "read_only"), 0)

@@ -15,6 +15,7 @@ from amon.domain import (
 from amon.domain.manifest_validation import ManifestValidationError
 
 from .capability_registry import CapabilityRegistry
+from .executor_policy_compatibility import evaluate_executor_policy_compatibility
 
 
 class BindingError(ValueError):
@@ -64,6 +65,12 @@ def bind_workflow(
             if missing:
                 raise BindingError(
                     f"executor 無法滿足 capability：node_id={node.id}, executor_ref={node.executor_ref}, missing={missing}"
+                )
+            compatibility = evaluate_executor_policy_compatibility(task, executor, manifest.tool_policies)
+            if not compatibility.allowed:
+                raise BindingError(
+                    f"{compatibility.reason}：node_id={node.id}, task_ref={task.id}",
+                    code="AMON_BINDER_002",
                 )
             bound_nodes.append(replace(node, status="valid" if node.status != "disabled" else node.status))
             continue

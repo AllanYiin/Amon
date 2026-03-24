@@ -121,6 +121,13 @@ runtime 僅能透過這份 compiled metadata contract 讀取 execution metadata�
 
 定義 allowed tools、allowed paths、network、delegation、side effect ceiling、approval rules。
 
+binding 規則：
+
+- `CapabilityRegistry.resolve_executor()` 必須先 consult executor 對應的 `ToolPolicy`
+- binder 至少需前置納入：`side_effect_ceiling`、`allow_network`、`delegated_allowed`
+- path allowlist 與 approval rules 仍屬 runtime policy engine 最終權威，binder 不應過度推論
+- 若 executor 未附 policy，binder 可對 `read_only` 等低風險情境保留 legacy fallback，但不得錯選明顯不可能執行的 executor
+
 ### Template
 
 高階流程範本，可 instantiate 成 workflow；模板本身不是 runtime primitive。
