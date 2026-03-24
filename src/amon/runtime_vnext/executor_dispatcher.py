@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from amon.domain import UNSUPPORTED_EXECUTOR_TYPE_CODE, unsupported_executor_type_message
 from amon.domain.compiled_node_metadata import CompiledNodeMetadata
 
 from .audit_log import RuntimeAuditLog
@@ -64,6 +65,11 @@ class ExecutorDispatcher:
                 "confirmation": confirmation.to_dict(),
                 "raw_output": json.dumps(confirmation.to_dict(), ensure_ascii=False),
             }
+        if executor_type == "subgraph":
+            raise ValueError(
+                f"{UNSUPPORTED_EXECUTOR_TYPE_CODE}: "
+                f"{unsupported_executor_type_message(executor_ref=node.id, executor_type=executor_type)}"
+            )
         raise ValueError(f"AMON_RUNTIME_001: unsupported executor type={executor_type}")
 
     @staticmethod

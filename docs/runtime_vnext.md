@@ -24,6 +24,12 @@ vNext runtime 不是第二套完整 runtime，而是接在既有 `TaskGraph3Runt
 - `sandbox`
 - `human_gate`
 
+目前不支援：
+
+- `subgraph`
+  - binder / compiler 會以 `AMON_EXECUTOR_TYPE_001` fail-fast
+  - runtime 不應再收到這類 compiled node；若收到，仍會拒絕執行
+
 ## Compiled Metadata Contract
 
 Phase 1 起，compiler 與 runtime 共用同一份 compiled node metadata contract：

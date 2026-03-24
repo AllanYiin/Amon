@@ -4,7 +4,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from amon.domain import AmonManifest, AgentProfile, ExecutorBinding, TaskDefinition, ToolPolicy, WorkflowDefinition
+from amon.domain import (
+    AmonManifest,
+    AgentProfile,
+    ExecutorBinding,
+    TaskDefinition,
+    ToolPolicy,
+    UNSUPPORTED_EXECUTOR_TYPE_CODE,
+    WorkflowDefinition,
+    is_compilable_executor_type,
+    unsupported_executor_type_message,
+)
 from amon.domain.compiled_node_metadata import CompiledNodeMetadata
 from amon.domain.manifest_validation import ManifestValidationError
 from amon.taskgraph3.payloads import (
@@ -110,6 +120,11 @@ def _compile_task_spec(
     agent_profile: AgentProfile | None,
     tool_policy: ToolPolicy | None,
 ) -> TaskSpec:
+    if not is_compilable_executor_type(executor.type):
+        raise CompilerError(
+            unsupported_executor_type_message(executor_ref=executor.id, executor_type=executor.type),
+            code=UNSUPPORTED_EXECUTOR_TYPE_CODE,
+        )
     if executor.type == "llm":
         instructions = _compose_llm_instructions(task, agent_profile, executor, tool_policy)
         model_policy = agent_profile.model_policy if agent_profile is not None else {}
@@ -159,7 +174,22 @@ def _compile_task_spec(
             display=TaskDisplayMetadata(label=task.title or task.id, summary=task.goal, tags=list(task.required_capabilities)),
             runnable=True,
         )
-    raise CompilerError(f"unsupported executor type：executor_ref={executor.id}, type={executor.type}", code="AMON_RUNTIME_001")
+    if executor.type == "human_gate":
+        return TaskSpec(
+            executor="agent",
+            agent=AgentTaskConfig(
+                prompt=f"人工確認：{task.goal}",
+                instructions="此節點由 runtime_vnext human_gate dispatcher 處理，不應走一般 LLM 執行。",
+            ),
+            input_bindings=_compile_input_bindings(task.input_contract),
+            artifacts=_compile_artifacts(task.output_contract),
+            display=TaskDisplayMetadata(label=task.title or task.id, summary=task.goal, tags=list(task.required_capabilities)),
+            runnable=True,
+        )
+    raise CompilerError(
+        unsupported_executor_type_message(executor_ref=executor.id, executor_type=executor.type),
+        code=UNSUPPORTED_EXECUTOR_TYPE_CODE,
+    )
 
 
 def _compile_edges(workflow: WorkflowDefinition) -> list[GraphEdge]:

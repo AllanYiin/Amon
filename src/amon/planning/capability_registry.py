@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from amon.domain import AmonManifest, ExecutorBinding, TaskDefinition
+from amon.domain import AmonManifest, ExecutorBinding, TaskDefinition, is_compilable_executor_type
 
 
 _SIDE_EFFECT_ORDER = {
@@ -13,6 +13,13 @@ _SIDE_EFFECT_ORDER = {
     "destructive_write": 2,
     "external_network": 3,
     "sandbox_exec": 4,
+}
+
+_EXECUTOR_TYPE_PRIORITY = {
+    "llm": 0,
+    "tool": 1,
+    "sandbox": 2,
+    "human_gate": 3,
 }
 
 
@@ -36,6 +43,8 @@ class CapabilityRegistry:
         for executor in self._executors.values():
             if executor.status != "active":
                 continue
+            if not is_compilable_executor_type(executor.type):
+                continue
             declared = {item for item in executor.capabilities if item}
             if required and not required.issubset(declared):
                 continue
@@ -52,11 +61,11 @@ class CapabilityRegistry:
 
     def _sort_key(self, match: CapabilityMatch, task: TaskDefinition) -> tuple[int, int, int, str]:
         executor = match.executor
-        tool_penalty = 1 if executor.type == "tool" else 0
+        type_penalty = _EXECUTOR_TYPE_PRIORITY.get(str(executor.type or "").strip().lower(), 99)
         streaming_penalty = 0 if executor.streaming_required else 1
         side_effect_penalty = self._side_effect_distance(task.side_effect_class, executor)
         coverage_penalty = len(match.covered_capabilities - set(task.required_capabilities))
-        return (side_effect_penalty, tool_penalty + streaming_penalty, coverage_penalty, executor.id)
+        return (side_effect_penalty, type_penalty + streaming_penalty, coverage_penalty, executor.id)
 
     def _side_effect_distance(self, side_effect_class: str, executor: ExecutorBinding) -> int:
         target = _SIDE_EFFECT_ORDER.get(side_effect_class or "read_only", 0)

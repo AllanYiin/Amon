@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from amon.domain import AmonManifest, WorkflowDefinition, WorkflowNode
+from amon.domain import (
+    AmonManifest,
+    UNSUPPORTED_EXECUTOR_TYPE_CODE,
+    WorkflowDefinition,
+    WorkflowNode,
+    is_compilable_executor_type,
+    unsupported_executor_type_message,
+)
 from amon.domain.manifest_validation import ManifestValidationError
 
 from .capability_registry import CapabilityRegistry
@@ -45,6 +52,11 @@ def bind_workflow(
                 raise BindingError(
                     f"unresolved executor_ref：workflow_id={workflow_id}, node_id={node.id}, executor_ref={node.executor_ref}",
                     code="AMON_VALIDATION_002",
+                )
+            if not is_compilable_executor_type(executor.type):
+                raise BindingError(
+                    unsupported_executor_type_message(executor_ref=executor.id, executor_type=executor.type),
+                    code=UNSUPPORTED_EXECUTOR_TYPE_CODE,
                 )
             if executor.status != "active":
                 raise BindingError(f"executor 未啟用：node_id={node.id}, executor_ref={node.executor_ref}")

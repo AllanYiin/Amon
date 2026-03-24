@@ -32,3 +32,7 @@ python -m unittest \
 ### 5. 舊文件仍存在
 
 repo 內保留不少 TaskGraph v3 cutover、sandbox、MCP、UI refactor 歷史文件。它們不是錯，但不一定是 vNext 的最佳入口。
+
+### 6. `subgraph` executor 目前僅保留規格位，不提供執行
+
+spec 與 domain 仍承認 `subgraph` 是合法 executor type，但 vNext 現階段不做 lowering / execution。若 manifest 綁到 `subgraph`，binder / compiler 會以 `AMON_EXECUTOR_TYPE_001` 明確拒絕。

@@ -91,6 +91,12 @@ manifest validation 分成三層：
 
 是 logical task 與實際執行方式的唯一橋樑。runtime dispatcher 只看這裡，不再掃多個散落欄位。
 
+目前 support matrix：
+
+- spec / domain 可宣告：`llm | tool | sandbox | human_gate | subgraph`
+- binder / compiler / runtime 已接通：`llm | tool | sandbox | human_gate`
+- `subgraph` 目前必須在 binder 或 compiler fail-fast，錯誤碼固定為 `AMON_EXECUTOR_TYPE_001`
+
 ### CompiledNodeMetadata
 
 compiled `taskgraph.v3` node metadata 必須有單一 canonical contract，至少包含：
