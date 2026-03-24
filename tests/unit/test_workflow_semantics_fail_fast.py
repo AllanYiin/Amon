@@ -30,30 +30,6 @@ class WorkflowSemanticsFailFastTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "AMON_WORKFLOW_001")
         self.assertIn("field=condition", str(ctx.exception))
 
-    def test_input_mapping_is_rejected_at_compile_time(self) -> None:
-        manifest = _load_manifest()
-        workflow = manifest.workflows["workflow.vnext_baseline"].clone()
-        workflow.nodes[1].update(input_mapping={"query": {"from": "research.summary"}})
-        manifest.workflows[workflow.id] = workflow
-
-        with self.assertRaises(CompilerError) as ctx:
-            compile_manifest_workflow(manifest, workflow.id)
-
-        self.assertEqual(ctx.exception.code, "AMON_WORKFLOW_001")
-        self.assertIn("field=input_mapping", str(ctx.exception))
-
-    def test_output_mapping_is_rejected_at_compile_time(self) -> None:
-        manifest = _load_manifest()
-        workflow = manifest.workflows["workflow.vnext_baseline"].clone()
-        workflow.nodes[1].update(output_mapping={"summary": {"to": "memory_lookup.raw"}})
-        manifest.workflows[workflow.id] = workflow
-
-        with self.assertRaises(CompilerError) as ctx:
-            compile_manifest_workflow(manifest, workflow.id)
-
-        self.assertEqual(ctx.exception.code, "AMON_WORKFLOW_001")
-        self.assertIn("field=output_mapping", str(ctx.exception))
-
     def test_routes_are_rejected_at_compile_time(self) -> None:
         manifest = _load_manifest()
         workflow = manifest.workflows["workflow.vnext_baseline"].clone()
@@ -65,18 +41,6 @@ class WorkflowSemanticsFailFastTests(unittest.TestCase):
 
         self.assertEqual(ctx.exception.code, "AMON_WORKFLOW_001")
         self.assertIn("field=routes", str(ctx.exception))
-
-    def test_output_bindings_are_rejected_at_compile_time(self) -> None:
-        manifest = _load_manifest()
-        workflow = manifest.workflows["workflow.vnext_baseline"].clone()
-        workflow.update(output_bindings={"final_summary": {"from_node": "research", "port": "summary"}})
-        manifest.workflows[workflow.id] = workflow
-
-        with self.assertRaises(CompilerError) as ctx:
-            compile_manifest_workflow(manifest, workflow.id)
-
-        self.assertEqual(ctx.exception.code, "AMON_WORKFLOW_001")
-        self.assertIn("field=output_bindings", str(ctx.exception))
 
     def test_depends_on_only_workflow_still_compiles(self) -> None:
         manifest = _load_manifest()

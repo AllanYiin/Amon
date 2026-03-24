@@ -1,0 +1,203 @@
+{
+  "version": "amon.manifest.v1",
+  "project": {
+    "id": "project.vnext-mapping",
+    "name": "vNext Mapping"
+  },
+  "tasks": {
+    "task.mapping_research": {
+      "id": "task.mapping_research",
+      "version": 1,
+      "title": "Mapping Research",
+      "goal": "stage6 seed",
+      "required_capabilities": [
+        "text_generate"
+      ],
+      "input_contract": {
+        "ports": []
+      },
+      "output_contract": {
+        "ports": [
+          {
+            "name": "summary",
+            "type": "string",
+            "description": "research summary",
+            "required": true
+          }
+        ]
+      },
+      "acceptance_criteria": [
+        "輸出研究摘要"
+      ],
+      "side_effect_class": "read_only",
+      "status": "active",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    },
+    "task.mapping_writer": {
+      "id": "task.mapping_writer",
+      "version": 1,
+      "title": "Mapping Writer",
+      "goal": "reviewed:${source_summary}",
+      "required_capabilities": [
+        "text_generate"
+      ],
+      "input_contract": {
+        "ports": []
+      },
+      "output_contract": {
+        "ports": [
+          {
+            "name": "draft",
+            "type": "string",
+            "description": "reviewed draft",
+            "required": true
+          }
+        ]
+      },
+      "acceptance_criteria": [
+        "沿用 research 輸出"
+      ],
+      "side_effect_class": "read_only",
+      "status": "active",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    },
+    "task.mapping_publisher": {
+      "id": "task.mapping_publisher",
+      "version": 1,
+      "title": "Mapping Publisher",
+      "goal": "final:${content}",
+      "required_capabilities": [
+        "text_generate"
+      ],
+      "input_contract": {
+        "ports": []
+      },
+      "output_contract": {
+        "ports": [
+          {
+            "name": "final_text",
+            "type": "string",
+            "description": "final output",
+            "required": true
+          }
+        ]
+      },
+      "acceptance_criteria": [
+        "輸出最終文字"
+      ],
+      "side_effect_class": "read_only",
+      "status": "active",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    }
+  },
+  "agent_profiles": {
+    "agent.mapping_llm": {
+      "id": "agent.mapping_llm",
+      "version": 1,
+      "name": "Mapping LLM",
+      "purpose": "執行 deterministic mapping 測試",
+      "system_prompt": "你是 deterministic 測試角色。",
+      "default_skills": [],
+      "model_policy": {
+        "provider": "openai",
+        "model": "gpt-4.1-mini",
+        "streaming_required": false
+      },
+      "memory_policy": "none",
+      "output_style": "plain_text",
+      "status": "active",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    }
+  },
+  "executors": {
+    "exec.mapping_llm": {
+      "id": "exec.mapping_llm",
+      "version": 1,
+      "type": "llm",
+      "capabilities": [
+        "text_generate"
+      ],
+      "agent_profile_ref": "agent.mapping_llm",
+      "tool_plan": {},
+      "tool_invocation_mode": "none",
+      "tool_policy_ref": "",
+      "timeout_s": 60,
+      "retry_policy": {},
+      "approval_policy": {},
+      "streaming_required": false,
+      "status": "active",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    }
+  },
+  "workflows": {
+    "workflow.vnext_mapping": {
+      "id": "workflow.vnext_mapping",
+      "version": 1,
+      "name": "vNext Mapping",
+      "nodes": [
+        {
+          "id": "research",
+          "task_ref": "task.mapping_research",
+          "executor_ref": "exec.mapping_llm",
+          "depends_on": [],
+          "condition": null,
+          "input_mapping": {},
+          "output_mapping": {},
+          "status": "valid"
+        },
+        {
+          "id": "writer",
+          "task_ref": "task.mapping_writer",
+          "executor_ref": "exec.mapping_llm",
+          "depends_on": [],
+          "condition": null,
+          "input_mapping": {
+            "source_summary": {
+              "from": "research.summary"
+            }
+          },
+          "output_mapping": {
+            "reviewed_summary": {
+              "from": "draft"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "id": "publisher",
+          "task_ref": "task.mapping_publisher",
+          "executor_ref": "exec.mapping_llm",
+          "depends_on": [],
+          "condition": null,
+          "input_mapping": {
+            "content": {
+              "from": "writer.reviewed_summary"
+            }
+          },
+          "output_mapping": {},
+          "status": "valid"
+        }
+      ],
+      "routes": [],
+      "output_bindings": {
+        "final_text": {
+          "from": "publisher.final_text"
+        },
+        "writer_reviewed": {
+          "from_node": "writer",
+          "port": "reviewed_summary"
+        }
+      },
+      "status": "active",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    }
+  },
+  "templates": {},
+  "tool_policies": {}
+}

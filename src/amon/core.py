@@ -2677,6 +2677,11 @@ class AmonCore:
             return ""
         state = json.loads(state_path.read_text(encoding="utf-8"))
         project_path = run_dir.parents[2]
+        graph_output = state.get("graph_output")
+        if isinstance(graph_output, dict):
+            graph_output_text = self._resolve_graph_output_text(project_path, graph_output)
+            if graph_output_text:
+                return graph_output_text
         resolved_nodes_by_id: dict[str, dict[str, Any]] = {}
         resolved_path = run_dir / "graph.resolved.json"
         if resolved_path.exists():
@@ -2729,6 +2734,24 @@ class AmonCore:
             return latest_port_text
         if latest_path_text:
             return latest_path_text
+        return ""
+
+    @staticmethod
+    def _resolve_graph_output_text(project_path: Path, graph_output: dict[str, Any]) -> str:
+        output_path = graph_output.get("output_path") or graph_output.get("path")
+        if isinstance(output_path, str) and output_path.strip():
+            target = project_path / output_path
+            if target.exists():
+                return target.read_text(encoding="utf-8")
+        for key in ("final_text", "text", "message", "content", "answer"):
+            candidate = graph_output.get(key)
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate
+        string_values = [value for value in graph_output.values() if isinstance(value, str) and value.strip()]
+        if len(string_values) == 1:
+            return string_values[0]
+        if string_values:
+            return string_values[-1]
         return ""
 
     def _sync_team_tasks(self, project_path: Path, tasks_dir: Path, docs_dir: Path) -> None:

@@ -82,13 +82,13 @@ manifest validation 分成三層：
 目前 compile honesty 規則：
 
 - `depends_on` 已 lower 成 control edges
+- `node.input_mapping` 已 lower 成 `TaskSpec.input_bindings(source="upstream")` 與 data edges
+- `node.output_mapping` 已 lower 成 graph metadata + runtime output aliasing
+- `workflow.output_bindings` 已 lower 成 graph metadata + runtime `state["graph_output"]`
 - `node.condition`
-- `node.input_mapping`
-- `node.output_mapping`
 - `workflow.routes`
-- `workflow.output_bindings`
 
-以上欄位在目前版本尚未 lower 成可執行語義，compiler 必須以 `AMON_WORKFLOW_001` compile-time fail-fast，不可靜默忽略
+目前仍未 lower 的欄位只有 `node.condition` 與 `workflow.routes`，compiler 必須以 `AMON_WORKFLOW_001` compile-time fail-fast，不可靜默忽略
 
 ### TaskDefinition
 

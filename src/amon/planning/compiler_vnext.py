@@ -30,6 +30,7 @@ from amon.taskgraph3.payloads import (
 from amon.taskgraph3.schema import EdgeCondition, GraphDefinition, GraphEdge, OutputContract, OutputPort, TaskNode
 
 from .compile_result import CompileResult, SnapshotPin
+from .workflow_semantics import CompiledWorkflowSemantics, WorkflowMappingError, compile_workflow_semantics
 
 
 class CompilerError(ValueError):
@@ -47,13 +48,25 @@ def compile_manifest_workflow(manifest: AmonManifest, workflow_id: str) -> Compi
     except ManifestValidationError as exc:
         raise CompilerError(str(exc), code=exc.code) from exc
     _ensure_supported_workflow_semantics(workflow)
+    try:
+        workflow_semantics = compile_workflow_semantics(manifest, workflow)
+    except WorkflowMappingError as exc:
+        raise CompilerError(str(exc), code=exc.code) from exc
 
     task_nodes = [
-        _compile_task_node(manifest, workflow, node_id=node.id, task_ref=node.task_ref, executor_ref=node.executor_ref)
+        _compile_task_node(manifest, workflow, node, workflow_semantics)
         for node in workflow.nodes
     ]
-    edges = _compile_edges(workflow)
+    edges = _compile_edges(workflow, workflow_semantics)
     snapshot_pins = _build_snapshot_pins(manifest, workflow)
+    graph_metadata: dict[str, Any] = {
+        "source_manifest_version": manifest.version,
+        "workflow_ref": workflow.id,
+        "snapshotPins": {key: pin.to_dict() for key, pin in snapshot_pins.items()},
+    }
+    semantics_metadata = workflow_semantics.metadata()
+    if semantics_metadata:
+        graph_metadata["workflow_semantics"] = semantics_metadata
     graph = GraphDefinition(
         id=workflow.id,
         name=workflow.name or workflow.id,
@@ -63,11 +76,7 @@ def compile_manifest_workflow(manifest: AmonManifest, workflow_id: str) -> Compi
         updated_at=workflow.updated_at,
         nodes=task_nodes,
         edges=edges,
-        metadata={
-            "source_manifest_version": manifest.version,
-            "workflow_ref": workflow.id,
-            "snapshotPins": {key: pin.to_dict() for key, pin in snapshot_pins.items()},
-        },
+        metadata=graph_metadata,
     )
     return CompileResult(workflow_ref=workflow.id, graph=graph, snapshot_pins=snapshot_pins)
 
@@ -79,24 +88,9 @@ def _ensure_supported_workflow_semantics(workflow: WorkflowDefinition) -> None:
                 f"unsupported workflow semantic：workflow_id={workflow.id}, node_id={node.id}, field=condition",
                 code="AMON_WORKFLOW_001",
             )
-        if node.input_mapping:
-            raise CompilerError(
-                f"unsupported workflow semantic：workflow_id={workflow.id}, node_id={node.id}, field=input_mapping",
-                code="AMON_WORKFLOW_001",
-            )
-        if node.output_mapping:
-            raise CompilerError(
-                f"unsupported workflow semantic：workflow_id={workflow.id}, node_id={node.id}, field=output_mapping",
-                code="AMON_WORKFLOW_001",
-            )
     if workflow.routes:
         raise CompilerError(
             f"unsupported workflow semantic：workflow_id={workflow.id}, field=routes",
-            code="AMON_WORKFLOW_001",
-        )
-    if workflow.output_bindings:
-        raise CompilerError(
-            f"unsupported workflow semantic：workflow_id={workflow.id}, field=output_bindings",
             code="AMON_WORKFLOW_001",
         )
 
@@ -104,18 +98,19 @@ def _ensure_supported_workflow_semantics(workflow: WorkflowDefinition) -> None:
 def _compile_task_node(
     manifest: AmonManifest,
     workflow: WorkflowDefinition,
-    *,
-    node_id: str,
-    task_ref: str,
-    executor_ref: str,
+    node,
+    workflow_semantics: CompiledWorkflowSemantics,
 ) -> TaskNode:
-    task = manifest.tasks.get(task_ref)
-    executor = manifest.executors.get(executor_ref)
+    task = manifest.tasks.get(node.task_ref)
+    executor = manifest.executors.get(node.executor_ref)
     if task is None:
-        raise CompilerError(f"unresolved task_ref：workflow_id={workflow.id}, task_ref={task_ref}", code="AMON_VALIDATION_002")
+        raise CompilerError(
+            f"unresolved task_ref：workflow_id={workflow.id}, task_ref={node.task_ref}",
+            code="AMON_VALIDATION_002",
+        )
     if executor is None:
         raise CompilerError(
-            f"unresolved executor_ref：workflow_id={workflow.id}, executor_ref={executor_ref}",
+            f"unresolved executor_ref：workflow_id={workflow.id}, executor_ref={node.executor_ref}",
             code="AMON_VALIDATION_002",
         )
     task_spec = _compile_task_spec(
@@ -123,6 +118,7 @@ def _compile_task_node(
         executor=executor,
         agent_profile=manifest.agent_profiles.get(executor.agent_profile_ref or ""),
         tool_policy=manifest.tool_policies.get(executor.tool_policy_ref or ""),
+        additional_input_bindings=workflow_semantics.input_bindings_by_node.get(node.id, []),
     )
     compiled_metadata = CompiledNodeMetadata.from_compile_inputs(
         task=task,
@@ -131,8 +127,8 @@ def _compile_task_node(
         tool_policy=manifest.tool_policies.get(executor.tool_policy_ref or ""),
     )
     return TaskNode(
-        id=node_id,
-        title=task.title or task.goal or node_id,
+        id=node.id,
+        title=task.title or task.goal or node.id,
         description=task.goal,
         status="ready",
         created_at=task.created_at,
@@ -149,6 +145,7 @@ def _compile_task_spec(
     executor: ExecutorBinding,
     agent_profile: AgentProfile | None,
     tool_policy: ToolPolicy | None,
+    additional_input_bindings: list[InputBinding] | None = None,
 ) -> TaskSpec:
     if not is_compilable_executor_type(executor.type):
         raise CompilerError(
@@ -168,7 +165,7 @@ def _compile_task_spec(
                 allowed_tools=_allowed_tools_for_llm(executor, tool_policy),
                 skills=list(agent_profile.default_skills) if agent_profile is not None else [],
             ),
-            input_bindings=_compile_input_bindings(task.input_contract),
+            input_bindings=_compile_input_bindings(task.input_contract, additional_bindings=additional_input_bindings),
             artifacts=_compile_artifacts(task.output_contract),
             display=TaskDisplayMetadata(
                 label=task.title or task.id,
@@ -183,7 +180,7 @@ def _compile_task_spec(
         return TaskSpec(
             executor="tool",
             tool=ToolTaskConfig(tools=tools, skills=[]),
-            input_bindings=_compile_input_bindings(task.input_contract),
+            input_bindings=_compile_input_bindings(task.input_contract, additional_bindings=additional_input_bindings),
             artifacts=_compile_artifacts(task.output_contract),
             display=TaskDisplayMetadata(label=task.title or task.id, summary=task.goal, tags=list(task.required_capabilities)),
             runnable=True,
@@ -199,7 +196,7 @@ def _compile_task_spec(
                 shell=str(executor.tool_plan.get("shell") or "bash"),
                 workdir=str(executor.tool_plan.get("workdir") or ""),
             ),
-            input_bindings=_compile_input_bindings(task.input_contract),
+            input_bindings=_compile_input_bindings(task.input_contract, additional_bindings=additional_input_bindings),
             artifacts=_compile_artifacts(task.output_contract),
             display=TaskDisplayMetadata(label=task.title or task.id, summary=task.goal, tags=list(task.required_capabilities)),
             runnable=True,
@@ -211,7 +208,7 @@ def _compile_task_spec(
                 prompt=f"人工確認：{task.goal}",
                 instructions="此節點由 runtime_vnext human_gate dispatcher 處理，不應走一般 LLM 執行。",
             ),
-            input_bindings=_compile_input_bindings(task.input_contract),
+            input_bindings=_compile_input_bindings(task.input_contract, additional_bindings=additional_input_bindings),
             artifacts=_compile_artifacts(task.output_contract),
             display=TaskDisplayMetadata(label=task.title or task.id, summary=task.goal, tags=list(task.required_capabilities)),
             runnable=True,
@@ -222,7 +219,7 @@ def _compile_task_spec(
     )
 
 
-def _compile_edges(workflow: WorkflowDefinition) -> list[GraphEdge]:
+def _compile_edges(workflow: WorkflowDefinition, workflow_semantics: CompiledWorkflowSemantics) -> list[GraphEdge]:
     edges: list[GraphEdge] = []
     for node in workflow.nodes:
         for dependency in node.depends_on:
@@ -239,6 +236,7 @@ def _compile_edges(workflow: WorkflowDefinition) -> list[GraphEdge]:
                     condition=EdgeCondition(type="always"),
                 )
             )
+    edges.extend(workflow_semantics.data_edges)
     return edges
 
 
@@ -337,7 +335,11 @@ def _compile_output_contract(output_contract: dict[str, Any]) -> OutputContract:
     return OutputContract(ports=ports)
 
 
-def _compile_input_bindings(input_contract: dict[str, Any]) -> list[InputBinding]:
+def _compile_input_bindings(
+    input_contract: dict[str, Any],
+    *,
+    additional_bindings: list[InputBinding] | None = None,
+) -> list[InputBinding]:
     ports_raw = input_contract.get("ports") if isinstance(input_contract.get("ports"), list) else []
     bindings: list[InputBinding] = []
     for item in ports_raw:
@@ -349,6 +351,8 @@ def _compile_input_bindings(input_contract: dict[str, Any]) -> list[InputBinding
         default_value = item.get("default")
         source = "literal" if default_value is not None else "variable"
         bindings.append(InputBinding(source=source, key=name, value=default_value))
+    if additional_bindings:
+        bindings.extend(additional_bindings)
     return bindings
 
 

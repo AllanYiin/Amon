@@ -155,7 +155,7 @@ class TaskGraph3Runtime:
                         if key == "raw_output":
                             continue
                         merged_output[key] = value
-                    node_state["output"] = merged_output
+                    node_state["output"] = self._apply_workflow_output_mappings(node.id, merged_output)
                 else:
                     node_state["output"] = output_payload
                 self._emit_event(
@@ -185,6 +185,9 @@ class TaskGraph3Runtime:
 
         if state["status"] == "running":
             state["status"] = "succeeded"
+        graph_output = self._resolve_graph_output_bindings(state)
+        if graph_output:
+            state["graph_output"] = graph_output
 
         self._emit_event(
             events_path,
@@ -364,6 +367,60 @@ class TaskGraph3Runtime:
         if isinstance(ports, dict):
             return ports.get(port)
         return output.get(port)
+
+    def _apply_workflow_output_mappings(self, node_id: str, output: dict[str, Any]) -> dict[str, Any]:
+        semantics = self._workflow_semantics()
+        node_output_mappings = semantics.get("node_output_mappings")
+        if not isinstance(node_output_mappings, dict):
+            return output
+        mappings = node_output_mappings.get(node_id)
+        if not isinstance(mappings, dict):
+            return output
+        merged = dict(output)
+        ports = dict(merged.get("ports") or {})
+        for alias, spec in mappings.items():
+            if not isinstance(spec, dict):
+                continue
+            ports[str(alias)] = self._resolve_output_alias_value(merged, spec)
+        merged["ports"] = ports
+        return merged
+
+    @staticmethod
+    def _resolve_output_alias_value(output: dict[str, Any], spec: dict[str, Any]) -> Any:
+        source = str(spec.get("source") or "").strip()
+        if source == "raw":
+            raw_text = output.get("raw")
+            if raw_text is not None:
+                return raw_text
+            return output.get("raw_output")
+        if source == "port":
+            port = str(spec.get("port") or "").strip()
+            ports = output.get("ports")
+            if isinstance(ports, dict):
+                return ports.get(port)
+            return None
+        return None
+
+    def _resolve_graph_output_bindings(self, state: dict[str, Any]) -> dict[str, Any]:
+        semantics = self._workflow_semantics()
+        output_bindings = semantics.get("output_bindings")
+        if not isinstance(output_bindings, dict):
+            return {}
+        resolved: dict[str, Any] = {}
+        for key, spec in output_bindings.items():
+            if not isinstance(spec, dict):
+                continue
+            from_node = str(spec.get("from_node") or "").strip()
+            port = str(spec.get("port") or "").strip() or "raw"
+            if not from_node:
+                continue
+            resolved[str(key)] = self._resolve_upstream_items(state, from_node=from_node, port=port)
+        return resolved
+
+    def _workflow_semantics(self) -> dict[str, Any]:
+        metadata = self.graph.metadata if isinstance(self.graph.metadata, dict) else {}
+        semantics = metadata.get("workflow_semantics")
+        return semantics if isinstance(semantics, dict) else {}
 
     @staticmethod
     def _parse_json_like(raw_text: str) -> Any:
