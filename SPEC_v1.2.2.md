@@ -75,6 +75,26 @@ Amon vNext 採單一 source-of-truth：
 
 是 logical task 與實際執行方式的唯一橋樑。runtime dispatcher 只看這裡，不再掃多個散落欄位。
 
+### CompiledNodeMetadata
+
+compiled `taskgraph.v3` node metadata 必須有單一 canonical contract，至少包含：
+
+- `task_ref` / `task_version`
+- `executor_ref` / `executor_version` / `executor_type`
+- `streaming_required`
+- `required_capabilities`
+- `tool_invocation_mode`
+- serialized `tool_policy`
+- `agent_profile_ref` / `agent_profile_version`
+- `timeout_s` / `approval_policy` / `retry_policy`
+
+runtime 僅能透過這份 compiled metadata contract 讀取 execution metadata；不得在 executor 內散落 `metadata.get("...")`。
+
+相容性規則：
+
+- legacy compiled graph 若缺少 `executor_type`，runtime 可依 `task_spec.executor` fallback 推斷 `llm`、`tool`、`sandbox`
+- 這個 fallback 僅作 backward compatibility，用於舊 graph；新 graph 一律由 compiler 顯式寫入 canonical metadata
+
 ### ToolPolicy
 
 定義 allowed tools、allowed paths、network、delegation、side effect ceiling、approval rules。

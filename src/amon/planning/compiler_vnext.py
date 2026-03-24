@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from amon.domain import AmonManifest, AgentProfile, ExecutorBinding, TaskDefinition, ToolPolicy, WorkflowDefinition
+from amon.domain.compiled_node_metadata import CompiledNodeMetadata
 from amon.taskgraph3.payloads import (
     AgentTaskConfig,
     ArtifactOutput,
@@ -79,6 +80,12 @@ def _compile_task_node(
         agent_profile=manifest.agent_profiles.get(executor.agent_profile_ref or ""),
         tool_policy=manifest.tool_policies.get(executor.tool_policy_ref or ""),
     )
+    compiled_metadata = CompiledNodeMetadata.from_compile_inputs(
+        task=task,
+        executor=executor,
+        agent_profile=manifest.agent_profiles.get(executor.agent_profile_ref or ""),
+        tool_policy=manifest.tool_policies.get(executor.tool_policy_ref or ""),
+    )
     return TaskNode(
         id=node_id,
         title=task.title or task.goal or node_id,
@@ -88,14 +95,7 @@ def _compile_task_node(
         updated_at=task.updated_at,
         task_spec=task_spec,
         output_contract=_compile_output_contract(task.output_contract),
-        metadata={
-            "task_ref": task.id,
-            "task_version": task.version,
-            "executor_ref": executor.id,
-            "executor_version": executor.version,
-            "streaming_required": executor.streaming_required,
-            "required_capabilities": list(task.required_capabilities),
-        },
+        metadata=compiled_metadata.to_dict(),
     )
 
 

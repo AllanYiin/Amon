@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+from amon.domain.compiled_node_metadata import CompiledNodeMetadata
+
 from .audit_log import RuntimeAuditLog
 from .confirmation_service import ConfirmationService
 from .llm_executor import LLMExecutor
@@ -66,14 +68,4 @@ class ExecutorDispatcher:
 
     @staticmethod
     def _resolve_executor_type(node) -> str:
-        metadata = node.metadata if isinstance(node.metadata, dict) else {}
-        executor_type = str(metadata.get("executor_type") or "").strip().lower()
-        if executor_type:
-            return executor_type
-        if node.task_spec.executor == "agent":
-            return "llm"
-        if node.task_spec.executor == "tool":
-            return "tool"
-        if node.task_spec.executor == "sandbox_run":
-            return "sandbox"
-        return ""
+        return CompiledNodeMetadata.from_node(node).runtime_executor_type

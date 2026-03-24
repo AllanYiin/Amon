@@ -191,37 +191,15 @@
       "lastRunId": null,
       "lastSucceededAt": null,
       "metadata": {
-        "agent_profile_ref": "agent.researcher.v1",
-        "agent_profile_version": 1,
-        "approval_policy": {},
         "executor_ref": "exec.researcher_llm",
-        "executor_type": "llm",
         "executor_version": 1,
         "required_capabilities": [
           "concept_alignment",
           "web_research"
         ],
-        "retry_policy": {},
         "streaming_required": true,
         "task_ref": "task.research_summary",
-        "task_version": 1,
-        "timeout_s": 180,
-        "tool_invocation_mode": "delegated",
-        "tool_policy": {
-          "allow_network": true,
-          "allowed_paths": [],
-          "allowed_tools": [
-            "web.search"
-          ],
-          "approval_rules": {},
-          "created_at": "2026-01-01T00:00:00Z",
-          "delegated_allowed": true,
-          "id": "policy.readonly_web",
-          "side_effect_ceiling": "read_only",
-          "status": "active",
-          "updated_at": "2026-01-01T00:00:00Z",
-          "version": 1
-        }
+        "task_version": 1
       },
       "name": "研究摘要",
       "node_type": "TASK",
@@ -349,36 +327,14 @@
       "lastRunId": null,
       "lastSucceededAt": null,
       "metadata": {
-        "agent_profile_ref": null,
-        "agent_profile_version": null,
-        "approval_policy": {},
         "executor_ref": "exec.memory_tool",
-        "executor_type": "tool",
         "executor_version": 1,
         "required_capabilities": [
           "memory_read"
         ],
-        "retry_policy": {},
         "streaming_required": false,
         "task_ref": "task.memory_lookup",
-        "task_version": 1,
-        "timeout_s": 120,
-        "tool_invocation_mode": "deterministic",
-        "tool_policy": {
-          "allow_network": false,
-          "allowed_paths": [],
-          "allowed_tools": [
-            "memory.search"
-          ],
-          "approval_rules": {},
-          "created_at": "2026-01-01T00:00:00Z",
-          "delegated_allowed": false,
-          "id": "policy.readonly_memory",
-          "side_effect_ceiling": "read_only",
-          "status": "active",
-          "updated_at": "2026-01-01T00:00:00Z",
-          "version": 1
-        }
+        "task_version": 1
       },
       "name": "查詢記憶",
       "node_type": "TASK",
@@ -504,38 +460,14 @@
       "lastRunId": null,
       "lastSucceededAt": null,
       "metadata": {
-        "agent_profile_ref": null,
-        "agent_profile_version": null,
-        "approval_policy": {},
         "executor_ref": "exec.probe_sandbox",
-        "executor_type": "sandbox",
         "executor_version": 1,
         "required_capabilities": [
           "sandbox_exec"
         ],
-        "retry_policy": {},
         "streaming_required": false,
         "task_ref": "task.sandbox_probe",
-        "task_version": 1,
-        "timeout_s": 60,
-        "tool_invocation_mode": null,
-        "tool_policy": {
-          "allow_network": false,
-          "allowed_paths": [
-            "workspace"
-          ],
-          "allowed_tools": [
-            "sandbox.run"
-          ],
-          "approval_rules": {},
-          "created_at": "2026-01-01T00:00:00Z",
-          "delegated_allowed": false,
-          "id": "policy.sandbox_exec",
-          "side_effect_ceiling": "sandbox_exec",
-          "status": "active",
-          "updated_at": "2026-01-01T00:00:00Z",
-          "version": 1
-        }
+        "task_version": 1
       },
       "name": "Sandbox 探針",
       "node_type": "TASK",

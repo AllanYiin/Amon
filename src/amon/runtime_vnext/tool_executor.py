@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from amon.domain import ToolPolicy
+from amon.domain.compiled_node_metadata import CompiledNodeMetadata
 
 from .audit_log import RuntimeAuditLog, ToolAuditRecord
 from .confirmation_service import ConfirmationService
@@ -28,10 +28,10 @@ class ToolExecutor:
     def execute(self, node, context: dict[str, Any], runtime_context: RuntimeExecutionContext) -> dict[str, Any]:
         tool_cfg = node.task_spec.tool
         assert tool_cfg is not None
-        metadata = node.metadata if isinstance(node.metadata, dict) else {}
-        invocation_mode = str(metadata.get("tool_invocation_mode") or "deterministic")
+        metadata = CompiledNodeMetadata.from_node(node)
+        invocation_mode = metadata.runtime_tool_invocation_mode
         selected_by = "workflow" if invocation_mode == "deterministic" else "model"
-        tool_policy = self._tool_policy_from_metadata(metadata)
+        tool_policy = metadata.parsed_tool_policy
         render_context = runtime_context.render_context(node, context) if callable(runtime_context.render_context) else context
 
         call_results: list[dict[str, Any]] = []
@@ -109,13 +109,6 @@ class ToolExecutor:
             "tool_calls": call_results,
             "path": primary_path or None,
         }
-
-    @staticmethod
-    def _tool_policy_from_metadata(metadata: dict[str, Any]) -> ToolPolicy | None:
-        payload = metadata.get("tool_policy")
-        if not isinstance(payload, dict):
-            return None
-        return ToolPolicy.from_dict(payload)
 
     @staticmethod
     def _decision_payload(runtime_context: RuntimeExecutionContext, node_id: str, decision: ToolPolicyDecision) -> dict[str, Any]:

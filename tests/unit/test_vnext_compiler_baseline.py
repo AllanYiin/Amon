@@ -29,7 +29,7 @@ class VNextCompilerBaselineTests(unittest.TestCase):
         validate_v3_graph_json(payload)
         self.assertEqual(payload, expected)
 
-    def test_compiler_keeps_current_metadata_shape_without_executor_type(self) -> None:
+    def test_compiler_emits_canonical_metadata_contract(self) -> None:
         manifest = _load_manifest()
 
         payload = compile_manifest_workflow(manifest, "workflow.vnext_baseline").compiled_graph
@@ -39,32 +39,62 @@ class VNextCompilerBaselineTests(unittest.TestCase):
             {node_id: sorted(metadata.keys()) for node_id, metadata in metadata_by_node.items()},
             {
                 "research": [
+                    "agent_profile_ref",
+                    "agent_profile_version",
+                    "approval_policy",
                     "executor_ref",
+                    "executor_type",
                     "executor_version",
                     "required_capabilities",
+                    "retry_policy",
                     "streaming_required",
                     "task_ref",
                     "task_version",
+                    "timeout_s",
+                    "tool_invocation_mode",
+                    "tool_policy",
                 ],
                 "memory_lookup": [
+                    "agent_profile_ref",
+                    "agent_profile_version",
+                    "approval_policy",
                     "executor_ref",
+                    "executor_type",
                     "executor_version",
                     "required_capabilities",
+                    "retry_policy",
                     "streaming_required",
                     "task_ref",
                     "task_version",
+                    "timeout_s",
+                    "tool_invocation_mode",
+                    "tool_policy",
                 ],
                 "sandbox_probe": [
+                    "agent_profile_ref",
+                    "agent_profile_version",
+                    "approval_policy",
                     "executor_ref",
+                    "executor_type",
                     "executor_version",
                     "required_capabilities",
+                    "retry_policy",
                     "streaming_required",
                     "task_ref",
                     "task_version",
+                    "timeout_s",
+                    "tool_invocation_mode",
+                    "tool_policy",
                 ],
             },
         )
-        self.assertNotIn("executor_type", metadata_by_node["research"])
+        self.assertEqual(metadata_by_node["research"]["executor_type"], "llm")
+        self.assertEqual(metadata_by_node["research"]["tool_invocation_mode"], "delegated")
+        self.assertEqual(metadata_by_node["research"]["tool_policy"]["id"], "policy.readonly_web")
+        self.assertEqual(metadata_by_node["memory_lookup"]["executor_type"], "tool")
+        self.assertEqual(metadata_by_node["memory_lookup"]["tool_policy"]["allowed_tools"], ["memory.search"])
+        self.assertEqual(metadata_by_node["sandbox_probe"]["executor_type"], "sandbox")
+        self.assertIsNone(metadata_by_node["sandbox_probe"]["tool_invocation_mode"])
         self.assertEqual(
             {node["id"]: node["taskSpec"]["executor"] for node in payload["nodes"]},
             {

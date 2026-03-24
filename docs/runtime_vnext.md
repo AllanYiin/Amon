@@ -24,17 +24,29 @@ vNext runtime 不是第二套完整 runtime，而是接在既有 `TaskGraph3Runt
 - `sandbox`
 - `human_gate`
 
-## Phase 0 Baseline Guardrails
+## Compiled Metadata Contract
 
-Phase 0 先固定目前 `manifest -> binder -> compiler -> dispatcher` 的既有行為，不在這一階段改 metadata contract。
+Phase 1 起，compiler 與 runtime 共用同一份 compiled node metadata contract：
 
-目前 characterization baseline 如下：
+- shared helper： [src/amon/domain/compiled_node_metadata.py](D:/PycharmProjects/Amon/src/amon/domain/compiled_node_metadata.py)
+- compiler 只透過這份 contract 寫入 metadata
+- dispatcher / llm / tool / sandbox executors 只透過這份 contract 解析 metadata
 
-- compiler 輸出的 node metadata 仍只有 `task_ref`、`task_version`、`executor_ref`、`executor_version`、`streaming_required`、`required_capabilities`
-- 若 compiled node metadata 沒有 `executor_type`，dispatcher 仍會依 `task_spec.executor` fallback 推斷 `llm`、`tool`、`sandbox`
-- Phase 0 的 fixture 與測試放在 `tests/fixtures/vnext_manifest/`、`tests/unit/test_vnext_*_baseline.py`、`tests/integration/test_vnext_bind_compile_dispatch_baseline.py`
+目前 canonical metadata 至少包含：
 
-這些 guardrails 是為了在 Phase 1 之前先把現況釘住，避免 compiler/runtime contract 繼續漂移。
+- `task_ref` / `task_version`
+- `executor_ref` / `executor_version` / `executor_type`
+- `streaming_required`
+- `required_capabilities`
+- `tool_invocation_mode`
+- serialized `tool_policy`
+- `agent_profile_ref` / `agent_profile_version`
+- `timeout_s` / `approval_policy` / `retry_policy`
+
+相容性要求仍保留：
+
+- legacy compiled graph 若缺少 `executor_type`，runtime 仍會依 `task_spec.executor` fallback 推斷 `llm`、`tool`、`sandbox`
+- Stage 0 的 legacy fixture 保留在 `tests/fixtures/vnext_manifest/pipeline_baseline_compiled_legacy.json`
 
 ## Streaming
 

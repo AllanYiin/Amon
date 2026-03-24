@@ -6,8 +6,8 @@ from string import Template
 from typing import Any
 from datetime import datetime, timezone
 
-from amon.domain import ToolPolicy
 from amon.artifacts.store import ingest_artifacts
+from amon.domain.compiled_node_metadata import CompiledNodeMetadata
 from amon.models import decode_reasoning_chunk, decode_stream_event
 
 from .runner import RuntimeExecutionContext
@@ -72,16 +72,16 @@ class LLMExecutor:
         return {"raw_output": response, "ingest_summary": ingest_summary}
 
     def _is_tool_usable(self, tool_name: str, node) -> bool:
-        metadata = node.metadata if isinstance(node.metadata, dict) else {}
-        tool_policy = metadata.get("tool_policy")
-        if not isinstance(tool_policy, dict):
+        metadata = CompiledNodeMetadata.from_node(node)
+        tool_policy = metadata.parsed_tool_policy
+        if tool_policy is None:
             return True
         try:
             decision = self.policy_engine.evaluate(
                 tool_name,
                 payload={},
-                tool_policy=ToolPolicy.from_dict(tool_policy),
-                invocation_mode=str(metadata.get("tool_invocation_mode") or "delegated"),
+                tool_policy=tool_policy,
+                invocation_mode=metadata.runtime_tool_invocation_mode,
                 selected_by="model",
             )
         except Exception:

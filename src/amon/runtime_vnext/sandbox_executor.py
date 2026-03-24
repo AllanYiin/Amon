@@ -6,7 +6,7 @@ import json
 from string import Template
 from typing import Any
 
-from amon.domain import ToolPolicy
+from amon.domain.compiled_node_metadata import CompiledNodeMetadata
 from amon.sandbox.service import run_sandbox_step
 
 from .audit_log import RuntimeAuditLog, ToolAuditRecord
@@ -30,8 +30,8 @@ class SandboxExecutor:
     def execute(self, node, context: dict[str, Any], runtime_context: RuntimeExecutionContext) -> dict[str, Any]:
         sandbox_run = node.task_spec.sandbox_run
         assert sandbox_run is not None
-        metadata = node.metadata if isinstance(node.metadata, dict) else {}
-        tool_policy = ToolPolicy.from_dict(metadata["tool_policy"]) if isinstance(metadata.get("tool_policy"), dict) else None
+        metadata = CompiledNodeMetadata.from_node(node)
+        tool_policy = metadata.parsed_tool_policy
         render_context = runtime_context.render_context(node, context) if callable(runtime_context.render_context) else context
         command = Template(sandbox_run.command or "").safe_substitute(render_context)
         payload = {

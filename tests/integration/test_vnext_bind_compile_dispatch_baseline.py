@@ -7,7 +7,6 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 from string import Template
-from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
@@ -38,7 +37,7 @@ class _RuntimeCoreStub:
 
 
 class VNextBindCompileDispatchBaselineTests(unittest.TestCase):
-    def test_dispatcher_falls_back_to_task_spec_when_executor_type_metadata_is_missing(self) -> None:
+    def test_bind_compile_dispatch_uses_canonical_metadata_contract(self) -> None:
         manifest = _load_manifest()
         workflow = manifest.workflows["workflow.vnext_baseline"]
         manifest.workflows["workflow.vnext_baseline"] = workflow.clone()
@@ -51,7 +50,17 @@ class VNextBindCompileDispatchBaselineTests(unittest.TestCase):
         compiled = compile_manifest_workflow(manifest, "workflow.vnext_baseline")
         nodes = {node.id: node for node in compiled.graph.nodes}
 
-        self.assertTrue(all("executor_type" not in (node.metadata or {}) for node in nodes.values()))
+        self.assertEqual(
+            {node_id: node.metadata["executor_type"] for node_id, node in nodes.items()},
+            {
+                "research": "llm",
+                "memory_lookup": "tool",
+                "sandbox_probe": "sandbox",
+            },
+        )
+        self.assertEqual(nodes["research"].metadata["tool_policy"]["id"], "policy.readonly_web")
+        self.assertEqual(nodes["memory_lookup"].metadata["tool_invocation_mode"], "deterministic")
+        self.assertEqual(nodes["sandbox_probe"].metadata["timeout_s"], 60)
 
         with tempfile.TemporaryDirectory() as tmp:
             project_path = Path(tmp)
