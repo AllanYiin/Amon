@@ -46,6 +46,7 @@ def compile_manifest_workflow(manifest: AmonManifest, workflow_id: str) -> Compi
         manifest.validate_compile(workflow_id)
     except ManifestValidationError as exc:
         raise CompilerError(str(exc), code=exc.code) from exc
+    _ensure_supported_workflow_semantics(workflow)
 
     task_nodes = [
         _compile_task_node(manifest, workflow, node_id=node.id, task_ref=node.task_ref, executor_ref=node.executor_ref)
@@ -69,6 +70,35 @@ def compile_manifest_workflow(manifest: AmonManifest, workflow_id: str) -> Compi
         },
     )
     return CompileResult(workflow_ref=workflow.id, graph=graph, snapshot_pins=snapshot_pins)
+
+
+def _ensure_supported_workflow_semantics(workflow: WorkflowDefinition) -> None:
+    for node in workflow.nodes:
+        if node.condition is not None:
+            raise CompilerError(
+                f"unsupported workflow semantic：workflow_id={workflow.id}, node_id={node.id}, field=condition",
+                code="AMON_WORKFLOW_001",
+            )
+        if node.input_mapping:
+            raise CompilerError(
+                f"unsupported workflow semantic：workflow_id={workflow.id}, node_id={node.id}, field=input_mapping",
+                code="AMON_WORKFLOW_001",
+            )
+        if node.output_mapping:
+            raise CompilerError(
+                f"unsupported workflow semantic：workflow_id={workflow.id}, node_id={node.id}, field=output_mapping",
+                code="AMON_WORKFLOW_001",
+            )
+    if workflow.routes:
+        raise CompilerError(
+            f"unsupported workflow semantic：workflow_id={workflow.id}, field=routes",
+            code="AMON_WORKFLOW_001",
+        )
+    if workflow.output_bindings:
+        raise CompilerError(
+            f"unsupported workflow semantic：workflow_id={workflow.id}, field=output_bindings",
+            code="AMON_WORKFLOW_001",
+        )
 
 
 def _compile_task_node(

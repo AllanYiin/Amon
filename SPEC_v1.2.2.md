@@ -79,6 +79,17 @@ manifest validation 分成三層：
 
 只負責節點順序、依賴、條件路由與輸入輸出映射，不直接攜帶 inline agent/tool payload。
 
+目前 compile honesty 規則：
+
+- `depends_on` 已 lower 成 control edges
+- `node.condition`
+- `node.input_mapping`
+- `node.output_mapping`
+- `workflow.routes`
+- `workflow.output_bindings`
+
+以上欄位在目前版本尚未 lower 成可執行語義，compiler 必須以 `AMON_WORKFLOW_001` compile-time fail-fast，不可靜默忽略
+
 ### TaskDefinition
 
 只描述工作語意、input/output contract、acceptance criteria、required capabilities、side effect class。

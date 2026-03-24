@@ -36,3 +36,7 @@ repo 內保留不少 TaskGraph v3 cutover、sandbox、MCP、UI refactor 歷史�
 ### 6. `subgraph` executor 目前僅保留規格位，不提供執行
 
 spec 與 domain 仍承認 `subgraph` 是合法 executor type，但 vNext 現階段不做 lowering / execution。若 manifest 綁到 `subgraph`，binder / compiler 會以 `AMON_EXECUTOR_TYPE_001` 明確拒絕。
+
+### 7. Workflow semantic lowering 目前僅支援 `depends_on`
+
+`node.condition`、`node.input_mapping`、`node.output_mapping`、`workflow.routes`、`workflow.output_bindings` 目前尚未 lower 到 taskgraph.v3 可執行語義。compiler 會以 `AMON_WORKFLOW_001` 明確拒絕，避免 silent ignore。
