@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from amon.domain import AmonManifest, WorkflowDefinition, WorkflowNode
+from amon.domain.manifest_validation import ManifestValidationError
 
 from .capability_registry import CapabilityRegistry
 
@@ -24,6 +25,10 @@ def bind_workflow(
     workflow = manifest.workflows.get(workflow_id)
     if workflow is None:
         raise BindingError(f"workflow 不存在：workflow_id={workflow_id}", code="AMON_VALIDATION_002")
+    try:
+        manifest.validate_authoring(workflow_id)
+    except ManifestValidationError as exc:
+        raise BindingError(str(exc), code=exc.code) from exc
 
     registry = capability_registry or CapabilityRegistry.from_manifest(manifest)
     bound_nodes: list[WorkflowNode] = []
@@ -66,4 +71,8 @@ def bind_workflow(
 
     bound_workflow = workflow.clone()
     bound_workflow.update(nodes=bound_nodes, status="valid" if workflow.status != "archived" else workflow.status)
+    try:
+        manifest.validate_bound(workflow=bound_workflow)
+    except ManifestValidationError as exc:
+        raise BindingError(str(exc), code=exc.code) from exc
     return bound_workflow

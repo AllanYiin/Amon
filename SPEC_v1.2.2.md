@@ -21,6 +21,22 @@ Amon vNext 採單一 source-of-truth：
 9. 所有 run 必須有 snapshot pins 與 trigger metadata
 10. unresolved refs 必須 compile-time fail-fast
 
+## Validation Layers
+
+manifest validation 分成三層：
+
+1. authoring validation
+2. bound-workflow validation
+3. compile validation
+
+規則如下：
+
+- authoring 階段允許 `node.executor_ref` 為空；若有提供，才要求可 resolve
+- authoring 階段必須 fail-fast 檢查 workflow 結構：duplicate node id、missing depends_on、self-dependency、cycle
+- binder 綁定前跑 authoring validation，綁定後跑 bound validation
+- compiler 只接受 bound-valid workflow；未綁定 workflow 必須在 compile 前拒絕
+- `validate_references()` 保留為相容 wrapper，但語意等同 authoring validation
+
 ## 目前模組狀態
 
 ### Canonical model

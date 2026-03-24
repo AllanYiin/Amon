@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .entities import AgentProfile, ExecutorBinding, TaskDefinition, Template, ToolPolicy, WorkflowDefinition
+from .manifest_validation import validate_manifest_authoring, validate_manifest_bound, validate_manifest_compile
 
 
 @dataclass
@@ -90,14 +91,13 @@ class AmonManifest:
         return self
 
     def validate_references(self) -> None:
-        task_ids = set(self.tasks.keys())
-        executor_ids = set(self.executors.keys())
-        unresolved: list[str] = []
-        for workflow in self.workflows.values():
-            for node in workflow.nodes:
-                if node.task_ref not in task_ids:
-                    unresolved.append(f"workflow={workflow.id} node={node.id} missing task_ref={node.task_ref}")
-                if node.executor_ref not in executor_ids:
-                    unresolved.append(f"workflow={workflow.id} node={node.id} missing executor_ref={node.executor_ref}")
-        if unresolved:
-            raise ValueError("unresolved refs: " + "; ".join(unresolved))
+        validate_manifest_authoring(self)
+
+    def validate_authoring(self, workflow_id: str | None = None) -> None:
+        validate_manifest_authoring(self, workflow_id)
+
+    def validate_bound(self, workflow_id: str | None = None, *, workflow: WorkflowDefinition | None = None) -> None:
+        validate_manifest_bound(self, workflow_id, workflow=workflow)
+
+    def validate_compile(self, workflow_id: str) -> None:
+        validate_manifest_compile(self, workflow_id)

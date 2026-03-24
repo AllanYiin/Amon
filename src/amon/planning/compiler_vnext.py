@@ -6,6 +6,7 @@ from typing import Any
 
 from amon.domain import AmonManifest, AgentProfile, ExecutorBinding, TaskDefinition, ToolPolicy, WorkflowDefinition
 from amon.domain.compiled_node_metadata import CompiledNodeMetadata
+from amon.domain.manifest_validation import ManifestValidationError
 from amon.taskgraph3.payloads import (
     AgentTaskConfig,
     ArtifactOutput,
@@ -31,7 +32,10 @@ def compile_manifest_workflow(manifest: AmonManifest, workflow_id: str) -> Compi
     workflow = manifest.workflows.get(workflow_id)
     if workflow is None:
         raise CompilerError(f"workflow 不存在：workflow_id={workflow_id}", code="AMON_VALIDATION_002")
-    manifest.validate_references()
+    try:
+        manifest.validate_compile(workflow_id)
+    except ManifestValidationError as exc:
+        raise CompilerError(str(exc), code=exc.code) from exc
 
     task_nodes = [
         _compile_task_node(manifest, workflow, node_id=node.id, task_ref=node.task_ref, executor_ref=node.executor_ref)

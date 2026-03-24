@@ -13,10 +13,12 @@ from .entities import (
     WorkflowNode,
 )
 from .manifest import AmonManifest, ManifestProject
+from .manifest_validation import ManifestValidationError, validate_manifest_authoring, validate_manifest_bound, validate_manifest_compile
 
 __all__ = [
     "AgentProfile",
     "AmonManifest",
+    "ManifestValidationError",
     "ExecutorBinding",
     "ManifestProject",
     "Project",
@@ -25,6 +27,9 @@ __all__ = [
     "Template",
     "ToolPolicy",
     "UploadAsset",
+    "validate_manifest_authoring",
+    "validate_manifest_bound",
+    "validate_manifest_compile",
     "WorkflowDefinition",
     "WorkflowNode",
 ]

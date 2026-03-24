@@ -28,7 +28,7 @@ class ManifestContractTests(unittest.TestCase):
 
         manifest = AmonManifest.from_dict(payload)
 
-        with self.assertRaisesRegex(ValueError, "unresolved refs"):
+        with self.assertRaisesRegex(ValueError, "unresolved executor_ref"):
             manifest.validate_references()
 
 
