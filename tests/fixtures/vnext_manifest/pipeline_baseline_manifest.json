@@ -1,0 +1,311 @@
+{
+  "version": "amon.manifest.v1",
+  "project": {
+    "id": "project.vnext-baseline",
+    "name": "vNext Baseline"
+  },
+  "tasks": {
+    "task.research_summary": {
+      "id": "task.research_summary",
+      "version": 1,
+      "title": "研究摘要",
+      "goal": "整理 vNext pipeline 基線",
+      "required_capabilities": [
+        "concept_alignment",
+        "web_research"
+      ],
+      "input_contract": {
+        "ports": [
+          {
+            "name": "request",
+            "type": "string",
+            "default": "整理 vNext pipeline 基線"
+          }
+        ]
+      },
+      "output_contract": {
+        "ports": [
+          {
+            "name": "summary",
+            "type": "markdown",
+            "description": "研究摘要",
+            "required": true
+          }
+        ]
+      },
+      "acceptance_criteria": [
+        "列出 llm/tool/sandbox 基線",
+        "標示目前 fallback 行為"
+      ],
+      "side_effect_class": "read_only",
+      "status": "active",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    },
+    "task.memory_lookup": {
+      "id": "task.memory_lookup",
+      "version": 1,
+      "title": "查詢記憶",
+      "goal": "查詢本地記憶摘要",
+      "required_capabilities": [
+        "memory_read"
+      ],
+      "input_contract": {
+        "ports": [
+          {
+            "name": "query",
+            "type": "string",
+            "default": "Phase 0 baseline"
+          }
+        ]
+      },
+      "output_contract": {
+        "ports": [
+          {
+            "name": "memory_result",
+            "type": "json",
+            "description": "記憶查詢結果",
+            "required": true
+          }
+        ]
+      },
+      "acceptance_criteria": [
+        "回傳 deterministic tool 結果"
+      ],
+      "side_effect_class": "read_only",
+      "status": "active",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    },
+    "task.sandbox_probe": {
+      "id": "task.sandbox_probe",
+      "version": 1,
+      "title": "Sandbox 探針",
+      "goal": "在 sandbox 執行探針",
+      "required_capabilities": [
+        "sandbox_exec"
+      ],
+      "input_contract": {
+        "ports": [
+          {
+            "name": "message",
+            "type": "string",
+            "default": "baseline probe"
+          }
+        ]
+      },
+      "output_contract": {
+        "ports": [
+          {
+            "name": "probe_output",
+            "type": "text",
+            "description": "sandbox 執行輸出",
+            "required": false
+          }
+        ]
+      },
+      "acceptance_criteria": [
+        "建立 confirmation gate"
+      ],
+      "side_effect_class": "sandbox_exec",
+      "status": "active",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    }
+  },
+  "agent_profiles": {
+    "agent.researcher.v1": {
+      "id": "agent.researcher.v1",
+      "version": 1,
+      "name": "Researcher",
+      "purpose": "蒐集整理資料",
+      "system_prompt": "你是嚴謹的研究型角色。",
+      "default_skills": [
+        "concept-alignment",
+        "source-synthesis"
+      ],
+      "model_policy": {
+        "provider": "openai",
+        "model": "gpt-4.1-mini",
+        "streaming_required": true
+      },
+      "memory_policy": "project_scoped",
+      "output_style": "markdown",
+      "status": "active",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    }
+  },
+  "executors": {
+    "exec.researcher_llm": {
+      "id": "exec.researcher_llm",
+      "version": 1,
+      "type": "llm",
+      "capabilities": [
+        "concept_alignment",
+        "web_research"
+      ],
+      "agent_profile_ref": "agent.researcher.v1",
+      "tool_plan": {},
+      "tool_invocation_mode": "delegated",
+      "tool_policy_ref": "policy.readonly_web",
+      "timeout_s": 180,
+      "retry_policy": {},
+      "approval_policy": {},
+      "streaming_required": true,
+      "status": "active",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    },
+    "exec.memory_tool": {
+      "id": "exec.memory_tool",
+      "version": 1,
+      "type": "tool",
+      "capabilities": [
+        "memory_read"
+      ],
+      "agent_profile_ref": null,
+      "tool_plan": {
+        "tools": [
+          {
+            "name": "memory.search",
+            "args": {
+              "query": "${query}"
+            },
+            "when_to_use": "查詢 Phase 0 fixture"
+          }
+        ]
+      },
+      "tool_invocation_mode": "deterministic",
+      "tool_policy_ref": "policy.readonly_memory",
+      "timeout_s": 120,
+      "retry_policy": {},
+      "approval_policy": {},
+      "streaming_required": false,
+      "status": "active",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    },
+    "exec.probe_sandbox": {
+      "id": "exec.probe_sandbox",
+      "version": 1,
+      "type": "sandbox",
+      "capabilities": [
+        "sandbox_exec"
+      ],
+      "agent_profile_ref": null,
+      "tool_plan": {
+        "command": "echo ${message}",
+        "shell": "bash",
+        "workdir": "workspace"
+      },
+      "tool_invocation_mode": null,
+      "tool_policy_ref": "policy.sandbox_exec",
+      "timeout_s": 60,
+      "retry_policy": {},
+      "approval_policy": {},
+      "streaming_required": false,
+      "status": "active",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    }
+  },
+  "workflows": {
+    "workflow.vnext_baseline": {
+      "id": "workflow.vnext_baseline",
+      "version": 1,
+      "name": "vNext Baseline",
+      "nodes": [
+        {
+          "id": "research",
+          "task_ref": "task.research_summary",
+          "executor_ref": "exec.researcher_llm",
+          "depends_on": [],
+          "condition": null,
+          "input_mapping": {},
+          "output_mapping": {},
+          "status": "valid"
+        },
+        {
+          "id": "memory_lookup",
+          "task_ref": "task.memory_lookup",
+          "executor_ref": "exec.memory_tool",
+          "depends_on": [
+            "research"
+          ],
+          "condition": null,
+          "input_mapping": {},
+          "output_mapping": {},
+          "status": "valid"
+        },
+        {
+          "id": "sandbox_probe",
+          "task_ref": "task.sandbox_probe",
+          "executor_ref": "exec.probe_sandbox",
+          "depends_on": [
+            "memory_lookup"
+          ],
+          "condition": null,
+          "input_mapping": {},
+          "output_mapping": {},
+          "status": "valid"
+        }
+      ],
+      "routes": [],
+      "output_bindings": {},
+      "status": "active",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    }
+  },
+  "templates": {},
+  "tool_policies": {
+    "policy.readonly_web": {
+      "id": "policy.readonly_web",
+      "version": 1,
+      "allowed_tools": [
+        "web.search"
+      ],
+      "allowed_paths": [],
+      "allow_network": true,
+      "delegated_allowed": true,
+      "side_effect_ceiling": "read_only",
+      "approval_rules": {},
+      "status": "active",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    },
+    "policy.readonly_memory": {
+      "id": "policy.readonly_memory",
+      "version": 1,
+      "allowed_tools": [
+        "memory.search"
+      ],
+      "allowed_paths": [],
+      "allow_network": false,
+      "delegated_allowed": false,
+      "side_effect_ceiling": "read_only",
+      "approval_rules": {},
+      "status": "active",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    },
+    "policy.sandbox_exec": {
+      "id": "policy.sandbox_exec",
+      "version": 1,
+      "allowed_tools": [
+        "sandbox.run"
+      ],
+      "allowed_paths": [
+        "workspace"
+      ],
+      "allow_network": false,
+      "delegated_allowed": false,
+      "side_effect_ceiling": "sandbox_exec",
+      "approval_rules": {},
+      "status": "active",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    }
+  }
+}

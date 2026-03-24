@@ -24,6 +24,18 @@ vNext runtime 不是第二套完整 runtime，而是接在既有 `TaskGraph3Runt
 - `sandbox`
 - `human_gate`
 
+## Phase 0 Baseline Guardrails
+
+Phase 0 先固定目前 `manifest -> binder -> compiler -> dispatcher` 的既有行為，不在這一階段改 metadata contract。
+
+目前 characterization baseline 如下：
+
+- compiler 輸出的 node metadata 仍只有 `task_ref`、`task_version`、`executor_ref`、`executor_version`、`streaming_required`、`required_capabilities`
+- 若 compiled node metadata 沒有 `executor_type`，dispatcher 仍會依 `task_spec.executor` fallback 推斷 `llm`、`tool`、`sandbox`
+- Phase 0 的 fixture 與測試放在 `tests/fixtures/vnext_manifest/`、`tests/unit/test_vnext_*_baseline.py`、`tests/integration/test_vnext_bind_compile_dispatch_baseline.py`
+
+這些 guardrails 是為了在 Phase 1 之前先把現況釘住，避免 compiler/runtime contract 繼續漂移。
+
 ## Streaming
 
 所有 LLM 文字輸出都要以 `node.chunk` 形式送出。這包含：

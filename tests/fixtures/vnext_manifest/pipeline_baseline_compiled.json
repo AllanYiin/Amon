@@ -1,0 +1,575 @@
+{
+  "agentIds": [],
+  "agents": [],
+  "archivedAt": null,
+  "canvas": {
+    "nodePositions": {},
+    "selectedIds": [],
+    "viewport": {
+      "x": 0.0,
+      "y": 0.0,
+      "zoom": 1.0
+    }
+  },
+  "createdAt": "2026-01-01T00:00:00Z",
+  "createdBy": null,
+  "description": "compiled from amon.manifest.v1",
+  "edgeIds": [
+    "research->memory_lookup",
+    "memory_lookup->sandbox_probe"
+  ],
+  "edges": [
+    {
+      "condition": {
+        "expression": null,
+        "type": "always"
+      },
+      "createdAt": "2026-01-01T00:00:00Z",
+      "createdBy": null,
+      "edge_type": "CONTROL",
+      "from": "research",
+      "graphId": "workflow.vnext_baseline",
+      "id": "research->memory_lookup",
+      "kind": "depends_on",
+      "label": "depends_on",
+      "mappings": [],
+      "metadata": null,
+      "name": "depends_on",
+      "priority": null,
+      "sourceNodeId": "research",
+      "sourcePortKey": null,
+      "status": "active",
+      "targetNodeId": "memory_lookup",
+      "targetPortKey": null,
+      "to": "memory_lookup",
+      "type": "control",
+      "updatedAt": "2026-01-01T00:00:00Z",
+      "updatedBy": null,
+      "version": 1
+    },
+    {
+      "condition": {
+        "expression": null,
+        "type": "always"
+      },
+      "createdAt": "2026-01-01T00:00:00Z",
+      "createdBy": null,
+      "edge_type": "CONTROL",
+      "from": "memory_lookup",
+      "graphId": "workflow.vnext_baseline",
+      "id": "memory_lookup->sandbox_probe",
+      "kind": "depends_on",
+      "label": "depends_on",
+      "mappings": [],
+      "metadata": null,
+      "name": "depends_on",
+      "priority": null,
+      "sourceNodeId": "memory_lookup",
+      "sourcePortKey": null,
+      "status": "active",
+      "targetNodeId": "sandbox_probe",
+      "targetPortKey": null,
+      "to": "sandbox_probe",
+      "type": "control",
+      "updatedAt": "2026-01-01T00:00:00Z",
+      "updatedBy": null,
+      "version": 1
+    }
+  ],
+  "entityVersion": 1,
+  "entryNodeIds": [
+    "research"
+  ],
+  "graphRuns": [],
+  "id": "workflow.vnext_baseline",
+  "kind": "graph",
+  "lastOpenedAt": null,
+  "latestRunId": null,
+  "metadata": {
+    "snapshotPins": {
+      "agent:agent.researcher.v1": {
+        "kind": "agent_profile",
+        "ref": "agent.researcher.v1",
+        "version": 1
+      },
+      "executor:exec.memory_tool": {
+        "kind": "executor",
+        "ref": "exec.memory_tool",
+        "version": 1
+      },
+      "executor:exec.probe_sandbox": {
+        "kind": "executor",
+        "ref": "exec.probe_sandbox",
+        "version": 1
+      },
+      "executor:exec.researcher_llm": {
+        "kind": "executor",
+        "ref": "exec.researcher_llm",
+        "version": 1
+      },
+      "task:task.memory_lookup": {
+        "kind": "task",
+        "ref": "task.memory_lookup",
+        "version": 1
+      },
+      "task:task.research_summary": {
+        "kind": "task",
+        "ref": "task.research_summary",
+        "version": 1
+      },
+      "task:task.sandbox_probe": {
+        "kind": "task",
+        "ref": "task.sandbox_probe",
+        "version": 1
+      },
+      "tool_policy:policy.readonly_memory": {
+        "kind": "tool_policy",
+        "ref": "policy.readonly_memory",
+        "version": 1
+      },
+      "tool_policy:policy.readonly_web": {
+        "kind": "tool_policy",
+        "ref": "policy.readonly_web",
+        "version": 1
+      },
+      "tool_policy:policy.sandbox_exec": {
+        "kind": "tool_policy",
+        "ref": "policy.sandbox_exec",
+        "version": 1
+      },
+      "workflow": {
+        "kind": "workflow",
+        "ref": "workflow.vnext_baseline",
+        "version": 1
+      }
+    },
+    "source_manifest_version": "amon.manifest.v1",
+    "workflow_ref": "workflow.vnext_baseline"
+  },
+  "name": "vNext Baseline",
+  "nodeIds": [
+    "research",
+    "memory_lookup",
+    "sandbox_probe"
+  ],
+  "nodeRuns": [],
+  "nodes": [
+    {
+      "agentId": null,
+      "config": {},
+      "createdAt": "2026-01-01T00:00:00Z",
+      "createdBy": null,
+      "description": "整理 vNext pipeline 基線",
+      "downstreamEdgeIds": [
+        "research->memory_lookup"
+      ],
+      "error": null,
+      "execution": "SINGLE",
+      "executionPolicy": {
+        "maxRetries": 0,
+        "retryable": true,
+        "runCondition": {
+          "expression": null,
+          "type": "always"
+        },
+        "skipIfDisabledInputs": null,
+        "timeoutMs": 300000
+      },
+      "graphId": "workflow.vnext_baseline",
+      "id": "research",
+      "inputBindings": [],
+      "inputPorts": [
+        {
+          "dataType": "any",
+          "key": "request",
+          "label": "request",
+          "multi": false,
+          "required": false
+        }
+      ],
+      "lastFailedAt": null,
+      "lastRunId": null,
+      "lastSucceededAt": null,
+      "metadata": {
+        "executor_ref": "exec.researcher_llm",
+        "executor_version": 1,
+        "required_capabilities": [
+          "concept_alignment",
+          "web_research"
+        ],
+        "streaming_required": true,
+        "task_ref": "task.research_summary",
+        "task_version": 1
+      },
+      "name": "研究摘要",
+      "node_type": "TASK",
+      "outputContract": {
+        "ports": [
+          {
+            "extractor": null,
+            "jsonSchema": null,
+            "name": "summary",
+            "parser": null,
+            "typeRef": "markdown"
+          }
+        ]
+      },
+      "outputPorts": [
+        {
+          "dataType": "any",
+          "key": "summary",
+          "label": "summary",
+          "multi": false,
+          "required": false
+        }
+      ],
+      "outputs": null,
+      "policy": {
+        "rateLimit": null,
+        "streamLimit": null
+      },
+      "promptTemplate": "整理 vNext pipeline 基線",
+      "status": "ready",
+      "taskSpec": {
+        "agent": {
+          "allowedTools": [
+            "web.search"
+          ],
+          "instructions": "目標：整理 vNext pipeline 基線\n\n驗收條件：\n- 列出 llm/tool/sandbox 基線\n- 標示目前 fallback 行為\n\n需要能力：\n- concept_alignment\n- web_research\n\n角色目的：蒐集整理資料\n\n工具模式：delegated\n\n允許工具：\n- web.search",
+          "model": "gpt-4.1-mini",
+          "prompt": "整理 vNext pipeline 基線",
+          "skills": [
+            "concept-alignment",
+            "source-synthesis"
+          ],
+          "systemPrompt": "你是嚴謹的研究型角色。"
+        },
+        "artifacts": [
+          {
+            "description": "研究摘要",
+            "mediaType": "markdown",
+            "name": "summary",
+            "required": true
+          }
+        ],
+        "display": {
+          "label": "研究摘要",
+          "summary": "整理 vNext pipeline 基線",
+          "tags": [
+            "concept_alignment",
+            "web_research"
+          ],
+          "todoHint": "列出 llm/tool/sandbox 基線"
+        },
+        "executor": "agent",
+        "inputBindings": [
+          {
+            "fromNode": null,
+            "key": "request",
+            "port": null,
+            "source": "literal",
+            "value": "整理 vNext pipeline 基線"
+          }
+        ],
+        "nonRunnableReason": null,
+        "runnable": true,
+        "sandboxRun": null,
+        "tool": null
+      },
+      "title": "研究摘要",
+      "type": "llm",
+      "uiState": {
+        "collapsed": false,
+        "color": null,
+        "height": null,
+        "icon": null,
+        "width": null
+      },
+      "updatedAt": "2026-01-01T00:00:00Z",
+      "updatedBy": null,
+      "upstreamEdgeIds": [],
+      "version": 1
+    },
+    {
+      "agentId": null,
+      "config": {},
+      "createdAt": "2026-01-01T00:00:00Z",
+      "createdBy": null,
+      "description": "查詢本地記憶摘要",
+      "downstreamEdgeIds": [
+        "memory_lookup->sandbox_probe"
+      ],
+      "error": null,
+      "execution": "SINGLE",
+      "executionPolicy": {
+        "maxRetries": 0,
+        "retryable": true,
+        "runCondition": {
+          "expression": null,
+          "type": "always"
+        },
+        "skipIfDisabledInputs": null,
+        "timeoutMs": 300000
+      },
+      "graphId": "workflow.vnext_baseline",
+      "id": "memory_lookup",
+      "inputBindings": [],
+      "inputPorts": [
+        {
+          "dataType": "any",
+          "key": "query",
+          "label": "query",
+          "multi": false,
+          "required": false
+        }
+      ],
+      "lastFailedAt": null,
+      "lastRunId": null,
+      "lastSucceededAt": null,
+      "metadata": {
+        "executor_ref": "exec.memory_tool",
+        "executor_version": 1,
+        "required_capabilities": [
+          "memory_read"
+        ],
+        "streaming_required": false,
+        "task_ref": "task.memory_lookup",
+        "task_version": 1
+      },
+      "name": "查詢記憶",
+      "node_type": "TASK",
+      "outputContract": {
+        "ports": [
+          {
+            "extractor": null,
+            "jsonSchema": null,
+            "name": "memory_result",
+            "parser": null,
+            "typeRef": "json"
+          }
+        ]
+      },
+      "outputPorts": [
+        {
+          "dataType": "any",
+          "key": "memory_result",
+          "label": "memory_result",
+          "multi": false,
+          "required": false
+        }
+      ],
+      "outputs": null,
+      "policy": {
+        "rateLimit": null,
+        "streamLimit": null
+      },
+      "promptTemplate": null,
+      "status": "ready",
+      "taskSpec": {
+        "agent": null,
+        "artifacts": [
+          {
+            "description": "記憶查詢結果",
+            "mediaType": "json",
+            "name": "memory_result",
+            "required": true
+          }
+        ],
+        "display": {
+          "label": "查詢記憶",
+          "summary": "查詢本地記憶摘要",
+          "tags": [
+            "memory_read"
+          ],
+          "todoHint": null
+        },
+        "executor": "tool",
+        "inputBindings": [
+          {
+            "fromNode": null,
+            "key": "query",
+            "port": null,
+            "source": "literal",
+            "value": "Phase 0 baseline"
+          }
+        ],
+        "nonRunnableReason": null,
+        "runnable": true,
+        "sandboxRun": null,
+        "tool": {
+          "skills": [],
+          "tools": [
+            {
+              "args": {
+                "query": "${query}"
+              },
+              "name": "memory.search",
+              "whenToUse": "查詢 Phase 0 fixture"
+            }
+          ]
+        }
+      },
+      "title": "查詢記憶",
+      "type": "tool",
+      "uiState": {
+        "collapsed": false,
+        "color": null,
+        "height": null,
+        "icon": null,
+        "width": null
+      },
+      "updatedAt": "2026-01-01T00:00:00Z",
+      "updatedBy": null,
+      "upstreamEdgeIds": [
+        "research->memory_lookup"
+      ],
+      "version": 1
+    },
+    {
+      "agentId": null,
+      "config": {},
+      "createdAt": "2026-01-01T00:00:00Z",
+      "createdBy": null,
+      "description": "在 sandbox 執行探針",
+      "downstreamEdgeIds": [],
+      "error": null,
+      "execution": "SINGLE",
+      "executionPolicy": {
+        "maxRetries": 0,
+        "retryable": true,
+        "runCondition": {
+          "expression": null,
+          "type": "always"
+        },
+        "skipIfDisabledInputs": null,
+        "timeoutMs": 300000
+      },
+      "graphId": "workflow.vnext_baseline",
+      "id": "sandbox_probe",
+      "inputBindings": [],
+      "inputPorts": [
+        {
+          "dataType": "any",
+          "key": "message",
+          "label": "message",
+          "multi": false,
+          "required": false
+        }
+      ],
+      "lastFailedAt": null,
+      "lastRunId": null,
+      "lastSucceededAt": null,
+      "metadata": {
+        "executor_ref": "exec.probe_sandbox",
+        "executor_version": 1,
+        "required_capabilities": [
+          "sandbox_exec"
+        ],
+        "streaming_required": false,
+        "task_ref": "task.sandbox_probe",
+        "task_version": 1
+      },
+      "name": "Sandbox 探針",
+      "node_type": "TASK",
+      "outputContract": {
+        "ports": [
+          {
+            "extractor": null,
+            "jsonSchema": null,
+            "name": "probe_output",
+            "parser": null,
+            "typeRef": "text"
+          }
+        ]
+      },
+      "outputPorts": [
+        {
+          "dataType": "any",
+          "key": "probe_output",
+          "label": "probe_output",
+          "multi": false,
+          "required": false
+        }
+      ],
+      "outputs": null,
+      "policy": {
+        "rateLimit": null,
+        "streamLimit": null
+      },
+      "promptTemplate": null,
+      "status": "ready",
+      "taskSpec": {
+        "agent": null,
+        "artifacts": [
+          {
+            "description": "sandbox 執行輸出",
+            "mediaType": "text",
+            "name": "probe_output",
+            "required": false
+          }
+        ],
+        "display": {
+          "label": "Sandbox 探針",
+          "summary": "在 sandbox 執行探針",
+          "tags": [
+            "sandbox_exec"
+          ],
+          "todoHint": null
+        },
+        "executor": "sandbox_run",
+        "inputBindings": [
+          {
+            "fromNode": null,
+            "key": "message",
+            "port": null,
+            "source": "literal",
+            "value": "baseline probe"
+          }
+        ],
+        "nonRunnableReason": null,
+        "runnable": true,
+        "sandboxRun": {
+          "command": "echo ${message}",
+          "shell": "bash",
+          "workdir": "workspace"
+        },
+        "tool": null
+      },
+      "title": "Sandbox 探針",
+      "type": "transform",
+      "uiState": {
+        "collapsed": false,
+        "color": null,
+        "height": null,
+        "icon": null,
+        "width": null
+      },
+      "updatedAt": "2026-01-01T00:00:00Z",
+      "updatedBy": null,
+      "upstreamEdgeIds": [
+        "memory_lookup->sandbox_probe"
+      ],
+      "version": 1
+    }
+  ],
+  "runtimeCapabilities": {
+    "supports_control_edges": true,
+    "supports_data_edges": true,
+    "supports_parallel_map": true,
+    "supports_recursive": true,
+    "supports_task_boundaries": true,
+    "supports_task_guardrails": true
+  },
+  "settings": {
+    "allowCycles": false,
+    "autoSave": true,
+    "concurrencyLimit": 1,
+    "persistRunHistory": true,
+    "runMode": "manual"
+  },
+  "status": "draft",
+  "tags": null,
+  "updatedAt": "2026-01-01T00:00:00Z",
+  "updatedBy": null,
+  "version": "taskgraph.v3"
+}
