@@ -139,17 +139,21 @@ class PlannerLLMTests(unittest.TestCase):
         )
         payload = llm.calls[0][1]["content"]
         self.assertIn("任務描述：", payload)
-        self.assertIn("可用 Skills", payload)
-        self.assertIn('"toolId": "web.search"', payload)
-        self.assertIn('"skillId": "frontend-design"', payload)
-        self.assertNotIn('"skillId": "problem-decomposer"', payload)
-        self.assertIn("concept-alignment", payload)
+        self.assertIn("輸出結構：", payload)
+        self.assertIn("請只輸出一段 json code block", payload)
+        self.assertNotIn("可用 Skills", payload)
+        self.assertNotIn("可用 Tools", payload)
         system_prompt = llm.calls[0][0]["content"]
+        self.assertIn("可用 Skills 定義：", system_prompt)
+        self.assertIn("可用 Tools 定義：", system_prompt)
+        self.assertIn('"toolId": "web.search"', system_prompt)
+        self.assertIn('"skillId": "frontend-design"', system_prompt)
+        self.assertNotIn('"skillId": "problem-decomposer"', system_prompt)
+        self.assertIn("concept-alignment", system_prompt)
         self.assertIn("嚴禁輸出任何 agent/persona/assignment", system_prompt)
-        self.assertIn("只輸出一段 code block", system_prompt)
-        self.assertIn("CONTROL 邊方向固定是「前置節點 -> 依賴它的節點」", system_prompt)
+        self.assertIn("CONTROL/DEPENDS_ON 的方向固定是前置節點 -> 依賴它的節點", system_prompt)
         self.assertIn("不得建立 ARTIFACT node", system_prompt)
-        self.assertIn("planner 已在圖外完成拆題；graph 內不可再放 TODO / 任務拆解 / task outline / WBS 類節點", system_prompt)
+        self.assertIn("planner 已在圖外完成拆題；graph 內不得再出現 TODO / 任務拆解 / task outline / WBS 類 TASK", system_prompt)
         self.assertIn("TASK 節點總數不得超過 8", system_prompt)
         self.assertIn("好例子：概念對齊 -> 設計定義", system_prompt)
         self.assertIn("根據上下文構成以及執行角色相似程度來切分", system_prompt)
@@ -158,11 +162,20 @@ class PlannerLLMTests(unittest.TestCase):
         self.assertIn("Artifact 是被 TASK 產出、引用、審查或交付的資訊", system_prompt)
         self.assertIn("Milestone 是時點或狀態檢查，不是 TaskGraph v3 NodeType", system_prompt)
         self.assertIn("問題拆解 / WBS / issue tree 類 skill 屬於 planner 內部能力", system_prompt)
-        self.assertIn("同一設計階段的需求/PRD/系統架構/架構設計/視覺規格/預設參數要合併", payload)
-        self.assertIn("artifact 是 TASK 內資訊；不得建立獨立 ARTIFACT node", payload)
-        self.assertIn("僅輸出一段 json code block；不要輸出 Mermaid。", payload)
-        self.assertIn("taskSpec.executor 只能是 agent、tool、sandbox_run", payload)
+        self.assertIn("內容必須是可執行的 GraphDefinition JSON", payload)
+        self.assertIn("不要輸出 Mermaid，也不要輸出任何 JSON 之外的補充文字", payload)
         self.assertIn("taskSpec.executor 只能是 agent、tool、sandbox_run", system_prompt)
+
+    def test_generate_plan_with_llm_repairs_empty_tool_list_to_web_search(self) -> None:
+        llm = _MockLLM([
+            '{"version":"taskgraph.v3","nodes":[{"id":"task_concept_alignment","node_type":"TASK","title":"概念對齊","taskSpec":{"executor":"tool","tool":{"tools":[]},"display":{"label":"概念對齊"},"runnable":true}}],"edges":[]}',
+        ])
+
+        plan = generate_plan_with_llm("請規劃", llm_client=llm)
+
+        task_node = next(node for node in plan.nodes if isinstance(node, TaskNode))
+        self.assertEqual(task_node.task_spec.executor, "tool")
+        self.assertEqual([tool.name for tool in task_node.task_spec.tool.tools], ["web.search"])
 
 
 if __name__ == "__main__":

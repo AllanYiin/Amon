@@ -229,7 +229,11 @@ def _extract_gate_routes(payload: dict[str, Any]) -> list[GateRoute]:
 def _extract_task_spec(payload: dict[str, Any], title: str) -> TaskSpec:
     task_spec_raw = payload.get("taskSpec")
     if isinstance(task_spec_raw, dict):
-        return task_spec_from_payload(task_spec_raw)
+        return task_spec_from_payload(
+            task_spec_raw,
+            node_id=str(payload.get("id") or ""),
+            task_title=title,
+        )
 
     input_bindings = [_legacy_input_binding_from_v3(item) for item in _list_of_dicts(payload.get("inputBindings"))]
     prompt_template = _optional_str(payload.get("promptTemplate"))
@@ -249,7 +253,7 @@ def _extract_task_spec(payload: dict[str, Any], title: str) -> TaskSpec:
             )
         return TaskSpec(
             executor="tool",
-            tool=ToolTaskConfig(tools=tool_calls or [ToolCallSpec(name="tool.unspecified", args={})]),
+            tool=ToolTaskConfig(tools=tool_calls or [ToolCallSpec(name="web.search", args={})]),
             input_bindings=input_bindings,
             display=TaskDisplayMetadata(label=title, summary=_optional_str(payload.get("description"))),
             runnable=True,

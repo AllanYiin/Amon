@@ -83,6 +83,10 @@ class TaskSpec:
     non_runnable_reason: str | None = None
 
 
+def _default_tool_call() -> ToolCallSpec:
+    return ToolCallSpec(name="web.search", args={})
+
+
 def validate_task_spec(node_id: str, task_spec: TaskSpec) -> None:
     if task_spec.executor not in _EXECUTORS:
         raise ValueError(f"task.task_spec.executor 不合法：node_id={node_id}, executor={task_spec.executor}")
@@ -121,10 +125,15 @@ def validate_task_spec(node_id: str, task_spec: TaskSpec) -> None:
             raise ValueError(f"task.task_spec.artifacts.name 不可為空：node_id={node_id}")
 
 
-def task_spec_from_payload(raw: dict[str, Any]) -> TaskSpec:
+def task_spec_from_payload(
+    raw: dict[str, Any],
+    *,
+    node_id: str | None = None,
+    task_title: str | None = None,
+) -> TaskSpec:
     tools_payload = raw.get("tool", {}).get("tools", []) if isinstance(raw.get("tool"), dict) else []
     executor = _normalize_executor(raw)
-    return TaskSpec(
+    task_spec = TaskSpec(
         executor=executor,
         agent=_agent_from_payload(raw.get("agent")),
         tool=ToolTaskConfig(
@@ -148,6 +157,8 @@ def task_spec_from_payload(raw: dict[str, Any]) -> TaskSpec:
         runnable=bool(raw.get("runnable", True)),
         non_runnable_reason=_optional_str(raw.get("nonRunnableReason")),
     )
+    _repair_task_spec_from_payload(task_spec, node_id=node_id, task_title=task_title)
+    return task_spec
 
 
 def _normalize_executor(raw: dict[str, Any]) -> str:
@@ -280,6 +291,75 @@ def _display_from_payload(raw: Any) -> TaskDisplayMetadata:
         todo_hint=_optional_str(raw.get("todoHint")),
         tags=[str(tag) for tag in raw.get("tags", [])],
     )
+
+
+def _repair_task_spec_from_payload(
+    task_spec: TaskSpec,
+    *,
+    node_id: str | None,
+    task_title: str | None,
+) -> None:
+    label = (
+        str(task_spec.display.label or "").strip()
+        or str(task_title or "").strip()
+        or str(node_id or "").strip()
+        or "未命名任務"
+    )
+    if not str(task_spec.display.label or "").strip():
+        task_spec.display.label = label
+    task_spec.display.tags = [str(tag).strip() for tag in task_spec.display.tags if str(tag).strip()]
+
+    if not task_spec.runnable and not str(task_spec.non_runnable_reason or "").strip():
+        task_spec.non_runnable_reason = f"taskSpec 已標記為不可執行：{label}"
+
+    task_spec.input_bindings = [
+        binding
+        for binding in task_spec.input_bindings
+        if binding.source in _BINDING_SOURCES
+        and str(binding.key or "").strip()
+        and (binding.source != "upstream" or (str(binding.from_node or "").strip() and str(binding.port or "").strip()))
+    ]
+    task_spec.artifacts = [artifact for artifact in task_spec.artifacts if str(artifact.name or "").strip()]
+
+    if task_spec.executor not in _EXECUTORS:
+        task_spec.executor = "agent"
+        task_spec.agent = task_spec.agent or AgentTaskConfig()
+        task_spec.runnable = False
+        task_spec.non_runnable_reason = task_spec.non_runnable_reason or f"taskSpec.executor 無法辨識，已降級為不可執行：{label}"
+
+    if task_spec.executor == "agent":
+        task_spec.agent = task_spec.agent or AgentTaskConfig()
+        task_spec.agent.allowed_tools = [str(item).strip() for item in task_spec.agent.allowed_tools if str(item).strip()]
+        task_spec.agent.skills = [str(item).strip() for item in task_spec.agent.skills if str(item).strip()]
+        has_prompt = str(task_spec.agent.prompt or "").strip()
+        has_instructions = str(task_spec.agent.instructions or "").strip()
+        if not has_prompt and not has_instructions:
+            task_spec.agent.prompt = f"完成「{label}」"
+        return
+
+    if task_spec.executor == "tool":
+        task_spec.tool = task_spec.tool or ToolTaskConfig()
+        task_spec.tool.skills = [str(item).strip() for item in task_spec.tool.skills if str(item).strip()]
+        repaired_tools: list[ToolCallSpec] = []
+        for tool in task_spec.tool.tools:
+            tool_name = str(tool.name or "").strip()
+            repaired_tools.append(
+                ToolCallSpec(
+                    name=tool_name or "web.search",
+                    args=tool.args if isinstance(tool.args, dict) else {},
+                    when_to_use=_optional_str(tool.when_to_use),
+                )
+            )
+        task_spec.tool.tools = repaired_tools or [_default_tool_call()]
+        return
+
+    if task_spec.executor == "sandbox_run":
+        task_spec.sandbox_run = task_spec.sandbox_run or SandboxRunConfig()
+        if not str(task_spec.sandbox_run.command or "").strip():
+            task_spec.runnable = False
+            task_spec.non_runnable_reason = (
+                task_spec.non_runnable_reason or f"sandbox_run 缺少 command，已降級為不可執行：{label}"
+            )
 
 
 def _optional_str(value: Any) -> str | None:

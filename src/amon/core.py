@@ -2867,7 +2867,7 @@ class AmonCore:
                 title=title,
                 execution=str(raw.get("execution") or "SINGLE"),
                 execution_config=raw.get("executionConfig") if isinstance(raw.get("executionConfig"), dict) else None,
-                task_spec=task_spec_from_payload(spec),
+                task_spec=task_spec_from_payload(spec, node_id=node_id, task_title=title),
             )
         raise ValueError(f"Unsupported node payload: node_id={node_id}")
 

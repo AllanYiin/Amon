@@ -123,6 +123,99 @@ class TaskGraph3SerializeTests(unittest.TestCase):
         task_node = next(node for node in graph.nodes if isinstance(node, TaskNode))
         self.assertEqual(task_node.task_spec.executor, "agent")
 
+    def test_validate_normalizes_empty_tool_list_to_web_search(self) -> None:
+        payload = {
+            "version": "taskgraph.v3",
+            "nodes": [
+                {
+                    "id": "task_concept_alignment",
+                    "node_type": "TASK",
+                    "title": "概念對齊",
+                    "taskSpec": {
+                        "executor": "tool",
+                        "tool": {"tools": []},
+                        "display": {"label": "概念對齊"},
+                        "runnable": True,
+                    },
+                }
+            ],
+            "edges": [],
+        }
+
+        validate_v3_graph_json(payload)
+        graph = graph_definition_from_payload(payload)
+        task_node = next(node for node in graph.nodes if isinstance(node, TaskNode))
+        self.assertEqual(task_node.task_spec.executor, "tool")
+        self.assertEqual([tool.name for tool in task_node.task_spec.tool.tools], ["web.search"])
+
+    def test_validate_normalizes_empty_agent_prompt_from_title(self) -> None:
+        payload = {
+            "version": "taskgraph.v3",
+            "nodes": [
+                {
+                    "id": "task_concept_alignment",
+                    "node_type": "TASK",
+                    "title": "概念對齊",
+                    "taskSpec": {
+                        "executor": "agent",
+                        "agent": {},
+                        "display": {"label": ""},
+                        "runnable": True,
+                    },
+                }
+            ],
+            "edges": [],
+        }
+
+        validate_v3_graph_json(payload)
+        graph = graph_definition_from_payload(payload)
+        task_node = next(node for node in graph.nodes if isinstance(node, TaskNode))
+        self.assertEqual(task_node.task_spec.agent.prompt, "完成「概念對齊」")
+
+    def test_validate_marks_empty_sandbox_command_non_runnable(self) -> None:
+        payload = {
+            "version": "taskgraph.v3",
+            "nodes": [
+                {
+                    "id": "task_shell",
+                    "node_type": "TASK",
+                    "title": "執行命令",
+                    "taskSpec": {
+                        "executor": "sandbox_run",
+                        "sandboxRun": {"command": ""},
+                        "display": {"label": "執行命令"},
+                        "runnable": True,
+                    },
+                }
+            ],
+            "edges": [],
+        }
+
+        validate_v3_graph_json(payload)
+        graph = graph_definition_from_payload(payload)
+        task_node = next(node for node in graph.nodes if isinstance(node, TaskNode))
+        self.assertFalse(task_node.task_spec.runnable)
+        self.assertIn("sandbox_run 缺少 command", task_node.task_spec.non_runnable_reason)
+
+    def test_validate_tool_node_without_tool_calls_defaults_to_web_search(self) -> None:
+        payload = {
+            "version": "taskgraph.v3",
+            "nodes": [
+                {
+                    "id": "task_search",
+                    "type": "tool",
+                    "title": "查資料",
+                    "config": {"toolCalls": []},
+                }
+            ],
+            "edges": [],
+        }
+
+        validate_v3_graph_json(payload)
+        graph = graph_definition_from_payload(payload)
+        task_node = next(node for node in graph.nodes if isinstance(node, TaskNode))
+        self.assertEqual([tool.name for tool in task_node.task_spec.tool.tools], ["web.search"])
+
 
 if __name__ == "__main__":
     unittest.main()
