@@ -161,6 +161,8 @@ class PlannerLLMTests(unittest.TestCase):
         self.assertIn("同一設計階段的需求/PRD/系統架構/架構設計/視覺規格/預設參數要合併", payload)
         self.assertIn("artifact 是 TASK 內資訊；不得建立獨立 ARTIFACT node", payload)
         self.assertIn("僅輸出一段 json code block；不要輸出 Mermaid。", payload)
+        self.assertIn("taskSpec.executor 只能是 agent、tool、sandbox_run", payload)
+        self.assertIn("taskSpec.executor 只能是 agent、tool、sandbox_run", system_prompt)
 
 
 if __name__ == "__main__":

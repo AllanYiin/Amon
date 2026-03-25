@@ -7,6 +7,12 @@ from typing import Any
 
 _EXECUTORS = {"agent", "tool", "sandbox_run"}
 _BINDING_SOURCES = {"variable", "upstream", "literal"}
+_EXECUTOR_ALIASES = {
+    "llm": "agent",
+    "planner": "agent",
+    "tool": "tool",
+    "sandbox": "sandbox_run",
+}
 
 
 @dataclass
@@ -117,8 +123,9 @@ def validate_task_spec(node_id: str, task_spec: TaskSpec) -> None:
 
 def task_spec_from_payload(raw: dict[str, Any]) -> TaskSpec:
     tools_payload = raw.get("tool", {}).get("tools", []) if isinstance(raw.get("tool"), dict) else []
+    executor = _normalize_executor(raw)
     return TaskSpec(
-        executor=str(raw.get("executor") or ""),
+        executor=executor,
         agent=_agent_from_payload(raw.get("agent")),
         tool=ToolTaskConfig(
             tools=[
@@ -141,6 +148,21 @@ def task_spec_from_payload(raw: dict[str, Any]) -> TaskSpec:
         runnable=bool(raw.get("runnable", True)),
         non_runnable_reason=_optional_str(raw.get("nonRunnableReason")),
     )
+
+
+def _normalize_executor(raw: dict[str, Any]) -> str:
+    normalized = str(raw.get("executor") or "").strip().lower()
+    if normalized in _EXECUTORS:
+        return normalized
+    if normalized in _EXECUTOR_ALIASES:
+        return _EXECUTOR_ALIASES[normalized]
+    if isinstance(raw.get("agent"), dict):
+        return "agent"
+    if isinstance(raw.get("tool"), dict):
+        return "tool"
+    if isinstance(raw.get("sandboxRun"), dict):
+        return "sandbox_run"
+    return normalized
 
 
 def task_spec_to_payload(task_spec: TaskSpec) -> dict[str, Any]:

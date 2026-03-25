@@ -277,6 +277,7 @@ def _planner_system_prompt(*, is_repair: bool) -> str:
             "- node.title 不得為空；若原本會是 None/空白，必須重寫成 <=10 個中文漢字的完整標題。\n"
             "- CONTROL 邊的方向必須是「前置節點 -> 依賴它的節點」，例如 concept_alignment -> design。\n"
             "- 不要用 DATA 邊把 artifact 拉成獨立節點；下游依賴請用 CONTROL 邊與 inputBindings/ports 表達。\n"
+            "- taskSpec.executor 只能是 agent、tool、sandbox_run；嚴禁輸出 planner、llm、sandbox、tool-router。\n"
             "- 嚴禁輸出任何 agent/persona/assignment/owner。\n"
             "- 壞例子：概念對齊 -> 背景調研 -> 需求規格 -> PRD -> 架構設計 -> 視覺規格 -> 預設參數 -> 打包交付。\n"
             "- 好例子：概念對齊 -> 設計定義（需求/PRD/架構/視覺/預設參數合併） -> 原型實作/內容產出 -> 打包交付。\n"
@@ -328,6 +329,7 @@ def _planner_system_prompt(*, is_repair: bool) -> str:
         "- 用 DEPENDS_ON 建立主要依賴；CONTROL 邊方向固定是「前置節點 -> 依賴它的節點」，例如 concept_alignment -> 設計定義；只有真的需要分支時才使用 GATE + ROUTE。\n"
         "- 每個 TASK 至少要有 objective + definitionOfDone（>=2 條）+ 主要 skillBindings（PRIMARY）。\n"
         "- 若 TASK 會產出文件、程式碼、報告或交付包，請寫入 taskSpec.artifacts；不要建立獨立 ARTIFACT node。下游依賴請用 CONTROL 邊，必要時再用 inputBindings/ports 傳遞。\n"
+        "- taskSpec.executor 只能是 agent、tool、sandbox_run；嚴禁輸出 planner、llm、sandbox、tool-router。\n"
         "- 只有在真的有外部呼叫量、事件量或即時性需求時才設定 rateLimit/streamLimit。\n\n"
         "正反例（硬性參考）：\n"
         "- 壞例子：概念對齊 -> 背景調研 -> 需求規格 -> PRD -> 架構設計 -> 視覺規格 -> 預設參數 -> 打包交付。\n"
@@ -383,6 +385,7 @@ def _planner_user_prompt(
         "- milestone 是 TASK 內的驗收/狀態資訊，不得建立 milestone node。",
         "- node.title 不得為空；若原本會是 None，改寫成 <=10 個中文漢字標題句（不可截斷）。",
         "- CONTROL/DEPENDS_ON 的方向固定是前置節點 -> 依賴它的節點，例如 concept_alignment -> design。",
+        "- taskSpec.executor 只能是 agent、tool、sandbox_run；不得輸出 planner、llm、sandbox、tool-router。",
         "- 不得提 agent/persona/assignment/指派。",
         "- 僅輸出一段 json code block；不要輸出 Mermaid。",
     ]

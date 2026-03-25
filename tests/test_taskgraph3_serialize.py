@@ -15,7 +15,7 @@ from amon.taskgraph3.payloads import (
 )
 from amon.taskgraph3.schema import GraphDefinition, GraphEdge, TaskNode
 from amon.taskgraph3.serialize import dumps_graph_definition
-from amon.taskgraph3.validate import validate_v3_graph_json
+from amon.taskgraph3.validate import graph_definition_from_payload, validate_v3_graph_json
 
 
 class TaskGraph3SerializeTests(unittest.TestCase):
@@ -95,6 +95,33 @@ class TaskGraph3SerializeTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "禁止 legacy 欄位"):
             validate_v3_graph_json(payload)
+
+    def test_validate_normalizes_planner_executor_alias_to_agent(self) -> None:
+        payload = {
+            "version": "taskgraph.v3",
+            "nodes": [
+                {
+                    "id": "task_concept_alignment",
+                    "node_type": "TASK",
+                    "title": "概念對齊",
+                    "taskSpec": {
+                        "executor": "planner",
+                        "agent": {
+                            "prompt": "先查關鍵概念",
+                            "instructions": "整理背景與風險",
+                        },
+                        "display": {"label": "概念對齊"},
+                        "runnable": True,
+                    },
+                }
+            ],
+            "edges": [],
+        }
+
+        validate_v3_graph_json(payload)
+        graph = graph_definition_from_payload(payload)
+        task_node = next(node for node in graph.nodes if isinstance(node, TaskNode))
+        self.assertEqual(task_node.task_spec.executor, "agent")
 
 
 if __name__ == "__main__":
