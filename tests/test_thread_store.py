@@ -161,6 +161,40 @@ class ThreadSessionStoreTests(unittest.TestCase):
         self.assertEqual(chat_logs[0].get("summary"), "skill:concept-alignment")
         self.assertEqual(chat_logs[1].get("summary"), "tool:filesystem.read:complete:ok")
 
+    def test_thread_session_event_log_includes_tool_args_preview_and_error_detail(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                project_id = "proj-log-003c"
+                thread_id = create_thread_session(project_id)
+                with patch("amon.chat.thread_store.log_event") as mock_log_event:
+                    append_event(
+                        thread_id,
+                        {
+                            "type": "tool_call",
+                            "text": "web.search",
+                            "project_id": project_id,
+                            "tool_name": "web.search",
+                            "stage": "complete",
+                            "status": "invalid_args",
+                            "args_preview": '{"query": ""}',
+                            "error_detail": "缺少 query 參數。",
+                        },
+                    )
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
+        chat_logs = [
+            call.args[0]
+            for call in mock_log_event.call_args_list
+            if isinstance(call.args[0], dict) and call.args[0].get("event") == "thread_session_event"
+        ]
+        self.assertEqual(len(chat_logs), 1)
+        payload = chat_logs[0]
+        self.assertEqual(payload.get("summary"), "tool:web.search:complete:invalid_args")
+        self.assertEqual(payload.get("args_preview"), '{"query": ""}')
+        self.assertEqual(payload.get("error_detail"), "缺少 query 參數。")
+
     def test_create_thread_session_and_append_user_event(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir

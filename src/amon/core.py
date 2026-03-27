@@ -3779,12 +3779,14 @@ class AmonCore:
         request_id: str | None = None,
     ) -> dict[str, Any]:
         route = "toolforge"
+        args_preview = self._tool_args_preview(args if isinstance(args, dict) else None)
         event_base = {
             "name": tool_name,
             "run_id": run_id,
             "node_id": node_id,
             "thread_id": thread_id,
             "request_id": request_id,
+            "args_preview": args_preview,
         }
         if ":" in tool_name:
             route = "mcp"
@@ -3800,6 +3802,7 @@ class AmonCore:
                     "tool_name": tool_name,
                     "route": route,
                     "stage": "start",
+                    "args_preview": args_preview,
                 }
             )
             self._emit_stream_event(stream_handler, "tool_call", {**event_base, "route": route, "stage": "start", "status": "running"})
@@ -3822,6 +3825,7 @@ class AmonCore:
                     "tool_name": tool_name,
                     "route": route,
                     "stage": "start",
+                    "args_preview": args_preview,
                 }
             )
             self._emit_stream_event(stream_handler, "tool_call", {**event_base, "route": route, "stage": "start", "status": "running"})
@@ -3855,6 +3859,7 @@ class AmonCore:
             "status": (result.get("meta") or {}).get("status"),
         }
         if route in {"mcp", "builtin"}:
+            error_detail = self._tool_error_detail(result)
             log_event(
                 {
                     "level": "INFO",
@@ -3869,6 +3874,8 @@ class AmonCore:
                     "stage": "complete",
                     "status": payload["status"] or ("error" if payload["is_error"] else "ok"),
                     "is_error": payload["is_error"],
+                    "args_preview": args_preview,
+                    "error_detail": error_detail,
                 }
             )
         log_event({"level": "INFO", "event": "tool_dispatch", **payload})
@@ -3882,6 +3889,8 @@ class AmonCore:
                     "stage": "complete",
                     "status": payload["status"] or ("error" if payload["is_error"] else "ok"),
                     "is_error": payload["is_error"],
+                    "args_preview": args_preview,
+                    "error_detail": error_detail,
                 },
             )
         emit_event(
@@ -4041,6 +4050,7 @@ class AmonCore:
         builtin_spec = builtin_registry.get_spec(tool_name)
         route = "builtin" if builtin_spec is not None else "toolforge"
         target_path = str(payload.get("path") or payload.get("root") or payload.get("cwd") or "") if isinstance(payload, dict) else ""
+        args_preview = self._tool_args_preview(payload if isinstance(payload, dict) else None)
         resolved_project_id = project_id
         if resolved_project_id is None and project_path:
             resolved_project_id = self.resolve_project_identity(project_path)[0]
@@ -4057,6 +4067,7 @@ class AmonCore:
                 "route": route,
                 "stage": "start",
                 "path": target_path or None,
+                "args_preview": args_preview,
             }
         )
         self._emit_stream_event(
@@ -4068,6 +4079,7 @@ class AmonCore:
                 "stage": "start",
                 "status": "running",
                 "path": target_path or None,
+                "args_preview": args_preview,
                 "run_id": run_id,
                 "node_id": node_id,
                 "thread_id": thread_id,
@@ -4088,6 +4100,7 @@ class AmonCore:
                 "meta": result.meta,
                 "text": result.as_text(),
             }
+            error_detail = self._tool_error_detail(normalized_result)
             log_event(
                 {
                     "level": "INFO",
@@ -4102,6 +4115,8 @@ class AmonCore:
                     "stage": "complete",
                     "status": str((result.meta or {}).get("status") or ("error" if result.is_error else "ok")),
                     "is_error": bool(result.is_error),
+                    "args_preview": args_preview,
+                    "error_detail": error_detail,
                 }
             )
             self._emit_stream_event(
@@ -4113,6 +4128,8 @@ class AmonCore:
                     "stage": "complete",
                     "status": str((result.meta or {}).get("status") or ("error" if result.is_error else "ok")),
                     "is_error": bool(result.is_error),
+                    "args_preview": args_preview,
+                    "error_detail": error_detail,
                     "run_id": run_id,
                     "node_id": node_id,
                     "thread_id": thread_id,
@@ -4196,6 +4213,8 @@ class AmonCore:
                 "stage": "complete",
                 "status": str((output.get("meta") or {}).get("status") or ("error" if output.get("is_error") else "ok")),
                 "is_error": bool(output.get("is_error", False)),
+                "args_preview": args_preview,
+                "error_detail": self._tool_error_detail(output),
             }
         )
         self._emit_stream_event(
@@ -4207,6 +4226,8 @@ class AmonCore:
                 "stage": "complete",
                 "status": str((output.get("meta") or {}).get("status") or ("error" if output.get("is_error") else "ok")),
                 "is_error": bool(output.get("is_error", False)),
+                "args_preview": args_preview,
+                "error_detail": self._tool_error_detail(output),
                 "run_id": run_id,
                 "node_id": node_id,
                 "thread_id": thread_id,
@@ -6799,6 +6820,88 @@ class AmonCore:
         if len(text) > limit:
             return f"{text[:limit]}..."
         return text
+
+    @staticmethod
+    def _is_sensitive_tool_log_key(key: str) -> bool:
+        normalized = str(key or "").strip().lower().replace("-", "_")
+        return any(
+            token in normalized
+            for token in (
+                "token",
+                "secret",
+                "password",
+                "passwd",
+                "authorization",
+                "cookie",
+                "credential",
+                "api_key",
+                "apikey",
+                "access_key",
+                "refresh_key",
+                "refresh_token",
+                "session_key",
+            )
+        )
+
+    @classmethod
+    def _sanitize_tool_log_value(cls, value: Any, *, depth: int = 0) -> Any:
+        if depth >= 3:
+            return cls._summarize_value(value, limit=120)
+        if isinstance(value, dict):
+            sanitized: dict[str, Any] = {}
+            for key, item in value.items():
+                key_text = str(key)
+                if cls._is_sensitive_tool_log_key(key_text):
+                    sanitized[key_text] = "[REDACTED]"
+                else:
+                    sanitized[key_text] = cls._sanitize_tool_log_value(item, depth=depth + 1)
+            return sanitized
+        if isinstance(value, list):
+            items = [cls._sanitize_tool_log_value(item, depth=depth + 1) for item in value[:6]]
+            if len(value) > 6:
+                items.append(f"...({len(value) - 6} more)")
+            return items
+        if isinstance(value, str):
+            compact = re.sub(r"\s+", " ", value).strip()
+            if len(compact) > 180:
+                return f"{compact[:180]}..."
+            return compact
+        return value
+
+    @classmethod
+    def _tool_args_preview(cls, args: dict[str, Any] | None, limit: int = 400) -> str | None:
+        if not isinstance(args, dict) or not args:
+            return None
+        try:
+            preview = json.dumps(cls._sanitize_tool_log_value(args), ensure_ascii=False, sort_keys=True)
+        except TypeError:
+            preview = cls._summarize_value(args, limit=limit)
+        if len(preview) > limit:
+            return f"{preview[:limit]}..."
+        return preview
+
+    @classmethod
+    def _tool_error_detail(cls, result: dict[str, Any] | None) -> str | None:
+        if not isinstance(result, dict) or not bool(result.get("is_error", False)):
+            return None
+        meta = result.get("meta")
+        if isinstance(meta, dict):
+            for key in ("error", "reason", "message", "detail"):
+                value = meta.get(key)
+                if isinstance(value, str) and value.strip():
+                    return str(cls._sanitize_tool_log_value(value))
+        for key in ("content_text", "text"):
+            value = result.get(key)
+            if isinstance(value, str) and value.strip():
+                return str(cls._sanitize_tool_log_value(value))
+        content = result.get("content")
+        if isinstance(content, list):
+            for item in content:
+                if isinstance(item, dict):
+                    value = item.get("text")
+                    if isinstance(value, str) and value.strip():
+                        return str(cls._sanitize_tool_log_value(value))
+        return None
 
     def _append_session_event(self, session_path: Path, payload: dict[str, Any], session_id: str) -> None:
         event_payload = {"timestamp": self._now(), "session_id": session_id}

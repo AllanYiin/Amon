@@ -3122,7 +3122,7 @@ appStore.patch({ bootstrappedAt: Date.now() });
       }
 
       function appendArtifactsHintToTimeline(count = 0) {
-        if (!state.graphRunId) return;
+        if (!state.graphRunId || Number(count || 0) <= 0) return;
         const row = document.createElement("article");
         row.className = "timeline-status timeline-status--artifacts";
         const hint = document.createElement("button");

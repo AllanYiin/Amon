@@ -2733,6 +2733,8 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                                         "stage": runtime_payload.get("stage"),
                                         "status": runtime_payload.get("status"),
                                         "path": runtime_payload.get("path"),
+                                        "args_preview": runtime_payload.get("args_preview"),
+                                        "error_detail": runtime_payload.get("error_detail"),
                                     },
                                 )
                             return

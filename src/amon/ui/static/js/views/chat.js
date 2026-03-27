@@ -506,7 +506,9 @@ export const CHAT_VIEW = {
                 await ctx.chatDeps.loadProjects();
                 if (hasConcreteProjectId(appState.projectId)) {
                   await ctx.chatDeps.loadContext();
-                  ctx.chatDeps.appendArtifactsHintToTimeline(appState.runArtifacts.length);
+                  if (Array.isArray(appState.runArtifacts) && appState.runArtifacts.length > 0) {
+                    ctx.chatDeps.appendArtifactsHintToTimeline(appState.runArtifacts.length);
+                  }
                 }
               }
             } catch (error) {

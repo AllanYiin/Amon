@@ -498,13 +498,28 @@ class UIAsyncAPITests(unittest.TestCase):
                         stream_handler(
                             encode_stream_event(
                                 "tool_call",
-                                {"name": "filesystem.read", "route": "builtin", "stage": "start", "status": "running", "run_id": run_id},
+                                {
+                                    "name": "filesystem.read",
+                                    "route": "builtin",
+                                    "stage": "start",
+                                    "status": "running",
+                                    "run_id": run_id,
+                                    "args_preview": "{\"path\":\"README.md\"}",
+                                },
                             )
                         )
                         stream_handler(
                             encode_stream_event(
                                 "tool_call",
-                                {"name": "filesystem.read", "route": "builtin", "stage": "complete", "status": "ok", "run_id": run_id},
+                                {
+                                    "name": "filesystem.read",
+                                    "route": "builtin",
+                                    "stage": "complete",
+                                    "status": "ok",
+                                    "run_id": run_id,
+                                    "args_preview": "{\"path\":\"README.md\"}",
+                                    "error_detail": "",
+                                },
                             )
                         )
                     return (
@@ -566,7 +581,14 @@ class UIAsyncAPITests(unittest.TestCase):
                 session_path = core.get_project_path(project.project_id) / ".amon" / "threads" / thread_id / "events.jsonl"
                 records = [json.loads(line) for line in session_path.read_text(encoding="utf-8").splitlines() if line.strip()]
                 self.assertTrue(any(item.get("type") == "skill_activity" and item.get("skill_name") == "concept-alignment" for item in records))
-                self.assertTrue(any(item.get("type") == "tool_call" and item.get("tool_name") == "filesystem.read" for item in records))
+                self.assertTrue(
+                    any(
+                        item.get("type") == "tool_call"
+                        and item.get("tool_name") == "filesystem.read"
+                        and item.get("args_preview") == "{\"path\":\"README.md\"}"
+                        for item in records
+                    )
+                )
             finally:
                 if server:
                     server.shutdown()

@@ -129,6 +129,12 @@ def _build_thread_session_log_details(payload: dict[str, Any]) -> dict[str, Any]
         status = str(payload.get("status") or "").strip()
         suffix = f":{status}" if status else ""
         details["summary"] = f"tool:{tool_name}:{stage}{suffix}"
+        args_preview = payload.get("args_preview")
+        if isinstance(args_preview, str) and args_preview.strip():
+            details["args_preview"] = args_preview.strip()
+        error_detail = payload.get("error_detail")
+        if isinstance(error_detail, str) and error_detail.strip():
+            details["error_detail"] = error_detail.strip()
     elif event_type:
         details["summary"] = event_type
 
