@@ -30,10 +30,12 @@ Amon 是一套以專案為中心的本地 AI 工作台。當前主線架構已�
 pip install -e .
 ```
 
-若要使用 sandbox runner 相關能力：
+目前 [pyproject.toml](D:/PycharmProjects/Amon/pyproject.toml) 沒有定義 `sandbox-runner` extra，因此不要使用 `pip install -e .[sandbox-runner]`；那條指令目前只會退化成一般安裝，並額外出現 warning。
+
+若要使用 sandbox runner，安裝本專案後直接使用已註冊的 console script：
 
 ```bash
-pip install -e .[sandbox-runner]
+amon-sandbox-runner
 ```
 
 必要環境變數與 staged rollout flags 可參考 [.env.example](D:/PycharmProjects/Amon/.env.example)。
@@ -58,6 +60,12 @@ amon init
 amon project create "Amon vNext Demo"
 ```
 
+若要在初始化後嘗試另開 command 視窗啟動 sandbox runner，正確旗標是：
+
+```bash
+amon init --start-sandbox
+```
+
 列出與查看專案：
 
 ```bash
@@ -72,8 +80,6 @@ set AMON_VNEXT_MANIFEST=1
 set AMON_VNEXT_BINDER=1
 set AMON_VNEXT_RUNTIME=1
 set AMON_VNEXT_UI=1
-```
-
 PowerShell 可改用：
 
 ```powershell

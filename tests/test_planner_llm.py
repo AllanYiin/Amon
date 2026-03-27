@@ -165,6 +165,7 @@ class PlannerLLMTests(unittest.TestCase):
         self.assertIn("內容必須是可執行的 GraphDefinition JSON", payload)
         self.assertIn("不要輸出 Mermaid，也不要輸出任何 JSON 之外的補充文字", payload)
         self.assertIn("taskSpec.executor 只能是 agent、tool、sandbox_run", system_prompt)
+        self.assertIn("每個 node.id 都必須是非空且唯一的字串", system_prompt)
 
     def test_generate_plan_with_llm_repairs_empty_tool_list_to_web_search(self) -> None:
         llm = _MockLLM([
