@@ -984,11 +984,14 @@ class AmonCore:
         enabled = bool(config.get("amon", {}).get("auto_web_search", True))
         if not enabled:
             return ""
+        normalized_prompt = str(prompt or "").strip()
+        if not normalized_prompt:
+            return ""
         if allowed_tools is not None:
             allowed = {str(item).strip() for item in allowed_tools if str(item).strip()}
             if not allowed.intersection({"web.search", "web.fetch", "web.better_search"}):
                 return ""
-        if not self._prompt_requires_web_search(prompt):
+        if not self._prompt_requires_web_search(normalized_prompt):
             return ""
         try:
             from .tooling.builtin import build_registry
@@ -1010,6 +1013,7 @@ class AmonCore:
                 "node_id": node_id,
                 "thread_id": thread_id,
                 "request_id": request_id,
+                "args_preview": self._tool_args_preview({"query": normalized_prompt, "max_results": 5}),
             }
             log_event(
                 {
@@ -1024,18 +1028,27 @@ class AmonCore:
                     "route": "builtin",
                     "stage": "start",
                     "source": "auto_web_search",
+                    "args_preview": tool_event_base["args_preview"],
                 }
             )
             self._emit_stream_event(stream_handler, "tool_call", {**tool_event_base, "stage": "start", "status": "running"})
             result = registry.call(
                 ToolCall(
                     tool="web.search",
-                    args={"query": prompt, "max_results": 5},
+                    args={"query": normalized_prompt, "max_results": 5},
                     caller="agent",
                     project_id=project_id,
                 )
             )
             status = str((result.meta or {}).get("status") or ("error" if result.is_error else "ok"))
+            error_detail = self._tool_error_detail(
+                {
+                    "is_error": bool(result.is_error),
+                    "meta": dict(result.meta or {}),
+                    "content_text": result.as_text(),
+                    "content": list(result.content or []),
+                }
+            )
             log_event(
                 {
                     "level": "INFO",
@@ -1051,6 +1064,8 @@ class AmonCore:
                     "status": status,
                     "source": "auto_web_search",
                     "is_error": bool(result.is_error),
+                    "args_preview": tool_event_base["args_preview"],
+                    "error_detail": error_detail,
                 }
             )
             self._emit_stream_event(
@@ -1061,6 +1076,7 @@ class AmonCore:
                     "stage": "complete",
                     "status": status,
                     "is_error": bool(result.is_error),
+                    "error_detail": error_detail,
                 },
             )
             if result.is_error:
