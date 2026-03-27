@@ -131,7 +131,10 @@ def task_spec_from_payload(
     node_id: str | None = None,
     task_title: str | None = None,
 ) -> TaskSpec:
-    tools_payload = raw.get("tool", {}).get("tools", []) if isinstance(raw.get("tool"), dict) else []
+    tool_raw = raw.get("tool") if isinstance(raw.get("tool"), dict) else {}
+    if not tool_raw and isinstance(raw.get("tools"), list):
+        tool_raw = {"tools": raw.get("tools")}
+    tools_payload = tool_raw.get("tools", []) if isinstance(tool_raw, dict) else []
     executor = _normalize_executor(raw)
     task_spec = TaskSpec(
         executor=executor,
@@ -139,23 +142,25 @@ def task_spec_from_payload(
         tool=ToolTaskConfig(
             tools=[
                 ToolCallSpec(
-                    name=str(item.get("name") or ""),
-                    args=item.get("args") if isinstance(item.get("args"), dict) else {},
-                    when_to_use=_optional_str(item.get("whenToUse")),
+                    name=_first_non_blank(item.get("name"), item.get("toolId"), item.get("tool"), item.get("tool_name"), item.get("id")),
+                    args=item.get("args")
+                    if isinstance(item.get("args"), dict)
+                    else (item.get("arguments") if isinstance(item.get("arguments"), dict) else {}),
+                    when_to_use=_first_non_blank(item.get("whenToUse"), item.get("when_to_use")),
                 )
                 for item in tools_payload
                 if isinstance(item, dict)
             ],
-            skills=[str(skill) for skill in (raw.get("tool", {}).get("skills") or [])],
+            skills=[str(skill).strip() for skill in (tool_raw.get("skills") or tool_raw.get("skillNames") or []) if str(skill).strip()],
         )
-        if isinstance(raw.get("tool"), dict)
+        if isinstance(tool_raw, dict) and (tool_raw or executor == "tool")
         else None,
         sandbox_run=_sandbox_from_payload(raw.get("sandboxRun")),
-        input_bindings=[_input_binding_from_payload(item) for item in raw.get("inputBindings", []) if isinstance(item, dict)],
+        input_bindings=[_input_binding_from_payload(item) for item in (raw.get("inputBindings") or raw.get("input_bindings") or []) if isinstance(item, dict)],
         artifacts=[_artifact_from_payload(item) for item in raw.get("artifacts", []) if isinstance(item, dict)],
         display=_display_from_payload(raw.get("display")),
         runnable=bool(raw.get("runnable", True)),
-        non_runnable_reason=_optional_str(raw.get("nonRunnableReason")),
+        non_runnable_reason=_first_non_blank(raw.get("nonRunnableReason"), raw.get("non_runnable_reason")),
     )
     _repair_task_spec_from_payload(task_spec, node_id=node_id, task_title=task_title)
     return task_spec
@@ -244,12 +249,12 @@ def _agent_from_payload(raw: Any) -> AgentTaskConfig | None:
     if not isinstance(raw, dict):
         return None
     return AgentTaskConfig(
-        system_prompt=_optional_str(raw.get("systemPrompt")),
+        system_prompt=_first_non_blank(raw.get("systemPrompt"), raw.get("system_prompt")),
         prompt=_optional_str(raw.get("prompt")),
         instructions=_optional_str(raw.get("instructions")),
         model=_optional_str(raw.get("model")),
-        allowed_tools=[str(item) for item in (raw.get("allowedTools") or []) if str(item).strip()],
-        skills=[str(item) for item in (raw.get("skills") or raw.get("skillNames") or []) if str(item).strip()],
+        allowed_tools=[str(item).strip() for item in (raw.get("allowedTools") or raw.get("allowed_tools") or []) if str(item).strip()],
+        skills=[str(item).strip() for item in (raw.get("skills") or raw.get("skillNames") or raw.get("skill_names") or []) if str(item).strip()],
     )
 
 
@@ -259,24 +264,24 @@ def _sandbox_from_payload(raw: Any) -> SandboxRunConfig | None:
     return SandboxRunConfig(
         command=_optional_str(raw.get("command")),
         shell=_optional_str(raw.get("shell")),
-        workdir=_optional_str(raw.get("workdir")),
+        workdir=_first_non_blank(raw.get("workdir"), raw.get("workingDir"), raw.get("cwd")),
     )
 
 
 def _input_binding_from_payload(raw: dict[str, Any]) -> InputBinding:
     return InputBinding(
-        source=str(raw.get("source") or ""),
-        key=str(raw.get("key") or ""),
+        source=_first_non_blank(raw.get("source"), raw.get("bindingSource"), raw.get("type")),
+        key=_first_non_blank(raw.get("key"), raw.get("portKey"), raw.get("targetPortKey"), raw.get("port")),
         value=raw.get("value"),
-        from_node=_optional_str(raw.get("fromNode")),
-        port=_optional_str(raw.get("port")),
+        from_node=_first_non_blank(raw.get("fromNode"), raw.get("from_node"), raw.get("nodeId"), raw.get("node_id")),
+        port=_first_non_blank(raw.get("port"), raw.get("path"), raw.get("sourcePort")),
     )
 
 
 def _artifact_from_payload(raw: dict[str, Any]) -> ArtifactOutput:
     return ArtifactOutput(
-        name=str(raw.get("name") or ""),
-        media_type=_optional_str(raw.get("mediaType")),
+        name=_first_non_blank(raw.get("name"), raw.get("artifactId"), raw.get("id")),
+        media_type=_first_non_blank(raw.get("mediaType"), raw.get("media_type")),
         description=_optional_str(raw.get("description")),
         required=bool(raw.get("required", False)),
     )
@@ -288,8 +293,8 @@ def _display_from_payload(raw: Any) -> TaskDisplayMetadata:
     return TaskDisplayMetadata(
         label=_optional_str(raw.get("label")),
         summary=_optional_str(raw.get("summary")),
-        todo_hint=_optional_str(raw.get("todoHint")),
-        tags=[str(tag) for tag in raw.get("tags", [])],
+        todo_hint=_first_non_blank(raw.get("todoHint"), raw.get("todo_hint")),
+        tags=[str(tag).strip() for tag in raw.get("tags", []) if str(tag).strip()],
     )
 
 
@@ -365,4 +370,15 @@ def _repair_task_spec_from_payload(
 def _optional_str(value: Any) -> str | None:
     if value is None:
         return None
-    return str(value)
+    text = str(value).strip()
+    return text if text else None
+
+
+def _first_non_blank(*values: Any) -> str:
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""

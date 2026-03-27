@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from amon.fs.atomic import append_jsonl, atomic_write_text
+from amon.models import encode_stream_event
 
 from amon.artifacts.store import ingest_artifacts
 
@@ -40,6 +41,7 @@ class TaskGraph3Runtime:
         project_path: Path,
         graph: GraphDefinition,
         run_id: str | None = None,
+        stream_handler: Callable[[str], None] | None = None,
         time_func: Callable[[], float] | None = None,
         sleep_func: Callable[[float], None] | None = None,
     ) -> None:
@@ -47,6 +49,7 @@ class TaskGraph3Runtime:
         self.project_path = Path(project_path)
         self.graph = graph
         self.run_id = run_id
+        self.stream_handler = stream_handler
         self._time = time_func or time.monotonic
         self._sleep = sleep_func or time.sleep
         self._bucket_state: dict[str, dict[str, float]] = {}
@@ -97,7 +100,7 @@ class TaskGraph3Runtime:
             stream_limit = node.policy.stream_limit if isinstance(node, TaskNode) else None
             self._emit_event(
                 events_path,
-                {"event": "node_status", "node_id": node_id, "status": "running"},
+                {"event": "node_status", "node_id": node_id, "node_title": node.title, "status": "running"},
                 stream_limit=stream_limit,
             )
 
@@ -160,7 +163,7 @@ class TaskGraph3Runtime:
                     node_state["output"] = output_payload
                 self._emit_event(
                     events_path,
-                    {"event": "node_status", "node_id": node_id, "status": "succeeded", "latency_ms": latency_ms},
+                    {"event": "node_status", "node_id": node_id, "node_title": node.title, "status": "succeeded", "latency_ms": latency_ms},
                     stream_limit=stream_limit,
                 )
             except Exception as exc:  # noqa: BLE001
@@ -171,7 +174,7 @@ class TaskGraph3Runtime:
                 node_state["attempt_logs"].append(f"attempt=1 failed={exc}")
                 self._emit_event(
                     events_path,
-                    {"event": "node_status", "node_id": node_id, "status": "failed", "error": str(exc)},
+                    {"event": "node_status", "node_id": node_id, "node_title": node.title, "status": "failed", "error": str(exc)},
                     stream_limit=stream_limit,
                 )
                 state["status"] = "failed"
@@ -509,6 +512,7 @@ class TaskGraph3Runtime:
         event_name = str(payload.get("event") or "")
         if not node_id or not stream_limit or stream_limit <= 0:
             append_jsonl(events_path, payload)
+            self._emit_stream_event(payload)
             return
         interval = 1.0 / float(stream_limit)
         status_key = str(payload.get("status") or "")
@@ -521,6 +525,7 @@ class TaskGraph3Runtime:
                 payload["coalesced"] = int(state["suppressed"])
                 state["suppressed"] = 0
             append_jsonl(events_path, payload)
+            self._emit_stream_event(payload)
             state["last_emit"] = now
             return
         state["suppressed"] += 1
@@ -537,8 +542,17 @@ class TaskGraph3Runtime:
             if status_name:
                 payload["status"] = status_name
             append_jsonl(events_path, payload)
+            self._emit_stream_event(payload)
             stream["suppressed"] = 0
             stream["last_emit"] = self._time()
+
+    def _emit_stream_event(self, payload: dict[str, Any]) -> None:
+        if not callable(self.stream_handler):
+            return
+        try:
+            self.stream_handler(encode_stream_event(str(payload.get("event") or "notice"), payload))
+        except Exception:
+            return
 
     def _extract_ports(self, node: TaskNode, raw_output: str) -> dict[str, Any]:
         ports: dict[str, Any] = {}

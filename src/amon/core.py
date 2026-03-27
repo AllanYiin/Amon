@@ -2509,7 +2509,10 @@ class AmonCore:
         setattr(result, "phase_metrics", phase_metrics)
         setattr(result, "execution_route", "planner")
         setattr(result, "planner_enabled", True)
-        return result, self._load_graph_primary_output(result.run_dir)
+        primary_output = self._load_graph_primary_output(result.run_dir)
+        if not str(primary_output or "").strip():
+            primary_output = self._summarize_graph_execution_without_text(result)
+        return result, primary_output
 
     def run_graph_stream(
         self,
@@ -2737,6 +2740,20 @@ class AmonCore:
         return ""
 
     @staticmethod
+    def _summarize_graph_execution_without_text(result: TaskGraph3RunResult) -> str:
+        state = result.state if isinstance(getattr(result, "state", None), dict) else {}
+        metrics = state.get("metrics") if isinstance(state.get("metrics"), dict) else {}
+        counters = metrics.get("counters") if isinstance(metrics.get("counters"), dict) else {}
+        succeeded = int(counters.get("nodes_succeeded", 0) or 0)
+        failed = int(counters.get("nodes_failed", 0) or 0)
+        total = int(counters.get("nodes_total", 0) or 0)
+        if failed > 0:
+            return f"已完成規劃並進入節點執行，但流程中斷：成功 {succeeded} / {total}，失敗 {failed}。請查看執行紀錄。"
+        if succeeded > 0:
+            return f"已完成規劃與節點執行，共成功 {succeeded} / {total} 個節點。本輪未產生可直接顯示的文字輸出，請查看 artifacts 或執行紀錄。"
+        return ""
+
+    @staticmethod
     def _resolve_graph_output_text(project_path: Path, graph_output: dict[str, Any]) -> str:
         output_path = graph_output.get("output_path") or graph_output.get("path")
         if isinstance(output_path, str) and output_path.strip():
@@ -2824,7 +2841,12 @@ class AmonCore:
             runtime_vars.update(variables)
 
         graph = self._to_taskgraph3_definition(graph_payload)
-        runtime = TaskGraph3Runtime(project_path=project_path, graph=graph, run_id=effective_run_id)
+        runtime = TaskGraph3Runtime(
+            project_path=project_path,
+            graph=graph,
+            run_id=effective_run_id,
+            stream_handler=stream_handler,
+        )
         node_runner = AmonNodeRunner(
             core=self,
             project_path=project_path,

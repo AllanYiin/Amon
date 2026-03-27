@@ -77,6 +77,21 @@ export function createTimelineRenderer({ executionAccordion, executionTimeline, 
       });
       return;
     }
+    if (eventType === "node.update") {
+      const nodeId = String(data.node_id || data.nodeId || "").trim() || "node";
+      const nodeTitle = String(data.node_title || data.nodeTitle || nodeId).trim() || nodeId;
+      const status = String(data.status || "").trim().toLowerCase() || "running";
+      const latencyMs = Number(data.latency_ms || data.latencyMs || 0);
+      const error = String(data.error || "").trim();
+      let details = `節點 ${nodeTitle} 執行中`;
+      if (status === "succeeded") {
+        details = latencyMs > 0 ? `節點 ${nodeTitle} 已完成，耗時 ${(latencyMs / 1000).toFixed(1)} 秒` : `節點 ${nodeTitle} 已完成`;
+      } else if (status === "failed") {
+        details = error ? `節點 ${nodeTitle} 失敗：${error}` : `節點 ${nodeTitle} 執行失敗`;
+      }
+      updateExecutionStep(`node:${nodeId}`, { title: `節點：${nodeTitle}`, status, details, inferred: false });
+      return;
+    }
     if (eventType === "result") {
       updateExecutionStep("tool_execution", { title: t("timeline.step.toolExecution"), status: "succeeded", details: t("timeline.toolReturned"), inferred: false });
       return;

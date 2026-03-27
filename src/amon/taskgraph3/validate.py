@@ -82,6 +82,25 @@ def graph_definition_from_payload(graph_json: dict[str, Any]) -> GraphDefinition
         metadata = dict(metadata)
         metadata["globals"] = raw.get("globals")
 
+    allocated_node_ids: set[str] = set()
+    node_ref_aliases: dict[str, str] = {}
+    ambiguous_node_refs: set[str] = set()
+    nodes: list[TaskNode | GateNode | GroupNode | ArtifactNode] = []
+    for index, item in enumerate(nodes_payload):
+        node = _to_node(item, graph_id=graph_id, node_index=index, allocated_node_ids=allocated_node_ids)
+        nodes.append(node)
+        payload = item if isinstance(item, dict) else {}
+        for ref in _node_reference_candidates(payload, node):
+            if ref in ambiguous_node_refs:
+                continue
+            existing = node_ref_aliases.get(ref)
+            if existing and existing != node.id:
+                ambiguous_node_refs.add(ref)
+                node_ref_aliases.pop(ref, None)
+                continue
+            node_ref_aliases[ref] = node.id
+
+    allocated_edge_ids: set[str] = set()
     graph = GraphDefinition(
         version=str(raw.get("version") or "taskgraph.v3"),
         id=graph_id,
@@ -93,8 +112,17 @@ def graph_definition_from_payload(graph_json: dict[str, Any]) -> GraphDefinition
         created_by=_optional_str(raw.get("createdBy")),
         updated_by=_optional_str(raw.get("updatedBy")),
         entity_version=int(raw.get("entityVersion") or raw.get("revision") or 1),
-        nodes=[_to_node(item, graph_id=graph_id) for item in nodes_payload],
-        edges=[_to_edge(item, graph_id=graph_id) for item in edges_payload],
+        nodes=nodes,
+        edges=[
+            _to_edge(
+                item,
+                graph_id=graph_id,
+                edge_index=index,
+                allocated_edge_ids=allocated_edge_ids,
+                node_ref_aliases=node_ref_aliases,
+            )
+            for index, item in enumerate(edges_payload)
+        ],
         agents=[_to_agent(item) for item in raw.get("agents", []) if isinstance(item, dict)],
         graph_runs=[_to_graph_run(item) for item in raw.get("graphRuns", []) if isinstance(item, dict)],
         node_runs=[_to_node_run(item) for item in raw.get("nodeRuns", []) if isinstance(item, dict)],
@@ -115,11 +143,24 @@ def graph_definition_from_payload(graph_json: dict[str, Any]) -> GraphDefinition
     return graph
 
 
-def _to_node(raw: Any, *, graph_id: str) -> TaskNode | GateNode | GroupNode | ArtifactNode:
+def _to_node(
+    raw: Any,
+    *,
+    graph_id: str,
+    node_index: int,
+    allocated_node_ids: set[str],
+) -> TaskNode | GateNode | GroupNode | ArtifactNode:
     payload = _ensure_dict(raw, name="v3 node")
-    node_type = str(payload.get("node_type") or payload.get("type") or "").upper().strip()
-    canonical_type = str(payload.get("type") or "").strip().lower()
-    title = _node_title_from_payload(payload)
+    node_type = _first_non_blank(payload.get("node_type"), payload.get("nodeType"), payload.get("type")).upper()
+    canonical_type = _first_non_blank(payload.get("type"), payload.get("node_type"), payload.get("nodeType")).lower()
+    node_id = _resolved_node_id(
+        payload,
+        title=_node_title_from_payload(payload),
+        node_type=node_type,
+        node_index=node_index,
+        allocated_node_ids=allocated_node_ids,
+    )
+    title = _resolved_node_title(payload, fallback=node_id)
     config = payload.get("config") if isinstance(payload.get("config"), dict) else {}
     if payload.get("objective") is not None:
         config = dict(config)
@@ -156,10 +197,10 @@ def _to_node(raw: Any, *, graph_id: str) -> TaskNode | GateNode | GroupNode | Ar
         metadata = dict(metadata)
         metadata["outcomes"] = payload.get("outcomes")
     common_kwargs = {
-        "id": str(payload.get("id") or ""),
+        "id": node_id,
         "title": title,
-        "status": str(payload.get("status") or "dirty"),
-        "graph_id": str(payload.get("graphId") or payload.get("graph_id") or graph_id),
+        "status": _first_non_blank(payload.get("status"), "dirty"),
+        "graph_id": _first_non_blank(payload.get("graphId"), payload.get("graph_id"), graph_id),
         "description": _optional_str(payload.get("description")) or _optional_str(payload.get("objective")),
         "agent_id": _optional_str(payload.get("agentId") or payload.get("agent_id")),
         "prompt_template": _optional_str(payload.get("promptTemplate") or payload.get("prompt_template")),
@@ -170,8 +211,8 @@ def _to_node(raw: Any, *, graph_id: str) -> TaskNode | GateNode | GroupNode | Ar
         "outputs": payload.get("outputs") if isinstance(payload.get("outputs"), dict) else None,
         "execution_policy": _to_execution_policy(payload.get("executionPolicy")),
         "ui_state": _to_ui_state(payload.get("uiState")),
-        "upstream_edge_ids": [str(item) for item in (payload.get("upstreamEdgeIds") or [])],
-        "downstream_edge_ids": [str(item) for item in (payload.get("downstreamEdgeIds") or [])],
+        "upstream_edge_ids": [_normalized_text(item) for item in (payload.get("upstreamEdgeIds") or []) if _normalized_text(item)],
+        "downstream_edge_ids": [_normalized_text(item) for item in (payload.get("downstreamEdgeIds") or []) if _normalized_text(item)],
         "last_run_id": _optional_str(payload.get("lastRunId")),
         "last_succeeded_at": _optional_str(payload.get("lastSucceededAt")),
         "last_failed_at": _optional_str(payload.get("lastFailedAt")),
@@ -193,7 +234,7 @@ def _to_node(raw: Any, *, graph_id: str) -> TaskNode | GateNode | GroupNode | Ar
     if node_type == "ARTIFACT" or canonical_type in {"output", "artifact"}:
         return ArtifactNode(**common_kwargs)
 
-    task_spec = _extract_task_spec(payload, title)
+    task_spec = _extract_task_spec(payload, title, node_id=node_id)
     output_contract = _extract_output_contract(payload)
     execution, execution_config = _extract_execution(payload, canonical_type, common_kwargs["config"])
     policy = _extract_policy(payload)
@@ -226,12 +267,12 @@ def _extract_gate_routes(payload: dict[str, Any]) -> list[GateRoute]:
     return routes
 
 
-def _extract_task_spec(payload: dict[str, Any], title: str) -> TaskSpec:
+def _extract_task_spec(payload: dict[str, Any], title: str, *, node_id: str) -> TaskSpec:
     task_spec_raw = payload.get("taskSpec")
     if isinstance(task_spec_raw, dict):
         return task_spec_from_payload(
             task_spec_raw,
-            node_id=str(payload.get("id") or ""),
+            node_id=node_id,
             task_title=title,
         )
 
@@ -390,14 +431,47 @@ def _extract_policy(payload: dict[str, Any]):
     )
 
 
-def _to_edge(raw: Any, *, graph_id: str) -> GraphEdge:
+def _to_edge(
+    raw: Any,
+    *,
+    graph_id: str,
+    edge_index: int,
+    allocated_edge_ids: set[str],
+    node_ref_aliases: dict[str, str],
+) -> GraphEdge:
     payload = _ensure_dict(raw, name="v3 edge")
     control_raw = payload.get("control") if isinstance(payload.get("control"), dict) else {}
     data_raw = payload.get("data") if isinstance(payload.get("data"), dict) else {}
-    edge_type = str(payload.get("edge_type") or payload.get("type") or "control")
+    edge_type = _first_non_blank(payload.get("edge_type"), payload.get("edgeType"), payload.get("type"), "control")
     mappings = [_to_edge_mapping(item) for item in _list_of_dicts(payload.get("mappings"))]
     if not mappings:
         mappings = [_to_edge_mapping_from_ref(item) for item in _list_of_dicts(data_raw.get("mapping"))]
+    resolved_from_node = _resolve_edge_endpoint(
+        payload.get("from"),
+        payload.get("from_node"),
+        payload.get("fromNode"),
+        payload.get("sourceNodeId"),
+        payload.get("sourceNode"),
+        payload.get("source"),
+        node_ref_aliases=node_ref_aliases,
+    )
+    resolved_to_node = _resolve_edge_endpoint(
+        payload.get("to"),
+        payload.get("to_node"),
+        payload.get("toNode"),
+        payload.get("targetNodeId"),
+        payload.get("targetNode"),
+        payload.get("target"),
+        node_ref_aliases=node_ref_aliases,
+    )
+    edge_id = _resolved_edge_id(
+        payload,
+        edge_type=edge_type,
+        edge_index=edge_index,
+        from_node=resolved_from_node,
+        to_node=resolved_to_node,
+        allocated_edge_ids=allocated_edge_ids,
+    )
     condition = _to_edge_condition(payload.get("condition"))
     if condition is None and control_raw:
         expression = _optional_str(control_raw.get("conditionExpr"))
@@ -416,16 +490,16 @@ def _to_edge(raw: Any, *, graph_id: str) -> GraphEdge:
         metadata = dict(metadata)
         metadata["data"] = data_raw
     return GraphEdge(
-        id=str(payload.get("id") or ""),
-        from_node=str(payload.get("from") or payload.get("from_node") or payload.get("sourceNodeId") or ""),
-        to_node=str(payload.get("to") or payload.get("to_node") or payload.get("targetNodeId") or ""),
+        id=edge_id,
+        from_node=resolved_from_node,
+        to_node=resolved_to_node,
         edge_type=str(edge_type),
-        kind=str(payload.get("kind") or payload.get("controlKind") or payload.get("dataKind") or payload.get("name") or payload.get("label") or ""),
-        graph_id=str(payload.get("graphId") or payload.get("graph_id") or graph_id),
+        kind=_first_non_blank(payload.get("kind"), payload.get("controlKind"), payload.get("dataKind"), payload.get("name"), payload.get("label")),
+        graph_id=_first_non_blank(payload.get("graphId"), payload.get("graph_id"), graph_id),
         label=_optional_str(payload.get("label")),
-        status=str(payload.get("status") or "active"),
-        source_port_key=_optional_str(payload.get("sourcePortKey")),
-        target_port_key=_optional_str(payload.get("targetPortKey")) or _infer_target_port_key(mappings),
+        status=_first_non_blank(payload.get("status"), "active"),
+        source_port_key=_first_non_blank(payload.get("sourcePortKey"), payload.get("sourcePort"), payload.get("fromPort")),
+        target_port_key=_first_non_blank(payload.get("targetPortKey"), payload.get("targetPort"), payload.get("toPort")) or _infer_target_port_key(mappings),
         condition=condition,
         mappings=mappings,
         priority=_to_optional_int(payload.get("priority")),
@@ -544,9 +618,9 @@ def _to_runtime_capabilities(raw: Any) -> RuntimeCapabilities:
 
 def _to_node_port(raw: dict[str, Any]) -> NodePort:
     return NodePort(
-        key=str(raw.get("key") or raw.get("name") or ""),
-        label=str(raw.get("label") or raw.get("key") or raw.get("name") or ""),
-        data_type=str(raw.get("dataType") or raw.get("typeRef") or "any"),
+        key=_first_non_blank(raw.get("key"), raw.get("portKey"), raw.get("name")),
+        label=_first_non_blank(raw.get("label"), raw.get("key"), raw.get("portKey"), raw.get("name")),
+        data_type=_first_non_blank(raw.get("dataType"), raw.get("typeRef"), raw.get("type"), "any"),
         required=bool(raw.get("required", False)),
         multi=bool(raw.get("multi", False)),
     )
@@ -555,14 +629,14 @@ def _to_node_port(raw: dict[str, Any]) -> NodePort:
 def _to_node_input_binding(raw: dict[str, Any]) -> NodeInputBindingV3:
     source_raw = raw.get("source") if isinstance(raw.get("source"), dict) else {}
     return NodeInputBindingV3(
-        port_key=str(raw.get("portKey") or raw.get("key") or ""),
+        port_key=_first_non_blank(raw.get("portKey"), raw.get("targetPortKey"), raw.get("key"), raw.get("port")),
         source=NodeInputSource(
-            type=str(source_raw.get("type") or ""),
-            value=source_raw.get("value"),
-            edge_id=_optional_str(source_raw.get("edgeId")),
-            key=_optional_str(source_raw.get("key")),
-            node_id=_optional_str(source_raw.get("nodeId")),
-            path=_optional_str(source_raw.get("path")),
+            type=_first_non_blank(source_raw.get("type"), raw.get("sourceType")),
+            value=source_raw.get("value") if "value" in source_raw else raw.get("value"),
+            edge_id=_first_non_blank(source_raw.get("edgeId"), raw.get("edgeId")),
+            key=_first_non_blank(source_raw.get("key"), raw.get("sourceKey"), raw.get("var")),
+            node_id=_first_non_blank(source_raw.get("nodeId"), source_raw.get("fromNode"), raw.get("nodeId"), raw.get("fromNode"), raw.get("from_node")),
+            path=_first_non_blank(source_raw.get("path"), raw.get("path"), raw.get("sourcePort"), raw.get("port")),
         ),
     )
 
@@ -621,14 +695,15 @@ def _to_node_error(raw: Any) -> NodeError | None:
 def _to_edge_condition(raw: Any) -> EdgeCondition | None:
     if not isinstance(raw, dict):
         return None
-    return EdgeCondition(type=str(raw.get("type") or "always"), expression=_optional_str(raw.get("expression")))
+    return EdgeCondition(type=_first_non_blank(raw.get("type"), "always"), expression=_optional_str(raw.get("expression")))
 
 
 def _to_edge_mapping(raw: dict[str, Any]) -> EdgeDataMapping:
+    target_ref = _first_non_blank(raw.get("toRef"), raw.get("targetRef"), raw.get("to"))
     return EdgeDataMapping(
-        source_path=_optional_str(raw.get("sourcePath")),
-        target_port_key=str(raw.get("targetPortKey") or ""),
-        transform_expr=_optional_str(raw.get("transformExpr")),
+        source_path=_first_non_blank(raw.get("sourcePath"), raw.get("fromPath"), raw.get("source"), raw.get("from")),
+        target_port_key=_first_non_blank(raw.get("targetPortKey"), raw.get("targetPort"), raw.get("portKey"), raw.get("key")) or _ref_to_target_port_key(target_ref),
+        transform_expr=_first_non_blank(raw.get("transformExpr"), raw.get("transform")),
         required=bool(raw["required"]) if "required" in raw else None,
     )
 
@@ -678,7 +753,78 @@ def _execution_from_canonical_type(canonical_type: str, config: dict[str, Any]) 
 
 
 def _node_title_from_payload(payload: dict[str, Any]) -> str:
-    return str(payload.get("title") or payload.get("name") or payload.get("objective") or payload.get("id") or "")
+    return _first_non_blank(payload.get("title"), payload.get("name"), payload.get("objective"), payload.get("id"))
+
+
+def _resolved_node_title(payload: dict[str, Any], *, fallback: str) -> str:
+    return _first_non_blank(payload.get("title"), payload.get("name"), payload.get("objective"), payload.get("id"), fallback)
+
+
+def _resolved_node_id(
+    payload: dict[str, Any],
+    *,
+    title: str,
+    node_type: str,
+    node_index: int,
+    allocated_node_ids: set[str],
+) -> str:
+    explicit_id = _first_non_blank(payload.get("id"), payload.get("nodeId"))
+    fallback_base = explicit_id or _first_non_blank(title, _fallback_node_id_base(node_type=node_type, node_index=node_index))
+    candidate = fallback_base
+    suffix = 2
+    while not candidate.strip() or candidate in allocated_node_ids:
+        candidate = f"{fallback_base}_{suffix}"
+        suffix += 1
+    allocated_node_ids.add(candidate)
+    return candidate
+
+
+def _fallback_node_id_base(*, node_type: str, node_index: int) -> str:
+    normalized_type = node_type.strip().lower()
+    if normalized_type not in {"task", "group", "gate", "artifact"}:
+        normalized_type = "task"
+    return f"{normalized_type}_{node_index + 1}"
+
+
+def _node_reference_candidates(payload: dict[str, Any], node: TaskNode | GateNode | GroupNode | ArtifactNode) -> set[str]:
+    candidates = {
+        _first_non_blank(payload.get("id")),
+        _first_non_blank(payload.get("nodeId")),
+        _first_non_blank(payload.get("title")),
+        _first_non_blank(payload.get("name")),
+        _first_non_blank(payload.get("objective")),
+        _first_non_blank(node.id),
+        _first_non_blank(node.title),
+    }
+    return {candidate for candidate in candidates if candidate}
+
+
+def _resolve_edge_endpoint(*values: Any, node_ref_aliases: dict[str, str]) -> str:
+    ref = _first_non_blank(*values)
+    return node_ref_aliases.get(ref, ref)
+
+
+def _resolved_edge_id(
+    payload: dict[str, Any],
+    *,
+    edge_type: str,
+    edge_index: int,
+    from_node: str,
+    to_node: str,
+    allocated_edge_ids: set[str],
+) -> str:
+    explicit_id = _first_non_blank(payload.get("id"), payload.get("edgeId"))
+    fallback_base = explicit_id or _first_non_blank(
+        f"{from_node}->{to_node}:{edge_type.lower()}" if from_node and to_node else "",
+        f"edge_{edge_index + 1}",
+    )
+    candidate = fallback_base
+    suffix = 2
+    while not candidate or candidate in allocated_edge_ids:
+        candidate = f"{fallback_base}_{suffix}"
+        suffix += 1
+    allocated_edge_ids.add(candidate)
+    return candidate
 
 
 def _extract_execution(payload: dict[str, Any], canonical_type: str, config: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
@@ -780,10 +926,22 @@ def _to_optional_float(value: Any) -> float | None:
 
 
 def _optional_str(value: Any) -> str | None:
+    text = _normalized_text(value)
+    return text or None
+
+
+def _normalized_text(value: Any) -> str:
     if value is None:
-        return None
-    text = str(value)
-    return text if text != "" else None
+        return ""
+    return str(value).strip()
+
+
+def _first_non_blank(*values: Any) -> str:
+    for value in values:
+        text = _normalized_text(value)
+        if text:
+            return text
+    return ""
 
 
 def _ensure_dict(value: Any, *, name: str) -> dict[str, Any]:

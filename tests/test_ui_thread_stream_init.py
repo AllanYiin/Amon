@@ -13,6 +13,7 @@ from urllib.parse import quote
 from unittest.mock import patch
 
 from amon.core import AmonCore
+from amon.models import encode_stream_event
 from amon.ui_server import AmonUIHandler
 from http.server import ThreadingHTTPServer
 
@@ -231,6 +232,186 @@ class UIChatStreamInitTests(unittest.TestCase):
                     done = _read_done_payload(sse_resp)
                     self.assertIsNotNone(done)
                     self.assertEqual(done.get("final_text"), "（本輪未產生文字回覆）")
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
+    def test_stream_relays_runtime_node_chunk_as_token_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = str(Path(temp_dir) / "data")
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("stream-node-chunk")
+
+                handler = partial(
+                    AmonUIHandler,
+                    directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"),
+                    core=core,
+                )
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                threading.Thread(target=server.serve_forever, daemon=True).start()
+
+                def fake_run_graph_stream(
+                    prompt,
+                    project_path,
+                    project_id=None,
+                    model=None,
+                    llm_client=None,
+                    available_tools=None,
+                    available_skills=None,
+                    stream_handler=None,
+                    todo_handler=None,
+                    run_id=None,
+                    thread_id=None,
+                    conversation_history=None,
+                    request_id=None,
+                ):
+                    if stream_handler:
+                        stream_handler(
+                            encode_stream_event(
+                                "node.chunk",
+                                {
+                                    "node_id": "writer",
+                                    "chunk_index": 0,
+                                    "text": "第一段輸出",
+                                },
+                            )
+                        )
+                    return SimpleNamespace(run_id="run-node-chunk", execution_route="planner", planner_enabled=True), ""
+
+                conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                conn.request(
+                    "POST",
+                    "/v1/threads/stream/init",
+                    body=json.dumps({"project_id": project.project_id, "message": "請回覆"}),
+                    headers={"Content-Type": "application/json"},
+                )
+                resp = conn.getresponse()
+                self.assertEqual(resp.status, 201)
+                token_payload = json.loads(resp.read().decode("utf-8"))
+                stream_token = token_payload["stream_token"]
+
+                with patch("amon.ui_server.decide_execution_mode", return_value="single"), patch.object(
+                    core,
+                    "run_graph_stream",
+                    side_effect=fake_run_graph_stream,
+                ):
+                    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                    conn.request(
+                        "GET",
+                        f"/v1/threads/stream?project_id={quote(project.project_id)}&stream_token={quote(stream_token)}",
+                    )
+                    sse_resp = conn.getresponse()
+                    self.assertEqual(sse_resp.status, 200)
+                    events = _read_sse_events(sse_resp)
+
+                token_events = [payload for event_type, payload in events if event_type == "token"]
+                self.assertEqual([payload.get("text") for payload in token_events], ["第一段輸出"])
+                done_events = [payload for event_type, payload in events if event_type == "done"]
+                self.assertTrue(done_events)
+                self.assertNotIn("final_text", done_events[-1])
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
+    def test_stream_relays_runtime_node_status_when_graph_has_no_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = str(Path(temp_dir) / "data")
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("stream-node-status")
+
+                handler = partial(
+                    AmonUIHandler,
+                    directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"),
+                    core=core,
+                )
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                threading.Thread(target=server.serve_forever, daemon=True).start()
+
+                def fake_run_graph_stream(
+                    prompt,
+                    project_path,
+                    project_id=None,
+                    model=None,
+                    llm_client=None,
+                    available_tools=None,
+                    available_skills=None,
+                    stream_handler=None,
+                    todo_handler=None,
+                    run_id=None,
+                    thread_id=None,
+                    conversation_history=None,
+                    request_id=None,
+                ):
+                    if stream_handler:
+                        stream_handler(
+                            encode_stream_event(
+                                "node_status",
+                                {
+                                    "node_id": "writer",
+                                    "node_title": "撰寫初稿",
+                                    "status": "running",
+                                },
+                            )
+                        )
+                        stream_handler(
+                            encode_stream_event(
+                                "node_status",
+                                {
+                                    "node_id": "writer",
+                                    "node_title": "撰寫初稿",
+                                    "status": "succeeded",
+                                    "latency_ms": 1200,
+                                },
+                            )
+                        )
+                    return (
+                        SimpleNamespace(run_id="run-node-status", execution_route="planner", planner_enabled=True),
+                        "已完成規劃與節點執行，共成功 1 / 1 個節點。本輪未產生可直接顯示的文字輸出，請查看 artifacts 或執行紀錄。",
+                    )
+
+                conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                conn.request(
+                    "POST",
+                    "/v1/threads/stream/init",
+                    body=json.dumps({"project_id": project.project_id, "message": "請回覆"}),
+                    headers={"Content-Type": "application/json"},
+                )
+                resp = conn.getresponse()
+                self.assertEqual(resp.status, 201)
+                token_payload = json.loads(resp.read().decode("utf-8"))
+                stream_token = token_payload["stream_token"]
+
+                with patch("amon.ui_server.decide_execution_mode", return_value="single"), patch.object(
+                    core,
+                    "run_graph_stream",
+                    side_effect=fake_run_graph_stream,
+                ):
+                    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                    conn.request(
+                        "GET",
+                        f"/v1/threads/stream?project_id={quote(project.project_id)}&stream_token={quote(stream_token)}",
+                    )
+                    sse_resp = conn.getresponse()
+                    self.assertEqual(sse_resp.status, 200)
+                    events = _read_sse_events(sse_resp)
+
+                node_events = [payload for event_type, payload in events if event_type == "node.update"]
+                self.assertEqual([payload.get("status") for payload in node_events], ["running", "succeeded"])
+                done_events = [payload for event_type, payload in events if event_type == "done"]
+                self.assertTrue(done_events)
+                self.assertIn("已完成規劃與節點執行", done_events[-1].get("final_text", ""))
             finally:
                 if server:
                     server.shutdown()

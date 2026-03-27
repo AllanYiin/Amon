@@ -407,6 +407,18 @@ export const CHAT_VIEW = {
                 }
                 return;
               }
+              if (eventType === "node.update") {
+                const nodeTitle = String(data.node_title || data.nodeTitle || data.node_id || data.nodeId || "").trim() || "unknown-node";
+                const status = String(data.status || "").trim().toLowerCase();
+                const statusText = status === "succeeded"
+                  ? `節點完成：${nodeTitle}`
+                  : status === "failed"
+                    ? `節點失敗：${nodeTitle}`
+                    : `正在執行節點：${nodeTitle}`;
+                messageRenderer.appendTimelineStatus(statusText);
+                ctx.chatDeps.updateThinking({ status: "node", brief: statusText });
+                return;
+              }
               if (eventType === "warning") {
                 const warningKind = String(data.kind || "").toLowerCase();
                 if (warningKind.includes("timeout")) {

@@ -172,6 +172,135 @@ class TaskGraph3SerializeTests(unittest.TestCase):
         task_node = next(node for node in graph.nodes if isinstance(node, TaskNode))
         self.assertEqual(task_node.task_spec.agent.prompt, "完成「概念對齊」")
 
+    def test_validate_normalizes_empty_node_id_from_title(self) -> None:
+        payload = {
+            "version": "taskgraph.v3",
+            "nodes": [
+                {
+                    "id": "",
+                    "node_type": "TASK",
+                    "title": "概念對齊",
+                    "taskSpec": {
+                        "executor": "tool",
+                        "tool": {"tools": [{"name": "web.search", "args": {}}]},
+                        "display": {"label": "概念對齊"},
+                        "runnable": True,
+                    },
+                },
+                {
+                    "id": "",
+                    "node_type": "TASK",
+                    "title": "概念對齊",
+                    "taskSpec": {
+                        "executor": "agent",
+                        "agent": {"prompt": "完成"},
+                        "display": {"label": "概念對齊"},
+                        "runnable": True,
+                    },
+                },
+            ],
+            "edges": [],
+        }
+
+        validate_v3_graph_json(payload)
+        graph = graph_definition_from_payload(payload)
+
+        self.assertEqual([node.id for node in graph.nodes if isinstance(node, TaskNode)], ["概念對齊", "概念對齊_2"])
+
+    def test_validate_normalizes_duplicate_ids_blank_titles_and_blank_edge_ids(self) -> None:
+        payload = {
+            "version": "taskgraph.v3",
+            "nodes": [
+                {
+                    "id": "task_dup",
+                    "node_type": "TASK",
+                    "title": " ",
+                    "objective": "整理概念",
+                    "taskSpec": {
+                        "executor": "agent",
+                        "agent": {"prompt": "完成"},
+                        "display": {"label": ""},
+                        "runnable": True,
+                    },
+                },
+                {
+                    "id": "task_dup",
+                    "node_type": "TASK",
+                    "title": "需求整理",
+                    "taskSpec": {
+                        "executor": "agent",
+                        "agent": {"prompt": "完成"},
+                        "display": {"label": "需求整理"},
+                        "runnable": True,
+                    },
+                },
+            ],
+            "edges": [
+                {"id": " ", "type": "CONTROL", "from": "task_dup", "to": "task_dup_2", "kind": "DEPENDS_ON"},
+                {"id": " ", "type": "CONTROL", "from": "task_dup", "to": "task_dup_2", "kind": "DEPENDS_ON"},
+            ],
+        }
+
+        validate_v3_graph_json(payload)
+        graph = graph_definition_from_payload(payload)
+
+        task_nodes = [node for node in graph.nodes if isinstance(node, TaskNode)]
+        self.assertEqual([node.id for node in task_nodes], ["task_dup", "task_dup_2"])
+        self.assertEqual(task_nodes[0].title, "整理概念")
+        self.assertEqual([edge.id for edge in graph.edges], ["task_dup->task_dup_2:control", "task_dup->task_dup_2:control_2"])
+
+    def test_validate_normalizes_task_spec_alias_keys_and_whitespace(self) -> None:
+        payload = {
+            "version": "taskgraph.v3",
+            "nodes": [
+                {
+                    "id": "task_tool",
+                    "node_type": "TASK",
+                    "title": "工具查詢",
+                    "taskSpec": {
+                        "executor": "tool",
+                        "tool": {
+                            "tools": [
+                                {
+                                    "toolId": " web.search ",
+                                    "arguments": {"query": "Amon"},
+                                    "when_to_use": " 需要查證 ",
+                                }
+                            ],
+                            "skillNames": [" concept-alignment "],
+                        },
+                        "input_bindings": [
+                            {
+                                "bindingSource": "upstream",
+                                "targetPortKey": " subject ",
+                                "from_node": " research ",
+                                "sourcePort": " final_text ",
+                            }
+                        ],
+                        "artifacts": [{"artifactId": " summary.md ", "media_type": " text/markdown "}],
+                        "display": {"label": "  ", "todo_hint": " 先查證 "},
+                        "runnable": True,
+                    },
+                }
+            ],
+            "edges": [],
+        }
+
+        validate_v3_graph_json(payload)
+        graph = graph_definition_from_payload(payload)
+        task_node = next(node for node in graph.nodes if isinstance(node, TaskNode))
+
+        self.assertEqual(task_node.task_spec.tool.tools[0].name, "web.search")
+        self.assertEqual(task_node.task_spec.tool.tools[0].args, {"query": "Amon"})
+        self.assertEqual(task_node.task_spec.tool.tools[0].when_to_use, "需要查證")
+        self.assertEqual(task_node.task_spec.tool.skills, ["concept-alignment"])
+        self.assertEqual(task_node.task_spec.input_bindings[0].key, "subject")
+        self.assertEqual(task_node.task_spec.input_bindings[0].from_node, "research")
+        self.assertEqual(task_node.task_spec.input_bindings[0].port, "final_text")
+        self.assertEqual(task_node.task_spec.artifacts[0].name, "summary.md")
+        self.assertEqual(task_node.task_spec.display.todo_hint, "先查證")
+        self.assertEqual(task_node.task_spec.display.label, "工具查詢")
+
     def test_validate_marks_empty_sandbox_command_non_runnable(self) -> None:
         payload = {
             "version": "taskgraph.v3",

@@ -293,6 +293,42 @@ class CoreStreamHandlerTests(unittest.TestCase):
             finally:
                 os.environ.pop("AMON_HOME", None)
 
+    def test_run_graph_stream_returns_execution_summary_when_graph_has_no_text_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["AMON_HOME"] = temp_dir
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("plan-exec-empty-output")
+                project_path = Path(project.path)
+                fake_result = SimpleNamespace(
+                    run_id="run-plan",
+                    run_dir=project_path / ".amon" / "runs" / "run-plan",
+                    state={
+                        "metrics": {
+                            "counters": {
+                                "nodes_total": 2,
+                                "nodes_succeeded": 2,
+                                "nodes_failed": 0,
+                            }
+                        }
+                    },
+                )
+
+                with patch.object(core, "generate_plan_docs", return_value=self._fake_v3_plan()), patch.object(
+                    core, "run_graph", return_value=fake_result
+                ), patch.object(core, "_load_graph_primary_output", return_value=""):
+                    _result, response = core.run_graph_stream(
+                        "請完成任務",
+                        project_path=project_path,
+                        project_id=project.project_id,
+                    )
+
+                self.assertIn("已完成規劃與節點執行", response)
+                self.assertIn("成功 2 / 2", response)
+            finally:
+                os.environ.pop("AMON_HOME", None)
+
     def test_run_graph_stream_forwards_conversation_history_to_runtime_variables(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             os.environ["AMON_HOME"] = temp_dir

@@ -2669,6 +2669,41 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         runtime_payload.setdefault("project_id", project_id)
                         runtime_payload.setdefault("thread_id", thread_id)
                         runtime_payload.setdefault("run_id", active_run_id or None)
+                        if event_name == "node.chunk":
+                            chunk_text = runtime_payload.get("text")
+                            if isinstance(chunk_text, str) and chunk_text:
+                                streamed_token_count += 1
+                                streamed_text_buffer.append(chunk_text)
+                                send_event("token", {"text": chunk_text}, run_id=active_run_id)
+                                append_event(
+                                    thread_id,
+                                    {
+                                        "type": "assistant_chunk",
+                                        "text": chunk_text,
+                                        "project_id": project_id,
+                                        "run_id": active_run_id or None,
+                                        "node_id": runtime_payload.get("node_id"),
+                                        "chunk_index": runtime_payload.get("chunk_index"),
+                                    },
+                                )
+                            return
+                        if event_name == "node_status":
+                            send_event("node.update", runtime_payload, run_id=active_run_id)
+                            append_event(
+                                thread_id,
+                                {
+                                    "type": "node_status",
+                                    "text": str(runtime_payload.get("node_title") or runtime_payload.get("node_id") or "").strip(),
+                                    "project_id": project_id,
+                                    "run_id": active_run_id or None,
+                                    "node_id": runtime_payload.get("node_id"),
+                                    "node_title": runtime_payload.get("node_title"),
+                                    "status": runtime_payload.get("status"),
+                                    "latency_ms": runtime_payload.get("latency_ms"),
+                                    "error": runtime_payload.get("error"),
+                                },
+                            )
+                            return
                         if event_name == "skill":
                             skill_name = str(runtime_payload.get("name") or "").strip()
                             if skill_name:
@@ -2705,6 +2740,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                                     },
                                 )
                             return
+                        return
                     is_reasoning, reasoning_text = decode_reasoning_chunk(token)
                     if is_reasoning:
                         if not isinstance(reasoning_text, str) or reasoning_text == "":
