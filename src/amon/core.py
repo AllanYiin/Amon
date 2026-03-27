@@ -2965,6 +2965,9 @@ class AmonCore:
                 "lease_expires_at": control.get("lease_expires_at") if isinstance(control, dict) else None,
                 "last_progress_at": control.get("last_progress_at") if isinstance(control, dict) else None,
                 "failure_class": control.get("failure_class") if isinstance(control, dict) else None,
+                "terminal_reason": control.get("terminal_reason") if isinstance(control, dict) else None,
+                "next_wake_at": control.get("next_wake_at") if isinstance(control, dict) else None,
+                "no_progress_deadline": control.get("no_progress_deadline") if isinstance(control, dict) else None,
             }
         try:
             payload = json.loads(state_path.read_text(encoding="utf-8"))
@@ -2984,6 +2987,9 @@ class AmonCore:
                 payload["last_progress_at"] = control.get("last_progress_at")
                 payload["failure_class"] = control.get("failure_class")
                 payload["request_id"] = control.get("request_id")
+                payload["terminal_reason"] = control.get("terminal_reason")
+                payload["next_wake_at"] = control.get("next_wake_at")
+                payload["no_progress_deadline"] = control.get("no_progress_deadline")
         return payload
 
     def get_job_status(self, job_id: str) -> dict[str, Any]:

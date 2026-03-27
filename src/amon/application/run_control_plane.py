@@ -14,15 +14,21 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from amon.domain import RunRecord
+from amon.fs.atomic import append_jsonl
 from amon.storage import RunRepository
 from amon.storage.common import write_json
 from amon.taskgraph3.runtime import TaskGraph3RunResult
+from amon.taskgraph3.serialize import dumps_graph_definition
+from amon.taskgraph3.validate import graph_definition_from_payload
 
 
 CONTROL_METADATA_KEY = "control"
+CONTROL_ATTEMPTS_FILE = "control.attempts.jsonl"
 TERMINAL_RUN_STATUSES = {"succeeded", "failed", "failed_terminal", "cancelled", "rolled_back", "archived", "abandoned"}
-ACTIVE_RUN_STATUSES = {"dispatching", "running", "repairing", "replanning"}
+ACTIVE_RUN_STATUSES = {"dispatching", "running"}
+REMEDIATE_RUN_STATUSES = {"repairing", "replanning"}
 WAKEABLE_RUN_STATUSES = {"queued", "retry_wait"}
+WAITING_RUN_STATUSES = {"waiting_confirmation", "waiting_external"}
 TRANSIENT_ERROR_TOKENS = (
     "timeout",
     "temporarily",
@@ -34,6 +40,44 @@ TRANSIENT_ERROR_TOKENS = (
     "busy",
     "rate limit",
     "too many requests",
+)
+WAITING_EXTERNAL_ERROR_TOKENS = (
+    "waiting_external",
+    "waiting external",
+    "waiting_confirmation",
+    "waiting confirmation",
+    "requires approval",
+    "need approval",
+    "pending confirmation",
+    "awaiting user input",
+    "missing required input",
+    "awaiting webhook",
+)
+REPAIRABLE_ERROR_TOKENS = (
+    "graph 驗證失敗",
+    "task.task_spec",
+    "taskspec",
+    "input_bindings",
+    "input binding",
+    "non_runnable_reason",
+    "unsupported node payload",
+    "不合法",
+    "缺失",
+)
+REPLAN_ERROR_TOKENS = (
+    "unsupported graph format",
+    "group execution is not supported yet",
+    "not supported yet",
+    "cycle",
+    "cyclic",
+    "cannot converge",
+)
+NO_PROGRESS_ERROR_TOKENS = (
+    "no progress",
+    "deadlock",
+    "stalled",
+    "stuck",
+    "infinite loop",
 )
 
 
@@ -103,6 +147,8 @@ class RunControlPlane:
         heartbeat_interval_seconds: int = 5,
         reconcile_interval_seconds: float = 1.0,
         max_workers: int = 2,
+        retry_cooldown_seconds: int = 5,
+        no_progress_timeout_seconds: int = 180,
     ) -> None:
         self.core = core
         self.worker_id = str(worker_id or f"worker-{uuid.uuid4().hex}")
@@ -110,6 +156,8 @@ class RunControlPlane:
         self.heartbeat_interval_seconds = max(1, heartbeat_interval_seconds)
         self.reconcile_interval_seconds = max(0.2, float(reconcile_interval_seconds))
         self.max_workers = max(1, int(max_workers))
+        self.retry_cooldown_seconds = max(1, int(retry_cooldown_seconds))
+        self.no_progress_timeout_seconds = max(5, int(no_progress_timeout_seconds))
         self._lock = threading.Lock()
         self._wake_event = threading.Event()
         self._stop_event = threading.Event()
@@ -185,6 +233,7 @@ class RunControlPlane:
             existing=get_run_control(run),
             request_id=selected_request_id,
             graph_path=compiled_graph_path,
+            source_graph_path=resolved_graph_path,
         )
         run.mark_status("queued")
         run.update_metadata(metadata=self._merge_run_metadata(run, variables=variables, control=control))
@@ -238,6 +287,10 @@ class RunControlPlane:
         payload["run_status"] = run.status
         if control.get("failure_class"):
             payload["failure_class"] = control.get("failure_class")
+        if control.get("terminal_reason"):
+            payload["terminal_reason"] = control.get("terminal_reason")
+        if control.get("next_wake_at"):
+            payload["next_wake_at"] = control.get("next_wake_at")
         return payload
 
     def reconcile_once(self) -> None:
@@ -250,7 +303,6 @@ class RunControlPlane:
             try:
                 self.reconcile_once()
             except Exception:  # noqa: BLE001
-                # The caller owns logging policy; keep the loop alive.
                 pass
             self._wake_event.wait(self.reconcile_interval_seconds)
             self._wake_event.clear()
@@ -268,31 +320,70 @@ class RunControlPlane:
             desired_status = str(control.get("desired_status") or "active").strip().lower()
             if desired_status == "cancelled":
                 if run.status != "cancelled":
-                    run.mark_status("cancelled")
-                    control["terminal_reason"] = control.get("terminal_reason") or "cancel requested"
-                    control["request_status"] = "canceled"
+                    self._mark_cancelled(run=run, repo=repo, control=control)
+                continue
+
+            state = self._load_run_state(project_path, run.id)
+            pending_confirmations = repo.load_pending_confirmations(run.id)
+            wait_status = self._detect_wait_status(state=state, pending_confirmations=pending_confirmations)
+
+            if run.status == "waiting_confirmation":
+                if wait_status != "waiting_confirmation":
+                    self._transition_to_queued(run=run, repo=repo, control=control, attempt_type="execute")
+                continue
+
+            if run.status == "waiting_external":
+                if wait_status is None and self._wake_due(control):
+                    self._transition_to_queued(run=run, repo=repo, control=control, attempt_type="execute")
+                continue
+
+            if run.status == "retry_wait":
+                if self._wake_due(control):
+                    self._transition_to_queued(run=run, repo=repo, control=control, attempt_type="retry")
+                continue
+
+            if run.status == "repairing":
+                self._process_repair(project_path=project_path, repo=repo, run=run, control=control)
+                continue
+
+            if run.status == "replanning":
+                self._process_replan(project_path=project_path, repo=repo, run=run, control=control)
+                continue
+
+            if run.status in ACTIVE_RUN_STATUSES:
+                if wait_status == "waiting_confirmation":
+                    run.mark_status("waiting_confirmation")
+                    control["request_status"] = "pending"
                     self._clear_lease(control)
                     set_run_control(run, control)
                     repo.save(run)
-                continue
-
-            if run.status == "waiting_confirmation":
-                if not repo.load_pending_confirmations(run.id):
-                    run.mark_status("queued")
-                    control["next_wake_at"] = _utc_now_iso()
-                    control["request_status"] = "queued"
+                    continue
+                if wait_status == "waiting_external":
+                    run.mark_status("waiting_external")
+                    control["request_status"] = "pending"
+                    control["next_wake_at"] = (_utc_now() + timedelta(seconds=self.retry_cooldown_seconds)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+                    self._clear_lease(control)
                     set_run_control(run, control)
                     repo.save(run)
-                continue
-
-            if run.status in ACTIVE_RUN_STATUSES and self._lease_expired(control) and not self._is_local_worker_alive(run.id):
-                run.mark_status("queued")
-                control["failure_class"] = control.get("failure_class") or "lease_expired"
-                control["next_wake_at"] = _utc_now_iso()
-                control["request_status"] = "queued"
-                self._clear_lease(control)
-                set_run_control(run, control)
-                repo.save(run)
+                    continue
+                if self._lease_expired(control) and not self._is_local_worker_alive(run.id):
+                    run.mark_status("queued")
+                    control["failure_class"] = "deadlock_or_no_progress"
+                    control["last_error"] = control.get("last_error") or "worker lease expired without completion"
+                    control["request_status"] = "queued"
+                    control["next_wake_at"] = _utc_now_iso()
+                    self._clear_lease(control)
+                    set_run_control(run, control)
+                    repo.save(run)
+                    continue
+                if self._no_progress_deadline_exceeded(control) and not self._is_local_worker_alive(run.id):
+                    self._apply_failure_transition(
+                        run=run,
+                        repo=repo,
+                        control=control,
+                        error_text="no progress deadline exceeded",
+                        failure_class="deadlock_or_no_progress",
+                    )
                 continue
 
             if run.status not in WAKEABLE_RUN_STATUSES:
@@ -324,6 +415,13 @@ class RunControlPlane:
         graph_path = Path(str(control.get("graph_path") or ""))
         variables = dict(run.metadata.get("variables") or {}) if isinstance(run.metadata, dict) else {}
         request_id = str(control.get("request_id") or "").strip() or None
+        attempt_type = str(control.get("scheduled_attempt_type") or "execute").strip() or "execute"
+        attempt_started_at = _utc_now_iso()
+
+        run.mark_status("running")
+        self._refresh_no_progress_deadline(control)
+        set_run_control(run, control)
+        repo.save(run)
 
         heartbeat_stop = threading.Event()
         heartbeat_thread = threading.Thread(
@@ -347,8 +445,33 @@ class RunControlPlane:
                 stream_handler=_record_progress,
             )
             self._finalize_success(project_path=project_path, run_id=run_id, result=result)
+            final_run = repo.get(run_id)
+            final_control = get_run_control(final_run)
+            self._append_attempt_record(
+                project_path=project_path,
+                run_id=run_id,
+                attempt_type=attempt_type,
+                started_at=attempt_started_at,
+                finished_at=_utc_now_iso(),
+                result="succeeded" if final_run.status == "succeeded" else "aborted",
+                error_class=str(final_control.get("failure_class") or "") or None,
+                notes={"status": final_run.status},
+            )
         except Exception as exc:  # noqa: BLE001
             self._finalize_failure(project_path=project_path, run_id=run_id, error_text=str(exc))
+            final_run = repo.get(run_id)
+            final_control = get_run_control(final_run)
+            attempt_result = "failed" if final_run.status == "failed_terminal" else "aborted"
+            self._append_attempt_record(
+                project_path=project_path,
+                run_id=run_id,
+                attempt_type=attempt_type,
+                started_at=attempt_started_at,
+                finished_at=_utc_now_iso(),
+                result=attempt_result,
+                error_class=str(final_control.get("failure_class") or "") or None,
+                notes={"status": final_run.status, "error": str(exc)},
+            )
         finally:
             heartbeat_stop.set()
             heartbeat_thread.join(timeout=2)
@@ -360,10 +483,19 @@ class RunControlPlane:
         repo = RunRepository(project_path)
         run = repo.get(run_id)
         control = get_run_control(run)
-        pending_confirmations = repo.load_pending_confirmations(run_id)
-        if pending_confirmations or self._state_waiting_confirmation(result.state):
+        wait_status = self._detect_wait_status(
+            state=result.state if isinstance(result.state, dict) else {},
+            pending_confirmations=repo.load_pending_confirmations(run_id),
+        )
+        if wait_status == "waiting_confirmation":
             run.mark_status("waiting_confirmation")
             control["request_status"] = "pending"
+            control["terminal_reason"] = None
+        elif wait_status == "waiting_external":
+            run.mark_status("waiting_external")
+            control["request_status"] = "pending"
+            control["terminal_reason"] = None
+            control["next_wake_at"] = (_utc_now() + timedelta(seconds=self.retry_cooldown_seconds)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         elif str(control.get("desired_status") or "").strip().lower() == "cancelled":
             run.mark_status("cancelled")
             control["request_status"] = "canceled"
@@ -372,11 +504,12 @@ class RunControlPlane:
             control["request_status"] = "completed"
             control["terminal_reason"] = None
             control["failure_class"] = None
+            control["last_error"] = None
         else:
             error_text = self._extract_failure_text(result.state)
             self._apply_failure_transition(run=run, repo=repo, control=control, error_text=error_text)
             return
-        control["last_progress_at"] = _utc_now_iso()
+        self._refresh_no_progress_deadline(control)
         self._clear_lease(control)
         set_run_control(run, control)
         repo.save(run)
@@ -387,27 +520,144 @@ class RunControlPlane:
         control = get_run_control(run)
         self._apply_failure_transition(run=run, repo=repo, control=control, error_text=error_text)
 
-    def _apply_failure_transition(self, *, run: RunRecord, repo: RunRepository, control: dict[str, Any], error_text: str) -> None:
+    def _apply_failure_transition(
+        self,
+        *,
+        run: RunRecord,
+        repo: RunRepository,
+        control: dict[str, Any],
+        error_text: str,
+        failure_class: str | None = None,
+    ) -> None:
         normalized_error = str(error_text or "").strip() or "unknown run failure"
-        failure_class = self._classify_failure(normalized_error)
-        control["failure_class"] = failure_class
+        resolved_failure_class = failure_class or self._classify_failure(normalized_error)
+        control["failure_class"] = resolved_failure_class
         control["last_error"] = normalized_error
-        control["last_progress_at"] = _utc_now_iso()
-        if failure_class == "transient" and int(control.get("retry_budget") or 0) > 0:
-            control["retry_budget"] = int(control.get("retry_budget") or 0) - 1
-            control["next_wake_at"] = (_utc_now() + timedelta(seconds=5)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        self._refresh_no_progress_deadline(control)
+        self._clear_lease(control)
+
+        if resolved_failure_class == "waiting_external":
+            run.mark_status("waiting_external")
             control["request_status"] = "pending"
-            self._clear_lease(control)
+            control["terminal_reason"] = None
+            control["next_wake_at"] = (_utc_now() + timedelta(seconds=self.retry_cooldown_seconds)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            set_run_control(run, control)
+            repo.save(run)
+            return
+
+        if resolved_failure_class == "transient" and int(control.get("retry_budget") or 0) > 0:
+            control["retry_budget"] = int(control.get("retry_budget") or 0) - 1
+            control["next_wake_at"] = (_utc_now() + timedelta(seconds=self.retry_cooldown_seconds)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            control["request_status"] = "pending"
+            control["scheduled_attempt_type"] = "retry"
             run.mark_status("retry_wait")
             set_run_control(run, control)
             repo.save(run)
             return
+
+        if resolved_failure_class in {"deterministic_input", "planner_repairable"} and int(control.get("repair_budget") or 0) > 0:
+            control["repair_budget"] = int(control.get("repair_budget") or 0) - 1
+            control["request_status"] = "running"
+            control["scheduled_attempt_type"] = "execute"
+            control["next_wake_at"] = _utc_now_iso()
+            run.mark_status("repairing")
+            set_run_control(run, control)
+            repo.save(run)
+            return
+
+        if resolved_failure_class in {"requires_replan", "deadlock_or_no_progress"} and int(control.get("replan_budget") or 0) > 0:
+            control["replan_budget"] = int(control.get("replan_budget") or 0) - 1
+            control["request_status"] = "running"
+            control["scheduled_attempt_type"] = "execute"
+            control["next_wake_at"] = _utc_now_iso()
+            run.mark_status("replanning")
+            set_run_control(run, control)
+            repo.save(run)
+            return
+
         run.mark_status("failed_terminal")
         control["terminal_reason"] = normalized_error
         control["request_status"] = "failed"
-        self._clear_lease(control)
         set_run_control(run, control)
         repo.save(run)
+
+    def _process_repair(self, *, project_path: Path, repo: RunRepository, run: RunRecord, control: dict[str, Any]) -> None:
+        started_at = _utc_now_iso()
+        try:
+            graph_path = Path(str(control.get("graph_path") or ""))
+            repaired_payload = self._load_and_normalize_graph_payload(graph_path)
+            write_json(graph_path, repaired_payload)
+            control["failure_class"] = None
+            control["terminal_reason"] = None
+            control["last_error"] = None
+            self._append_attempt_record(
+                project_path=project_path,
+                run_id=run.id,
+                attempt_type="repair",
+                started_at=started_at,
+                finished_at=_utc_now_iso(),
+                result="succeeded",
+                notes={"graph_path": str(graph_path)},
+            )
+            self._transition_to_queued(run=run, repo=repo, control=control, attempt_type="execute")
+        except Exception as exc:  # noqa: BLE001
+            self._append_attempt_record(
+                project_path=project_path,
+                run_id=run.id,
+                attempt_type="repair",
+                started_at=started_at,
+                finished_at=_utc_now_iso(),
+                result="failed",
+                error_class=self._classify_failure(str(exc)),
+                notes={"error": str(exc)},
+            )
+            self._apply_failure_transition(
+                run=run,
+                repo=repo,
+                control=control,
+                error_text=str(exc),
+                failure_class="requires_replan" if int(control.get("replan_budget") or 0) > 0 else None,
+            )
+
+    def _process_replan(self, *, project_path: Path, repo: RunRepository, run: RunRecord, control: dict[str, Any]) -> None:
+        started_at = _utc_now_iso()
+        try:
+            source_graph_path = Path(str(control.get("source_graph_path") or ""))
+            graph_path = Path(str(control.get("graph_path") or ""))
+            replanned_payload = self._load_and_normalize_graph_payload(source_graph_path)
+            write_json(graph_path, replanned_payload)
+            control["failure_class"] = None
+            control["terminal_reason"] = None
+            control["last_error"] = None
+            self._append_attempt_record(
+                project_path=project_path,
+                run_id=run.id,
+                attempt_type="replan",
+                started_at=started_at,
+                finished_at=_utc_now_iso(),
+                result="succeeded",
+                notes={"source_graph_path": str(source_graph_path), "graph_path": str(graph_path)},
+            )
+            self._transition_to_queued(run=run, repo=repo, control=control, attempt_type="execute")
+        except Exception as exc:  # noqa: BLE001
+            self._append_attempt_record(
+                project_path=project_path,
+                run_id=run.id,
+                attempt_type="replan",
+                started_at=started_at,
+                finished_at=_utc_now_iso(),
+                result="failed",
+                error_class=self._classify_failure(str(exc)),
+                notes={"error": str(exc)},
+            )
+            run.mark_status("failed_terminal")
+            control["failure_class"] = "requires_replan"
+            control["last_error"] = str(exc)
+            control["terminal_reason"] = str(exc)
+            control["request_status"] = "failed"
+            self._clear_lease(control)
+            set_run_control(run, control)
+            repo.save(run)
 
     def _heartbeat_loop(self, project_path: Path, run_id: str, stop_event: threading.Event) -> None:
         while not stop_event.wait(self.heartbeat_interval_seconds):
@@ -426,7 +676,7 @@ class RunControlPlane:
         control["last_heartbeat_ts"] = now_iso
         control["lease_expires_at"] = (_utc_now() + timedelta(seconds=self.lease_ttl_seconds)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         if not heartbeat_only:
-            control["last_progress_at"] = now_iso
+            self._refresh_no_progress_deadline(control, at=now_iso)
         set_run_control(run, control)
         repo.save(run)
 
@@ -450,7 +700,8 @@ class RunControlPlane:
                 control["last_progress_at"] = control.get("last_progress_at") or now_iso
                 control["request_status"] = "running"
                 control["attempt_count"] = int(control.get("attempt_count") or 0) + 1
-                run.mark_status("running")
+                self._refresh_no_progress_deadline(control, at=now_iso)
+                run.mark_status("dispatching")
                 set_run_control(run, control)
                 repo.save(run)
                 return True
@@ -484,20 +735,32 @@ class RunControlPlane:
                     pass
         raise RuntimeError("claim lock busy")
 
-    def _build_control_payload(self, *, existing: dict[str, Any], request_id: str, graph_path: Path) -> dict[str, Any]:
+    def _build_control_payload(
+        self,
+        *,
+        existing: dict[str, Any],
+        request_id: str,
+        graph_path: Path,
+        source_graph_path: Path,
+    ) -> dict[str, Any]:
         now_iso = _utc_now_iso()
         control = dict(existing or {})
         control.setdefault("desired_status", "active")
         control["request_id"] = request_id
         control["request_status"] = "queued"
         control["graph_path"] = str(graph_path)
-        control.setdefault("retry_budget", 1)
-        control.setdefault("repair_budget", 0)
+        control["source_graph_path"] = str(source_graph_path)
+        control.setdefault("retry_budget", 2)
+        control.setdefault("repair_budget", 1)
+        control.setdefault("replan_budget", 1)
         control.setdefault("attempt_count", 0)
-        control.setdefault("last_progress_at", now_iso)
+        control.setdefault("scheduled_attempt_type", "execute")
+        control.setdefault("no_progress_timeout_seconds", self.no_progress_timeout_seconds)
+        self._refresh_no_progress_deadline(control, at=now_iso)
         control["next_wake_at"] = now_iso
         control["failure_class"] = None
         control["terminal_reason"] = None
+        control["last_error"] = None
         self._clear_lease(control)
         return control
 
@@ -562,25 +825,57 @@ class RunControlPlane:
         return bool(owner and expires_at and expires_at <= _utc_now())
 
     @staticmethod
+    def _no_progress_deadline_exceeded(control: dict[str, Any]) -> bool:
+        deadline = _iso_to_datetime(control.get("no_progress_deadline"))
+        return deadline is not None and deadline <= _utc_now()
+
+    @staticmethod
+    def _refresh_no_progress_deadline(control: dict[str, Any], at: str | None = None) -> None:
+        now_iso = at or _utc_now_iso()
+        now_dt = _iso_to_datetime(now_iso) or _utc_now()
+        timeout_seconds = max(5, int(control.get("no_progress_timeout_seconds") or 180))
+        control["last_progress_at"] = now_iso
+        control["no_progress_deadline"] = (now_dt + timedelta(seconds=timeout_seconds)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+    @staticmethod
     def _classify_failure(error_text: str) -> str:
         lowered = str(error_text or "").strip().lower()
-        for token in TRANSIENT_ERROR_TOKENS:
-            if token in lowered:
-                return "transient"
+        if any(token in lowered for token in TRANSIENT_ERROR_TOKENS):
+            return "transient"
+        if any(token in lowered for token in WAITING_EXTERNAL_ERROR_TOKENS):
+            return "waiting_external"
+        if any(token in lowered for token in NO_PROGRESS_ERROR_TOKENS):
+            return "deadlock_or_no_progress"
+        if any(token in lowered for token in REPLAN_ERROR_TOKENS):
+            return "requires_replan"
+        if any(token in lowered for token in REPAIRABLE_ERROR_TOKENS):
+            return "planner_repairable"
         return "internal_bug"
 
     @staticmethod
-    def _state_waiting_confirmation(state: dict[str, Any]) -> bool:
+    def _detect_wait_status(*, state: dict[str, Any], pending_confirmations: list[dict[str, Any]]) -> str | None:
+        if pending_confirmations:
+            return "waiting_confirmation"
+        normalized_status = str(state.get("status") or "").strip().lower()
+        if normalized_status in WAITING_RUN_STATUSES:
+            return normalized_status
         nodes = state.get("nodes")
         if not isinstance(nodes, dict):
-            return False
+            return None
         for node_state in nodes.values():
             if not isinstance(node_state, dict):
                 continue
             output = node_state.get("output")
-            if isinstance(output, dict) and str(output.get("status") or "").strip().lower() == "waiting_confirmation":
-                return True
-        return False
+            if isinstance(output, dict):
+                output_status = str(output.get("status") or "").strip().lower()
+                if output_status in WAITING_RUN_STATUSES:
+                    return output_status
+                if isinstance(output.get("confirmation"), dict):
+                    return "waiting_confirmation"
+            error_text = str(node_state.get("error") or "").strip().lower()
+            if any(token in error_text for token in WAITING_EXTERNAL_ERROR_TOKENS):
+                return "waiting_external"
+        return None
 
     @staticmethod
     def _extract_failure_text(state: dict[str, Any]) -> str:
@@ -593,3 +888,74 @@ class RunControlPlane:
                 if error_text:
                     return error_text
         return str(state.get("status") or "run failed")
+
+    @staticmethod
+    def _load_run_state(project_path: Path, run_id: str) -> dict[str, Any]:
+        state_path = project_path / ".amon" / "runs" / run_id / "state.json"
+        if not state_path.exists():
+            return {}
+        try:
+            payload = json.loads(state_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    @staticmethod
+    def _load_and_normalize_graph_payload(graph_path: Path) -> dict[str, Any]:
+        if not graph_path.exists():
+            raise FileNotFoundError(f"找不到 graph 檔案：{graph_path}")
+        payload = json.loads(graph_path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("graph payload 必須是物件")
+        if str(payload.get("version") or "").strip() != "taskgraph.v3":
+            raise ValueError("Unsupported graph format: only taskgraph.v3 is supported.")
+        graph = graph_definition_from_payload(payload)
+        return json.loads(dumps_graph_definition(graph))
+
+    def _transition_to_queued(self, *, run: RunRecord, repo: RunRepository, control: dict[str, Any], attempt_type: str) -> None:
+        run.mark_status("queued")
+        control["request_status"] = "queued"
+        control["next_wake_at"] = _utc_now_iso()
+        control["scheduled_attempt_type"] = attempt_type
+        control["terminal_reason"] = None
+        self._clear_lease(control)
+        self._refresh_no_progress_deadline(control)
+        set_run_control(run, control)
+        repo.save(run)
+
+    def _mark_cancelled(self, *, run: RunRecord, repo: RunRepository, control: dict[str, Any]) -> None:
+        run.mark_status("cancelled")
+        control["terminal_reason"] = control.get("terminal_reason") or "cancel requested"
+        control["request_status"] = "canceled"
+        self._clear_lease(control)
+        set_run_control(run, control)
+        repo.save(run)
+
+    @staticmethod
+    def _append_attempt_record(
+        *,
+        project_path: Path,
+        run_id: str,
+        attempt_type: str,
+        started_at: str,
+        finished_at: str,
+        result: str,
+        error_class: str | None = None,
+        notes: dict[str, Any] | None = None,
+    ) -> None:
+        path = project_path / ".amon" / "runs" / run_id / CONTROL_ATTEMPTS_FILE
+        append_jsonl(
+            path,
+            {
+                "attempt_id": uuid.uuid4().hex,
+                "task_run_id": run_id,
+                "node_id": None,
+                "attempt_type": attempt_type,
+                "started_at": started_at,
+                "finished_at": finished_at,
+                "result": result,
+                "error_class": error_class,
+                "token_usage": None,
+                "notes": dict(notes or {}),
+            },
+        )
