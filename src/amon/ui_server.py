@@ -45,7 +45,7 @@ from amon.daemon.queue import get_queue_depth
 from amon.events import emit_event
 from amon.jobs.runner import start_job
 from amon.artifacts.store import ingest_artifacts
-from amon.application import WorkspaceService
+from amon.application import RunControlPlane, WorkspaceService
 from amon.llm_request_log import load_recent_llm_requests
 from amon.observability import ensure_correlation_fields, normalize_project_id
 from amon.tooling.audit import default_audit_log_path
@@ -125,7 +125,14 @@ class _TaskManager:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._tasks: dict[str, dict[str, Any]] = {}
-        self._run_cancel: dict[str, threading.Event] = {}
+        self._run_controller: RunControlPlane | None = None
+
+    def _ensure_run_controller(self, core: AmonCore) -> RunControlPlane:
+        with self._lock:
+            if self._run_controller is None:
+                self._run_controller = RunControlPlane(core, max_workers=2)
+                self._run_controller.start()
+            return self._run_controller
 
     def submit_run(
         self,
@@ -137,40 +144,23 @@ class _TaskManager:
         variables: dict[str, Any],
         run_id: str,
     ) -> str:
-        request_id = request_id or uuid.uuid4().hex
-        cancel_event = threading.Event()
+        controller = self._ensure_run_controller(core)
+        selected_request_id = controller.submit_run(
+            project_path=project_path,
+            graph_path=graph_path,
+            variables=variables,
+            run_id=run_id,
+            request_id=request_id,
+        )
         with self._lock:
-            self._tasks[request_id] = {
-                "request_id": request_id,
+            self._tasks[selected_request_id] = {
+                "request_id": selected_request_id,
                 "status": "queued",
                 "run_id": run_id,
                 "type": "run",
+                "project_path": str(project_path),
             }
-            self._run_cancel[run_id] = cancel_event
-
-        def _run() -> None:
-            try:
-                with self._lock:
-                    self._tasks[request_id]["status"] = "running"
-                resolved_graph_path = Path(graph_path)
-                if not resolved_graph_path.is_absolute():
-                    resolved_graph_path = project_path / resolved_graph_path
-                core.run_graph(
-                    project_path=project_path,
-                    graph_path=resolved_graph_path,
-                    variables=variables,
-                    run_id=run_id,
-                    request_id=request_id,
-                )
-                with self._lock:
-                    self._tasks[request_id]["status"] = "completed"
-            except Exception as exc:  # noqa: BLE001
-                with self._lock:
-                    self._tasks[request_id]["status"] = "failed"
-                    self._tasks[request_id]["error"] = str(exc)
-
-        threading.Thread(target=_run, daemon=True).start()
-        return request_id
+        return selected_request_id
 
     def submit_tool(
         self,
@@ -265,13 +255,19 @@ class _TaskManager:
     def get_status(self, request_id: str) -> dict[str, Any] | None:
         with self._lock:
             status = self._tasks.get(request_id)
-            return dict(status) if status else None
+            payload = dict(status) if status else None
+            controller = self._run_controller
+        if not payload:
+            return None
+        if payload.get("type") == "run" and controller is not None:
+            request_status = controller.get_request_status(request_id)
+            if request_status:
+                payload.update(request_status)
+        return payload
 
-    def cancel_run(self, run_id: str) -> None:
-        with self._lock:
-            cancel_event = self._run_cancel.get(run_id)
-        if cancel_event:
-            cancel_event.set()
+    def cancel_run(self, *, core: AmonCore, project_path: Path, run_id: str) -> None:
+        controller = self._ensure_run_controller(core)
+        controller.cancel_run(project_path=project_path, run_id=run_id)
 
 
 _TASK_MANAGER = _TaskManager()
@@ -1499,7 +1495,7 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             cancel_path = project_path / ".amon" / "runs" / run_id / "cancel.json"
             cancel_path.parent.mkdir(parents=True, exist_ok=True)
             cancel_path.write_text(json.dumps({"run_id": run_id}), encoding="utf-8")
-            _TASK_MANAGER.cancel_run(run_id)
+            _TASK_MANAGER.cancel_run(core=self.core, project_path=project_path, run_id=run_id)
             self._send_json(200, {"status": "cancelled", "run_id": run_id})
             return
         if parsed.path == "/v1/tools/run":
@@ -3412,15 +3408,22 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 graph = fallback_graph
 
         state_payload: dict[str, Any] = {}
+        run_payload: dict[str, Any] = {}
         state_path = run_dir / "state.json"
         if state_path.exists():
             try:
                 state_payload = json.loads(state_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 state_payload = {}
+        run_file = run_dir / "run.json"
+        if run_file.exists():
+            try:
+                run_payload = json.loads(run_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                run_payload = {}
 
         events = self._read_run_events(run_dir)
-        inferred_status = self._infer_run_status(state_payload=state_payload, events=events)
+        inferred_status = self._infer_run_status(run_payload=run_payload, state_payload=state_payload, events=events)
         return {
             "run_id": run_id,
             "run_status": inferred_status,
@@ -3449,7 +3452,10 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             return []
         return events
 
-    def _infer_run_status(self, *, state_payload: dict[str, Any], events: list[dict[str, Any]]) -> str:
+    def _infer_run_status(self, *, run_payload: dict[str, Any] | None = None, state_payload: dict[str, Any], events: list[dict[str, Any]]) -> str:
+        run_status = str((run_payload or {}).get("status") or "").strip().lower()
+        if run_status:
+            return run_status
         status = str(state_payload.get("status") or "").strip().lower()
         if status:
             return status
@@ -3477,9 +3483,17 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                 state_payload = json.loads(state_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 state_payload = {}
+        run_payload: dict[str, Any] = {}
+        run_file = run_dir / "run.json"
+        if run_file.exists():
+            candidates.append(run_file.stat().st_mtime)
+            try:
+                run_payload = json.loads(run_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                run_payload = {}
         latest_ts = max(candidates)
         events = self._read_run_events(run_dir)
-        status = self._infer_run_status(state_payload=state_payload, events=events)
+        status = self._infer_run_status(run_payload=run_payload, state_payload=state_payload, events=events)
         priority = 1 if status == "running" else 0
         return (priority, latest_ts, run_dir.name)
 
@@ -3507,13 +3521,22 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         state_payload = json.loads(state_path.read_text(encoding="utf-8"))
                     except (OSError, json.JSONDecodeError):
                         state_payload = {}
-                status = self._infer_run_status(state_payload=state_payload, events=events)
+                run_payload: dict[str, Any] = {}
+                run_file = run_dir / "run.json"
+                if run_file.exists():
+                    try:
+                        run_payload = json.loads(run_file.read_text(encoding="utf-8"))
+                    except (OSError, json.JSONDecodeError):
+                        run_payload = {}
+                status = self._infer_run_status(run_payload=run_payload, state_payload=state_payload, events=events)
                 events_path = run_dir / "events.jsonl"
                 timestamps = [run_dir.stat().st_mtime]
                 if events_path.exists():
                     timestamps.append(events_path.stat().st_mtime)
                 if state_path.exists():
                     timestamps.append(state_path.stat().st_mtime)
+                if run_file.exists():
+                    timestamps.append(run_file.stat().st_mtime)
                 latest_ts = max(timestamps)
                 iso = datetime.fromtimestamp(latest_ts, tz=timezone.utc).isoformat()
                 runs.append(

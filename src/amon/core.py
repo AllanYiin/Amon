@@ -2924,14 +2924,66 @@ class AmonCore:
         if not project_path:
             raise ValueError("查詢 run 狀態需要指定專案")
         run_dir = project_path / ".amon" / "runs" / run_id
+        run_file = run_dir / "run.json"
         state_path = run_dir / "state.json"
-        if not state_path.exists():
+        if not run_file.exists() and not state_path.exists():
             return {"run_id": run_id, "status": "not_found"}
+
+        def _ui_run_status(raw_status: str) -> str:
+            normalized = str(raw_status or "").strip().lower()
+            if normalized in {"queued", "retry_wait", "waiting_confirmation", "waiting_external", "paused"}:
+                return "pending"
+            if normalized in {"dispatching", "running", "repairing", "replanning", "retrying"}:
+                return "running"
+            if normalized == "succeeded":
+                return "completed"
+            if normalized == "cancelled":
+                return "canceled"
+            if normalized in {"failed", "failed_terminal", "abandoned"}:
+                return "failed"
+            return normalized or "unknown"
+
+        run_payload: dict[str, Any] = {}
+        if run_file.exists():
+            try:
+                run_payload = json.loads(run_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                self.logger.error("讀取 run record 失敗：%s", exc, exc_info=True)
+                raise
+        if not state_path.exists():
+            control = (
+                run_payload.get("metadata", {}).get("control")
+                if isinstance(run_payload.get("metadata"), dict)
+                else {}
+            )
+            raw_status = str(run_payload.get("status") or "unknown")
+            return {
+                "run_id": run_id,
+                "status": _ui_run_status(raw_status),
+                "run_status": raw_status,
+                "lease_owner": control.get("lease_owner") if isinstance(control, dict) else None,
+                "lease_expires_at": control.get("lease_expires_at") if isinstance(control, dict) else None,
+                "last_progress_at": control.get("last_progress_at") if isinstance(control, dict) else None,
+                "failure_class": control.get("failure_class") if isinstance(control, dict) else None,
+            }
         try:
             payload = json.loads(state_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             self.logger.error("讀取 run 狀態失敗：%s", exc, exc_info=True)
             raise
+        if isinstance(run_payload, dict) and run_payload:
+            metadata = run_payload.get("metadata")
+            control = metadata.get("control") if isinstance(metadata, dict) else {}
+            raw_status = str(run_payload.get("status") or payload.get("status") or "unknown")
+            payload["run_id"] = run_id
+            payload["status"] = _ui_run_status(raw_status)
+            payload["run_status"] = raw_status
+            if isinstance(control, dict):
+                payload["lease_owner"] = control.get("lease_owner")
+                payload["lease_expires_at"] = control.get("lease_expires_at")
+                payload["last_progress_at"] = control.get("last_progress_at")
+                payload["failure_class"] = control.get("failure_class")
+                payload["request_id"] = control.get("request_id")
         return payload
 
     def get_job_status(self, job_id: str) -> dict[str, Any]:

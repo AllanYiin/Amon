@@ -8,6 +8,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any, Callable
 
+from amon.application import RunControlPlane
 from amon.core import AmonCore
 from amon.events import emit_event
 from amon.hooks.runner import process_event
@@ -35,6 +36,7 @@ def run_daemon(
     event_queue: deque[dict[str, Any]] = deque()
     started_jobs: set[str] = set()
     action_queue = configure_action_queue(tool_executor=tool_executor, data_dir=core.data_dir)
+    control_plane = RunControlPlane(core, max_workers=2)
 
     def queue_emitter(event: dict[str, Any]) -> str:
         event_id = emit_event(event, dispatch_hooks=False)
@@ -48,6 +50,7 @@ def run_daemon(
             _ensure_jobs_started(core.data_dir, started_jobs, queue_emitter)
             tick(data_dir=core.data_dir, event_emitter=queue_emitter)
             _drain_event_queue(core, event_queue)
+            control_plane.reconcile_once()
         except Exception as exc:  # noqa: BLE001
             logger.error("Scheduler tick 失敗：%s", exc, exc_info=True)
         try:
@@ -68,6 +71,7 @@ def run_daemon_once(
     os.environ.setdefault("AMON_DISABLE_HOOK_DISPATCH", "1")
     event_queue: deque[dict[str, Any]] = deque()
     action_queue = configure_action_queue(tool_executor=tool_executor, data_dir=core.data_dir)
+    control_plane = RunControlPlane(core, max_workers=2)
 
     def queue_emitter(event: dict[str, Any]) -> str:
         event_id = emit_event(event, dispatch_hooks=False)
@@ -79,7 +83,9 @@ def run_daemon_once(
     _ensure_jobs_started(core.data_dir, set(), queue_emitter)
     tick(data_dir=core.data_dir, event_emitter=queue_emitter)
     _drain_event_queue(core, event_queue)
+    control_plane.reconcile_once()
     action_queue.wait_for_idle(timeout=10)
+    control_plane.wait_for_idle(timeout=10)
     action_queue.stop()
 
 

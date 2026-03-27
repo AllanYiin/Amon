@@ -15,6 +15,7 @@ from amon.domain import (
     ExecutorBinding,
     ManifestProject,
     Project,
+    RESUMABLE_RUN_STATUSES,
     RunRecord,
     TaskDefinition,
     Template,
@@ -39,7 +40,7 @@ DEFINITION_KIND_MAP = {
     "templates": ("templates", Template),
     "tool-policies": ("tool_policies", ToolPolicy),
 }
-TERMINAL_RUN_STATUSES = {"succeeded", "failed", "cancelled", "rolled_back", "archived"}
+TERMINAL_RUN_STATUSES = {"succeeded", "failed", "failed_terminal", "cancelled", "rolled_back", "archived", "abandoned"}
 
 
 class WorkspaceService:
@@ -67,7 +68,7 @@ class WorkspaceService:
         ui_state = self.ui_state_service.load()
         runs = sorted(self.run_repo.list(), key=lambda item: item.updated_at, reverse=True)
         uploads = sorted(self.upload_repo.list(), key=lambda item: item.updated_at, reverse=True)
-        resumable = [run.to_dict() for run in runs if run.status in {"queued", "running", "waiting_confirmation", "paused", "retrying"}]
+        resumable = [run.to_dict() for run in runs if run.status in RESUMABLE_RUN_STATUSES]
         recent_preview = next((asset.to_dict() for asset in uploads if asset.preview_ref or asset.metadata), None)
         pending_confirmations = self.list_confirmations()
         return {

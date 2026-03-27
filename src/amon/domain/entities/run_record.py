@@ -11,18 +11,36 @@ RUN_STATUSES = {
     "binding",
     "compiled",
     "queued",
+    "dispatching",
     "running",
     "waiting_confirmation",
+    "waiting_external",
     "paused",
     "retrying",
+    "retry_wait",
+    "repairing",
+    "replanning",
     "succeeded",
     "failed",
+    "failed_terminal",
     "cancelled",
+    "abandoned",
     "rolled_back",
     "archived",
 }
 
-RESUMABLE_RUN_STATUSES = {"queued", "running", "waiting_confirmation", "paused", "retrying"}
+RESUMABLE_RUN_STATUSES = {
+    "queued",
+    "dispatching",
+    "running",
+    "waiting_confirmation",
+    "waiting_external",
+    "paused",
+    "retrying",
+    "retry_wait",
+    "repairing",
+    "replanning",
+}
 
 
 @dataclass
@@ -97,9 +115,9 @@ class RunRecord(EntityTimestamps):
         if status not in RUN_STATUSES:
             raise ValueError(f"不合法的 run status：{status}")
         self.status = status
-        if status in {"running", "retrying"} and self.started_at is None:
+        if status in {"dispatching", "running", "repairing", "replanning", "retrying"} and self.started_at is None:
             self.started_at = utc_now_iso()
-        if status in {"succeeded", "failed", "cancelled", "rolled_back", "archived"}:
+        if status in {"succeeded", "failed", "failed_terminal", "cancelled", "rolled_back", "archived", "abandoned"}:
             self.finished_at = utc_now_iso()
         self.touch()
         return self

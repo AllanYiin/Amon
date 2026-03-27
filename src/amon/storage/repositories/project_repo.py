@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from ...config import write_yaml
-from ...domain.entities import Project
+from ...domain.entities import Project, RESUMABLE_RUN_STATUSES
 from ..common import read_json, write_json
 from ..migrations import bootstrap_manifest_storage
 
@@ -90,6 +90,6 @@ class ProjectRepository:
                 continue
             payload = read_json(run_file, default={})
             status = str(payload.get("status") or "")
-            if status in {"queued", "running", "waiting_confirmation", "paused", "retrying"}:
+            if status in RESUMABLE_RUN_STATUSES:
                 resumable_runs.append(payload)
         return ProjectResumeSnapshot(project=self.load(), ui_state=self.load_ui_state(), resumable_runs=resumable_runs)
