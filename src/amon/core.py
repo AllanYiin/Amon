@@ -66,6 +66,7 @@ from .taskgraph3.payloads import (
     TaskSpec,
     ToolCallSpec,
     ToolTaskConfig,
+    task_spec_to_payload,
     task_spec_from_payload,
 )
 from .taskgraph3.runtime import TaskGraph3RunResult, TaskGraph3Runtime
@@ -1385,8 +1386,15 @@ class AmonCore:
             request_id=request_id,
         )
         try:
-            plan = self._postprocess_planner_graph(plan, message=message, available_tools=planning_tools)
-            postprocess_issues = semantic_plan_issues(plan)
+            plan = self._postprocess_planner_graph(
+                plan,
+                message=message,
+                available_tools=planning_tools,
+                project_path=project_path,
+                project_id=project_id,
+                run_id=run_id,
+            )
+            postprocess_issues = semantic_plan_issues(plan, message=message)
             if postprocess_issues:
                 raise ValueError("planner 後處理後仍不合法：" + "; ".join(postprocess_issues))
             plan_json = dumps_graph_definition(plan)
@@ -1405,6 +1413,9 @@ class AmonCore:
                 _minimal_plan(message),
                 message=message,
                 available_tools=planning_tools,
+                project_path=project_path,
+                project_id=project_id,
+                run_id=run_id,
             )
             plan_json = dumps_graph_definition(plan)
         docs_dir = project_path / "docs"
@@ -1615,6 +1626,9 @@ class AmonCore:
         *,
         message: str,
         available_tools: list[dict[str, Any]],
+        project_path: Path | None = None,
+        project_id: str | None = None,
+        run_id: str | None = None,
     ) -> GraphDefinition:
         tool_names = {str(item.get("name") or "") for item in available_tools if str(item.get("name") or "").strip()}
         nodes = list(graph.nodes)
@@ -1626,12 +1640,70 @@ class AmonCore:
             message=message,
             tool_names=tool_names,
         )
-        if self._is_development_planning_task(message):
+        pre_repair_snapshot = self._planner_graph_snapshot_payload(
+            GraphDefinition(
+                id=graph.id,
+                version=graph.version,
+                name=graph.name,
+                description=graph.description,
+                status=graph.status,
+                created_at=graph.created_at,
+                updated_at=graph.updated_at,
+                created_by=graph.created_by,
+                updated_by=graph.updated_by,
+                entity_version=graph.entity_version,
+                nodes=list(nodes),
+                edges=list(edges),
+                metadata=graph.metadata,
+                runtime_capabilities=graph.runtime_capabilities,
+            )
+        )
+        pre_stage_task_ids = self._planner_task_ids(nodes)
+        pre_stage_control_edges = self._planner_control_edge_pairs(edges)
+        deterministic_repairs: list[dict[str, Any]] = []
+        if self._should_enforce_development_task_stages(message, nodes):
             nodes, edges = self._ensure_development_task_stages(nodes, edges, message=message)
+            post_stage_task_ids = self._planner_task_ids(nodes)
+            post_stage_control_edges = self._planner_control_edge_pairs(edges)
+            if pre_stage_task_ids != post_stage_task_ids or pre_stage_control_edges != post_stage_control_edges:
+                deterministic_repairs.append(
+                    {
+                        "kind": "ensure_development_task_stages",
+                        "triggered_by": ["deterministic_postprocess_rule"],
+                        "before_task_ids": pre_stage_task_ids,
+                        "after_task_ids": post_stage_task_ids,
+                        "added_task_ids": [task_id for task_id in post_stage_task_ids if task_id not in pre_stage_task_ids],
+                        "removed_task_ids": [task_id for task_id in pre_stage_task_ids if task_id not in post_stage_task_ids],
+                        "before_control_edges": pre_stage_control_edges,
+                        "after_control_edges": post_stage_control_edges,
+                    }
+                )
         else:
             nodes, edges = self._merge_spec_cluster_tasks(nodes, edges)
+            post_stage_task_ids = self._planner_task_ids(nodes)
+            post_stage_control_edges = self._planner_control_edge_pairs(edges)
+            if pre_stage_task_ids != post_stage_task_ids or pre_stage_control_edges != post_stage_control_edges:
+                deterministic_repairs.append(
+                    {
+                        "kind": "merge_spec_cluster_tasks",
+                        "triggered_by": ["deterministic_postprocess_rule"],
+                        "before_task_ids": pre_stage_task_ids,
+                        "after_task_ids": post_stage_task_ids,
+                        "added_task_ids": [task_id for task_id in post_stage_task_ids if task_id not in pre_stage_task_ids],
+                        "removed_task_ids": [task_id for task_id in pre_stage_task_ids if task_id not in post_stage_task_ids],
+                        "before_control_edges": pre_stage_control_edges,
+                        "after_control_edges": post_stage_control_edges,
+                    }
+                )
         edges = self._normalize_planner_edge_directions(nodes, edges)
         nodes, edges = self._collapse_planner_artifact_nodes(nodes, edges)
+        nodes, edges, semantic_repair_trace = self._repair_semantic_planner_shape(nodes, edges, message=message)
+        repair_trace = {
+            "initial_issues": semantic_repair_trace["initial_issues"],
+            "final_issues": semantic_repair_trace["final_issues"],
+            "repairs": [*deterministic_repairs, *semantic_repair_trace["repairs"]],
+        }
+        edges = self._normalize_planner_edge_directions(nodes, edges)
         nodes, edges = self._promote_concept_alignment_to_entry(nodes, edges)
         edges = self._stabilize_root_sequence(nodes, edges)
         control_predecessors = self._build_control_predecessors(edges)
@@ -1698,6 +1770,16 @@ class AmonCore:
         )
         try:
             validate_graph_definition(processed)
+            if repair_trace["repairs"] and project_path is not None:
+                self._write_planner_repair_trace(
+                    project_path=project_path,
+                    project_id=project_id,
+                    run_id=run_id,
+                    message=message,
+                    before_snapshot=pre_repair_snapshot,
+                    after_graph=processed,
+                    trace=repair_trace,
+                )
             return processed
         except ValueError as exc:
             if "CYCLE_DETECTED" not in str(exc):
@@ -1720,6 +1802,16 @@ class AmonCore:
             runtime_capabilities=graph.runtime_capabilities,
         )
         validate_graph_definition(repaired)
+        if repair_trace["repairs"] and project_path is not None:
+            self._write_planner_repair_trace(
+                project_path=project_path,
+                project_id=project_id,
+                run_id=run_id,
+                message=message,
+                before_snapshot=pre_repair_snapshot,
+                after_graph=repaired,
+                trace=repair_trace,
+            )
         return repaired
 
     @staticmethod
@@ -1920,6 +2012,204 @@ class AmonCore:
     def _is_packaging_like_task(self, node: TaskNode) -> bool:
         normalized = self._planner_brief_identity_tokens(node)
         return any(token in normalized for token in {"packaging", "release", "bundle", "交付", "打包", "封裝"})
+
+    def _should_enforce_development_task_stages(
+        self,
+        message: str,
+        nodes: list[BaseNode],
+    ) -> bool:
+        if self._is_development_planning_task(message):
+            return True
+        task_nodes = [node for node in nodes if isinstance(node, TaskNode)]
+        return any(
+            "vibe-coding-guidelines" in {skill.lower() for skill in self._task_skill_names(node)}
+            or self._is_development_execution_like_task(node)
+            for node in task_nodes
+        )
+
+    def _repair_semantic_planner_shape(
+        self,
+        nodes: list[BaseNode],
+        edges: list[GraphEdge],
+        *,
+        message: str,
+    ) -> tuple[list[BaseNode], list[GraphEdge], dict[str, Any]]:
+        previous_issue_key: tuple[str, tuple[str, ...]] | None = None
+        initial_issues: list[str] = []
+        repairs: list[dict[str, Any]] = []
+        final_issues: list[str] = []
+        for _ in range(2):
+            draft = GraphDefinition(version="taskgraph.v3", nodes=nodes, edges=edges)
+            issues = semantic_plan_issues(draft, message=message)
+            if not initial_issues:
+                initial_issues = list(issues)
+            final_issues = list(issues)
+            requires_development_repair = any(
+                issue.startswith("程式開發任務缺少「")
+                or issue.startswith("程式開發任務把")
+                for issue in issues
+            )
+            requires_spec_cluster_repair = (
+                "需求/PRD/架構/視覺/預設參數被切成過多獨立 TASK，必須合併為同一設計階段節點。" in issues
+            )
+            if requires_development_repair:
+                issue_key = ("development", tuple(sorted(issues)))
+                if issue_key == previous_issue_key:
+                    break
+                previous_issue_key = issue_key
+                before_task_ids = self._planner_task_ids(nodes)
+                before_control_edges = self._planner_control_edge_pairs(edges)
+                nodes, edges = self._ensure_development_task_stages(nodes, edges, message=message)
+                after_task_ids = self._planner_task_ids(nodes)
+                repairs.append(
+                    {
+                        "kind": "ensure_development_task_stages",
+                        "triggered_by": list(issues),
+                        "before_task_ids": before_task_ids,
+                        "after_task_ids": after_task_ids,
+                        "added_task_ids": [task_id for task_id in after_task_ids if task_id not in before_task_ids],
+                        "removed_task_ids": [task_id for task_id in before_task_ids if task_id not in after_task_ids],
+                        "before_control_edges": before_control_edges,
+                        "after_control_edges": self._planner_control_edge_pairs(edges),
+                    }
+                )
+                continue
+            if requires_spec_cluster_repair:
+                issue_key = ("spec_cluster", tuple(sorted(issues)))
+                if issue_key == previous_issue_key:
+                    break
+                previous_issue_key = issue_key
+                before_task_ids = self._planner_task_ids(nodes)
+                before_control_edges = self._planner_control_edge_pairs(edges)
+                nodes, edges = self._merge_spec_cluster_tasks(nodes, edges)
+                after_task_ids = self._planner_task_ids(nodes)
+                repairs.append(
+                    {
+                        "kind": "merge_spec_cluster_tasks",
+                        "triggered_by": list(issues),
+                        "before_task_ids": before_task_ids,
+                        "after_task_ids": after_task_ids,
+                        "added_task_ids": [task_id for task_id in after_task_ids if task_id not in before_task_ids],
+                        "removed_task_ids": [task_id for task_id in before_task_ids if task_id not in after_task_ids],
+                        "before_control_edges": before_control_edges,
+                        "after_control_edges": self._planner_control_edge_pairs(edges),
+                    }
+                )
+                continue
+            break
+        return nodes, edges, {
+            "initial_issues": initial_issues,
+            "final_issues": final_issues,
+            "repairs": repairs,
+        }
+
+    @staticmethod
+    def _planner_task_ids(nodes: list[BaseNode]) -> list[str]:
+        return [node.id for node in nodes if isinstance(node, TaskNode)]
+
+    @staticmethod
+    def _planner_control_edge_pairs(edges: list[GraphEdge]) -> list[list[str]]:
+        return [
+            [edge.from_node, edge.to_node]
+            for edge in edges
+            if edge.edge_type == "CONTROL" and edge.kind in {"DEPENDS_ON", "SOFT_DEPENDS"}
+        ]
+
+    def _planner_graph_snapshot_payload(self, graph: GraphDefinition) -> dict[str, Any]:
+        nodes_payload: list[dict[str, Any]] = []
+        for node in graph.nodes:
+            node_payload: dict[str, Any] = {
+                "id": node.id,
+                "type": node.canonical_type,
+                "node_type": node.node_type,
+                "title": node.title,
+                "status": node.status,
+                "metadata": node.metadata,
+            }
+            if isinstance(node, TaskNode):
+                node_payload["taskSpec"] = task_spec_to_payload(node.task_spec)
+            elif isinstance(node, ArtifactNode):
+                node_payload["artifact"] = {"title": node.title}
+            nodes_payload.append(node_payload)
+        edges_payload = [
+            {
+                "id": edge.id,
+                "from": edge.from_node,
+                "to": edge.to_node,
+                "edge_type": edge.edge_type,
+                "kind": edge.kind,
+                "source_port_key": edge.source_port_key,
+                "target_port_key": edge.target_port_key,
+                "metadata": edge.metadata,
+            }
+            for edge in graph.edges
+        ]
+        return {
+            "version": graph.version,
+            "id": graph.id,
+            "name": graph.name,
+            "description": graph.description,
+            "metadata": graph.metadata,
+            "nodes": nodes_payload,
+            "edges": edges_payload,
+        }
+
+    def _write_planner_repair_trace(
+        self,
+        *,
+        project_path: Path,
+        project_id: str | None,
+        run_id: str | None,
+        message: str,
+        before_snapshot: dict[str, Any],
+        after_graph: GraphDefinition,
+        trace: dict[str, Any],
+    ) -> None:
+        trace_dir = (
+            project_path / ".amon" / "runs" / run_id / "planner_repair"
+            if str(run_id or "").strip()
+            else project_path / ".amon" / "graphs" / "planner_repair"
+        )
+        trace_dir.mkdir(parents=True, exist_ok=True)
+        pre_graph_path = trace_dir / "pre_repair_graph.json"
+        post_graph_path = trace_dir / "post_repair_graph.json"
+        patch_path = trace_dir / "repair_patch.json"
+        report_path = trace_dir / "repair_report.json"
+        post_payload = self._planner_graph_snapshot_payload(after_graph)
+        patch_payload = {
+            "version": "1",
+            "operations": trace["repairs"],
+        }
+        report_payload = {
+            "version": "1",
+            "objective": message,
+            "project_id": project_id or self.resolve_project_identity(project_path)[0],
+            "run_id": run_id,
+            "repair_count": len(trace["repairs"]),
+            "initial_issues": trace["initial_issues"],
+            "final_issues": trace["final_issues"],
+            "files": {
+                "pre_repair_graph": str(pre_graph_path.relative_to(project_path)),
+                "post_repair_graph": str(post_graph_path.relative_to(project_path)),
+                "repair_patch": str(patch_path.relative_to(project_path)),
+            },
+        }
+        self._atomic_write_text(pre_graph_path, json.dumps(before_snapshot, ensure_ascii=False, indent=2))
+        self._atomic_write_text(post_graph_path, json.dumps(post_payload, ensure_ascii=False, indent=2))
+        self._atomic_write_text(patch_path, json.dumps(patch_payload, ensure_ascii=False, indent=2))
+        self._atomic_write_text(report_path, json.dumps(report_payload, ensure_ascii=False, indent=2))
+        log_event(
+            {
+                "level": "INFO",
+                "event": "planner_repair_trace_written",
+                "project_id": project_id or self.resolve_project_identity(project_path)[0],
+                "payload": {
+                    "run_id": run_id,
+                    "repair_count": len(trace["repairs"]),
+                    "trace_dir": str(trace_dir.relative_to(project_path)),
+                },
+            }
+        )
 
     def _ensure_development_task_stages(
         self,
