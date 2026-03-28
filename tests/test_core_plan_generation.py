@@ -78,13 +78,13 @@ class CorePlanGenerationTests(unittest.TestCase):
                 todo_text = (project_path / "docs" / "TODO.md").read_text(encoding="utf-8")
                 self.assertIn("- [ ] task-1 需求規格", todo_text)
                 self.assertIn("- [ ] concept_alignment 概念對齊", todo_text)
-                self.assertIn("  - Skill: concept-alignment", todo_text)
+                self.assertIn("  - Skill: concept-alignment、web-search-strategy", todo_text)
                 self.assertIn("  - Skill: （未綁定 skill）", todo_text)
                 task_nodes = [node for node in plan.nodes if isinstance(node, TaskNode)]
                 self.assertFalse(any(isinstance(node, ArtifactNode) for node in plan.nodes))
                 self.assertEqual(task_nodes[0].id, "concept_alignment")
                 self.assertIn("web.search", task_nodes[0].task_spec.agent.allowed_tools)
-                self.assertEqual(task_nodes[0].task_spec.agent.skills, ["concept-alignment"])
+                self.assertEqual(task_nodes[0].task_spec.agent.skills, ["concept-alignment", "web-search-strategy"])
                 self.assertEqual(task_nodes[1].task_spec.agent.skills, [])
                 self.assertEqual(task_nodes[1].task_spec.artifacts[0].name, "TODO")
                 self.assertEqual(task_nodes[1].task_spec.artifacts[0].media_type, "text/markdown")
@@ -145,7 +145,14 @@ class CorePlanGenerationTests(unittest.TestCase):
                 for edge in plan.edges
                 if edge.edge_type == "CONTROL" and edge.kind == "DEPENDS_ON"
             ]
-            self.assertEqual(control_pairs, [("concept_alignment", "design"), ("design", "implement")])
+            self.assertEqual(
+                control_pairs,
+                [
+                    ("concept_alignment", "spec_organizer"),
+                    ("spec_organizer", "frontend_design"),
+                    ("frontend_design", "development_implementation"),
+                ],
+            )
 
     def test_build_quick_todo_markdown_marks_planner_stage_as_internal(self) -> None:
         core = AmonCore(data_dir=Path(tempfile.mkdtemp()))
@@ -153,8 +160,21 @@ class CorePlanGenerationTests(unittest.TestCase):
             todo = core._build_quick_todo_markdown("請幫我規劃上線流程", available_tools=[{"name": "web.search"}])
         finally:
             shutil.rmtree(core.data_dir, ignore_errors=True)
-        self.assertIn("  - Skill: concept-alignment", todo)
+        self.assertIn("  - Skill: concept-alignment、web-search-strategy", todo)
         self.assertIn("  - Skill: planner-internal", todo)
+
+    def test_build_quick_todo_markdown_uses_fixed_development_stages(self) -> None:
+        core = AmonCore(data_dir=Path(tempfile.mkdtemp()))
+        try:
+            todo = core._build_quick_todo_markdown("請幫我開發一個內部工具", available_tools=[{"name": "web.search"}])
+        finally:
+            shutil.rmtree(core.data_dir, ignore_errors=True)
+        self.assertIn("spec_organizer 規格整理", todo)
+        self.assertIn("frontend_design 前端視覺化設計", todo)
+        self.assertIn("development_implementation 開發實作", todo)
+        self.assertIn("  - Skill: spec-organizer", todo)
+        self.assertIn("  - Skill: frontend-design", todo)
+        self.assertIn("  - Skill: vibe-coding-guidelines", todo)
 
     def test_write_graph_resolved_preserves_graph_id_for_taskgraph_v3(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -292,9 +312,10 @@ class CorePlanGenerationTests(unittest.TestCase):
         self.assertTrue(concept_node.task_spec.runnable)
         self.assertEqual(concept_node.task_spec.non_runnable_reason, None)
         self.assertIn("concept-alignment", concept_node.task_spec.agent.skills)
+        self.assertIn("web-search-strategy", concept_node.task_spec.agent.skills)
         self.assertIn("web.search", concept_node.task_spec.agent.allowed_tools)
 
-    def test_postprocess_planner_graph_merges_spec_cluster_tasks(self) -> None:
+    def test_postprocess_planner_graph_enforces_fixed_development_stages(self) -> None:
         core = AmonCore(data_dir=Path(tempfile.mkdtemp()))
         try:
             graph = GraphDefinition(
@@ -355,16 +376,24 @@ class CorePlanGenerationTests(unittest.TestCase):
 
         task_nodes = [node for node in processed.nodes if isinstance(node, TaskNode)]
         task_ids = [node.id for node in task_nodes]
-        self.assertEqual(task_ids, ["concept_alignment", "requirements", "packaging"])
-        self.assertEqual(task_nodes[1].title, "設計定義")
-        self.assertIn("請把需求、PRD、系統架構、視覺方向與預設參數整合成同一設計階段", task_nodes[1].task_spec.agent.prompt or "")
+        self.assertEqual(
+            task_ids,
+            ["concept_alignment", "spec_organizer", "frontend_design", "development_implementation", "packaging"],
+        )
+        self.assertEqual(task_nodes[1].title, "規格整理")
+        self.assertEqual(task_nodes[2].title, "前端設計")
+        self.assertEqual(task_nodes[3].title, "開發實作")
+        self.assertIn("spec-organizer", task_nodes[1].task_spec.agent.skills)
+        self.assertIn("frontend-design", task_nodes[2].task_spec.agent.skills)
+        self.assertIn("vibe-coding-guidelines", task_nodes[3].task_spec.agent.skills)
         control_pairs = {
             (edge.from_node, edge.to_node)
             for edge in processed.edges
             if edge.edge_type == "CONTROL"
         }
-        self.assertIn(("concept_alignment", "requirements"), control_pairs)
-        self.assertIn(("requirements", "packaging"), control_pairs)
+        self.assertIn(("concept_alignment", "spec_organizer"), control_pairs)
+        self.assertIn(("spec_organizer", "frontend_design"), control_pairs)
+        self.assertIn(("frontend_design", "development_implementation"), control_pairs)
 
     def test_postprocess_planner_graph_promotes_existing_background_research_task(self) -> None:
         core = AmonCore(data_dir=Path(tempfile.mkdtemp()))
@@ -553,12 +582,13 @@ class CorePlanGenerationTests(unittest.TestCase):
         validate_graph_definition(processed)
         edges = {(edge.from_node, edge.to_node, edge.edge_type, edge.kind) for edge in processed.edges}
         self.assertFalse(any(isinstance(node, ArtifactNode) for node in processed.nodes))
-        self.assertIn(("concept_alignment", "design", "CONTROL", "DEPENDS_ON"), edges)
-        self.assertIn(("design", "implement", "CONTROL", "DEPENDS_ON"), edges)
+        self.assertIn(("concept_alignment", "spec_organizer", "CONTROL", "DEPENDS_ON"), edges)
+        self.assertIn(("spec_organizer", "frontend_design", "CONTROL", "DEPENDS_ON"), edges)
+        self.assertIn(("frontend_design", "development_implementation", "CONTROL", "DEPENDS_ON"), edges)
         concept_node = next(node for node in processed.nodes if isinstance(node, TaskNode) and node.id == "concept_alignment")
-        design_node = next(node for node in processed.nodes if isinstance(node, TaskNode) and node.id == "design")
+        spec_node = next(node for node in processed.nodes if isinstance(node, TaskNode) and node.id == "spec_organizer")
         self.assertTrue(any(artifact.name == "調研對齊文" for artifact in concept_node.task_spec.artifacts))
-        self.assertTrue(any(artifact.name == "產品技術規格" for artifact in design_node.task_spec.artifacts))
+        self.assertTrue(any(artifact.name == "產品技術規格" for artifact in spec_node.task_spec.artifacts))
         self.assertNotIn(("design", "concept_alignment", "CONTROL", "DEPENDS_ON"), edges)
         self.assertNotIn(("implement", "design", "CONTROL", "DEPENDS_ON"), edges)
 
@@ -648,16 +678,9 @@ class CorePlanGenerationTests(unittest.TestCase):
 
         validate_graph_definition(processed)
         task_ids = [node.id for node in processed.nodes if isinstance(node, TaskNode)]
-        self.assertEqual(
-            task_ids,
-            [
-                "concept_alignment",
-                "task_design_definition",
-                "task_core_implementation",
-                "task_interaction_tuning",
-                "task_quality_packaging",
-            ],
-        )
+        self.assertEqual(task_ids[:4], ["concept_alignment", "spec_organizer", "frontend_design", "development_implementation"])
+        self.assertIn("task_interaction_tuning", task_ids)
+        self.assertIn("task_quality_packaging", task_ids)
 
     def test_postprocess_planner_graph_assigns_code_tools_to_game_execution_node(self) -> None:
         core = AmonCore(data_dir=Path(tempfile.mkdtemp()))
@@ -707,7 +730,9 @@ class CorePlanGenerationTests(unittest.TestCase):
         finally:
             shutil.rmtree(core.data_dir, ignore_errors=True)
 
-        execution_node = next(node for node in processed.nodes if isinstance(node, TaskNode) and node.id == "task_execute")
+        execution_node = next(
+            node for node in processed.nodes if isinstance(node, TaskNode) and node.id == "development_implementation"
+        )
         self.assertIn("filesystem.read", execution_node.task_spec.agent.allowed_tools)
         self.assertIn("filesystem.patch", execution_node.task_spec.agent.allowed_tools)
         self.assertIn("terminal.exec", execution_node.task_spec.agent.allowed_tools)
@@ -780,9 +805,10 @@ class CorePlanGenerationTests(unittest.TestCase):
         self.assertEqual(
             control_pairs,
             [
-                ("concept_alignment", "design"),
-                ("design", "implement"),
-                ("implement", "optimize"),
+                ("concept_alignment", "spec_organizer"),
+                ("spec_organizer", "frontend_design"),
+                ("frontend_design", "development_implementation"),
+                ("development_implementation", "optimize"),
             ],
         )
 

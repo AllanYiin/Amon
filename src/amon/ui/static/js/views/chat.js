@@ -416,10 +416,20 @@ export const CHAT_VIEW = {
                 return;
               }
               if (eventType === "tool_call") {
-                const { nodeLabel } = resolveNodeMeta(data);
+                rememberNodeMeta(data);
+                const nodeMeta = resolveNodeMeta(data);
+                const { nodeLabel } = nodeMeta;
                 const toolName = String(data.name || "").trim() || "unknown-tool";
                 const stage = String(data.stage || "").trim().toLowerCase();
                 const status = String(data.status || "").trim().toLowerCase();
+                messageRenderer.upsertToolCall(nodeMeta, {
+                  toolName,
+                  stage,
+                  status,
+                  argsPreview: data.args_preview,
+                  errorDetail: data.error_detail,
+                  isError: Boolean(data.is_error),
+                });
                 if (stage === "start") {
                   const statusText = nodeLabel ? `[${nodeLabel}] 正在呼叫工具：${toolName}` : `正在呼叫工具：${toolName}`;
                   messageRenderer.appendTimelineStatus(statusText);

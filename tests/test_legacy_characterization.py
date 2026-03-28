@@ -15,7 +15,7 @@ from amon.planning.planner_llm import _minimal_plan
 
 class LegacyCharacterizationTests(unittest.TestCase):
     def test_planner_minimal_plan_fallback_shape_is_stable(self) -> None:
-        graph = _minimal_plan("整理目前 repo 狀態")
+        graph = _minimal_plan("整理目前提案狀態")
 
         self.assertEqual(graph.id, "planner-fallback")
         self.assertEqual(graph.version, "taskgraph.v3")
@@ -29,14 +29,14 @@ class LegacyCharacterizationTests(unittest.TestCase):
 
         concept_alignment = graph.nodes[0]
         self.assertEqual(concept_alignment.task_spec.executor, "agent")
-        self.assertIn("任務：整理目前 repo 狀態", concept_alignment.task_spec.agent.prompt)
-        self.assertEqual(concept_alignment.task_spec.agent.skills, ["concept-alignment"])
+        self.assertIn("任務：整理目前提案狀態", concept_alignment.task_spec.agent.prompt)
+        self.assertEqual(concept_alignment.task_spec.agent.skills, ["concept-alignment", "web-search-strategy"])
         self.assertEqual(concept_alignment.task_spec.artifacts[0].name, "concept_summary")
         self.assertIn("fallback", concept_alignment.task_spec.display.tags)
 
         execution = graph.nodes[1]
         self.assertEqual(execution.task_spec.executor, "agent")
-        self.assertEqual(execution.task_spec.agent.prompt, "整理目前 repo 狀態")
+        self.assertEqual(execution.task_spec.agent.prompt, "整理目前提案狀態")
         self.assertEqual(execution.task_spec.artifacts[0].name, "todo")
         self.assertIn("fallback", execution.task_spec.display.tags)
 

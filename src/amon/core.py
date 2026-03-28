@@ -1464,12 +1464,38 @@ class AmonCore:
         tool_names = [str(item.get("name") or "") for item in planning_tools[:6] if str(item.get("name") or "").strip()]
         concept_text = "、".join(key_concepts) if key_concepts else "任務目標、限制條件、輸出格式"
         tool_text = "、".join(tool_names) if tool_names else "web.search、web.fetch"
+        if self._is_development_planning_task(objective):
+            lines = [
+                f"# TODO Plan: {objective}",
+                "",
+                "- [ ] concept_alignment 概念對齊與關鍵概念查證",
+                f"  - Goal: 先釐清「{concept_text}」的定義、邊界與常見歧義，再開始規格整理。",
+                "  - Skill: concept-alignment、web-search-strategy",
+                "  - DoD: 產出關鍵概念、查詢方向、資料可信度與後續規劃注意事項。",
+                "- [ ] spec_organizer 規格整理",
+                "  - Goal: 先把需求、架構、資料模型、驗收條件整理成可開發規格。",
+                "  - Skill: spec-organizer",
+                "  - DoD: 產出可開發 spec、限制、假設與驗收條件。",
+                "- [ ] frontend_design 前端視覺化設計",
+                "  - Goal: 根據規格定義 UI flow、畫面重點、互動狀態與 responsive 規則。",
+                "  - Skill: frontend-design",
+                "  - DoD: 產出可直接指導開發的前端設計定義。",
+                "- [ ] development_implementation 開發實作",
+                "  - Goal: 依規格與前端設計完成程式開發；預設以 Python 優先。",
+                "  - Skill: vibe-coding-guidelines",
+                "  - DoD: 完成可執行交付、測試重點與必要 artifact。",
+                "",
+                f"> 關鍵概念：{concept_text}",
+                f"> 初步工具範圍：{tool_text}",
+                "",
+            ]
+            return "\n".join(lines)
         lines = [
             f"# TODO Plan: {objective}",
             "",
             "- [ ] concept_alignment 概念對齊與關鍵概念查證",
             f"  - Goal: 先釐清「{concept_text}」的定義、邊界與常見歧義，再開始詳細規劃。",
-            "  - Skill: concept-alignment",
+            "  - Skill: concept-alignment、web-search-strategy",
             "  - DoD: 產出關鍵概念、查詢方向、資料可信度與後續規劃注意事項。",
             "- [ ] planner_graph_design 規劃器產生執行圖",
             "  - Goal: 由 planner 直接切出執行節點、依賴與交付物定義。",
@@ -1600,7 +1626,10 @@ class AmonCore:
             message=message,
             tool_names=tool_names,
         )
-        nodes, edges = self._merge_spec_cluster_tasks(nodes, edges)
+        if self._is_development_planning_task(message):
+            nodes, edges = self._ensure_development_task_stages(nodes, edges, message=message)
+        else:
+            nodes, edges = self._merge_spec_cluster_tasks(nodes, edges)
         edges = self._normalize_planner_edge_directions(nodes, edges)
         nodes, edges = self._collapse_planner_artifact_nodes(nodes, edges)
         nodes, edges = self._promote_concept_alignment_to_entry(nodes, edges)
@@ -1610,7 +1639,7 @@ class AmonCore:
             if not isinstance(node, TaskNode) or node.task_spec.executor != "agent" or node.task_spec.agent is None:
                 continue
             if node.id == "concept_alignment":
-                self._bind_agent_skills(node, "concept-alignment")
+                self._bind_agent_skills(node, "concept-alignment", "web-search-strategy")
             self._apply_planner_node_focus(node)
             if node.id != "concept_alignment":
                 binding_spec = self._select_planner_context_binding(node.id, control_predecessors)
@@ -1725,7 +1754,7 @@ class AmonCore:
 
     @staticmethod
     def _planning_default_skill_names() -> list[str]:
-        return ["concept-alignment"]
+        return ["concept-alignment", "web-search-strategy", "spec-organizer", "frontend-design", "vibe-coding-guidelines"]
 
     def _merge_planning_available_skills(
         self,
@@ -1822,6 +1851,289 @@ class AmonCore:
             "定義",
         }
         return any(token in normalized for token in tokens)
+
+    @staticmethod
+    def _is_development_planning_task(text: str) -> bool:
+        normalized = unicodedata.normalize("NFKC", str(text or "")).lower()
+        return any(
+            token in normalized
+            for token in {
+                "開發",
+                "程式",
+                "實作",
+                "修正",
+                "bug",
+                "repo",
+                "app",
+                "web app",
+                "網站",
+                "網頁",
+                "前端",
+                "後端",
+                "python",
+                "api",
+                "遊戲",
+                "code",
+                "develop",
+                "development",
+                "implement",
+                "implementation",
+            }
+        )
+
+    def _is_development_spec_like_task(self, node: TaskNode) -> bool:
+        normalized = self._planner_brief_identity_tokens(node)
+        skills = {skill.lower() for skill in self._task_skill_names(node)}
+        if "spec-organizer" in skills:
+            return True
+        if "frontend-design" in skills or "vibe-coding-guidelines" in skills or self._is_packaging_like_task(node):
+            return False
+        return any(
+            token in normalized
+            for token in {"requirements", "需求", "prd", "architecture", "架構", "spec", "規格", "資料模型", "驗收", "design", "設計", "definition", "定義"}
+        )
+
+    def _is_frontend_stage_like_task(self, node: TaskNode) -> bool:
+        normalized = self._planner_brief_identity_tokens(node)
+        skills = {skill.lower() for skill in self._task_skill_names(node)}
+        if "frontend-design" in skills:
+            return True
+        if "vibe-coding-guidelines" in skills or self._is_packaging_like_task(node):
+            return False
+        return any(
+            token in normalized
+            for token in {"visual", "視覺", "ui", "ux", "介面", "wireframe", "mockup", "layout", "design system"}
+        )
+
+    def _is_development_execution_like_task(self, node: TaskNode) -> bool:
+        normalized = self._planner_brief_identity_tokens(node)
+        skills = {skill.lower() for skill in self._task_skill_names(node)}
+        if "vibe-coding-guidelines" in skills:
+            return True
+        if self._is_packaging_like_task(node):
+            return False
+        return any(
+            token in normalized
+            for token in {"開發", "實作", "修正", "integration", "整合", "測試", "test", "build", "code", "develop", "implement", "程式", "程式碼"}
+        )
+
+    def _is_packaging_like_task(self, node: TaskNode) -> bool:
+        normalized = self._planner_brief_identity_tokens(node)
+        return any(token in normalized for token in {"packaging", "release", "bundle", "交付", "打包", "封裝"})
+
+    def _ensure_development_task_stages(
+        self,
+        nodes: list[BaseNode],
+        edges: list[GraphEdge],
+        *,
+        message: str,
+    ) -> tuple[list[BaseNode], list[GraphEdge]]:
+        stage_defs = [
+            {
+                "key": "spec",
+                "id": "spec_organizer",
+                "title": "規格整理",
+                "label": "規格整理",
+                "summary": "先把需求、架構、資料模型、驗收條件整理成可開發規格。",
+                "todo_hint": "完成可開發 spec、限制、假設與驗收條件。",
+                "skill": "spec-organizer",
+                "tags": ["development_stage", "spec_stage"],
+                "prompt": "請先整理成可開發規格，整合需求範圍、架構、資料模型、驗收條件與風險。",
+                "instructions": "若資訊不足但不構成真正阻塞，請明確標註假設後繼續，不要拆成多輪追問。",
+            },
+            {
+                "key": "frontend",
+                "id": "frontend_design",
+                "title": "前端設計",
+                "label": "前端設計",
+                "summary": "根據規格定義視覺方向、UI flow、互動狀態與 responsive 原則。",
+                "todo_hint": "完成畫面重點、互動狀態與視覺規則。",
+                "skill": "frontend-design",
+                "tags": ["development_stage", "frontend_stage"],
+                "prompt": "請根據規格整理前端視覺方向、主要流程、互動狀態與 responsive 規則。",
+                "instructions": "輸出要能直接指導實作，不要只給抽象風格詞。",
+            },
+            {
+                "key": "development",
+                "id": "development_implementation",
+                "title": "開發實作",
+                "label": "開發實作",
+                "summary": "依規格與前端設計完成程式開發與整合，預設以 Python 優先。",
+                "todo_hint": "完成實作、測試重點與必要 artifact。",
+                "skill": "vibe-coding-guidelines",
+                "tags": ["development_stage", "implementation_stage"],
+                "prompt": message,
+                "instructions": "請依前置規格與前端設計完成實作；預設以 Python 優先，除非既有專案或需求明確指定其他技術。",
+            },
+        ]
+
+        concept_node: BaseNode | None = None
+        stage_buckets: dict[str, list[TaskNode]] = {stage["key"]: [] for stage in stage_defs}
+        remaining_nodes: list[BaseNode] = []
+
+        for node in nodes:
+            if isinstance(node, TaskNode) and node.id == "concept_alignment":
+                concept_node = node
+                continue
+            if isinstance(node, TaskNode):
+                stage_key: str | None = None
+                if self._is_frontend_stage_like_task(node):
+                    stage_key = "frontend"
+                elif self._is_development_spec_like_task(node):
+                    stage_key = "spec"
+                elif self._is_development_execution_like_task(node):
+                    stage_key = "development"
+                if stage_key is not None:
+                    stage_buckets[stage_key].append(node)
+                    continue
+            remaining_nodes.append(node)
+
+        id_rewrites: dict[str, str] = {}
+        stage_nodes: list[TaskNode] = []
+        for stage in stage_defs:
+            bucket = stage_buckets[stage["key"]]
+            stage_node = self._build_or_merge_development_stage_node(bucket, stage, id_rewrites)
+            stage_nodes.append(stage_node)
+
+        ordered_nodes: list[BaseNode] = []
+        if concept_node is not None:
+            ordered_nodes.append(concept_node)
+        ordered_nodes.extend(stage_nodes)
+        ordered_nodes.extend(remaining_nodes)
+
+        for node in ordered_nodes:
+            if not isinstance(node, TaskNode):
+                continue
+            for binding in node.task_spec.input_bindings:
+                binding.from_node = id_rewrites.get(binding.from_node, binding.from_node)
+
+        rewritten_edges: list[GraphEdge] = []
+        seen_edges: set[tuple[str, str, str, str, str | None, str | None]] = set()
+        for edge in edges:
+            from_node = id_rewrites.get(edge.from_node, edge.from_node)
+            to_node = id_rewrites.get(edge.to_node, edge.to_node)
+            if from_node == to_node:
+                continue
+            signature = (from_node, to_node, edge.edge_type, edge.kind, edge.source_port_key, edge.target_port_key)
+            if signature in seen_edges:
+                continue
+            seen_edges.add(signature)
+            rewritten_edges.append(self._clone_edge_with_nodes(edge, from_node=from_node, to_node=to_node))
+
+        forced_chain = []
+        if concept_node is not None:
+            forced_chain.append("concept_alignment")
+        forced_chain.extend(stage["id"] for stage in stage_defs)
+        for from_node, to_node in zip(forced_chain, forced_chain[1:]):
+            signature = (from_node, to_node, "CONTROL", "DEPENDS_ON", None, None)
+            if signature in seen_edges:
+                continue
+            seen_edges.add(signature)
+            rewritten_edges.append(
+                GraphEdge(
+                    from_node=from_node,
+                    to_node=to_node,
+                    edge_type="CONTROL",
+                    kind="DEPENDS_ON",
+                )
+            )
+        return ordered_nodes, rewritten_edges
+
+    def _build_or_merge_development_stage_node(
+        self,
+        bucket: list[TaskNode],
+        stage: dict[str, Any],
+        id_rewrites: dict[str, str],
+    ) -> TaskNode:
+        if bucket:
+            primary = bucket[0]
+            original_primary_id = primary.id
+            if original_primary_id != stage["id"]:
+                id_rewrites[original_primary_id] = stage["id"]
+                primary.id = stage["id"]
+            for duplicate in bucket[1:]:
+                id_rewrites[duplicate.id] = stage["id"]
+            self._repair_development_stage_node(primary, bucket, stage)
+            return primary
+        return TaskNode(
+            id=stage["id"],
+            title=stage["title"],
+            task_spec=TaskSpec(
+                executor="agent",
+                agent=AgentTaskConfig(
+                    prompt=stage["prompt"],
+                    instructions=stage["instructions"],
+                    skills=[stage["skill"]],
+                ),
+                display=TaskDisplayMetadata(
+                    label=stage["label"],
+                    summary=stage["summary"],
+                    todo_hint=stage["todo_hint"],
+                    tags=list(stage["tags"]),
+                ),
+                runnable=True,
+            ),
+        )
+
+    def _repair_development_stage_node(
+        self,
+        node: TaskNode,
+        bucket: list[TaskNode],
+        stage: dict[str, Any],
+    ) -> None:
+        agent_candidates = [candidate.task_spec.agent for candidate in bucket if candidate.task_spec.agent is not None]
+        existing_agent = agent_candidates[0] if agent_candidates else None
+        allowed_tools = self._merge_unique_items(
+            [
+                tool
+                for agent in agent_candidates
+                for tool in agent.allowed_tools
+            ]
+        )
+        merged_skills = self._merge_unique_items(
+            [
+                skill
+                for agent in agent_candidates
+                for skill in agent.skills
+            ]
+        )
+        merged_artifacts: list[ArtifactOutput] = []
+        seen_artifacts: set[tuple[str, str | None, str | None]] = set()
+        for candidate in bucket:
+            for artifact in candidate.task_spec.artifacts:
+                signature = (artifact.name, artifact.media_type, artifact.description)
+                if signature in seen_artifacts:
+                    continue
+                seen_artifacts.add(signature)
+                merged_artifacts.append(artifact)
+
+        node.title = stage["title"]
+        if node.task_spec.display is None:
+            node.task_spec.display = TaskDisplayMetadata(label=stage["label"])
+        node.task_spec.display.label = stage["label"]
+        node.task_spec.display.summary = stage["summary"]
+        node.task_spec.display.todo_hint = stage["todo_hint"]
+        node.task_spec.display.tags = self._merge_unique_items([*node.task_spec.display.tags, *stage["tags"]])
+        node.task_spec.executor = "agent"
+        node.task_spec.tool = None
+        node.task_spec.agent = AgentTaskConfig(
+            system_prompt=existing_agent.system_prompt if existing_agent is not None else None,
+            prompt=self._merge_unique_text_segments(
+                stage["prompt"],
+                *(agent.prompt or "" for agent in agent_candidates),
+            ),
+            instructions=self._merge_unique_text_segments(
+                stage["instructions"],
+                *(agent.instructions or "" for agent in agent_candidates),
+            ),
+            model=existing_agent.model if existing_agent is not None else None,
+            allowed_tools=allowed_tools,
+            skills=merged_skills,
+        )
+        node.task_spec.artifacts = merged_artifacts
+        node.task_spec.runnable = True
+        node.task_spec.non_runnable_reason = None
+        self._bind_agent_skills(node, stage["skill"])
 
     def _deduplicate_concept_tasks(
         self,
@@ -2012,7 +2324,7 @@ class AmonCore:
         node.task_spec.tool = None
         node.task_spec.runnable = True
         node.task_spec.non_runnable_reason = None
-        self._bind_agent_skills(node, "concept-alignment")
+        self._bind_agent_skills(node, "concept-alignment", "web-search-strategy")
 
     @staticmethod
     def _promote_concept_alignment_to_entry(

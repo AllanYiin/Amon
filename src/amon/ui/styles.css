@@ -1353,6 +1353,72 @@ body {
   font-weight: 600;
 }
 
+.chat-msg__tools {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.chat-msg__tool-call {
+  border: 1px solid var(--c-neutral-border);
+  background: var(--c-neutral-soft);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.chat-msg__tool-call--running {
+  border-color: var(--c-info-border);
+  background: var(--c-info-soft);
+}
+
+.chat-msg__tool-call--succeeded {
+  border-color: var(--c-success-border);
+  background: var(--c-success-soft);
+}
+
+.chat-msg__tool-call--failed {
+  border-color: var(--c-danger-border);
+  background: var(--c-danger-soft);
+}
+
+.chat-msg__tool-call-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.chat-msg__tool-call-name {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.chat-msg__tool-call-status {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.chat-msg__tool-call--running .chat-msg__tool-call-status {
+  color: var(--c-info);
+}
+
+.chat-msg__tool-call--succeeded .chat-msg__tool-call-status {
+  color: var(--c-success);
+}
+
+.chat-msg__tool-call--failed .chat-msg__tool-call-status {
+  color: var(--c-danger);
+}
+
+.chat-msg__tool-call-detail {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .chat-msg__bubble.is-typing .chat-msg__body:empty::before {
   content: "Amon 正在輸入中…";
   color: var(--muted);

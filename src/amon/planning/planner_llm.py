@@ -32,6 +32,31 @@ _CONCEPT_TASK_TOKENS = (
     "背景知識",
     "background research",
 )
+_DEVELOPMENT_TASK_TOKENS = (
+    "開發",
+    "程式",
+    "實作",
+    "修正",
+    "bug",
+    "repo",
+    "代碼",
+    "程式碼",
+    "code",
+    "coding",
+    "develop",
+    "development",
+    "implement",
+    "implementation",
+    "app",
+    "web app",
+    "網站",
+    "網頁",
+    "前端",
+    "後端",
+    "python",
+    "api",
+    "遊戲",
+)
 _SPEC_CLUSTER_TOKENS = (
     "requirements",
     "需求",
@@ -44,6 +69,48 @@ _SPEC_CLUSTER_TOKENS = (
     "規格",
     "preset",
     "預設",
+)
+_SPEC_STAGE_TOKENS = (
+    "spec-organizer",
+    "requirements",
+    "需求",
+    "prd",
+    "architecture",
+    "架構",
+    "spec",
+    "規格",
+    "資料模型",
+    "驗收",
+)
+_FRONTEND_STAGE_TOKENS = (
+    "frontend-design",
+    "frontend design",
+    "front-end design",
+    "visual",
+    "視覺",
+    "介面",
+    "wireframe",
+    "mockup",
+    "layout",
+    "design system",
+    "元件",
+)
+_DEVELOPMENT_STAGE_TOKENS = (
+    "vibe-coding-guidelines",
+    "開發",
+    "實作",
+    "修正",
+    "integration",
+    "整合",
+    "測試",
+    "test",
+    "build",
+    "code",
+    "develop",
+    "implement",
+    "implementation",
+    "程式",
+    "程式碼",
 )
 _PACKAGING_TOKENS = ("packaging", "release", "bundle", "交付", "打包", "封裝", "驗收")
 _PLANNING_TASK_TOKENS = (
@@ -69,7 +136,12 @@ _PLANNER_INTERNAL_SKILL_TOKENS = (
 )
 _REPAIRABLE_SEMANTIC_ISSUES = {
     "出現重複的概念對齊/背景調研 TASK，必須只保留 1 個。",
-    "需求/PRD/架構/視覺/預設參數被切成過多獨立 TASK，必須合併為同一設計階段節點。",
+    "「概念對齊」TASK 必須同時綁定 concept-alignment 與 web-search-strategy。",
+    "程式開發任務缺少「規格整理」TASK，必須補上並綁定 spec-organizer。",
+    "程式開發任務缺少「前端設計」TASK，必須補上並綁定 frontend-design。",
+    "程式開發任務缺少「開發實作」TASK，必須補上並綁定 vibe-coding-guidelines。",
+    "程式開發任務把需求/PRD/架構拆成過多獨立 TASK，必須合併為單一「規格整理」階段。",
+    "程式開發任務把視覺/UI 設計拆成過多獨立 TASK，必須合併為單一「前端設計」階段。",
     "打包交付/release 類 TASK 缺少前置依賴，不可作為前段 root。",
 }
 
@@ -123,7 +195,7 @@ def generate_plan_with_llm(
             try:
                 graph = _loads_graph_definition_from_response(previous_raw)
                 last_valid_graph = graph
-                semantic_issues = _semantic_plan_issues(graph)
+                semantic_issues = _semantic_plan_issues(graph, message=normalized)
                 if not semantic_issues:
                     return graph
                 repair_reason = "語義修復要求：\n- " + "\n- ".join(semantic_issues)
@@ -146,12 +218,12 @@ def generate_plan_with_llm(
         try:
             graph = _loads_graph_definition_from_response(previous_raw)
             last_valid_graph = graph
-            semantic_issues = _semantic_plan_issues(graph)
+            semantic_issues = _semantic_plan_issues(graph, message=normalized)
             if semantic_issues:
                 raise ValueError("planner 語義修復失敗：" + "; ".join(semantic_issues))
             return graph
         except ValueError:
-            if last_valid_graph is not None and not _fatal_semantic_plan_issues(last_valid_graph):
+            if last_valid_graph is not None and not _fatal_semantic_plan_issues(last_valid_graph, message=normalized):
                 return last_valid_graph
             raise
     except Exception as exc:  # noqa: BLE001
@@ -273,16 +345,19 @@ def _planner_system_prompt(
             "硬性規則：\n"
             "- graph 中的第 0 個任務節點必須是「概念對齊」，並使用 web/search 類工具查詢資料作為背景知識與事實依據。\n"
             "- 後續的 graph 中不得再出現同質功能的概念調研節點。\n"
-            "- 「概念對齊」節點的 PRIMARY skillBindings 必須包含 concept-alignment 技能。\n"
+            "- 「概念對齊」節點的 PRIMARY skillBindings 必須同時包含 concept-alignment 與 web-search-strategy 技能。\n"
             "- planner 已在圖外完成拆題；graph 內不得再出現 TODO / 任務拆解 / task outline / WBS 類 TASK。\n"
             f"- TASK 節點總數不得超過 {_MAX_TASK_NODES}，優先控制在 {_PREFERRED_TASK_NODES} 個；過細步驟要合併成較大的交付節點。\n"
             "- 任務拆解為 TASK 的主要切割點，是執行任務的專業身分差別；再來才看上文結構。\n"
             "- 根據上下文構成以及執行角色相似程度來切分。\n"
             "- 執行角色是任務的天然分界；若主執行者、權限、side effect、獨立審核或重跑需求不同，必須拆成不同 TASK。\n"
-            "- 若需求/系統架構/視覺規格屬於共享上文、且每經過一個節點只是 append 新上文連續推進同一目標，應優先合併成單一任務節點。\n"
             "- 目前節點的上下文若近似於前一節點上下文加前一節點輸出，且只是連續推進同一目標，應與前一節點合併為單一 TASK，透過多個 artifact 表達不同產出。\n"
             "- 目前節點的上下文若只是前一節點上下文的嚴格子集合，且母節點只是等待子任務完成，應優先表達為 GROUP / children，而不是額外平鋪成兄弟 TASK。\n"
-            "- 需求規格、PRD、系統架構、架構設計、視覺規格、預設參數若屬同一設計階段，必須合併成單一 TASK，透過多個 artifact 輸出，不可拆成多個連續規劃節點。\n"
+            "- 若任務屬於程式開發，概念對齊之後至少必須依序有 3 個固定 TASK：規格整理、前端設計、開發實作。\n"
+            "- 程式開發任務中的「規格整理」TASK 必須吸收需求、PRD、架構、資料模型、驗收條件等設計工作，且 PRIMARY skillBindings 必須包含 spec-organizer。\n"
+            "- 程式開發任務中的「前端設計」TASK 必須吸收視覺方向、UI flow、互動狀態與 responsive 規劃，且 PRIMARY skillBindings 必須包含 frontend-design。\n"
+            "- 程式開發任務中的「開發實作」TASK 必須負責程式實作、整合、測試與交付收斂，且 PRIMARY skillBindings 必須包含 vibe-coding-guidelines。\n"
+            "- 程式開發任務預設以 Python 優先，除非使用者已明示既有技術棧或明確要求其他語言/框架。\n"
             "- 打包交付 / release / bundle / 驗收只能出現在後段，必須帶明確前置依賴，不可成為概念對齊之後的直接 root。\n"
             "- 後續執行節點只負責完成當前交付，不可把整體問題再拆解一次，也不可重做概念對齊。\n"
             "- 問題拆解 / WBS / issue tree 類 skill 屬於 planner 內部能力；不要把這類 skill 放進任何 task 的 skillBindings。\n"
@@ -299,8 +374,8 @@ def _planner_system_prompt(
             "- 不要用 DATA 邊把 artifact 拉成獨立節點；下游依賴請用 CONTROL 邊與 inputBindings/ports 表達。\n"
             "- taskSpec.executor 只能是 agent、tool、sandbox_run；不得輸出 planner、llm、sandbox、tool-router。\n"
             "- 不要擅自對 agent/persona/assignment/指派做規劃，也不要填 owner。\n"
-            "- 壞例子：概念對齊 -> 背景調研 -> 需求規格 -> PRD -> 架構設計 -> 視覺規格 -> 預設參數 -> 打包交付。\n"
-            "- 好例子：概念對齊 -> 設計定義（需求/PRD/架構/視覺/預設參數合併） -> 原型實作/內容產出 -> 打包交付。\n"
+            "- 壞例子：概念對齊 -> 背景調研 -> 需求規格 -> PRD -> 架構設計 -> 視覺規格 -> 直接開發。\n"
+            "- 好例子：概念對齊 -> 規格整理 -> 前端設計 -> 開發實作 -> 打包交付。\n"
         )
     return (
         "# System Prompt - TaskGraph v3 Planner（只做任務拆解與圖定義；不做 agent/assignment）\n\n"
@@ -317,7 +392,7 @@ def _planner_system_prompt(
         "固定第一步（硬性）：\n"
         "- graph 中的第 0 個任務節點將會是「概念對齊」。\n"
         "- 「概念對齊」使用 web/search 類工具查詢資料，作為背景知識與事實依據。\n"
-        "- 「概念對齊」節點的 PRIMARY skillBindings 必須包含 concept-alignment 技能。\n"
+        "- 「概念對齊」節點的 PRIMARY skillBindings 必須同時包含 concept-alignment 與 web-search-strategy 技能。\n"
         "- 後續的 graph 中不得再出現同質功能的概念調研節點。\n"
         "- planner 已在圖外完成拆題；graph 內不得再出現 TODO / 任務拆解 / task outline / WBS 類 TASK。\n\n"
         "步驟切分規範（硬性）：\n"
@@ -326,10 +401,13 @@ def _planner_system_prompt(
         "- 任務拆解為 TASK 的主要切割點，是執行任務的專業身分差別；再來才看上文結構。\n"
         "- 根據上下文構成以及執行角色相似程度來切分。\n"
         "- 執行角色是任務的天然分界；若主執行者、權限、side effect、獨立審核或重跑需求不同，必須拆成不同 TASK。\n"
-        "- 若需求/系統架構/視覺規格屬於共享上文、且每經過一個節點只是 append 新上文連續推進同一目標，應優先合併成單一任務節點。\n"
         "- 子任務的上文若只是母任務上文的子集合，拆分才有意義；如果目前節點上下文近似於前一節點上下文加前一節點輸出，且只是連續推進同一目標，應與前一節點合併。\n"
         "- 如果目前節點上下文只是前一節點上下文的嚴格子集合，且母節點只是等待全部子任務完成，應優先用 GROUP / children 表達，而不是額外平鋪成兄弟 TASK。\n"
-        "- 同一設計階段內的需求規格、PRD、系統架構、架構設計、視覺規格、預設參數，應合併成 1 個 TASK，透過多個 artifacts 表達產出。\n"
+        "- 若任務屬於程式開發，概念對齊之後至少必須依序有 3 個固定 TASK：規格整理、前端設計、開發實作。\n"
+        "- 程式開發任務中的「規格整理」TASK 必須吸收需求、PRD、架構、資料模型、驗收條件等設計工作，且 PRIMARY skillBindings 必須包含 spec-organizer。\n"
+        "- 程式開發任務中的「前端設計」TASK 必須吸收視覺方向、UI flow、互動狀態與 responsive 規劃，且 PRIMARY skillBindings 必須包含 frontend-design。\n"
+        "- 程式開發任務中的「開發實作」TASK 必須負責程式實作、整合、測試與交付收斂，且 PRIMARY skillBindings 必須包含 vibe-coding-guidelines。\n"
+        "- 程式開發任務預設以 Python 優先，除非使用者已明示既有技術棧或明確要求其他語言/框架。\n"
         "- 後續 TASK 是執行節點，不是重新拆題節點；不可在任何 TASK 再做 TODO 分解、WBS、任務骨架規劃或概念對齊。\n"
         "- 打包交付 / release / bundle / 驗收必須位於後段，且要有明確依賴；不可直接接在概念對齊後面。\n\n"
         "節點辨識與邊界（硬性）：\n"
@@ -359,8 +437,8 @@ def _planner_system_prompt(
         "- taskSpec.executor 只能是 agent、tool、sandbox_run；不得輸出 planner、llm、sandbox、tool-router。\n"
         "- 只有在真的有外部呼叫量、事件量或即時性需求時才設定 rateLimit/streamLimit。\n\n"
         "正反例（硬性參考）：\n"
-        "- 壞例子：概念對齊 -> 背景調研 -> 需求規格 -> PRD -> 架構設計 -> 視覺規格 -> 預設參數 -> 打包交付。\n"
-        "- 好例子：概念對齊 -> 設計定義（把需求/PRD/架構/視覺/預設參數合併成同一節點） -> 實作/內容產出 -> 打包交付。\n\n"
+        "- 壞例子：概念對齊 -> 背景調研 -> 需求規格 -> PRD -> 架構設計 -> 視覺規格 -> 直接開發。\n"
+        "- 好例子：概念對齊 -> 規格整理 -> 前端設計 -> 開發實作 -> 打包交付。\n\n"
     )
 
 
@@ -454,7 +532,7 @@ def _is_planner_internal_skill(item: dict[str, Any]) -> bool:
     return any(token in normalized for token in _PLANNER_INTERNAL_SKILL_TOKENS)
 
 
-def _semantic_plan_issues(graph: GraphDefinition) -> list[str]:
+def _semantic_plan_issues(graph: GraphDefinition, *, message: str | None = None) -> list[str]:
     task_nodes = [node for node in graph.nodes if isinstance(node, TaskNode)]
     issues: list[str] = []
     if len(task_nodes) > _MAX_TASK_NODES:
@@ -462,12 +540,33 @@ def _semantic_plan_issues(graph: GraphDefinition) -> list[str]:
     concept_nodes = [node for node in task_nodes if _is_concept_task(node)]
     if len(concept_nodes) > 1:
         issues.append("出現重複的概念對齊/背景調研 TASK，必須只保留 1 個。")
+    for node in concept_nodes:
+        skill_names = {str(name or "").strip().lower() for name in (node.task_spec.agent.skills if node.task_spec and node.task_spec.agent else [])}
+        if "concept-alignment" not in skill_names or "web-search-strategy" not in skill_names:
+            issues.append("「概念對齊」TASK 必須同時綁定 concept-alignment 與 web-search-strategy。")
+            break
     planning_nodes = [node for node in task_nodes if node.id != "concept_alignment" and _is_planning_task(node)]
     if planning_nodes:
         issues.append("planner 已在圖外完成拆題，graph 內不得再出現 TODO / 任務拆解 / WBS 類 TASK。")
-    spec_cluster_count = sum(1 for node in task_nodes if _is_spec_cluster_task(node))
-    if spec_cluster_count >= 3:
-        issues.append("需求/PRD/架構/視覺/預設參數被切成過多獨立 TASK，必須合併為同一設計階段節點。")
+    is_development = _is_development_request(message, task_nodes)
+    if is_development:
+        spec_stage_count = sum(1 for node in task_nodes if _is_spec_stage_task(node))
+        frontend_stage_count = sum(1 for node in task_nodes if _is_frontend_stage_task(node))
+        development_stage_count = sum(1 for node in task_nodes if _is_development_stage_task(node))
+        if spec_stage_count == 0:
+            issues.append("程式開發任務缺少「規格整理」TASK，必須補上並綁定 spec-organizer。")
+        if frontend_stage_count == 0:
+            issues.append("程式開發任務缺少「前端設計」TASK，必須補上並綁定 frontend-design。")
+        if development_stage_count == 0:
+            issues.append("程式開發任務缺少「開發實作」TASK，必須補上並綁定 vibe-coding-guidelines。")
+        if spec_stage_count >= 2:
+            issues.append("程式開發任務把需求/PRD/架構拆成過多獨立 TASK，必須合併為單一「規格整理」階段。")
+        if frontend_stage_count >= 2:
+            issues.append("程式開發任務把視覺/UI 設計拆成過多獨立 TASK，必須合併為單一「前端設計」階段。")
+    else:
+        spec_cluster_count = sum(1 for node in task_nodes if _is_spec_cluster_task(node))
+        if spec_cluster_count >= 3:
+            issues.append("需求/PRD/架構/視覺/預設參數被切成過多獨立 TASK，必須合併為同一設計階段節點。")
     incoming_dependencies = _incoming_dependency_count(graph)
     for node in task_nodes:
         if node.id == "concept_alignment":
@@ -478,12 +577,12 @@ def _semantic_plan_issues(graph: GraphDefinition) -> list[str]:
     return issues
 
 
-def semantic_plan_issues(graph: GraphDefinition) -> list[str]:
-    return _semantic_plan_issues(graph)
+def semantic_plan_issues(graph: GraphDefinition, *, message: str | None = None) -> list[str]:
+    return _semantic_plan_issues(graph, message=message)
 
 
-def _fatal_semantic_plan_issues(graph: GraphDefinition) -> list[str]:
-    return [issue for issue in _semantic_plan_issues(graph) if issue not in _REPAIRABLE_SEMANTIC_ISSUES]
+def _fatal_semantic_plan_issues(graph: GraphDefinition, *, message: str | None = None) -> list[str]:
+    return [issue for issue in _semantic_plan_issues(graph, message=message) if issue not in _REPAIRABLE_SEMANTIC_ISSUES]
 
 
 def _incoming_dependency_count(graph: GraphDefinition) -> dict[str, int]:
@@ -525,6 +624,39 @@ def _is_spec_cluster_task(node: TaskNode) -> bool:
     return any(token in normalized for token in _SPEC_CLUSTER_TOKENS)
 
 
+def _is_development_request(message: str | None, task_nodes: list[TaskNode]) -> bool:
+    normalized_message = str(message or "").strip().lower()
+    if any(token in normalized_message for token in _DEVELOPMENT_TASK_TOKENS):
+        return True
+    return any(_is_development_stage_task(node) for node in task_nodes)
+
+
+def _is_spec_stage_task(node: TaskNode) -> bool:
+    skill_names = {str(name or "").strip().lower() for name in (node.task_spec.agent.skills if node.task_spec and node.task_spec.agent else [])}
+    if "spec-organizer" in skill_names:
+        return True
+    if "frontend-design" in skill_names or "vibe-coding-guidelines" in skill_names:
+        return False
+    normalized = _normalize_task_text(node)
+    return any(token in normalized for token in _SPEC_STAGE_TOKENS)
+
+
+def _is_frontend_stage_task(node: TaskNode) -> bool:
+    skill_names = {str(name or "").strip().lower() for name in (node.task_spec.agent.skills if node.task_spec and node.task_spec.agent else [])}
+    if "frontend-design" in skill_names:
+        return True
+    normalized = _normalize_task_text(node)
+    return any(token in normalized for token in _FRONTEND_STAGE_TOKENS)
+
+
+def _is_development_stage_task(node: TaskNode) -> bool:
+    skill_names = {str(name or "").strip().lower() for name in (node.task_spec.agent.skills if node.task_spec and node.task_spec.agent else [])}
+    if "vibe-coding-guidelines" in skill_names:
+        return True
+    normalized = _normalize_task_text(node)
+    return any(token in normalized for token in _DEVELOPMENT_STAGE_TOKENS)
+
+
 def _is_packaging_task(node: TaskNode) -> bool:
     normalized = _normalize_task_identity_text(node)
     return any(token in normalized for token in _PACKAGING_TOKENS)
@@ -536,6 +668,99 @@ def _is_planning_task(node: TaskNode) -> bool:
 
 
 def _minimal_plan(message: str) -> GraphDefinition:
+    if _is_development_request(message, []):
+        return GraphDefinition(
+            id="planner-fallback",
+            version="taskgraph.v3",
+            name="Fallback Planner Graph",
+            nodes=[
+                TaskNode(
+                    id="concept_alignment",
+                    title="概念對齊",
+                    task_spec=TaskSpec(
+                        executor="agent",
+                        agent=AgentTaskConfig(
+                            prompt=(
+                                f"任務：{message}\n"
+                                "先做概念對齊，整理關鍵名詞定義、背景知識、常見作法、風險與後續規劃注意事項。"
+                            ),
+                            instructions="先完成概念對齊，再把摘要提供給下游規格整理節點。",
+                            skills=["concept-alignment", "web-search-strategy"],
+                        ),
+                        display=TaskDisplayMetadata(
+                            label="概念對齊",
+                            summary="先查清關鍵概念與風險，再開始後續規劃。",
+                            todo_hint="完成概念摘要、風險與名詞對照。",
+                            tags=["concept_alignment", "fallback"],
+                        ),
+                        runnable=True,
+                    ),
+                ),
+                TaskNode(
+                    id="spec_organizer",
+                    title="規格整理",
+                    task_spec=TaskSpec(
+                        executor="agent",
+                        agent=AgentTaskConfig(
+                            prompt="請整理成可開發規格，補齊需求範圍、架構、資料模型、驗收條件與假設。",
+                            instructions="若資訊不足但不構成真正阻塞，請明確標註假設後繼續。",
+                            skills=["spec-organizer"],
+                        ),
+                        display=TaskDisplayMetadata(
+                            label="規格整理",
+                            summary="整理成可開發、可驗收的規格文件。",
+                            todo_hint="完成規格、限制、假設與驗收條件。",
+                            tags=["spec_stage", "fallback"],
+                        ),
+                        runnable=True,
+                    ),
+                ),
+                TaskNode(
+                    id="frontend_design",
+                    title="前端設計",
+                    task_spec=TaskSpec(
+                        executor="agent",
+                        agent=AgentTaskConfig(
+                            prompt="請根據規格整理前端視覺方向、主要流程、互動狀態與 responsive 原則。",
+                            instructions="輸出要能直接指導後續實作，不要只給抽象風格詞。",
+                            skills=["frontend-design"],
+                        ),
+                        display=TaskDisplayMetadata(
+                            label="前端設計",
+                            summary="整理 UI 流程、視覺方向與互動狀態。",
+                            todo_hint="完成畫面重點、狀態與視覺規則。",
+                            tags=["frontend_stage", "fallback"],
+                        ),
+                        runnable=True,
+                    ),
+                ),
+                TaskNode(
+                    id="development_implementation",
+                    title="開發實作",
+                    task_spec=TaskSpec(
+                        executor="agent",
+                        agent=AgentTaskConfig(
+                            prompt=message,
+                            instructions="請依前置規格與前端設計完成實作，預設以 Python 優先。",
+                            skills=["vibe-coding-guidelines"],
+                        ),
+                        artifacts=[ArtifactOutput(name="todo", media_type="text/markdown", description="最小任務清單", required=True)],
+                        display=TaskDisplayMetadata(
+                            label="開發實作",
+                            summary="依規格與前端設計完成最小可行交付。",
+                            todo_hint="完成實作、測試與待補資訊整理。",
+                            tags=["development_stage", "fallback"],
+                        ),
+                        runnable=True,
+                    ),
+                ),
+            ],
+            edges=[
+                GraphEdge(from_node="concept_alignment", to_node="spec_organizer", edge_type="CONTROL", kind="DEPENDS_ON"),
+                GraphEdge(from_node="spec_organizer", to_node="frontend_design", edge_type="CONTROL", kind="DEPENDS_ON"),
+                GraphEdge(from_node="frontend_design", to_node="development_implementation", edge_type="CONTROL", kind="DEPENDS_ON"),
+            ],
+        )
     return GraphDefinition(
         id="planner-fallback",
         version="taskgraph.v3",
@@ -552,7 +777,7 @@ def _minimal_plan(message: str) -> GraphDefinition:
                             "先做概念對齊，整理關鍵名詞定義、背景知識、常見作法、風險與後續規劃注意事項。"
                         ),
                         instructions="先完成概念對齊，再把摘要提供給下游規劃節點。",
-                        skills=["concept-alignment"],
+                        skills=["concept-alignment", "web-search-strategy"],
                     ),
                     artifacts=[
                         ArtifactOutput(

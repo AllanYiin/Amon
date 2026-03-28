@@ -341,6 +341,7 @@ class ThreadSessionStoreTests(unittest.TestCase):
         self.assertIn("請直接沿用既有任務往下執行", prompt)
         self.assertIn("只有在缺少關鍵資訊而無法完成任務", prompt)
         self.assertIn("一次整合提出所有阻塞問題", prompt)
+        self.assertIn("整個任務最多只允許一次阻塞提問", prompt)
         self.assertIn("停在等待使用者回覆的狀態", prompt)
         self.assertIn("不要用問句收尾", prompt)
 

@@ -136,6 +136,102 @@ export function createMessageRenderer({ timelineEl, renderMarkdown }) {
     stickToBottom();
   }
 
+  function ensureNodeLabel(bubble, labelText = "") {
+    const normalizedLabel = String(labelText || "").trim();
+    let labelEl = bubble.querySelector(".chat-msg__node-label");
+    if (!normalizedLabel) {
+      labelEl?.remove();
+      return null;
+    }
+    if (!labelEl) {
+      labelEl = document.createElement("div");
+      labelEl.className = "chat-msg__node-label";
+      bubble.insertBefore(labelEl, bubble.firstChild);
+    }
+    labelEl.textContent = normalizedLabel;
+    return labelEl;
+  }
+
+  function ensureToolsContainer(bubble) {
+    let toolsEl = bubble.querySelector(".chat-msg__tools");
+    if (toolsEl) return toolsEl;
+    toolsEl = document.createElement("div");
+    toolsEl.className = "chat-msg__tools";
+    const body = bubble.querySelector(".chat-msg__body");
+    bubble.insertBefore(toolsEl, body || null);
+    return toolsEl;
+  }
+
+  function normalizeToolState({ stage = "", status = "", isError = false }) {
+    const normalizedStage = String(stage || "").trim().toLowerCase();
+    const normalizedStatus = String(status || "").trim().toLowerCase();
+    if (normalizedStage === "start") {
+      return { state: "running", label: "執行中" };
+    }
+    if (isError || normalizedStatus === "error" || normalizedStatus === "failed") {
+      return { state: "failed", label: `失敗${normalizedStatus ? ` · ${normalizedStatus}` : ""}` };
+    }
+    return { state: "succeeded", label: `已完成${normalizedStatus ? ` · ${normalizedStatus}` : ""}` };
+  }
+
+  function createToolCallEntry(toolName, toolState) {
+    const item = document.createElement("section");
+    item.className = `chat-msg__tool-call chat-msg__tool-call--${toolState.state}`;
+    item.dataset.toolName = String(toolName || "").trim().toLowerCase();
+    item.dataset.toolState = toolState.state;
+
+    const header = document.createElement("div");
+    header.className = "chat-msg__tool-call-header";
+
+    const nameEl = document.createElement("span");
+    nameEl.className = "chat-msg__tool-call-name";
+    nameEl.textContent = toolName || "unknown-tool";
+    header.appendChild(nameEl);
+
+    const statusEl = document.createElement("span");
+    statusEl.className = "chat-msg__tool-call-status";
+    statusEl.textContent = toolState.label;
+    header.appendChild(statusEl);
+
+    const detailEl = document.createElement("div");
+    detailEl.className = "chat-msg__tool-call-detail";
+    detailEl.hidden = true;
+
+    item.appendChild(header);
+    item.appendChild(detailEl);
+    return item;
+  }
+
+  function setToolCallEntryState(item, toolState, { argsPreview = "", errorDetail = "" } = {}) {
+    item.classList.remove("chat-msg__tool-call--running", "chat-msg__tool-call--succeeded", "chat-msg__tool-call--failed");
+    item.classList.add(`chat-msg__tool-call--${toolState.state}`);
+    item.dataset.toolState = toolState.state;
+
+    const statusEl = item.querySelector(".chat-msg__tool-call-status");
+    if (statusEl) {
+      statusEl.textContent = toolState.label;
+    }
+
+    const detailEl = item.querySelector(".chat-msg__tool-call-detail");
+    if (!detailEl) return;
+
+    const lines = [];
+    if (String(argsPreview || "").trim()) {
+      lines.push(`參數：${String(argsPreview).trim()}`);
+    }
+    if (String(errorDetail || "").trim()) {
+      lines.push(`錯誤：${String(errorDetail).trim()}`);
+    }
+
+    if (!lines.length) {
+      detailEl.textContent = "";
+      detailEl.hidden = true;
+      return;
+    }
+    detailEl.textContent = lines.join("\n");
+    detailEl.hidden = false;
+  }
+
   function pendingKeyForMeta(meta = {}) {
     const nodeId = String(meta.nodeId || "").trim();
     if (nodeId) return `assistant:${nodeId}`;
@@ -162,7 +258,9 @@ export function createMessageRenderer({ timelineEl, renderMarkdown }) {
       pendingAssistantMessage.bubble.dataset.buffer = "";
       state.pendingAssistantMessages.set(key, pendingAssistantMessage);
     }
-    return state.pendingAssistantMessages.get(key);
+    const pendingAssistantMessage = state.pendingAssistantMessages.get(key);
+    ensureNodeLabel(pendingAssistantMessage.bubble, nodeLabelForMeta(meta));
+    return pendingAssistantMessage;
   }
 
   function applyTokenChunk(text = "", meta = {}) {
@@ -200,6 +298,35 @@ export function createMessageRenderer({ timelineEl, renderMarkdown }) {
     badgeEl.textContent = normalizedLabel;
   }
 
+  function upsertToolCall(meta = {}, toolMeta = {}) {
+    const pendingAssistantMessage = getOrCreatePendingAssistantMessage(meta);
+    const toolName = String(toolMeta.toolName || "").trim() || "unknown-tool";
+    const toolsEl = ensureToolsContainer(pendingAssistantMessage.bubble);
+    const toolState = normalizeToolState(toolMeta);
+    const normalizedToolName = toolName.toLowerCase();
+    let entry = null;
+
+    if (String(toolMeta.stage || "").trim().toLowerCase() === "start") {
+      entry = createToolCallEntry(toolName, toolState);
+      toolsEl.appendChild(entry);
+    } else {
+      const entries = Array.from(toolsEl.querySelectorAll(".chat-msg__tool-call"))
+        .filter((item) => item.dataset.toolName === normalizedToolName);
+      entry = [...entries].reverse().find((item) => item.dataset.toolState === "running")
+        || entries[entries.length - 1]
+        || createToolCallEntry(toolName, toolState);
+      if (!entry.parentElement) {
+        toolsEl.appendChild(entry);
+      }
+    }
+
+    setToolCallEntryState(entry, toolState, {
+      argsPreview: toolMeta.argsPreview,
+      errorDetail: toolMeta.errorDetail,
+    });
+    stickToBottom();
+  }
+
   function finalizeAssistantBubble() {
     state.pendingAssistantMessages.forEach((pendingAssistantMessage) => {
       pendingAssistantMessage.bubble.classList.remove("is-typing");
@@ -225,6 +352,7 @@ export function createMessageRenderer({ timelineEl, renderMarkdown }) {
     applyTokenChunk,
     getPendingBuffer,
     setArtifactBadge,
+    upsertToolCall,
     finalizeAssistantBubble,
     reset,
   };

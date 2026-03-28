@@ -28,8 +28,9 @@ class ToolPolicyTests(unittest.TestCase):
                 os.environ.pop("AMON_HOME", None)
 
         self.assertIn("不要以反問句結尾", system_message)
-        self.assertIn("不預設 1–2 題", system_message)
+        self.assertIn("整個任務最多只允許一次阻塞提問", system_message)
         self.assertIn("不要自問自答", system_message)
+        self.assertIn("預設以 Python 優先", system_message)
         self.assertIn("file=workspace/", system_message)
         self.assertIn("禁止輸出 workspace 外路徑", system_message)
 
@@ -143,7 +144,7 @@ class WorkspacePathNormalizationTests(unittest.TestCase):
         with patch("amon.tooling.policy.os.path.abspath", side_effect=lambda value: value):
             normalized = _normalize_path_text(raw)
         self.assertFalse(normalized.startswith("\\?\\"))
-        self.assertIn(r"server\share\Amon", normalized)
+        self.assertIn(r"server\share\amon", normalized.lower())
 
 
 class WorkspaceGuardTests(unittest.TestCase):

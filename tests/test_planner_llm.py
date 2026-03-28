@@ -26,7 +26,7 @@ class PlannerLLMTests(unittest.TestCase):
     def test_generate_plan_with_llm_success(self) -> None:
         llm = _MockLLM([
             "```json\n"
-            '{"graphId":"graph-1","name":"規劃圖","version":"taskgraph.v3","createdAt":"2026-03-16T00:00:00Z","createdBy":"planner","nodes":[{"id":"task-1","type":"TASK","title":"概念對齊","objective":"查關鍵概念","definitionOfDone":["完成概念摘要","整理風險"],"skillBindings":[{"skillId":"concept-alignment","role":"PRIMARY","config":{"tools":["web.search"]}}],"execution":{"mode":"SINGLE"}},{"id":"artifact-task-1-todo","type":"ARTIFACT","title":"docs/TODO.md","artifact":{"artifactId":"artifact-task-1-todo","name":"TODO","kind":"document"}}],"edges":[{"id":"edge-1","type":"DATA","from":"task-1","to":"artifact-task-1-todo","dataKind":"PRODUCES"}]}\n'
+            '{"graphId":"graph-1","name":"規劃圖","version":"taskgraph.v3","createdAt":"2026-03-16T00:00:00Z","createdBy":"planner","nodes":[{"id":"task-1","type":"TASK","title":"概念對齊","objective":"查關鍵概念","definitionOfDone":["完成概念摘要","整理風險"],"skillBindings":[{"skillId":"concept-alignment","role":"PRIMARY","config":{"tools":["web.search"]}},{"skillId":"web-search-strategy","role":"PRIMARY"}],"execution":{"mode":"SINGLE"}},{"id":"artifact-task-1-todo","type":"ARTIFACT","title":"docs/TODO.md","artifact":{"artifactId":"artifact-task-1-todo","name":"TODO","kind":"document"}}],"edges":[{"id":"edge-1","type":"DATA","from":"task-1","to":"artifact-task-1-todo","dataKind":"PRODUCES"}]}\n'
             "```\n"
             "```mermaid\n"
             "flowchart TD\n"
@@ -39,7 +39,7 @@ class PlannerLLMTests(unittest.TestCase):
         self.assertEqual(len(plan.nodes), 2)
         task_node = next(node for node in plan.nodes if isinstance(node, TaskNode))
         self.assertEqual(task_node.task_spec.agent.allowed_tools, ["web.search"])
-        self.assertEqual(task_node.task_spec.agent.skills, ["concept-alignment"])
+        self.assertEqual(task_node.task_spec.agent.skills, ["concept-alignment", "web-search-strategy"])
         self.assertIn("planner_mermaid", plan.metadata)
 
     def test_generate_plan_with_llm_retry_once(self) -> None:
@@ -57,6 +57,7 @@ class PlannerLLMTests(unittest.TestCase):
         self.assertEqual(plan.version, "taskgraph.v3")
         self.assertEqual(plan.nodes[0].id, "concept_alignment")
         self.assertTrue(all(isinstance(node, TaskNode) for node in plan.nodes))
+        self.assertEqual(plan.nodes[0].task_spec.agent.skills, ["concept-alignment", "web-search-strategy"])
 
     def test_generate_plan_with_llm_fallback_emits_observability_event(self) -> None:
         llm = _MockLLM(["not-json", "still-not-json"])
@@ -75,7 +76,7 @@ class PlannerLLMTests(unittest.TestCase):
     def test_generate_plan_with_llm_keeps_repairable_semantic_issues_for_postprocess(self) -> None:
         llm = _MockLLM([
             "```json\n"
-            '{"graphId":"graph-2","name":"規劃圖","version":"taskgraph.v3","createdAt":"2026-03-16T00:00:00Z","createdBy":"planner","nodes":[{"id":"concept_alignment","type":"TASK","title":"概念對齊","objective":"查關鍵概念","definitionOfDone":["完成概念摘要","整理風險"],"skillBindings":[{"skillId":"concept-alignment","role":"PRIMARY","config":{"tools":["web.search"]}}],"execution":{"mode":"SINGLE"}},{"id":"requirements","type":"TASK","title":"需求規格","objective":"整理需求","definitionOfDone":["完成需求","完成規格"],"execution":{"mode":"SINGLE"}},{"id":"architecture","type":"TASK","title":"架構設計","objective":"整理架構","definitionOfDone":["完成架構","完成限制"],"execution":{"mode":"SINGLE"}},{"id":"visual","type":"TASK","title":"視覺規格","objective":"整理視覺","definitionOfDone":["完成視覺","完成風格"],"execution":{"mode":"SINGLE"}},{"id":"artifact-task-1-todo","type":"ARTIFACT","title":"docs/TODO.md","artifact":{"artifactId":"artifact-task-1-todo","name":"TODO","kind":"document"}}],"edges":[{"id":"edge-1","type":"DATA","from":"visual","to":"artifact-task-1-todo","dataKind":"PRODUCES"}]}\n'
+            '{"graphId":"graph-2","name":"規劃圖","version":"taskgraph.v3","createdAt":"2026-03-16T00:00:00Z","createdBy":"planner","nodes":[{"id":"concept_alignment","type":"TASK","title":"概念對齊","objective":"查關鍵概念","definitionOfDone":["完成概念摘要","整理風險"],"skillBindings":[{"skillId":"concept-alignment","role":"PRIMARY","config":{"tools":["web.search"]}},{"skillId":"web-search-strategy","role":"PRIMARY"}],"execution":{"mode":"SINGLE"}},{"id":"requirements","type":"TASK","title":"需求規格","objective":"整理需求","definitionOfDone":["完成需求","完成規格"],"execution":{"mode":"SINGLE"}},{"id":"architecture","type":"TASK","title":"架構設計","objective":"整理架構","definitionOfDone":["完成架構","完成限制"],"execution":{"mode":"SINGLE"}},{"id":"visual","type":"TASK","title":"視覺規格","objective":"整理視覺","definitionOfDone":["完成視覺","完成風格"],"execution":{"mode":"SINGLE"}},{"id":"artifact-task-1-todo","type":"ARTIFACT","title":"docs/TODO.md","artifact":{"artifactId":"artifact-task-1-todo","name":"TODO","kind":"document"}}],"edges":[{"id":"edge-1","type":"DATA","from":"visual","to":"artifact-task-1-todo","dataKind":"PRODUCES"}]}\n'
             "```\n"
             "```mermaid\n"
             "flowchart TD\n"
@@ -91,10 +92,10 @@ class PlannerLLMTests(unittest.TestCase):
     def test_generate_plan_with_llm_repairs_repairable_semantic_issues(self) -> None:
         llm = _MockLLM([
             "```json\n"
-            '{"graphId":"graph-2","name":"規劃圖","version":"taskgraph.v3","createdAt":"2026-03-16T00:00:00Z","createdBy":"planner","nodes":[{"id":"concept_alignment","type":"TASK","title":"概念對齊","objective":"查關鍵概念","definitionOfDone":["完成概念摘要","整理風險"],"skillBindings":[{"skillId":"concept-alignment","role":"PRIMARY","config":{"tools":["web.search"]}}],"execution":{"mode":"SINGLE"}},{"id":"requirements","type":"TASK","title":"需求規格","objective":"整理需求","definitionOfDone":["完成需求","完成規格"],"execution":{"mode":"SINGLE"}},{"id":"architecture","type":"TASK","title":"架構設計","objective":"整理架構","definitionOfDone":["完成架構","完成限制"],"execution":{"mode":"SINGLE"}},{"id":"visual","type":"TASK","title":"視覺規格","objective":"整理視覺","definitionOfDone":["完成視覺","完成風格"],"execution":{"mode":"SINGLE"}}],"edges":[{"id":"edge-1","type":"CONTROL","from":"concept_alignment","to":"requirements","kind":"DEPENDS_ON"},{"id":"edge-2","type":"CONTROL","from":"requirements","to":"architecture","kind":"DEPENDS_ON"},{"id":"edge-3","type":"CONTROL","from":"architecture","to":"visual","kind":"DEPENDS_ON"}]}\n'
+            '{"graphId":"graph-2","name":"規劃圖","version":"taskgraph.v3","createdAt":"2026-03-16T00:00:00Z","createdBy":"planner","nodes":[{"id":"concept_alignment","type":"TASK","title":"概念對齊","objective":"查關鍵概念","definitionOfDone":["完成概念摘要","整理風險"],"skillBindings":[{"skillId":"concept-alignment","role":"PRIMARY","config":{"tools":["web.search"]}},{"skillId":"web-search-strategy","role":"PRIMARY"}],"execution":{"mode":"SINGLE"}},{"id":"requirements","type":"TASK","title":"需求規格","objective":"整理需求","definitionOfDone":["完成需求","完成規格"],"execution":{"mode":"SINGLE"}},{"id":"architecture","type":"TASK","title":"架構設計","objective":"整理架構","definitionOfDone":["完成架構","完成限制"],"execution":{"mode":"SINGLE"}},{"id":"visual","type":"TASK","title":"視覺規格","objective":"整理視覺","definitionOfDone":["完成視覺","完成風格"],"execution":{"mode":"SINGLE"}}],"edges":[{"id":"edge-1","type":"CONTROL","from":"concept_alignment","to":"requirements","kind":"DEPENDS_ON"},{"id":"edge-2","type":"CONTROL","from":"requirements","to":"architecture","kind":"DEPENDS_ON"},{"id":"edge-3","type":"CONTROL","from":"architecture","to":"visual","kind":"DEPENDS_ON"}]}\n'
             "```\n",
             "```json\n"
-            '{"graphId":"graph-2-repaired","name":"規劃圖","version":"taskgraph.v3","createdAt":"2026-03-16T00:00:00Z","createdBy":"planner","nodes":[{"id":"concept_alignment","type":"TASK","title":"概念對齊","objective":"查關鍵概念","definitionOfDone":["完成概念摘要","整理風險"],"skillBindings":[{"skillId":"concept-alignment","role":"PRIMARY","config":{"tools":["web.search"]}}],"execution":{"mode":"SINGLE"}},{"id":"design_definition","type":"TASK","title":"設計定義","objective":"整合需求、架構與視覺規格","definitionOfDone":["完成需求規格","完成架構說明","完成視覺方向"],"execution":{"mode":"SINGLE"}}],"edges":[{"id":"edge-1","type":"CONTROL","from":"concept_alignment","to":"design_definition","kind":"DEPENDS_ON"}]}\n'
+            '{"graphId":"graph-2-repaired","name":"規劃圖","version":"taskgraph.v3","createdAt":"2026-03-16T00:00:00Z","createdBy":"planner","nodes":[{"id":"concept_alignment","type":"TASK","title":"概念對齊","objective":"查關鍵概念","definitionOfDone":["完成概念摘要","整理風險"],"skillBindings":[{"skillId":"concept-alignment","role":"PRIMARY","config":{"tools":["web.search"]}},{"skillId":"web-search-strategy","role":"PRIMARY"}],"execution":{"mode":"SINGLE"}},{"id":"spec_organizer","type":"TASK","title":"規格整理","objective":"整理需求與架構規格","definitionOfDone":["完成需求規格","完成架構說明"],"skillBindings":[{"skillId":"spec-organizer","role":"PRIMARY"}],"execution":{"mode":"SINGLE"}},{"id":"frontend_design","type":"TASK","title":"前端設計","objective":"整理 UI 與視覺方向","definitionOfDone":["完成流程","完成視覺規則"],"skillBindings":[{"skillId":"frontend-design","role":"PRIMARY"}],"execution":{"mode":"SINGLE"}},{"id":"development_implementation","type":"TASK","title":"開發實作","objective":"完成程式實作","definitionOfDone":["完成開發","完成測試重點"],"skillBindings":[{"skillId":"vibe-coding-guidelines","role":"PRIMARY"}],"execution":{"mode":"SINGLE"}}],"edges":[{"id":"edge-1","type":"CONTROL","from":"concept_alignment","to":"spec_organizer","kind":"DEPENDS_ON"},{"id":"edge-2","type":"CONTROL","from":"spec_organizer","to":"frontend_design","kind":"DEPENDS_ON"},{"id":"edge-3","type":"CONTROL","from":"frontend_design","to":"development_implementation","kind":"DEPENDS_ON"}]}\n'
             "```\n",
         ])
 
@@ -103,14 +104,14 @@ class PlannerLLMTests(unittest.TestCase):
         self.assertEqual(plan.id, "graph-2-repaired")
         self.assertEqual(
             [node.id for node in plan.nodes if isinstance(node, TaskNode)],
-            ["concept_alignment", "design_definition"],
+            ["concept_alignment", "spec_organizer", "frontend_design", "development_implementation"],
         )
         self.assertEqual(len(llm.calls), 2)
 
     def test_generate_plan_with_llm_preserves_last_valid_graph_when_repair_response_is_invalid(self) -> None:
         llm = _MockLLM([
             "```json\n"
-            '{"graphId":"graph-2","name":"規劃圖","version":"taskgraph.v3","createdAt":"2026-03-16T00:00:00Z","createdBy":"planner","nodes":[{"id":"concept_alignment","type":"TASK","title":"概念對齊","objective":"查關鍵概念","definitionOfDone":["完成概念摘要","整理風險"],"skillBindings":[{"skillId":"concept-alignment","role":"PRIMARY","config":{"tools":["web.search"]}}],"execution":{"mode":"SINGLE"}},{"id":"requirements","type":"TASK","title":"需求規格","objective":"整理需求","definitionOfDone":["完成需求","完成規格"],"execution":{"mode":"SINGLE"}},{"id":"architecture","type":"TASK","title":"架構設計","objective":"整理架構","definitionOfDone":["完成架構","完成限制"],"execution":{"mode":"SINGLE"}},{"id":"visual","type":"TASK","title":"視覺規格","objective":"整理視覺","definitionOfDone":["完成視覺","完成風格"],"execution":{"mode":"SINGLE"}}],"edges":[{"id":"edge-1","type":"CONTROL","from":"concept_alignment","to":"requirements","kind":"DEPENDS_ON"},{"id":"edge-2","type":"CONTROL","from":"requirements","to":"architecture","kind":"DEPENDS_ON"},{"id":"edge-3","type":"CONTROL","from":"architecture","to":"visual","kind":"DEPENDS_ON"}]}\n'
+            '{"graphId":"graph-2","name":"規劃圖","version":"taskgraph.v3","createdAt":"2026-03-16T00:00:00Z","createdBy":"planner","nodes":[{"id":"concept_alignment","type":"TASK","title":"概念對齊","objective":"查關鍵概念","definitionOfDone":["完成概念摘要","整理風險"],"skillBindings":[{"skillId":"concept-alignment","role":"PRIMARY","config":{"tools":["web.search"]}},{"skillId":"web-search-strategy","role":"PRIMARY"}],"execution":{"mode":"SINGLE"}},{"id":"requirements","type":"TASK","title":"需求規格","objective":"整理需求","definitionOfDone":["完成需求","完成規格"],"execution":{"mode":"SINGLE"}},{"id":"architecture","type":"TASK","title":"架構設計","objective":"整理架構","definitionOfDone":["完成架構","完成限制"],"execution":{"mode":"SINGLE"}},{"id":"visual","type":"TASK","title":"視覺規格","objective":"整理視覺","definitionOfDone":["完成視覺","完成風格"],"execution":{"mode":"SINGLE"}}],"edges":[{"id":"edge-1","type":"CONTROL","from":"concept_alignment","to":"requirements","kind":"DEPENDS_ON"},{"id":"edge-2","type":"CONTROL","from":"requirements","to":"architecture","kind":"DEPENDS_ON"},{"id":"edge-3","type":"CONTROL","from":"architecture","to":"visual","kind":"DEPENDS_ON"}]}\n'
             "```\n",
             "not-json",
         ])
@@ -150,12 +151,15 @@ class PlannerLLMTests(unittest.TestCase):
         self.assertIn('"skillId": "frontend-design"', system_prompt)
         self.assertNotIn('"skillId": "problem-decomposer"', system_prompt)
         self.assertIn("concept-alignment", system_prompt)
+        self.assertIn("web-search-strategy", system_prompt)
         self.assertIn("嚴禁輸出任何 agent/persona/assignment", system_prompt)
         self.assertIn("CONTROL/DEPENDS_ON 的方向固定是前置節點 -> 依賴它的節點", system_prompt)
         self.assertIn("不得建立 ARTIFACT node", system_prompt)
         self.assertIn("planner 已在圖外完成拆題；graph 內不得再出現 TODO / 任務拆解 / task outline / WBS 類 TASK", system_prompt)
         self.assertIn("TASK 節點總數不得超過 8", system_prompt)
-        self.assertIn("好例子：概念對齊 -> 設計定義", system_prompt)
+        self.assertIn("好例子：概念對齊 -> 規格整理 -> 前端設計 -> 開發實作", system_prompt)
+        self.assertIn("spec-organizer", system_prompt)
+        self.assertIn("vibe-coding-guidelines", system_prompt)
         self.assertIn("根據上下文構成以及執行角色相似程度來切分", system_prompt)
         self.assertIn("執行角色是任務的天然分界", system_prompt)
         self.assertIn("Task 是可由單一主執行者直接完成", system_prompt)
