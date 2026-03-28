@@ -16,6 +16,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from amon.core import AmonCore
+from amon.chat.router_types import RouterResult
 from amon.models import encode_stream_event
 from amon.ui_server import AmonUIHandler
 from http.server import ThreadingHTTPServer
@@ -831,6 +832,137 @@ class UIAsyncAPITests(unittest.TestCase):
                 self.assertEqual(len(observed_run_ids), 2)
                 self.assertTrue(observed_run_ids[0])
                 self.assertTrue(observed_run_ids[1])
+            finally:
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                os.environ.pop("AMON_HOME", None)
+
+    def test_chat_semantic_followup_forces_continuation_even_when_router_returns_command_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            os.environ["AMON_HOME"] = str(data_dir)
+            server = None
+            try:
+                core = AmonCore()
+                core.initialize()
+                project = core.create_project("語意續跑強制測試")
+
+                observed_histories: list[list[dict[str, str]] | None] = []
+                call_count = 0
+
+                def fake_run_graph_stream(
+                    prompt,
+                    project_path,
+                    project_id=None,
+                    model=None,
+                    llm_client=None,
+                    available_tools=None,
+                    available_skills=None,
+                    stream_handler=None,
+                    todo_handler=None,
+                    run_id=None,
+                    thread_id=None,
+                    conversation_history=None,
+                    request_id=None,
+                ):
+                    nonlocal call_count
+                    call_count += 1
+                    observed_histories.append(conversation_history)
+                    if stream_handler:
+                        stream_handler("token")
+                    response = (
+                        "先決定要優先做前端還是後端"
+                        if call_count == 1
+                        else "收到，我會依照你剛補充的後端方向直接續做。"
+                    )
+                    resolved_run_id = run_id or "run-semantic-followup-001"
+                    return (
+                        SimpleNamespace(run_id=resolved_run_id, execution_route="planner", planner_enabled=True),
+                        response,
+                    )
+
+                handler = partial(
+                    AmonUIHandler,
+                    directory=str(Path(__file__).resolve().parents[1] / "src" / "amon" / "ui"),
+                    core=core,
+                )
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                port = server.server_address[1]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                with patch("amon.ui_server.decide_execution_mode", return_value="single"), patch(
+                    "amon.ui_server.should_continue_run_with_llm",
+                    return_value=True,
+                ), patch(
+                    "amon.ui_server.route_intent",
+                    side_effect=[
+                        RouterResult(type="chat_response", confidence=1.0, execution_mode="single"),
+                        RouterResult(type="command_plan", confidence=0.98, api="projects.list", args={}),
+                    ],
+                ), patch(
+                    "amon.ui_server.execute",
+                    side_effect=AssertionError("semantic continuation should not execute a new command plan"),
+                ), patch.object(
+                    core,
+                    "run_graph_stream",
+                    side_effect=fake_run_graph_stream,
+                ):
+                    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                    conn.request(
+                        "GET",
+                        f"/v1/threads/stream?project_id={quote(project.project_id)}&message={quote('請幫我建立完整功能')}",
+                    )
+                    resp1 = conn.getresponse()
+                    self.assertEqual(resp1.status, 200)
+                    done_payload_1 = None
+                    event_type = ""
+                    for _ in range(120):
+                        raw_line = resp1.fp.readline()
+                        if not raw_line:
+                            break
+                        decoded = raw_line.decode("utf-8", errors="ignore").strip()
+                        if decoded.startswith("event: "):
+                            event_type = decoded.split(":", 1)[1].strip()
+                        elif decoded.startswith("data: ") and event_type == "done":
+                            done_payload_1 = json.loads(decoded.split(": ", 1)[1])
+                            break
+
+                    self.assertIsNotNone(done_payload_1)
+                    thread_id = done_payload_1["thread_id"]
+
+                    conn = HTTPConnection("127.0.0.1", port, timeout=5)
+                    conn.request(
+                        "GET",
+                        f"/v1/threads/stream?project_id={quote(project.project_id)}&thread_id={quote(thread_id)}&message={quote('我先處理後端 API 與資料庫整合，其他部分之後再補')}",
+                    )
+                    resp2 = conn.getresponse()
+                    self.assertEqual(resp2.status, 200)
+                    done_payload_2 = None
+                    event_type = ""
+                    for _ in range(120):
+                        raw_line = resp2.fp.readline()
+                        if not raw_line:
+                            break
+                        decoded = raw_line.decode("utf-8", errors="ignore").strip()
+                        if decoded.startswith("event: "):
+                            event_type = decoded.split(":", 1)[1].strip()
+                        elif decoded.startswith("data: ") and event_type == "done":
+                            done_payload_2 = json.loads(decoded.split(": ", 1)[1])
+                            break
+
+                    self.assertIsNotNone(done_payload_2)
+
+                self.assertEqual(call_count, 2)
+                self.assertEqual(observed_histories[0], [])
+                self.assertEqual(
+                    observed_histories[1],
+                    [
+                        {"role": "user", "content": "請幫我建立完整功能"},
+                        {"role": "assistant", "content": "先決定要優先做前端還是後端"},
+                    ],
+                )
             finally:
                 if server:
                     server.shutdown()

@@ -2495,6 +2495,14 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
             )
             route_intent_ms = int((time.monotonic() - route_started_at) * 1000)
             execution_mode_ms = 0
+            semantic_continuation = False
+            last_assistant_text = str(run_context.get("last_assistant_text") or "").strip()
+            if not turn_bundle.short_continuation and last_assistant_text:
+                semantic_continuation = _should_continue_chat_run(
+                    project_id=project_id,
+                    last_assistant_text=last_assistant_text,
+                    user_message=message,
+                )
             if turn_bundle.short_continuation and router_result.type not in {
                 "chat_response",
                 "command_plan",
@@ -2507,9 +2515,22 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                         "project_id": project_id,
                         "thread_id": thread_id,
                         "original_router_type": router_result.type,
+                        "continuation_source": "short",
                     }
                 )
                 router_result = RouterResult(type="chat_response", confidence=1.0, reason="short_continuation")
+            elif semantic_continuation and router_result.type != "chat_response":
+                log_event(
+                    {
+                        "level": "INFO",
+                        "event": "ui_chat_force_continuation",
+                        "project_id": project_id,
+                        "thread_id": thread_id,
+                        "original_router_type": router_result.type,
+                        "continuation_source": "semantic",
+                    }
+                )
+                router_result = RouterResult(type="chat_response", confidence=1.0, reason="semantic_continuation")
             append_event(thread_id, {"type": "user", "text": message, "project_id": project_id})
             append_event(
                 thread_id,
