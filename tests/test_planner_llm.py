@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from amon.planning.planner_llm import generate_plan_with_llm, semantic_plan_issues
+from amon.planning.planner_llm import generate_plan_with_llm, semantic_plan_advisory_issues, semantic_plan_issues
 from amon.taskgraph3.payloads import AgentTaskConfig, TaskDisplayMetadata, TaskSpec
 from amon.taskgraph3.schema import GraphDefinition, TaskNode
 
@@ -66,6 +66,71 @@ class PlannerLLMTests(unittest.TestCase):
 
         self.assertIn("「概念對齊」TASK 必須同時綁定 concept-alignment 與 web-search-strategy。", issues)
         self.assertIn("程式開發任務缺少「前端設計」TASK，必須補上並綁定 frontend-design。", issues)
+
+    def test_semantic_plan_advisory_issues_contains_duplicate_spec_stage_issue(self) -> None:
+        graph = GraphDefinition(
+            version="taskgraph.v3",
+            nodes=[
+                TaskNode(
+                    id="concept_alignment",
+                    title="概念對齊",
+                    task_spec=TaskSpec(
+                        executor="agent",
+                        agent=AgentTaskConfig(
+                            prompt="先查概念",
+                            skills=["concept-alignment", "web-search-strategy"],
+                        ),
+                        display=TaskDisplayMetadata(label="概念對齊", summary="查概念", todo_hint="完成概念摘要"),
+                    ),
+                ),
+                TaskNode(
+                    id="requirements",
+                    title="需求規格",
+                    task_spec=TaskSpec(
+                        executor="agent",
+                        agent=AgentTaskConfig(prompt="整理需求", skills=["spec-organizer"]),
+                        display=TaskDisplayMetadata(label="需求規格", summary="需求", todo_hint="完成規格"),
+                    ),
+                ),
+                TaskNode(
+                    id="architecture",
+                    title="架構設計",
+                    task_spec=TaskSpec(
+                        executor="agent",
+                        agent=AgentTaskConfig(prompt="整理架構"),
+                        display=TaskDisplayMetadata(label="架構設計", summary="架構", todo_hint="完成架構"),
+                    ),
+                ),
+                TaskNode(
+                    id="frontend_design",
+                    title="前端設計",
+                    task_spec=TaskSpec(
+                        executor="agent",
+                        agent=AgentTaskConfig(prompt="整理前端", skills=["frontend-design"]),
+                        display=TaskDisplayMetadata(label="前端設計", summary="前端", todo_hint="完成前端設計"),
+                    ),
+                ),
+                TaskNode(
+                    id="development_implementation",
+                    title="開發實作",
+                    task_spec=TaskSpec(
+                        executor="agent",
+                        agent=AgentTaskConfig(prompt="完成實作", skills=["vibe-coding-guidelines"]),
+                        display=TaskDisplayMetadata(label="開發實作", summary="完成實作", todo_hint="完成交付"),
+                    ),
+                ),
+            ],
+            edges=[],
+        )
+
+        issues = semantic_plan_issues(graph, message="請幫我開發一個內部工具")
+        advisory_issues = semantic_plan_advisory_issues(graph, message="請幫我開發一個內部工具")
+
+        self.assertIn("程式開發任務把需求/PRD/架構拆成過多獨立 TASK，必須合併為單一「規格整理」階段。", issues)
+        self.assertEqual(
+            advisory_issues,
+            ["程式開發任務把需求/PRD/架構拆成過多獨立 TASK，必須合併為單一「規格整理」階段。"],
+        )
 
     def test_generate_plan_with_llm_success(self) -> None:
         llm = _MockLLM([

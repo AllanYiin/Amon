@@ -13,7 +13,7 @@ from .planner_vnext import (
     logical_workflow_from_payload,
     validate_planner_payload,
 )
-from .planner_llm import generate_plan_with_llm, semantic_plan_issues
+from .planner_llm import generate_plan_with_llm, semantic_plan_advisory_issues, semantic_plan_issues
 
 __all__ = [
     "BindingError",
@@ -31,6 +31,7 @@ __all__ = [
     "logical_workflow_from_payload",
     "normalize_graph_definition_payload",
     "generate_plan_with_llm",
+    "semantic_plan_advisory_issues",
     "semantic_plan_issues",
     "validate_planner_payload",
 ]

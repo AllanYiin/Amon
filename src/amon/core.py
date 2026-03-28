@@ -45,7 +45,7 @@ from .logging import log_billing, log_event
 from .logging_utils import setup_logger
 from .llm_request_log import append_llm_request, build_llm_request_payload
 from .mcp_client import MCPClientError, MCPServerConfig, MCPStdioClient
-from .planning import generate_plan_with_llm, semantic_plan_issues
+from .planning import generate_plan_with_llm, semantic_plan_advisory_issues, semantic_plan_issues
 from .planning.planner_llm import _minimal_plan
 from .models import (
     ProviderError,
@@ -1395,8 +1395,10 @@ class AmonCore:
                 run_id=run_id,
             )
             postprocess_issues = semantic_plan_issues(plan, message=message)
-            if postprocess_issues:
-                raise ValueError("planner 後處理後仍不合法：" + "; ".join(postprocess_issues))
+            advisory_postprocess_issues = set(semantic_plan_advisory_issues(plan, message=message))
+            fatal_postprocess_issues = [issue for issue in postprocess_issues if issue not in advisory_postprocess_issues]
+            if fatal_postprocess_issues:
+                raise ValueError("planner 後處理後仍不合法：" + "; ".join(fatal_postprocess_issues))
             plan_json = dumps_graph_definition(plan)
         except ValueError as exc:
             if "CYCLE_DETECTED" not in str(exc):
@@ -2387,6 +2389,12 @@ class AmonCore:
                 for skill in agent.skills
             ]
         )
+        canonical_stage_skills = {"spec-organizer", "frontend-design", "vibe-coding-guidelines"}
+        merged_skills = [
+            skill
+            for skill in merged_skills
+            if skill not in canonical_stage_skills or skill == stage["skill"]
+        ]
         merged_artifacts: list[ArtifactOutput] = []
         seen_artifacts: set[tuple[str, str | None, str | None]] = set()
         for candidate in bucket:

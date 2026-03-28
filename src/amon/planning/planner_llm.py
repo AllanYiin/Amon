@@ -144,6 +144,9 @@ _REPAIRABLE_SEMANTIC_ISSUES = {
     "程式開發任務把視覺/UI 設計拆成過多獨立 TASK，必須合併為單一「前端設計」階段。",
     "打包交付/release 類 TASK 缺少前置依賴，不可作為前段 root。",
 }
+_ADVISORY_SEMANTIC_ISSUES = {
+    "程式開發任務把需求/PRD/架構拆成過多獨立 TASK，必須合併為單一「規格整理」階段。",
+}
 
 
 class LLMClient(Protocol):
@@ -579,6 +582,10 @@ def _semantic_plan_issues(graph: GraphDefinition, *, message: str | None = None)
 
 def semantic_plan_issues(graph: GraphDefinition, *, message: str | None = None) -> list[str]:
     return _semantic_plan_issues(graph, message=message)
+
+
+def semantic_plan_advisory_issues(graph: GraphDefinition, *, message: str | None = None) -> list[str]:
+    return [issue for issue in _semantic_plan_issues(graph, message=message) if issue in _ADVISORY_SEMANTIC_ISSUES]
 
 
 def _fatal_semantic_plan_issues(graph: GraphDefinition, *, message: str | None = None) -> list[str]:

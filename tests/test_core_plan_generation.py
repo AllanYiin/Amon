@@ -139,6 +139,80 @@ class CorePlanGenerationTests(unittest.TestCase):
                         project_id=record.project_id,
                     )
 
+    def test_generate_plan_docs_allows_repairable_duplicate_spec_stage_issue(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            core = AmonCore(data_dir=Path(temp_dir))
+            record = core.create_project("plan-semantic-advisory")
+            project_path = core.get_project_path(record.project_id)
+            advisory_plan = GraphDefinition(
+                version="taskgraph.v3",
+                nodes=[
+                    TaskNode(
+                        id="concept_alignment",
+                        title="概念對齊",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(
+                                prompt="先查概念",
+                                skills=["concept-alignment", "web-search-strategy"],
+                            ),
+                            display=TaskDisplayMetadata(label="概念對齊", summary="查概念", todo_hint="完成概念摘要"),
+                        ),
+                    ),
+                    TaskNode(
+                        id="requirements",
+                        title="需求規格",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="整理需求", skills=["spec-organizer"]),
+                            display=TaskDisplayMetadata(label="需求規格", summary="需求", todo_hint="完成規格"),
+                        ),
+                    ),
+                    TaskNode(
+                        id="architecture",
+                        title="架構設計",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="整理架構"),
+                            display=TaskDisplayMetadata(label="架構設計", summary="架構", todo_hint="完成架構"),
+                        ),
+                    ),
+                    TaskNode(
+                        id="frontend_design",
+                        title="前端設計",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="整理前端", skills=["frontend-design"]),
+                            display=TaskDisplayMetadata(label="前端設計", summary="前端", todo_hint="完成前端設計"),
+                        ),
+                    ),
+                    TaskNode(
+                        id="development_implementation",
+                        title="開發實作",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="完成實作", skills=["vibe-coding-guidelines"]),
+                            display=TaskDisplayMetadata(label="開發實作", summary="完成實作", todo_hint="完成實作與測試重點"),
+                        ),
+                    ),
+                ],
+                edges=[],
+            )
+
+            with patch("amon.core.generate_plan_with_llm", return_value=advisory_plan), patch.object(
+                core,
+                "_postprocess_planner_graph",
+                return_value=advisory_plan,
+            ):
+                plan = core.generate_plan_docs(
+                    "請幫我開發一個內部工具",
+                    project_path=project_path,
+                    project_id=record.project_id,
+                )
+
+            self.assertEqual(plan.version, "taskgraph.v3")
+            self.assertTrue((project_path / "docs" / "plan.json").exists())
+
     def test_generate_plan_docs_repairs_cycle_before_serialization(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             core = AmonCore(data_dir=Path(temp_dir))
@@ -572,6 +646,76 @@ class CorePlanGenerationTests(unittest.TestCase):
             ["concept_alignment", "spec_organizer", "frontend_design", "development_implementation"],
         )
         self.assertEqual(semantic_plan_issues(processed, message="請規劃交付流程"), [])
+
+    def test_postprocess_planner_graph_strips_cross_stage_skills_after_stage_merge(self) -> None:
+        core = AmonCore(data_dir=Path(tempfile.mkdtemp()))
+        try:
+            graph = GraphDefinition(
+                version="taskgraph.v3",
+                nodes=[
+                    TaskNode(
+                        id="concept_alignment",
+                        title="概念對齊",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(
+                                prompt="先查概念",
+                                skills=["concept-alignment", "web-search-strategy"],
+                            ),
+                            display=TaskDisplayMetadata(label="概念對齊", summary="查概念", todo_hint="完成概念摘要"),
+                        ),
+                    ),
+                    TaskNode(
+                        id="requirements",
+                        title="需求規格",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="整理需求", skills=["spec-organizer"]),
+                            display=TaskDisplayMetadata(label="需求規格", summary="需求", todo_hint="完成規格"),
+                        ),
+                    ),
+                    TaskNode(
+                        id="ui_design",
+                        title="UI 規劃",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(
+                                prompt="整理介面",
+                                skills=["spec-organizer", "frontend-design"],
+                            ),
+                            display=TaskDisplayMetadata(label="UI 規劃", summary="介面", todo_hint="完成 UI"),
+                        ),
+                    ),
+                    TaskNode(
+                        id="implementation",
+                        title="程式實作",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="完成程式", skills=["vibe-coding-guidelines"]),
+                            display=TaskDisplayMetadata(label="程式實作", summary="實作", todo_hint="完成開發"),
+                        ),
+                    ),
+                ],
+                edges=[],
+            )
+
+            processed = core._postprocess_planner_graph(
+                graph,
+                message="請幫我開發一個內部工具",
+                available_tools=[{"name": "web.search"}],
+            )
+        finally:
+            shutil.rmtree(core.data_dir, ignore_errors=True)
+
+        task_nodes = {
+            node.id: node
+            for node in processed.nodes
+            if isinstance(node, TaskNode)
+        }
+        self.assertEqual(task_nodes["spec_organizer"].task_spec.agent.skills, ["spec-organizer"])
+        self.assertEqual(task_nodes["frontend_design"].task_spec.agent.skills, ["frontend-design"])
+        self.assertEqual(task_nodes["development_implementation"].task_spec.agent.skills, ["vibe-coding-guidelines"])
+        self.assertEqual(semantic_plan_issues(processed, message="請幫我開發一個內部工具"), [])
 
     def test_postprocess_planner_graph_promotes_existing_background_research_task(self) -> None:
         core = AmonCore(data_dir=Path(tempfile.mkdtemp()))
