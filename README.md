@@ -101,7 +101,6 @@ amon workspace runs stream --project <project_id> <run_id> --follow
 ### 4. 啟動 UI
 
 ```bash
-amon ui --port 8000
 ```
 
 UI 主工作台與 streaming / preview / confirmation 的互動說明見 [docs/ui_workspace.md](D:/PycharmProjects/Amon/docs/ui_workspace.md)。

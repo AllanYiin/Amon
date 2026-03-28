@@ -1,6 +1,6 @@
 /**
  * Utility Functions
- * 
+ *
  * Location: {project_path}/skills/frontend-design/examples/typescript/utils.ts
  */
 
@@ -10,10 +10,10 @@ import { twMerge } from 'tailwind-merge';
 /**
  * Merge Tailwind CSS classes with proper precedence
  * Combines clsx and tailwind-merge for optimal class handling
- * 
+ *
  * @param inputs - Class values to merge
  * @returns Merged class string
- * 
+ *
  * @example
  * cn('px-4 py-2', 'px-6') // => 'py-2 px-6' (px-6 overwrites px-4)
  * cn('text-red-500', condition && 'text-blue-500') // => conditional classes
@@ -24,7 +24,7 @@ export function cn(...inputs: ClassValue[]) {
 
 /**
  * Format file size in human-readable format
- * 
+ *
  * @param bytes - File size in bytes
  * @param decimals - Number of decimal places (default: 2)
  * @returns Formatted string (e.g., "1.5 MB")
@@ -42,7 +42,7 @@ export function formatFileSize(bytes: number, decimals: number = 2): string {
 
 /**
  * Debounce function to limit execution rate
- * 
+ *
  * @param func - Function to debounce
  * @param wait - Wait time in milliseconds
  * @returns Debounced function
@@ -66,7 +66,7 @@ export function debounce<T extends (...args: any[]) => any>(
 
 /**
  * Throttle function to limit execution frequency
- * 
+ *
  * @param func - Function to throttle
  * @param limit - Time limit in milliseconds
  * @returns Throttled function
@@ -88,7 +88,7 @@ export function throttle<T extends (...args: any[]) => any>(
 
 /**
  * Generate a random ID
- * 
+ *
  * @param length - Length of the ID (default: 8)
  * @returns Random ID string
  */
@@ -135,7 +135,7 @@ export const storage = {
 
 /**
  * Copy text to clipboard
- * 
+ *
  * @param text - Text to copy
  * @returns Promise<boolean> - Success status
  */
@@ -165,7 +165,7 @@ export async function copyToClipboard(text: string): Promise<boolean> {
 
 /**
  * Format date in relative time (e.g., "2 hours ago")
- * 
+ *
  * @param date - Date to format
  * @returns Formatted relative time string
  */
@@ -184,7 +184,7 @@ export function formatRelativeTime(date: Date): string {
 
 /**
  * Truncate text with ellipsis
- * 
+ *
  * @param text - Text to truncate
  * @param maxLength - Maximum length
  * @returns Truncated text
@@ -196,7 +196,7 @@ export function truncate(text: string, maxLength: number): string {
 
 /**
  * Sleep/delay function
- * 
+ *
  * @param ms - Milliseconds to sleep
  * @returns Promise that resolves after delay
  */
@@ -206,7 +206,7 @@ export function sleep(ms: number): Promise<void> {
 
 /**
  * Clamp a number between min and max
- * 
+ *
  * @param value - Value to clamp
  * @param min - Minimum value
  * @param max - Maximum value
@@ -234,10 +234,10 @@ export function prefersDarkMode(): boolean {
 
 /**
  * Format number with commas
- * 
+ *
  * @param num - Number to format
  * @returns Formatted number string
- * 
+ *
  * @example
  * formatNumber(1000) // => "1,000"
  * formatNumber(1000000) // => "1,000,000"
@@ -248,10 +248,10 @@ export function formatNumber(num: number): string {
 
 /**
  * Abbreviate large numbers
- * 
+ *
  * @param num - Number to abbreviate
  * @returns Abbreviated number string
- * 
+ *
  * @example
  * abbreviateNumber(1000) // => "1K"
  * abbreviateNumber(1000000) // => "1M"
@@ -266,11 +266,11 @@ export function abbreviateNumber(num: number): string {
 
 /**
  * Get initials from name
- * 
+ *
  * @param name - Full name
  * @param maxLength - Maximum number of initials (default: 2)
  * @returns Initials string
- * 
+ *
  * @example
  * getInitials("John Doe") // => "JD"
  * getInitials("Mary Jane Watson") // => "MJ"
@@ -286,7 +286,7 @@ export function getInitials(name: string, maxLength: number = 2): string {
 
 /**
  * Validate email format
- * 
+ *
  * @param email - Email to validate
  * @returns True if valid email format
  */
@@ -297,7 +297,7 @@ export function isValidEmail(email: string): boolean {
 
 /**
  * Validate URL format
- * 
+ *
  * @param url - URL to validate
  * @returns True if valid URL format
  */
@@ -312,7 +312,7 @@ export function isValidUrl(url: string): boolean {
 
 /**
  * Remove HTML tags from string
- * 
+ *
  * @param html - HTML string
  * @returns Plain text
  */
@@ -325,7 +325,7 @@ export function stripHtml(html: string): string {
 
 /**
  * Capitalize first letter of string
- * 
+ *
  * @param str - String to capitalize
  * @returns Capitalized string
  */
@@ -335,7 +335,7 @@ export function capitalize(str: string): string {
 
 /**
  * Convert camelCase to kebab-case
- * 
+ *
  * @param str - camelCase string
  * @returns kebab-case string
  */
@@ -345,7 +345,7 @@ export function camelToKebab(str: string): string {
 
 /**
  * Convert kebab-case to camelCase
- * 
+ *
  * @param str - kebab-case string
  * @returns camelCase string
  */

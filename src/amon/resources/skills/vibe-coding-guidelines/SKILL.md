@@ -1,22 +1,22 @@
 ---
-name: vibe-coding-development-guidelines
-description: 非程式開發者進行vibe coding時給予coding agent的開發準則
-version: 2026.3.10
-metadata:
-  author: Allan Yiin
-  short-description: 非程式開發者進行vibe coding時給予coding agent的開發準則
+name: vibe-coding-guidelines
+description: 在非程式開發者要用 vibe coding 與 coding agent 協作時使用。常見觸發像「幫我整理開發準則」「定義交付邊界」「規劃驗證方式」。輸出需求表達、邊界與風險控管準則；不直接取代實作。
+version: 2026.3.26
+homepage: https://github.com/AllanYiin/skills/tree/main/skills/vibe-coding-guidelines
+license: MIT
+metadata: {"author":"Allan Yiin","language":"zh-TW","category":"engineering","short-description":"非程式開發者進行 vibe coding 時給 coding agent 的開發準則"}
 ---
 
-# Vibe Coding Development Guidelines
+# Vibe Coding Guidelines
 
 ## Purpose
 
 把「不懂程式的使用者」的需求，交付成一個可解壓縮後直接點一下就能啟動的專案：
-- Windows：雙擊 `run_app.bat`
+- Windows：雙擊 `run_app.bat`（它是 `scripts/project_launcher.py` 生成/維護的 Windows wrapper，不是另一份可自由發明的新主入口）
 - macOS：雙擊 `run_app.command`（若無法執行，請先 `chmod +x run_app.command`；若首次被系統阻擋，依提示到「系統設定 > 隱私權與安全性」允許後再執行）
 - Linux：雙擊或執行 `run_app.sh`（若無法執行，請先 `chmod +x run_app.sh`）
 
-同時提供繁體中文介面、狀態持久化、友善錯誤訊息與 logs；若使用者提供 SVG / mockup / 畫面規格，介面方向必須尊重原規格，不能擅自改風格。
+同時提供繁體中文介面、狀態持久化、友善錯誤訊息與 logs；若使用者提供 SVG / mockup / 畫面規格，介面方向必須尊重原規格，不能擅自改風格。若是工作台型 UI，嚴格禁止 stacked UI / stacked cards 疊首頁；必須先定義唯一主任務，並讓該功能盡量佔據最大、最中央、最先被看的畫面區域。任何工作台或流程頁都要把 task model、state model、資訊分類與 visibility plan 寫進規格與 `AGENTS.md`，不能只留一句「請簡潔」。
 
 ## Scope
 
@@ -63,6 +63,24 @@ metadata:
 9) 在目標專案根目錄執行 `python scripts/project_launcher.py`，完成依賴驗證、launcher 生成、runtime metadata 建立與常見啟動修正；之後至少做一次本機啟動驗證，並再跑 `python scripts/apsm_validate.py --project <target-project> --strict`。
 10) 確認 launcher、logs、runtime metadata 與錯誤訊息都符合規範後，壓縮成 ZIP 交付。
 
+## Routing boundaries
+
+- Neighboring skills / workflows:
+  - `spec-organizer`：需求還沒整理成可開發規格。
+  - `frontend-design`：重點是前端視覺與互動，而不是整個可執行專案交付規範。
+  - `technical-documentation-writer`：只需要文件，不需要交付可啟動專案。
+- Negative triggers:
+  - 「幫我只做一段文案」
+  - 「只討論概念，不要產出專案」
+  - 「只改一個元件顏色，不做整體交付」
+- Handoff rule: 若任務不涉及可執行專案交付、啟動器、打包或新手協作規範，就不應啟動這個 skill。
+
+## Language coverage
+
+- Primary language(s): 繁體中文、英文。
+- Mixed-language trigger phrases: vibe coding、run_app.bat、ZIP delivery、project launcher、streaming chat、Windows tool。
+- Locale-specific wording risks: 使用者說「做個小工具」常隱含 Windows 一鍵啟動與零指令體驗，需要主動寫進規格。
+
 ## Success criteria
 
 - `project.config.json` 除了 APSM 欄位外，還要包含 `usage_scene` 與 `project_profile`。
@@ -71,6 +89,7 @@ metadata:
 
 - 使用者不需手動安裝依賴、不需手動輸入指令；只需解壓縮→點一下啟動（Windows：`run_app.bat`／macOS：`run_app.command`／Linux：`run_app.sh`）。
 - 跨平台可啟動：ZIP 內同時包含 `run_app.bat` / `run_app.command` / `run_app.sh`，且三者皆可在對應平台啟動。
+- `run_app.bat` / `run_app.command` / `run_app.sh` 都是由 `scripts/project_launcher.py`（必要時搭配 `scripts/project_launcher_posix.py`）生成或維護的 launcher wrapper；agent 應沿用或修改這條生成鏈，不得另外自創平行的 `run_app.bat` 主流程。
 - 編碼穩定：`.py/.json/.md` 為 UTF-8（建議無 BOM）；`run_app.bat` 預設 ASCII-only，不以 ANSI/CP950 為策略，也不預設加入 `chcp 65001`；`run_app.command` / `run_app.sh` 使用 UTF-8 LF。
 - 重要流程（I/O、網路、LLM）不閃退：有全域 try/except、UI 友善錯誤、`logs/` 有 stack trace。
 - port 衝突不可假裝已自動處理；若尚未實作完整動態 port 協調，至少要清楚提示衝突原因與下一步。若要支援動態 port，必須以服務實際綁定後回報的 port 為單一事實來源，並同步更新 URL / API base / log / 啟動器狀態。
@@ -78,13 +97,18 @@ metadata:
 - 在規劃目錄前已完成 APSM 選型，且根目錄有可機器判讀的 `project.config.json`（含 `apsm_version` 與 `archetype`）；agent 不需要靠猜測目錄來反推架構。
 - `python scripts/apsm_validate.py --project <target-project> --strict` 可通過，代表 `project.config.json`、目錄結構、必要啟動檔與 `.env` 關鍵欄位一致。
 - 已執行過 `project_launcher.py` 的專案，必須另外具備 `.runtime/ports.json`、`.runtime/launcher_state.json` 與 `logs/launcher.log` 等 machine-readable runtime metadata。
+- 若有 viewer / editor / diff / preview 類工作台，必須只聚焦一個唯一主任務；主任務必須佔據最大、最中央、最先被看的區域，次要資訊退到側欄、drawer、tab 或折疊層，不得做成 stacked UI / stacked cards 首頁。
+- 若有 viewer / editor / diff / preview 類工作台，`specs/requirements.md` 與 `AGENTS.md` 必須都寫出：primary task、task model、state model、資訊角色分類、首屏主要群組上限與 disclosure 規則。
+- 工作台首頁預設只允許 2-3 個主要視覺群組，且只有 1 個主 CTA；`reference` 類資訊不得長期佔據主舞台。
+- 空狀態不可只留白；必須清楚說明缺少什麼、為何沒有內容、下一步要做什麼。
 
 ## Instructions
 
 ### Step 0: Inputs 期望
 
 - 若使用者有提供規格：直接進入 Step 1。
-- 若規格不足：自行補齊並以「白話文確認」列出：核心功能、限制、UI 版型（預設左右分欄）、資料保存方式、輸出檔案（ZIP）。
+- 若規格不足：自行補齊並以「白話文確認」列出：核心功能、限制、UI 版型（只有在未指定時才預設左右分欄；若規格已指定結構，不得擅改）、資料保存方式、輸出檔案（ZIP）。
+- 若屬工作台、dashboard、viewer、editor、review tool 或 setup flow，額外補齊：唯一主任務、task model、state model、資訊分類、visibility plan。
 
 ### Step 1: 產生並維護 todo.md 與 specs/requirements.md
 
@@ -93,6 +117,7 @@ metadata:
 
 - 把所有子任務寫成 checklist。
 - 把當前確認過的規格整理到根目錄 `specs/requirements.md`；至少包含：功能範圍、輸入輸出、UI/互動、資料保存、外部依賴、驗收條件。
+- 若有工作台型 UI（viewer、editor、diff、preview、審閱台），規格內必須額外寫明：唯一主任務、主畫面責任、task model、state model、各資訊區塊的角色（`action-critical`、`decision-supporting`、`status-feedback`、`reference`、`exception-handling`、`audit/history`）、次要資訊應退到哪裡、首屏最多 2-3 個主要視覺群組、空狀態的下一步指引；嚴格禁止 stacked UI / stacked cards 疊首頁。
 - 若使用者後續補需求，先更新 `specs/requirements.md`，再更新 `todo.md`；不要讓規格只散落在對話裡。
 - 後續每完成一項就打勾；任何新需求都先更新 todo.md。
 
@@ -119,6 +144,15 @@ metadata:
   - 技術補充規則
   - 專案特例
 - `AGENTS.md` 至少要寫出：專案定位、最高原則、目錄與檔案規範、實作規範、UI / UX 規範、修改規範、測試與打包規範、專案特例。
+- 若專案有主工作台，`AGENTS.md` 的 UI / UX 規範必須額外包含：
+  - 先定義唯一主任務，再畫版面；盡量一次只聚焦一個功能
+  - 先寫 task model、state model、資訊分類與 visibility plan，再允許切版
+  - 主畫面只能讓主任務佔據中央、首要視線與最大化畫面區域
+  - 次要資訊退到側欄、drawer、tab 或折疊層；`reference` 類資訊預設 on-demand
+  - `exception-handling` 類資訊只在對應 state 顯示
+  - 首屏最多 2-3 個主要視覺群組，且只能有 1 個主 CTA
+  - 嚴格禁止 stacked UI / stacked cards 首頁
+  - 空狀態要交代缺少內容、原因與下一步
 
 ### Step 3: APSM 技術選型與專案類型宣告
 
@@ -163,6 +197,7 @@ metadata:
 - 目標專案的相對路徑 `scripts/project_launcher.py` 必須存在；這支檔案來自此 skill 內的 `scripts/project_launcher.py`。
 - 目標專案的相對路徑 `scripts/apsm_validate.py` 也必須存在；這支檔案負責做 APSM 結構檢核。
 - 交付完成時，目標專案根目錄必有：`project.config.json`、`specs/requirements.md`、`.venv/`（不打包）、`requirements.txt`、`run_app.bat`、`run_app.command`、`run_app.sh`、`.env`（不進版控）、`.env.example`、`README.md`、`todo.md`。
+- `run_app.bat` 是根目錄 `scripts/project_launcher.py` 的 Windows 啟動 wrapper；若需要修 launcher 行為，優先修改/重跑 `project_launcher.py`，不要另外手寫一份脫鉤的 `run_app.bat`。
 - 執行過 `project_launcher.py` 後，專案還應該有 `.runtime/ports.json`、`.runtime/launcher_state.json` 與 `logs/launcher.log` 等 runtime metadata；這些檔案是 APSM Runtime 的機器判讀介面。
 - 目錄結構是技術選型結果，不是起點；必須先完成 Step 2，再依專案型態（前後端分離 / monorepo / single-service）選擇目錄。
 - 規範細節放在 `references/directory_structure_recommendations.md`。
@@ -216,6 +251,7 @@ metadata:
 - 先將此 skill 內相對路徑 `scripts/project_launcher.py` 與 `scripts/apsm_validate.py` 的內容寫入目標專案的相對路徑。
 - 主入口請維持 `scripts/project_launcher.py`；它負責跨平台高階分類、修復與 launcher 生成，不應改成平台後綴名稱。
 - 雖然 PDF 原始規格傾向單一 `run_app`，但此 skill 為了維持 Windows/macOS/Linux 的零指令雙擊體驗，仍保留 `run_app.bat` / `run_app.command` / `run_app.sh` 三入口；不要擅自改回單檔。
+- `run_app.bat` 是由 `scripts/project_launcher.py` 生成/維護的 Windows wrapper，不是獨立規格或另一套 hand-written launcher；若專案內已存在這條鏈，禁止 agent 自作主張另外寫一份新的 `run_app.bat` 取代它。
 - 若要沿用來源 skill 的分平台流程，或要在 POSIX 環境單獨驗證，也可一併帶入此 skill 內的 `scripts/project_launcher_posix.py`，並以 `python scripts/project_launcher_posix.py` 生成/檢查 `run_app.sh` 與 `run_app.command`。舊名 `scripts/project_launcher_linux.py` 僅保留相容別名，不建議再當主名稱。
 - 再於目標專案根目錄執行：`python scripts/project_launcher.py` 以：
   - 自動掃描 imports → 修正/生成 `requirements.txt`

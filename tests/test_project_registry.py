@@ -89,6 +89,39 @@ class ProjectRegistryTests(unittest.TestCase):
 
             self.assertEqual(resolved, direct_path)
 
+    def test_core_list_projects_keeps_existing_active_record_when_registry_temporarily_misses(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            core = AmonCore(data_dir=Path(tmp))
+            project = core.create_project("registry-miss-active")
+
+            def simulate_empty_registry() -> None:
+                core.project_registry._id_to_path = {}
+                core.project_registry._meta = {}
+
+            core.project_registry.scan = simulate_empty_registry  # type: ignore[method-assign]
+
+            listed = core.list_projects()
+            refreshed = core.get_project(project.project_id)
+
+            self.assertEqual([item.project_id for item in listed], [project.project_id])
+            self.assertEqual(refreshed.project_id, project.project_id)
+
+    def test_core_list_projects_drops_active_record_when_path_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            core = AmonCore(data_dir=Path(tmp))
+            project = core.create_project("registry-miss-missing-path")
+            shutil.rmtree(project.path)
+
+            def simulate_empty_registry() -> None:
+                core.project_registry._id_to_path = {}
+                core.project_registry._meta = {}
+
+            core.project_registry.scan = simulate_empty_registry  # type: ignore[method-assign]
+
+            listed = core.list_projects()
+
+            self.assertEqual(listed, [])
+
 
 
 if __name__ == "__main__":

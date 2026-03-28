@@ -312,6 +312,7 @@ class UIChatStreamInitTests(unittest.TestCase):
 
                 token_events = [payload for event_type, payload in events if event_type == "token"]
                 self.assertEqual([payload.get("text") for payload in token_events], ["第一段輸出"])
+                self.assertEqual(token_events[0].get("node_id"), "writer")
                 done_events = [payload for event_type, payload in events if event_type == "done"]
                 self.assertTrue(done_events)
                 self.assertNotIn("final_text", done_events[-1])

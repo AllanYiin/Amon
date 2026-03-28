@@ -1,11 +1,11 @@
 /**
  * Sample Components — Production-Ready React Components
- * 
+ *
  * This file demonstrates how to build type-safe, accessible React components
  * using the design token system.
- * 
+ *
  * Location: {project_path}/skills/frontend-design/examples/typescript/sample-components.tsx
- * 
+ *
  * All components include:
  * - Full TypeScript type safety
  * - Complete state coverage (default/hover/active/focus/disabled/loading/error)
@@ -146,14 +146,14 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             {label}
           </label>
         )}
-        
+
         <div className="relative">
           {leftIcon && (
             <div className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted">
               {leftIcon}
             </div>
           )}
-          
+
           <input
             ref={ref}
             id={inputId}
@@ -169,20 +169,20 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             aria-describedby={cn(errorId, helperId)}
             {...props}
           />
-          
+
           {rightIcon && (
             <div className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted">
               {rightIcon}
             </div>
           )}
         </div>
-        
+
         {error && (
           <span id={errorId} className="helper-text helper-text-error" role="alert">
             {error}
           </span>
         )}
-        
+
         {!error && helperText && (
           <span id={helperId} className="helper-text">
             {helperText}
@@ -462,7 +462,7 @@ function Example() {
   return (
     <>
       <Button onClick={() => setIsOpen(true)}>Open Modal</Button>
-      
+
       <Modal isOpen={isOpen} onClose={() => setIsOpen(false)} title="Confirm Action">
         <ModalBody>
           <p>Are you sure you want to proceed with this action?</p>

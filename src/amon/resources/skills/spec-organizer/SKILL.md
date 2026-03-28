@@ -1,10 +1,10 @@
 ---
 name: spec-organizer
-description: 當使用者要把模糊想法整理成可開發 spec 時使用。輸出技術規格、白話規格、驗收條件與分階段開發計畫。
-version: 2026.3.9
-metadata:
-  author: Allan Yiin
-  short-description: 技術規格、白話規格與分階段開發規劃流程
+description: 在使用者要把模糊想法整理成可開發 spec 時使用。常見觸發像「整理需求成 spec」「補驗收條件」「拆分階段開發計畫」。輸出技術規格、白話規格與可直接貼用於 Codex / Claude Code 的分階段 instructions；不直接代替正式文件發布。
+version: 2026.3.25
+homepage: https://github.com/AllanYiin/skills/tree/main/skills/spec-organizer
+license: MIT
+metadata: {"author":"Allan Yiin","language":"zh-TW","category":"product","short-description":"技術規格、白話規格與分階段開發規劃流程"}
 ---
 
 # Spec Organizer
@@ -16,7 +16,9 @@ metadata:
 每次交付固定包含三份內容：
 1) 技術規格文件
 2) 非技術規格文件
-3) Web 版 Codex 分階段開發計畫
+3) Codex / Claude Code 分階段開發計畫
+
+若需求涉及工作台、dashboard、viewer、review tool、setup flow 或任何容易堆疊資訊的介面，規格必須額外把 task model、state model、資訊分類與揭露策略寫成獨立章節；不接受只有功能清單。
 
 ## Scope
 
@@ -24,7 +26,7 @@ metadata:
 - 從對話、草稿、附件或既有需求文件萃取需求，補齊缺口後產出完整 spec。
 - 依固定流程完成技術可行性分析、多角色精煉、驗收與測試、嚴格 reviewer、edge/abuse cases、雙版本切分與落地檢查。
 - 在正式撰寫 spec 前，先上網查詢關鍵概念定義、競品/廠商與相似 GitHub repo，整理差異並與使用者確認。
-- 將大需求切成 N 個可驗收、可回滾的 Web Codex stages，附可直接貼用 instructions。
+- 將大需求切成 N 個可驗收、可回滾的 agent stages，附可直接貼用的 Codex 與 Claude Code instructions。
 - 若規格會受到時效性資訊影響，先上網查證並在規格中標記來源與日期。
 
 ### Out of scope
@@ -37,7 +39,7 @@ metadata:
 
 1) **從模糊需求整理雙版本規格**
 - Trigger examples: 「幫我整理這個產品需求成 spec」「我要技術規格和白話版規格」「請把這個功能想法整理成完整規格」
-- Expected result: 先交付研究與比較 code blocks，確認方向後再交付完整技術 spec、白話 spec、Codex 分階段開發計畫，且明確標註假設與驗收標準。
+- Expected result: 先交付研究與比較 code blocks，確認方向後再交付完整技術 spec、白話 spec、Codex / Claude Code 分階段開發計畫，且明確標註假設與驗收標準。
 
 2) **補齊已有規格的缺漏**
 - Trigger examples: 「這份 PRD 太鬆散，幫我補成可開發規格」「幫我補 acceptance criteria、edge cases、資料模型」
@@ -47,9 +49,9 @@ metadata:
 - Trigger examples: 「不要分回合，直接做完整 spec」「資訊不足就合理假設並標記」
 - Expected result: 在單回合內先輸出研究與決策 code blocks，再在同一回合完成最終三份交付物，不暴露內部草稿。
 
-4) **產出可貼進 Web 版 Codex 的分階段計畫**
-- Trigger examples: 「順便幫我切 Codex 開發階段」「我要每個階段可直接貼上的 instructions」
-- Expected result: 至少包含 Stage 0、可變中間 stages、倒數第 2 測試 stage、最終文件交付 stage，且每階段都有測試與 DoD。
+4) **產出可貼進 Codex / Claude Code 的分階段計畫**
+- Trigger examples: 「順便幫我切 Codex 開發階段」「我要 Claude Code 版 instructions」「我要每個階段可直接貼上的 Codex 與 Claude Code instructions」
+- Expected result: 至少包含 Stage 0、可變中間 stages、倒數第 2 測試 stage、最終文件交付 stage，且每階段都有 Codex 與 Claude Code 版本、測試與 DoD。
 
 5) **先研究再確認方向**
 - Trigger examples: 「先幫我研究一下這個概念和競品」「先比較市面上與 GitHub 類似做法，再決定 spec」
@@ -68,11 +70,11 @@ metadata:
 9) 補齊 edge/abuse cases，定義提示語與回復策略。
 10) 切分成技術版與白話版兩份文件。
 11) 做一致性與可落地性檢查。
-12) 產出 Web 版 Codex 的分階段開發計畫。
+12) 產出 Codex / Claude Code 的分階段開發計畫。
 
 ## Communication notes
 
-- User vocabulary: 規格整理、技術規格、白話版規格、需求文件、驗收條件、分階段開發計畫、Codex instructions。
+- User vocabulary: 規格整理、技術規格、白話版規格、需求文件、驗收條件、分階段開發計畫、Codex instructions、Claude Code instructions、AGENTS.md、CLAUDE.md。
 - Avoid jargon: 寫白話版時不要直接使用 API、DB、backend、schema、QPS、state machine、token、migration、cache、streaming、CRUD 等詞；改用 `references/plain-language-rules.md` 的替代表述。
 - Least-surprise rule: 使用者要求的是完整 spec 流程，不是 brainstorming、不是內部思考展示，也不是只回一段摘要。
 - Interaction rule: 中途研究結果、比較表、待確認決策，必須用 code block 輸出給使用者看；不要把中間過程全部藏起來。
@@ -84,7 +86,7 @@ metadata:
   - `longform-writing-process`: 長文、文章改寫、潤稿。
   - `slide-content-planner`: 投影片逐頁規劃。
   - `mermaid-diagram`: 只需要 Mermaid 圖表。
-  - `vibe-coding-development-guidelines`: 進入跨平台交付、啟動器、ZIP 打包階段。
+  - `vibe-coding-guidelines`: 進入跨平台交付、啟動器、ZIP 打包階段。
 - Negative triggers:
   - 「幫我改這篇文案」
   - 「請做一份 12 頁簡報大綱」
@@ -95,7 +97,7 @@ metadata:
 ## Language coverage
 
 - Primary language(s): 繁體中文。
-- Mixed-language trigger phrases: spec、technical spec、non-technical spec、PRD、acceptance criteria、user flow、edge case、abuse case、Codex plan。
+- Mixed-language trigger phrases: spec、technical spec、non-technical spec、PRD、acceptance criteria、user flow、edge case、abuse case、Codex plan、Claude Code plan、AGENTS.md、CLAUDE.md。
 - Locale-specific wording risks: `spec` 可能指標準文件、硬體規格或學術說明；若產品情境不明，先確認是否為軟體/數位產品規格。
 
 ## Success criteria
@@ -105,7 +107,7 @@ metadata:
 - 研究前置完整度：100% 在正式 spec 前完成關鍵概念、競品/廠商、相似 GitHub repo 三類研究。
 - 技術規格必備章節覆蓋率：100%。
 - 白話版禁用術語命中數：0。
-- Stage 計畫結構完整度：100% 含 Stage 0、倒數第 2 測試 stage、最終文件交付 stage。
+- Stage 計畫結構完整度：100% 含 Stage 0、倒數第 2 測試 stage、最終文件交付 stage，且每個 stage 有對應的 Codex / Claude Code instructions。
 - 關鍵準則漏掉數：0。不得漏掉 state/persistence、CRUD、上傳預覽、等比縮放、Streaming、模組化。
 
 ### Qualitative
@@ -117,7 +119,7 @@ metadata:
 
 ## Instructions
 
-先讀 `references/output-template.md` 與 `references/quality_checklist.md`。
+先讀 `references/output-template.md`、`references/ui-information-architecture-playbook.md` 與 `references/quality_checklist.md`。
 準備白話版時，先讀 `references/plain-language-rules.md`；若輸出落檔，再用 `python scripts/check_plain_language.py <file>` 做禁語檢查。
 
 ### Global rules (always on)
@@ -127,7 +129,8 @@ metadata:
 - 預設為互動模式：先研究、先比較、先確認，再寫正式 spec。
 - 若使用者明確要求「不要中斷」「直接完成」「不要先確認」或等價語意，可切到單回合模式；但仍必須先輸出研究與比較 code blocks，再繼續最終 spec。
 - 中間交付物必須用 code block 呈現，至少包含：關鍵概念定義、競品比較、GitHub repo 比較、建議方案與待確認事項。
-- 最終技術版、白話版、Codex stage plan 都必須是「完成稿」，不是只列章節名稱的空骨架。
+- 最終技術版、白話版、Codex / Claude Code stage plan 都必須是「完成稿」，不是只列章節名稱的空骨架。
+- 預設同時產出 Codex 與 Claude Code 兩版 instructions；若使用者明確指定只要其中一個平台，可只保留該平台版本，但不要把兩平台規則混寫成同一個 block。
 - 每個主要章節至少要滿足下列其中一種：
   - 2 句以上完整描述
   - 1 個有實際內容的表格
@@ -143,8 +146,16 @@ metadata:
 - 所有 UI 設計一律遵守下列介面準則：
   - 先定調風格走向，再決定視覺語言。先回答介面是偏時尚、專業、溫馨、工具感、或其他方向，再往下設計。
   - 風格定調後，先定主要色系。至少選 2-3 種主色/輔色，再補 1 種強調色，並說明它們各自負責的場景。
+  - 任何工作台型或流程型 UI，都要先定義唯一 primary task，再做 task model、state model、資訊分類與 visibility plan。
+  - task model 不能只寫功能名稱；至少要列出：唯一主目標、次目標、低頻目標、罕見目標。
+  - state model 不能只列名詞；至少要定義每個 state 的觸發條件、可見區塊、隱藏區塊、主 CTA 與退出條件。
+  - 每個資訊區塊都要標記為 `action-critical`、`decision-supporting`、`status-feedback`、`reference`、`exception-handling` 或 `audit/history` 其中之一。
   - 若操作具有明顯階段性，優先拆成分步流程，不要把所有內容塞在單一頁面。可用 tabs、step navigation、wizard，或同頁分段顯示/隱藏。
   - 每個畫面一次只保留 1 個明確視覺重點；重點區塊面積與層級必須足夠清晰。
+  - 先做資訊架構表，再做 UI；資訊架構表至少要有：資訊項目、使用頻率、是否首屏必須、所屬任務階段、顯示條件、建議容器、是否可收合。
+  - 首屏預設只允許 1 個主操作區、1 個狀態區、1 個次要摘要；整體不得超過 2-3 個主要視覺群組，且只能有 1 個主 CTA。
+  - `reference` 類資訊預設收合或延後揭露；`exception-handling` 只在錯誤或對應例外 state 顯示。
+  - 相同任務流中的說明文字優先內嵌在元件旁，不要獨立做成大型說明卡。
   - 優先讓所有主要操作在單一可視畫面內完成；若需要超出頁面才操作，應重構畫面或拆步驟。
   - 每個控制項都要有明確使用者意義；沒有明確目的的控制項先隱藏，不要為了湊功能而展示。
   - UI 必須保存工作狀態，避免介面關閉後使用者得重新輸入；同時提供「重新開始」機制，讓使用者可清楚清空舊案例重來。
@@ -213,6 +224,24 @@ metadata:
   - 是否有會產生新物件的功能，且已覆蓋 Create / Update / Delete
   - 是否有上傳、縮放、AI 生成、多人協作或離線重試情境
 
+### Step 2.5: A0.5 UI information architecture extraction
+- 若需求包含畫面、工作台、操作流程或多區塊頁面，先抽出 UI IA，不要直接進畫面章節。
+- 先產出 `task model`：
+  - 使用者當前唯一主目標
+  - 次目標
+  - 低頻目標
+  - 罕見目標
+- 再產出 `state model`：
+  - 至少列 `empty / drafting(editing) / validating / resolved / blocked / submitted` 或等價狀態
+  - 每個 state 要定義：進入條件、使用者正在做什麼、必顯資訊、隱藏資訊、主 CTA、離開條件
+- 再產出 `資訊分類表`：
+  - 每個資訊項目都要被歸類到 `action-critical / decision-supporting / status-feedback / reference / exception-handling / audit-history`
+- 再產出 `揭露策略`：
+  - 首屏保留哪些區塊
+  - 哪些內容改成 accordion / drawer / modal / tab / inline helper
+  - 哪些內容只在錯誤或特定 state 顯示
+- 若這四項做不出來，代表需求仍停在功能清單層，不能直接寫 UI spec。
+
 ### Step 3: A1 初步需求整理
 - 明確整理：
   - 商業目標
@@ -221,6 +250,7 @@ metadata:
   - 成功標準（可量化優先）
   - 範圍與不做什麼
 - 若使用者目標模糊，先提出一組合理範圍，不要假裝已經完全明確。
+- 若是工作台或流程型 UI，在這一步就要明確糾正「功能導向大於任務導向」的寫法；不能讓需求繼續停留在 A/B/C/D 功能平鋪。
 
 ### Step 4: A2 決定完整規格章節結構
 - 技術版至少包含：
@@ -231,6 +261,8 @@ metadata:
   - 開發應注意重點以及應避開誤區
   - 專案目錄規劃
   - 前後端模組（含 SVG 架構圖）
+  - 任務模型與資訊優先級
+  - 狀態模型與揭露策略
   - 使用流程
   - 功能清單（含 CRUD 與狀態）
   - G3M
@@ -270,6 +302,14 @@ metadata:
 - 對 State 管理至少定義：記憶體中的互動 state、持久化 state、恢復流程、衝突處理、草稿保存與續編。
 - 對專案目錄至少定義：根目錄下的主要資料夾、責任邊界、代表檔案、命名慣例，以及為何這樣切分。
 - 對 UI 至少定義：風格方向、色彩策略、是否需分步導覽、單頁可視範圍、介面狀態保存、重新開始機制。
+- 對工作台型 UI 額外定義：
+  - 唯一 primary task
+  - task model（唯一主目標 / 次目標 / 低頻目標 / 罕見目標）
+  - state model（進入條件 / 顯示策略 / 主 CTA / 離開條件）
+  - 資訊角色分類
+  - 資訊架構表
+  - 首屏主要群組上限
+  - 哪些內容必須 on-demand / conditional reveal
 - 確保 AI 輸出是 Streaming，專案可續編，模組拆分可逐步擴充。
 
 ### Step 8: B3 QA 視角修正（內部）
@@ -277,6 +317,8 @@ metadata:
 - 對上傳、斷線、重試、重複提交、空狀態、資料遺失風險提出驗證點。
 - 補上 UI 元件清單、UI 事件回報、UI ↔ API Mapping 是否足以支撐測試、追錯與行為分析。
 - 檢查 UI 是否違反：單頁塞滿、視覺焦點不明、控制項沒有意義、關閉後需重填、沒有重新開始機制。
+- 檢查 UI 是否把功能清單直接翻成 card farm、是否讓 `reference` 內容常駐、是否把 state-specific 內容同時攤開。
+- 檢查資訊架構表是否真的能推導出 reveal / hide 決策，而不是只把所有項目都標成高重要。
 - 整合成內部 `Spec v1`，但不要顯示此名稱。
 
 ### Step 9: C 驗收與測試定義（內部）
@@ -288,6 +330,7 @@ metadata:
 - 主動找出模糊詞，例如：快速、穩定、盡量、友善、容易、流暢。
 - 抓矛盾、缺少前置條件、不可實作點、沒有 fallback 的流程。
 - 若 API、背景任務、通知、回退策略、UI ↔ API Mapping 缺任何一塊，都視為不可落地缺漏。
+- 若 task model、state model、資訊分類、資訊架構表、揭露策略任一塊缺失，視為 UI spec 不可落地缺漏。
 - 修正後形成內部 `Spec v3`。
 
 ### Step 11: E Edge / Abuse cases（內部）
@@ -308,6 +351,8 @@ metadata:
   - 核心流程設計
   - 開發應注意重點以及應避開誤區
   - 專案目錄規劃
+  - 任務模型與資訊優先級
+  - 狀態模型與揭露策略
   - UI 風格定調與色彩策略
   - API
   - 核心資料模型
@@ -344,9 +389,12 @@ metadata:
   - 是否列出 UI 元件清單、UI 事件回報與 UI ↔ API Mapping
   - 是否定義專案目錄規劃，且目錄切分與模組邊界一致
   - 是否定義 UI 風格、主色/輔色/強調色、視覺重點、分步導覽、狀態保存與重新開始機制
+  - 若是工作台或流程型 UI，是否定義 task model、state model、資訊角色分類與 visibility plan
+  - 首屏是否維持 2-3 個主要視覺群組與 1 個主 CTA
+  - `reference` / `exception-handling` 是否有延後揭露，而不是長期霸佔主畫面
 - 有缺漏時，直接補回對應章節，不要把缺漏留給使用者自己發現。
 
-### Step 14: G2 生成 Web 版 Codex 分階段開發計畫
+### Step 14: G2 生成 Codex / Claude Code 分階段開發計畫
 - 採可變階段，不要固定 4-6 階段。
 - 切分原則：
   - 以可交付、可測試、可回滾為單位
@@ -361,9 +409,20 @@ metadata:
   - Stage 名稱（動詞開頭）
   - 目標
   - 前置條件
-  - `Codex Web Instructions` code block
+  - `Codex Instructions` code block
+  - `Claude Code Instructions` code block
   - 風險與回滾方式
-- 每個 `Codex Web Instructions` code block 必含：
+- 每個 `Codex Instructions` code block 必含：
+  - 建議貼用方式（直接貼給 Codex；若屬長期專案規則，標示應同步到哪個 `AGENTS.md`）
+  - 任務範圍（做什麼 / 不做什麼）
+  - 需修改/新增的檔案清單
+  - 具體步驟
+  - 輸出格式要求
+  - 測試要求
+  - 驗收標準（DoD）
+  - 若涉及 LLM：明寫必須 Streaming
+- 每個 `Claude Code Instructions` code block 必含：
+  - 建議貼用方式（直接貼給 Claude Code；若屬持續規則，標示寫入 `CLAUDE.md` / `.claude/CLAUDE.md`；若屬可重複流程，可建議做成 `.claude/skills/<name>/SKILL.md` 或 `.claude/commands/<name>.md`）
   - 任務範圍（做什麼 / 不做什麼）
   - 需修改/新增的檔案清單
   - 具體步驟
@@ -385,26 +444,37 @@ metadata:
 - 之後固定依序輸出：
   - `## 技術規格文件`
   - `## 非技術規格文件`
-  - `## Web 版 Codex 分階段開發計畫`
+  - `## Codex / Claude Code 分階段開發計畫`
 - 優先沿用 `references/output-template.md` 的骨架。
 - 技術版與白話版都要放 SVG code block。
 - 若有合理假設，放在各文件開頭的 `假設與前提` 區塊。
 - 不要輸出只有標題的空章節；每個章節都要寫出具體內容。
 - 技術版至少要包含：具體模組說明、欄位定義、狀態轉換、請求/回應格式、錯誤處理、觀測指標、背景任務規則。
+- 技術版若涉及工作台或流程型 UI，必須額外包含 `任務模型與資訊優先級`、`狀態模型與揭露策略`，並用表格寫出資訊分類與顯示條件。
+- 技術版若涉及工作台或流程型 UI，`任務模型與資訊優先級` 章節至少要有：
+  - 1 個任務模型表
+  - 1 個資訊分類表
+  - 1 個資訊架構表
+- 技術版若涉及工作台或流程型 UI，`狀態模型與揭露策略` 章節至少要有：
+  - 1 個狀態矩陣
+  - 1 組首屏 reveal / hide 規則
+  - 1 組容器策略（accordion / drawer / modal / tab / inline helper）
 - 技術版的「專案目錄規劃」至少要包含：目錄樹、各目錄責任、代表檔案與命名原則；不能只寫「依團隊習慣安排」。
 - UI 設計至少要包含：風格定調、2-3 種主色/輔色與 1 種強調色、是否採用 tabs/stepper/wizard、單頁視覺重點、控制項保留/隱藏原則、狀態保存與重新開始機制。
+- UI 若涉及多資訊面板，必須說明首屏保留哪些群組、哪些內容收合、哪些內容只在特定 state 顯示。
 - 白話版至少要包含：實際操作說明、會看到的畫面、會看到的提示語、限制條件與完成後結果。
-- Codex plan 至少要包含：明確檔案路徑、具體步驟、測試方式、DoD；不能只寫「實作功能」。
+- Agent stage plan 至少要包含：明確檔案路徑、具體步驟、測試方式、DoD；預設每個 stage 同時有 Codex 與 Claude Code 兩版 block，不能只寫「實作功能」。
 
 ## Testing plan
 
 ### Triggering tests
 - Should trigger:
   - 「幫我把這個功能需求整理成技術規格和白話規格」
-  - 「請根據這份 PRD 輸出完整 spec 與 Codex 開發階段」
+  - 「請根據這份 PRD 輸出完整 spec 與 Codex / Claude Code 開發階段」
   - 「不要追問，直接合理假設並做雙版本規格文件」
   - 「幫我補 acceptance criteria、edge cases、資料模型、錯誤處理」
   - 「先幫我查一下競品和 GitHub 類似做法，再決定 spec」
+  - 「我要可以直接貼進 CLAUDE.md 與 Codex 的 stage instructions」
 - Should NOT trigger:
   - 「幫我把這篇文章改得更口語」
   - 「請做一份 12 頁簡報大綱」
@@ -427,6 +497,7 @@ metadata:
     - 技術版有 UI 風格定調、配色策略與分步導覽規劃
     - 白話版沒有技術術語
     - Stage 計畫含 Stage 0 與最後兩個固定 stages
+    - 每個 Stage 預設同時有 `Codex Instructions` 與 `Claude Code Instructions`
     - 各章節有實質內容，不是只有標題
 
 - Test case: 需求明確要求單輪完成
@@ -452,9 +523,10 @@ metadata:
     - 明確定義預覽
     - 縮放維持原始比例
     - AI 輸出為 Streaming
+    - Codex 與 Claude Code instructions 若涉及 AI 功能，都明寫必須 Streaming
 
 ### Performance comparison (optional)
-- Baseline (no skill): 常只得到一份鬆散需求整理，缺乏雙版本切分、驗收條件、edge cases 與 stage 化 instructions。
+- Baseline (no skill): 常只得到一份鬆散需求整理，缺乏雙版本切分、驗收條件、edge cases 與可直接貼用的 Codex / Claude Code stage instructions。
 - With skill: 輸出結構固定，對工程、PM、QA 與非技術利害關係人都可直接使用。
 
 ### ROI guardrail
@@ -479,9 +551,13 @@ metadata:
   - 白話版仍殘留技術詞
   - 漏掉核心流程、資料模型、State 管理、通知背景任務或 UI ↔ API Mapping
   - 沒有專案目錄規劃，或只有含糊的資料夾名稱列表
-  - UI 沒有風格定調、沒有清楚視覺重點、把所有操作塞進同一頁、或沒有狀態保存/重新開始機制
-  - Stage instructions 太抽象，無法直接貼進 Codex
-  - 忘記補 Create / Update / Delete 或專案可續編
+- UI 沒有風格定調、沒有清楚視覺重點、把所有操作塞進同一頁、或沒有狀態保存/重新開始機制
+- 任務模型只剩「功能清單」，沒有主目標 / 次目標 / 低頻目標 / 罕見目標
+- 狀態模型沒有顯示策略，導致所有資訊永久攤開
+- 資訊分類缺失，或所有項目都被寫成高優先級
+- 沒有先做資訊架構表，就直接跳到 UI 版面與元件
+- Stage instructions 太抽象，無法直接貼進 Codex 或 Claude Code
+- 忘記補 Create / Update / Delete 或專案可續編
 - Likely fix:
   - 重寫 `description`
   - 收緊 `Final output contract`
@@ -492,14 +568,14 @@ metadata:
 
 - Save approved prompts to `assets/evals/evals.json`
 - Define release thresholds in `assets/evals/regression_gates.json`
-- Prepare paired runs with `python scripts/prepare_eval_workspace.py <path/to/skill>`
+- 若此 skill 與 `skill-creator-advanced` 工具鏈一起維護，可沿用共用 eval workspace 流程準備 paired runs。
 - If the environment supports subagents or parallel workers, launch with-skill and baseline runs in the same batch
 - After runs complete, aggregate results and generate a review viewer
-- Validate release thresholds with `python scripts/check_regression_gates.py <benchmark.json> --config assets/evals/regression_gates.json`
+- 若此 skill 與 `skill-creator-advanced` 工具鏈一起維護，可沿用共用 regression gates 檢查發版門檻。
 
 ## Distribution notes
 
-- Packaging: `python scripts/package_skill.py <path/to/skill-folder> <output-dir>`
+- Packaging: 由宿主或 registry 的標準 SKILL 發佈流程處理；若在本 repo 維護，再使用 repo 根目錄的打包腳本。
 - Repo-level README belongs outside this skill folder.
 
 ## Troubleshooting
@@ -512,7 +588,7 @@ metadata:
   - Cause: 漏掉 state/persistence、資料模型、錯誤處理或驗收條件
   - Fix: 回到 `references/quality_checklist.md` 的 G1 段落逐項補齊
 
-- Symptom: Codex stages 太大顆，難以驗收或回滾
+- Symptom: Codex / Claude Code stages 太大顆，難以驗收或回滾
   - Cause: 以技術層切分，而不是以可交付 vertical slice 切分
   - Fix: 重切成獨立可測的使用者價值切片，並補明確檔案清單與 DoD
 
@@ -520,6 +596,7 @@ metadata:
 
 - `references/output-template.md`
 - `references/plain-language-rules.md`
+- `references/ui-information-architecture-playbook.md`
 - `references/quality_checklist.md`
 - `scripts/check_plain_language.py`
 - `assets/evals/evals.json`

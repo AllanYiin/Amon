@@ -195,8 +195,15 @@ class OpenAICompatibleProvider:
                     function = tool_call.get("function") if isinstance(tool_call, dict) else None
                     function_name = str((function or {}).get("name") or "").strip()
                     argument_text = str((function or {}).get("arguments") or "")
-                    tool_args = _decode_tool_arguments(argument_text)
-                    tool_result = execute_tool(function_name, tool_args)
+                    tool_args, decode_error = _decode_tool_arguments(argument_text)
+                    if decode_error:
+                        tool_result = {
+                            "is_error": True,
+                            "meta": {"status": "invalid_args", "source": "tool_arguments"},
+                            "content_text": decode_error,
+                        }
+                    else:
+                        tool_result = execute_tool(function_name, tool_args)
                     tool_text = _tool_result_to_message_text(tool_result)
                     working_messages.append(
                         {
@@ -297,17 +304,17 @@ def _merge_stream_tool_call(tool_calls: list[dict[str, Any]], delta: dict[str, A
         target_function["arguments"] = str(target_function.get("arguments") or "") + arguments
 
 
-def _decode_tool_arguments(argument_text: str) -> dict[str, Any]:
+def _decode_tool_arguments(argument_text: str) -> tuple[dict[str, Any], str | None]:
     cleaned = str(argument_text or "").strip()
     if not cleaned:
-        return {}
+        return {}, "工具呼叫缺少 arguments JSON。"
     try:
         parsed = json.loads(cleaned)
-    except json.JSONDecodeError:
-        return {"_raw": cleaned}
+    except json.JSONDecodeError as exc:
+        return {}, f"工具 arguments JSON 無法解析：{exc.msg}"
     if isinstance(parsed, dict):
-        return parsed
-    return {"_value": parsed}
+        return parsed, None
+    return {}, "工具 arguments 必須是 JSON object。"
 
 
 def _tool_result_to_message_text(result: dict[str, Any]) -> str:

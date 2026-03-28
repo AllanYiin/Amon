@@ -37,6 +37,18 @@
       "type": "functional",
       "prompt": "幫我設計一組可重用的按鈕元件，除了程式碼還要有 guideline 文件，並檢查是否出現模糊 CTA 或 AI slop 樣式",
       "expect": "guideline_sections + anti_pattern_scan + specific_cta_copy + reusable_component_rules"
+    },
+    {
+      "id": "functional-04",
+      "type": "functional",
+      "prompt": "請把 7 個工作台需求濃縮成 3 個互動區，避免 dashboard/card farm/stacked sections layout。先給 task model、state model、資訊分類與 visibility plan，再做 UI。",
+      "expect": "task_model + state_model + information_priority_roles + progressive_disclosure + anti_stacked_workbench"
+    },
+    {
+      "id": "functional-05",
+      "type": "functional",
+      "prompt": "設計一個審核工作台。先輸出唯一主目標、次目標、低頻目標、罕見目標，再做 state matrix 與資訊架構表，最後才做 UI。首屏只能有 1 個主操作區、1 個狀態區、1 個次要摘要。",
+      "expect": "task_model_layers + state_matrix + information_architecture_table + first_viewport_constraints + progressive_disclosure"
     }
   ]
 }

@@ -82,11 +82,6 @@ class TaskSpec:
     runnable: bool = True
     non_runnable_reason: str | None = None
 
-
-def _default_tool_call() -> ToolCallSpec:
-    return ToolCallSpec(name="web.search", args={})
-
-
 def validate_task_spec(node_id: str, task_spec: TaskSpec) -> None:
     if task_spec.executor not in _EXECUTORS:
         raise ValueError(f"task.task_spec.executor 不合法：node_id={node_id}, executor={task_spec.executor}")
@@ -348,14 +343,21 @@ def _repair_task_spec_from_payload(
         repaired_tools: list[ToolCallSpec] = []
         for tool in task_spec.tool.tools:
             tool_name = str(tool.name or "").strip()
+            if not tool_name:
+                continue
             repaired_tools.append(
                 ToolCallSpec(
-                    name=tool_name or "web.search",
+                    name=tool_name,
                     args=tool.args if isinstance(tool.args, dict) else {},
                     when_to_use=_optional_str(tool.when_to_use),
                 )
             )
-        task_spec.tool.tools = repaired_tools or [_default_tool_call()]
+        task_spec.tool.tools = repaired_tools
+        if not repaired_tools:
+            task_spec.runnable = False
+            task_spec.non_runnable_reason = (
+                task_spec.non_runnable_reason or f"tool 缺少可執行工具定義，已降級為不可執行：{label}"
+            )
         return
 
     if task_spec.executor == "sandbox_run":

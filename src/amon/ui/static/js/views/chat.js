@@ -61,6 +61,7 @@ export const CHAT_VIEW = {
     let streamAbortController = null;
     let streamCompleted = false;
     let receivedSoftWarning = false;
+    const nodeTitles = new Map();
     const artifactParser = createStreamingArtifactParser();
     const inlineFiles = new Map();
     const inlinePreviewUrls = new Map();
@@ -69,6 +70,25 @@ export const CHAT_VIEW = {
     const setStreamStatus = (text = "") => {
       if (!elements.chatStreamStatus) return;
       elements.chatStreamStatus.textContent = String(text || "").trim();
+    };
+
+    const rememberNodeMeta = (data = {}) => {
+      const nodeId = String(data.node_id || data.nodeId || "").trim();
+      const nodeTitle = String(data.node_title || data.nodeTitle || "").trim();
+      if (nodeId && nodeTitle) {
+        nodeTitles.set(nodeId, nodeTitle);
+      }
+    };
+
+    const resolveNodeMeta = (data = {}) => {
+      const nodeId = String(data.node_id || data.nodeId || "").trim();
+      const rememberedTitle = nodeId ? String(nodeTitles.get(nodeId) || "").trim() : "";
+      const nodeTitle = String(data.node_title || data.nodeTitle || rememberedTitle).trim();
+      return {
+        nodeId,
+        nodeTitle,
+        nodeLabel: nodeTitle || nodeId || "",
+      };
     };
 
     const setStreaming = (active) => {
@@ -386,28 +406,36 @@ export const CHAT_VIEW = {
                 return;
               }
               if (eventType === "skill") {
+                const { nodeLabel } = resolveNodeMeta(data);
                 const skillName = String(data.name || "").trim() || "unknown-skill";
                 const skillSource = String(data.source || "").trim();
                 const skillLabel = skillSource ? `${skillName}（${skillSource}）` : skillName;
-                messageRenderer.appendTimelineStatus(`正在讀取 skill：${skillLabel}`);
-                ctx.chatDeps.updateThinking({ status: "skill", brief: `正在讀取 skill：${skillLabel}` });
+                const statusText = nodeLabel ? `[${nodeLabel}] 正在讀取 skill：${skillLabel}` : `正在讀取 skill：${skillLabel}`;
+                messageRenderer.appendTimelineStatus(statusText);
+                ctx.chatDeps.updateThinking({ status: "skill", brief: statusText });
                 return;
               }
               if (eventType === "tool_call") {
+                const { nodeLabel } = resolveNodeMeta(data);
                 const toolName = String(data.name || "").trim() || "unknown-tool";
                 const stage = String(data.stage || "").trim().toLowerCase();
                 const status = String(data.status || "").trim().toLowerCase();
                 if (stage === "start") {
-                  messageRenderer.appendTimelineStatus(`正在呼叫工具：${toolName}`);
-                  ctx.chatDeps.updateThinking({ status: "tool_call", brief: `正在呼叫工具：${toolName}` });
+                  const statusText = nodeLabel ? `[${nodeLabel}] 正在呼叫工具：${toolName}` : `正在呼叫工具：${toolName}`;
+                  messageRenderer.appendTimelineStatus(statusText);
+                  ctx.chatDeps.updateThinking({ status: "tool_call", brief: statusText });
                 } else {
                   const finalStatus = status || (data.is_error ? "error" : "ok");
-                  messageRenderer.appendTimelineStatus(`工具完成：${toolName}（${finalStatus}）`);
-                  ctx.chatDeps.updateThinking({ status: "tool_result", brief: `工具完成：${toolName}` });
+                  const statusText = nodeLabel
+                    ? `[${nodeLabel}] 工具完成：${toolName}（${finalStatus}）`
+                    : `工具完成：${toolName}（${finalStatus}）`;
+                  messageRenderer.appendTimelineStatus(statusText);
+                  ctx.chatDeps.updateThinking({ status: "tool_result", brief: statusText });
                 }
                 return;
               }
               if (eventType === "node.update") {
+                rememberNodeMeta(data);
                 const nodeTitle = String(data.node_title || data.nodeTitle || data.node_id || data.nodeId || "").trim() || "unknown-node";
                 const status = String(data.status || "").trim().toLowerCase();
                 const statusText = status === "succeeded"
@@ -428,7 +456,7 @@ export const CHAT_VIEW = {
                 return;
               }
               if (eventType === "token") {
-                messageRenderer.applyTokenChunk(data.text || "");
+                messageRenderer.applyTokenChunk(data.text || "", resolveNodeMeta(data));
                 applyInlineArtifactEvents(artifactParser.feed(data.text || ""));
                 return;
               }

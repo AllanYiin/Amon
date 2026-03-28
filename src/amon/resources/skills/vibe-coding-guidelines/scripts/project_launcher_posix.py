@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-POSIX compatibility entrypoint for vibe-coding-development-guidelines.
+POSIX compatibility entrypoint for vibe-coding-guidelines.
 
 This keeps the split-platform workflow from the source skill available while
 delegating to the local unified project_launcher.py implementation.

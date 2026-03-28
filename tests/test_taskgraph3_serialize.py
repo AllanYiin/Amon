@@ -123,7 +123,7 @@ class TaskGraph3SerializeTests(unittest.TestCase):
         task_node = next(node for node in graph.nodes if isinstance(node, TaskNode))
         self.assertEqual(task_node.task_spec.executor, "agent")
 
-    def test_validate_normalizes_empty_tool_list_to_web_search(self) -> None:
+    def test_validate_marks_empty_tool_list_non_runnable(self) -> None:
         payload = {
             "version": "taskgraph.v3",
             "nodes": [
@@ -146,7 +146,9 @@ class TaskGraph3SerializeTests(unittest.TestCase):
         graph = graph_definition_from_payload(payload)
         task_node = next(node for node in graph.nodes if isinstance(node, TaskNode))
         self.assertEqual(task_node.task_spec.executor, "tool")
-        self.assertEqual([tool.name for tool in task_node.task_spec.tool.tools], ["web.search"])
+        self.assertEqual(task_node.task_spec.tool.tools, [])
+        self.assertFalse(task_node.task_spec.runnable)
+        self.assertIn("tool 缺少可執行工具定義", task_node.task_spec.non_runnable_reason)
 
     def test_validate_normalizes_empty_agent_prompt_from_title(self) -> None:
         payload = {
@@ -326,7 +328,7 @@ class TaskGraph3SerializeTests(unittest.TestCase):
         self.assertFalse(task_node.task_spec.runnable)
         self.assertIn("sandbox_run 缺少 command", task_node.task_spec.non_runnable_reason)
 
-    def test_validate_tool_node_without_tool_calls_defaults_to_web_search(self) -> None:
+    def test_validate_tool_node_without_tool_calls_marks_non_runnable(self) -> None:
         payload = {
             "version": "taskgraph.v3",
             "nodes": [
@@ -343,7 +345,9 @@ class TaskGraph3SerializeTests(unittest.TestCase):
         validate_v3_graph_json(payload)
         graph = graph_definition_from_payload(payload)
         task_node = next(node for node in graph.nodes if isinstance(node, TaskNode))
-        self.assertEqual([tool.name for tool in task_node.task_spec.tool.tools], ["web.search"])
+        self.assertEqual(task_node.task_spec.tool.tools, [])
+        self.assertFalse(task_node.task_spec.runnable)
+        self.assertIn("tool 缺少 toolCalls 定義", task_node.task_spec.non_runnable_reason)
 
 
 if __name__ == "__main__":

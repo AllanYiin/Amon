@@ -2670,7 +2670,16 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                             if isinstance(chunk_text, str) and chunk_text:
                                 streamed_token_count += 1
                                 streamed_text_buffer.append(chunk_text)
-                                send_event("token", {"text": chunk_text}, run_id=active_run_id)
+                                send_event(
+                                    "token",
+                                    {
+                                        "text": chunk_text,
+                                        "node_id": runtime_payload.get("node_id"),
+                                        "node_title": runtime_payload.get("node_title"),
+                                        "chunk_index": runtime_payload.get("chunk_index"),
+                                    },
+                                    run_id=active_run_id,
+                                )
                                 append_event(
                                     thread_id,
                                     {
@@ -2729,6 +2738,8 @@ class AmonUIHandler(SimpleHTTPRequestHandler):
                                         "project_id": project_id,
                                         "run_id": active_run_id or None,
                                         "tool_name": tool_name,
+                                        "node_id": runtime_payload.get("node_id"),
+                                        "node_title": runtime_payload.get("node_title"),
                                         "route": runtime_payload.get("route"),
                                         "stage": runtime_payload.get("stage"),
                                         "status": runtime_payload.get("status"),

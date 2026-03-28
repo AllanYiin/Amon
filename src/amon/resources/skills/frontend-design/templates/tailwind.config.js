@@ -1,11 +1,11 @@
 /**
  * Tailwind CSS Configuration
- * 
+ *
  * This configuration integrates the design token system with Tailwind CSS.
  * It provides custom colors, spacing, typography, and more.
- * 
+ *
  * Location: {project_path}/skills/frontend-design/templates/tailwind.config.js
- * 
+ *
  * Installation:
  * 1. npm install -D tailwindcss postcss autoprefixer
  * 2. Copy this file to your project root as tailwind.config.js
@@ -225,10 +225,10 @@ module.exports = {
   plugins: [
     // Typography plugin for prose styling
     require('@tailwindcss/typography'),
-    
+
     // Forms plugin for better form styling
     require('@tailwindcss/forms'),
-    
+
     // Custom plugin for component utilities
     function ({ addComponents, theme }) {
       addComponents({

@@ -1,6 +1,14 @@
 import { t } from "../../../i18n.js";
 
 export function createTimelineRenderer({ executionAccordion, executionTimeline, escapeHtml, shortenId, getRunId }) {
+  function describeNode(data = {}) {
+    const nodeTitle = String(data.node_title || data.nodeTitle || "").trim();
+    const nodeId = String(data.node_id || data.nodeId || "").trim();
+    if (nodeTitle) return nodeTitle;
+    if (nodeId) return nodeId;
+    return "";
+  }
+
   function executionStatusMeta(status = "pending") {
     if (status === "succeeded") return { icon: "✅", label: t("timeline.status.succeeded") };
     if (status === "running") return { icon: "🔄", label: t("timeline.status.running") };
@@ -63,16 +71,30 @@ export function createTimelineRenderer({ executionAccordion, executionTimeline, 
     }
     if (eventType === "tool_call") {
       const toolName = String(data.name || "").trim() || "unknown-tool";
+      const nodeLabel = describeNode(data);
+      const nodeId = String(data.node_id || data.nodeId || "").trim() || "global";
+      const stepId = `tool:${nodeId}:${toolName}`;
       const stage = String(data.stage || "").trim().toLowerCase();
       const status = String(data.status || "").trim().toLowerCase();
+      const argsPreview = String(data.args_preview || "").trim();
+      const errorDetail = String(data.error_detail || "").trim();
       if (stage === "start") {
-        updateExecutionStep("tool_execution", { title: t("timeline.step.toolExecution"), status: "running", details: `正在呼叫 ${toolName}`, inferred: false });
+        updateExecutionStep(stepId, {
+          title: nodeLabel ? `${nodeLabel} · ${toolName}` : `${t("timeline.step.toolExecution")} · ${toolName}`,
+          status: "running",
+          details: argsPreview
+            ? `正在呼叫 ${toolName}${nodeLabel ? `（節點：${nodeLabel}）` : ""}\n參數：${argsPreview}`
+            : `正在呼叫 ${toolName}${nodeLabel ? `（節點：${nodeLabel}）` : ""}`,
+          inferred: false,
+        });
         return;
       }
-      updateExecutionStep("tool_execution", {
-        title: t("timeline.step.toolExecution"),
+      updateExecutionStep(stepId, {
+        title: nodeLabel ? `${nodeLabel} · ${toolName}` : `${t("timeline.step.toolExecution")} · ${toolName}`,
         status: status === "error" || status === "failed" ? "failed" : "succeeded",
-        details: `工具 ${toolName} 已完成（${status || "ok"}）`,
+        details: errorDetail
+          ? `工具 ${toolName} 已完成（${status || "ok"}）\n錯誤：${errorDetail}`
+          : `工具 ${toolName} 已完成（${status || "ok"}）${nodeLabel ? `\n節點：${nodeLabel}` : ""}`,
         inferred: false,
       });
       return;

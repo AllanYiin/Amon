@@ -66,7 +66,40 @@
 - 這兩項通常需要人工目視確認，無法只靠靜態字串掃描保證正確。
 - 若用動畫暗示群組或流程，需確認 `prefers-reduced-motion` 下仍能理解。
 
-## 4. 機器可檢查的代理指標
+## 4. 工作台與任務焦點 guardrails
+
+這組規則用來防止把工作台做成首頁儀表板，或讓沒有穩定價值的容器搶走主畫面。
+
+### 先定義唯一主任務
+
+- 每個工作台主畫面先寫一句：這個畫面唯一主任務是什麼，例如「看 diff」「審閱差異」「預覽文件」。
+- 若一個畫面同時想承擔概覽、管理、設定、狀態、預覽、編輯、比對，通常代表應拆分視圖或重排層級。
+- 主任務不清楚時，先停在資訊架構，不要急著做視覺。
+
+### 主畫面責任分配
+
+- 主內容區只留給真正的工作面，例如 viewer、editor、diff panel、compare canvas。
+- 專案資訊、環境狀態、流程提示、次要設定、補充說明，都應退到側欄、drawer、tab 或折疊區。
+- 若規格已寫明 `頂部操作列 + 左側導覽 + 中央 viewer`，就不應改成「上方一堆卡片 + 下方工作區」。
+
+### 不要用 stacked UI 取代工作台
+
+- 使用者如果主要在操作單一工作面，不應先看一整串 summary cards、status cards、process cards，再往下才看到真正工具。
+- 同一主工作區中的互斥模式，例如 `預覽 / 比對`，通常應採 tab、segmented control 或 mode switch，而不是上下堆疊。
+
+### 空狀態與無效容器
+
+- 任何主畫面區塊若不能穩定提供內容，就不該佔據主位。
+- 空狀態必須回答三件事：目前缺什麼、為什麼沒有內容、下一步要做什麼。
+- 「技術上存在的 iframe/preview 容器」不等於「對使用者有價值的內容」；沒有內容時要縮位或轉成指引，而不是留下大片空白。
+
+### 狀態與 responsive
+
+- 系統狀態要可見，但角色是輔助，不應壓過主任務本身。
+- 縮到小螢幕時，優先保住主任務與下一步動作；不要把所有桌面資訊等比例壓縮進首屏。
+- 用 Gestalt 檢查三件事：相關內容是否分在一起、主內容是否明顯浮出背景、視線是否自然流向下一步。
+
+## 5. 機器可檢查的代理指標
 
 下列項目可由 `scripts/audit_frontend_principles.py` 做可復現檢查：
 
@@ -77,8 +110,9 @@
 - 是否有 `tokens / variants / semantic color` 等 similarity 代理訊號
 - 是否有 `background / surface / text / contrast` 等 figure-ground 代理訊號
 - 是否有 `stepper / timeline / connector / ordered sequence` 等 continuation 代理訊號
+- 是否能從文件或元件命名看出 `primary task / main stage / sidebar / empty state / next step` 等任務焦點訊號
 
-## 5. 建議交付契約
+## 6. 建議交付契約
 
 做多步驟 UI 時，交付物至少應包含：
 

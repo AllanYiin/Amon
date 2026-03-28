@@ -85,6 +85,18 @@ FRONTEND_PKG_CANDIDATES = [
     "package.json",
 ]
 
+BACKEND_NODE_PKG_CANDIDATES = [
+    "services/api/package.json",
+    "services/backend/package.json",
+    "backend/package.json",
+    "api/package.json",
+    "server/package.json",
+    "src/server/package.json",
+    "src/api/package.json",
+    "packages/api/package.json",
+    "apps/api/package.json",
+]
+
 STATIC_SITE_DIR_CANDIDATES = [
     "dist",
     "build",
@@ -769,6 +781,128 @@ def detect_uvicorn_from_text(text: str) -> Tuple[Optional[str], Optional[str], O
 
     return None, None, None
 
+def detect_node_package_manager(pkg_dir: Path) -> str:
+    if (pkg_dir / "pnpm-lock.yaml").is_file():
+        return "pnpm"
+    if (pkg_dir / "yarn.lock").is_file():
+        return "yarn"
+    return "npm"
+
+def load_package_scripts(pkg_path: Path) -> Dict[str, str]:
+    try:
+        data = json.loads(read_text_quick(pkg_path)) or {}
+    except Exception:
+        return {}
+    scripts = data.get("scripts", {}) or {}
+    if not isinstance(scripts, dict):
+        return {}
+    return {str(k): str(v) for k, v in scripts.items()}
+
+def choose_node_backend_script(scripts: Dict[str, str]) -> Tuple[Optional[str], Optional[str]]:
+    for name in ("dev", "start:dev", "start", "serve"):
+        cmd = scripts.get(name)
+        if cmd:
+            return name, cmd
+
+    for name, cmd in scripts.items():
+        lowered = name.lower()
+        if any(token in lowered for token in ("dev", "start", "serve", "api")):
+            return name, cmd
+    return None, None
+
+def build_node_run_command(pm: str, script_name: str) -> Tuple[str, str]:
+    if pm == "pnpm":
+        return "pnpm install", f"pnpm {script_name}"
+    if pm == "yarn":
+        return "yarn install", f"yarn {script_name}"
+    return "npm install", f"npm run {script_name}"
+
+def iter_backend_package_jsons(root: Path) -> List[Path]:
+    found: List[Path] = []
+    seen: Set[Path] = set()
+
+    def add_candidate(path: Path) -> None:
+        if not path.is_file():
+            return
+        if path in seen:
+            return
+        seen.add(path)
+        found.append(path)
+
+    for rel in BACKEND_NODE_PKG_CANDIDATES:
+        add_candidate(root / rel)
+
+    frontend_dir_markers = {"frontend", "client", "web", "ui"}
+    for pkg in root.rglob("package.json"):
+        if any(part in EXCLUDE_DIRS for part in pkg.parts):
+            continue
+        try:
+            rel = pkg.relative_to(root)
+        except ValueError:
+            continue
+        rel_parts = [part.lower() for part in rel.parts[:-1]]
+        if not rel_parts:
+            continue
+        if any(part in frontend_dir_markers for part in rel_parts):
+            continue
+        if not any(part in BACKEND_HINT_DIRS for part in rel_parts):
+            continue
+        add_candidate(pkg)
+
+    return found
+
+def detect_node_backend_mode(root: Path, cfg: Dict[str, str]) -> Optional[dict]:
+    for pkg in iter_backend_package_jsons(root):
+        scripts = load_package_scripts(pkg)
+        if not scripts:
+            continue
+
+        script_name, script_cmd = choose_node_backend_script(scripts)
+        if not script_name or not script_cmd:
+            continue
+
+        backend_dir = pkg.parent
+        pm = detect_node_package_manager(backend_dir)
+        install_cmd, run_cmd = build_node_run_command(pm, script_name)
+        host, port = parse_frontend_host_port_from_script(script_cmd)
+
+        for env_name in (".env", ".env.local", ".env.development", ".env.production"):
+            env_path = backend_dir / env_name
+            if not env_path.is_file():
+                continue
+            env_host, env_port = parse_env_host_port(read_text_quick(env_path), allow_generic_port=True)
+            host = host or env_host
+            port = port or env_port
+
+        if cfg.get("BACKEND_HOST"):
+            host = cfg["BACKEND_HOST"].strip() or host
+        if cfg.get("BACKEND_PORT"):
+            cfg_port = safe_int(cfg["BACKEND_PORT"])
+            if cfg_port is not None:
+                port = cfg_port
+
+        if host is None:
+            host = "127.0.0.1"
+        if port is None:
+            port = 8000
+
+        rel_dir = str(backend_dir.relative_to(root)).replace("/", "\\") if backend_dir != root else "."
+        rel_pkg = str(pkg.relative_to(root)).replace("/", "\\")
+        return {
+            "mode": "node",
+            "dir": rel_dir,
+            "package_json": rel_pkg,
+            "pm": pm,
+            "script": script_name,
+            "install_cmd": install_cmd,
+            "run_cmd": run_cmd,
+            "host": host,
+            "port": port,
+            "notes": [f"Detected Node backend package in {rel_pkg} via script '{script_name}'."],
+        }
+
+    return None
+
 def find_backend_start_script(root: Path) -> Optional[str]:
     for rel in START_BACKEND_SCRIPT_CANDIDATES:
         p = root / rel
@@ -843,6 +977,7 @@ def detect_backend_mode(root: Path, cfg: Dict[str, str]) -> dict:
     返回 dict:
       uvicorn: {mode, target, host, port, notes}
       module : {mode, module, file}
+      node   : {mode, dir, pm, script, install_cmd, run_cmd, host, port, notes}
       streamlit fallback
     """
     notes: List[str] = []
@@ -889,13 +1024,18 @@ def detect_backend_mode(root: Path, cfg: Dict[str, str]) -> dict:
         notes.append("Inferred uvicorn target from code (FastAPI/ASGI assignment).")
         return {"mode": "uvicorn", "target": inferred, "host": None, "port": None, "notes": notes}
 
-    # 3) streamlit fallback (only if truly streamlit)
+    # 3) node backend package fallback (monorepo/services/api, backend/, server/, ...)
+    node_backend = detect_node_backend_mode(root, cfg)
+    if node_backend:
+        return node_backend
+
+    # 4) streamlit fallback (only if truly streamlit)
     for rel in ["streamlit_app.py", "src/streamlit_app.py", "src/app.py", "src/main.py", "app.py", "main.py"]:
         p = root / rel
         if p.is_file() and file_contains(p, STREAMLIT_PAT):
             return {"mode": "streamlit", "file": str(p.relative_to(root)).replace("/", "\\")}
 
-    # 4) module fallback (ensure backend still starts)
+    # 5) module fallback (ensure backend still starts)
     for rel in MODULE_ENTRY_CANDIDATES:
         p = root / rel
         if p.is_file():
@@ -1393,6 +1533,20 @@ def write_run_app_bat(root: Path, script_name: str, backend: dict,
                 'set APP_BACKEND_PORT=%APP_BACKEND_PORT% ^&^& ""%PYEXE%"" '
                 f'-m streamlit run "{entry}" 1>>""%~dp0logs\\backend.log"" 2>>&1"\n'
             )
+        elif mode == "node":
+            backend_dir = det.backend.get("dir", ".")
+            install_cmd = det.backend.get("install_cmd", "npm install")
+            run_cmd = det.backend.get("run_cmd", "npm run dev")
+            backend_start = (
+                'start "Backend" cmd /k "set APP_BACKEND_HOST=%APP_BACKEND_HOST% ^&^& '
+                'set APP_BACKEND_PORT=%APP_BACKEND_PORT% ^&^& '
+                'set BACKEND_HOST=%APP_BACKEND_HOST% ^&^& '
+                'set BACKEND_PORT=%APP_BACKEND_PORT% ^&^& '
+                'set HOST=%APP_BACKEND_HOST% ^&^& '
+                'set PORT=%APP_BACKEND_PORT% ^&^& '
+                f'cd /d ""{backend_dir}"" ^&^& {install_cmd} 1>>""%~dp0logs\\backend.log"" 2>>&1 ^&^& '
+                f'{run_cmd} 1>>""%~dp0logs\\backend.log"" 2>>&1"\n'
+            )
         else:
             backend_start = 'echo [WARN] Embedded backend mode detected but no backend start command was built.\n'
 
@@ -1424,6 +1578,21 @@ def write_run_app_bat(root: Path, script_name: str, backend: dict,
     elif mode == "streamlit":
         entry = det.backend.get("file", "")
         backend_start = 'set "PYTHONPATH=%CD%\\src;%CD%;%PYTHONPATH%"\n' + f'start "Backend" cmd /k """%PYEXE%"" -m streamlit run "{entry}" 1>>"logs\\backend.log" 2>>&1"\n'
+    elif mode == "node":
+        backend_dir = det.backend.get("dir", ".")
+        install_cmd = det.backend.get("install_cmd", "npm install")
+        run_cmd = det.backend.get("run_cmd", "npm run dev")
+        backend_start = (
+            f'start "Backend" cmd /k "set APP_BACKEND_HOST={backend_host} ^&^& '
+            f'set APP_BACKEND_PORT={backend_port} ^&^& '
+            f'set BACKEND_HOST={backend_host} ^&^& '
+            f'set BACKEND_PORT={backend_port} ^&^& '
+            f'set HOST={backend_host} ^&^& '
+            f'set PORT={backend_port} ^&^& '
+            f'cd /d ""{backend_dir}"" ^&^& {install_cmd} 1>>"logs\\backend.log" 2>>&1 ^&^& '
+            f'{run_cmd} 1>>"logs\\backend.log" 2>>&1"\n'
+        )
+        backend_url = f"http://{backend_host}:{backend_port}"
     elif mode == "module":
         module_name = det.backend.get("module", "")
         py_path_fix = 'set "PYTHONPATH=%CD%\\src;%CD%;%PYTHONPATH%"\n' if needs_src_pythonpath_fix(root, module_name) else ""
@@ -1588,6 +1757,23 @@ def write_run_app_sh(root: Path, script_relpath: str, backend: dict,
         elif mode == "streamlit":
             entry = str(det.backend.get("file", "")).replace("\\", "/")
             backend_start = port_block + f'PYTHONPATH="$ROOT/src:$ROOT:${{PYTHONPATH:-}}" APP_BACKEND_HOST="$APP_BACKEND_HOST" APP_BACKEND_PORT="$APP_BACKEND_PORT" "$PYEXE" -m streamlit run "$ROOT/{entry}" >>"$ROOT/logs/backend.log" 2>&1 &\nBACKEND_PID=$!\n'
+        elif mode == "node":
+            backend_dir = str(det.backend.get("dir", ".")).replace("\\", "/")
+            install_cmd = det.backend.get("install_cmd", "npm install")
+            run_cmd = det.backend.get("run_cmd", "npm run dev")
+            backend_start = port_block + f"""start_backend() {{
+  if ! cd "$ROOT/{backend_dir}"; then
+    printf '[WARN] Backend cd failed: %s\\n' "$ROOT/{backend_dir}" >>"$ROOT/logs/backend.log"
+    return 1
+  fi
+  if ! {install_cmd} >>"$ROOT/logs/backend.log" 2>&1; then
+    printf '[WARN] Backend install failed in %s\\n' "$ROOT/{backend_dir}" >>"$ROOT/logs/backend.log"
+  fi
+  APP_BACKEND_HOST="$APP_BACKEND_HOST" APP_BACKEND_PORT="$APP_BACKEND_PORT" BACKEND_HOST="$APP_BACKEND_HOST" BACKEND_PORT="$APP_BACKEND_PORT" HOST="$APP_BACKEND_HOST" PORT="$APP_BACKEND_PORT" {run_cmd} >>"$ROOT/logs/backend.log" 2>&1
+}}
+start_backend &
+BACKEND_PID=$!
+"""
 
         if local_py.exists and local_py.entry:
             py_prefix = shell_pythonpath_prefix(root, local_py.import_root)
@@ -1607,6 +1793,24 @@ def write_run_app_sh(root: Path, script_relpath: str, backend: dict,
     elif mode == "streamlit":
         entry = str(det.backend.get("file", "")).replace("\\", "/")
         backend_start = f'PYTHONPATH="$ROOT/src:$ROOT:${{PYTHONPATH:-}}" "$PYEXE" -m streamlit run "$ROOT/{entry}" >>"$ROOT/logs/backend.log" 2>&1 &\nBACKEND_PID=$!\n'
+    elif mode == "node":
+        backend_dir = str(det.backend.get("dir", ".")).replace("\\", "/")
+        install_cmd = det.backend.get("install_cmd", "npm install")
+        run_cmd = det.backend.get("run_cmd", "npm run dev")
+        backend_start = f"""start_backend() {{
+  if ! cd "$ROOT/{backend_dir}"; then
+    printf '[WARN] Backend cd failed: %s\\n' "$ROOT/{backend_dir}" >>"$ROOT/logs/backend.log"
+    return 1
+  fi
+  if ! {install_cmd} >>"$ROOT/logs/backend.log" 2>&1; then
+    printf '[WARN] Backend install failed in %s\\n' "$ROOT/{backend_dir}" >>"$ROOT/logs/backend.log"
+  fi
+  APP_BACKEND_HOST="{backend_host}" APP_BACKEND_PORT="{backend_port}" BACKEND_HOST="{backend_host}" BACKEND_PORT="{backend_port}" HOST="{backend_host}" PORT="{backend_port}" {run_cmd} >>"$ROOT/logs/backend.log" 2>&1
+}}
+start_backend &
+BACKEND_PID=$!
+"""
+        backend_url = f"http://{backend_host}:{backend_port}"
     elif mode == "module":
         module_name = det.backend.get("module", "")
         py_prefix = 'PYTHONPATH="$ROOT/src:$ROOT:${PYTHONPATH:-}" ' if needs_src_pythonpath_fix(root, module_name) else ""
@@ -2040,6 +2244,10 @@ def full_auto(root: Path, venv_dir: str, ensure_only: bool = False) -> Tuple[int
         messages.append(f"- backend script: {det.backend.get('rel_script')}")
     if det.backend.get("mode") == "uvicorn":
         messages.append(f"- uvicorn target: {det.backend.get('target')}")
+    if det.backend.get("mode") == "node":
+        messages.append(
+            f"- node backend: dir={det.backend.get('dir')}, pm={det.backend.get('pm')}, script={det.backend.get('script')}"
+        )
     if det.backend.get("mode") == "module":
         messages.append(f"- python module: {det.backend.get('module')}")
     if det.backend.get("mode") != "none":

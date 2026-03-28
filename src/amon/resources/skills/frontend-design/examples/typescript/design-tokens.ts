@@ -1,9 +1,9 @@
 /**
  * Design Tokens — Type-Safe Token Definitions
- * 
+ *
  * This file provides TypeScript interfaces and types for the design token system.
  * Use these to ensure type safety when working with design tokens programmatically.
- * 
+ *
  * Location: {project_path}/skills/frontend-design/examples/typescript/design-tokens.ts
  */
 
@@ -17,18 +17,18 @@ export interface ColorTokens {
   surface: string;
   surfaceSubtle: string;
   surfaceHover: string;
-  
+
   // Text
   text: string;
   textSecondary: string;
   textMuted: string;
   textInverse: string;
-  
+
   // Borders
   border: string;
   borderSubtle: string;
   borderStrong: string;
-  
+
   // Primary
   primary: string;
   primaryHover: string;
@@ -36,36 +36,36 @@ export interface ColorTokens {
   primarySubtle: string;
   primaryMuted: string;
   primaryForeground: string;
-  
+
   // Secondary
   secondary: string;
   secondaryHover: string;
   secondaryActive: string;
   secondarySubtle: string;
   secondaryForeground: string;
-  
+
   // Accent
   accent: string;
   accentHover: string;
   accentForeground: string;
-  
+
   // Semantic Colors
   success: string;
   successSubtle: string;
   successForeground: string;
-  
+
   warning: string;
   warningSubtle: string;
   warningForeground: string;
-  
+
   danger: string;
   dangerSubtle: string;
   dangerForeground: string;
-  
+
   info: string;
   infoSubtle: string;
   infoForeground: string;
-  
+
   // Overlays
   overlay: string;
   scrim: string;
@@ -177,13 +177,13 @@ export interface MotionTokens {
   base: string;
   slow: string;
   slower: string;
-  
+
   // Easings
   easeIn: string;
   easeOut: string;
   easeInOut: string;
   easeBounce: string;
-  
+
   // Common transitions
   transitionColors: string;
   transitionTransform: string;
@@ -280,10 +280,10 @@ export interface ThemeConfig {
 export function getCSSVariable(tokenPath: string): string {
   const parts = tokenPath.split('.');
   const tokenName = parts[parts.length - 1];
-  
+
   // Convert camelCase to kebab-case
   const kebabCase = tokenName.replace(/([A-Z])/g, '-$1').toLowerCase();
-  
+
   return `var(--${kebabCase})`;
 }
 
@@ -296,7 +296,7 @@ export function getCSSVariable(tokenPath: string): string {
 export function getTokenValue(tokens: DesignTokens, path: string): string | undefined {
   const parts = path.split('.');
   let value: any = tokens;
-  
+
   for (const part of parts) {
     if (value && typeof value === 'object' && part in value) {
       value = value[part];
@@ -304,7 +304,7 @@ export function getTokenValue(tokens: DesignTokens, path: string): string | unde
       return undefined;
     }
   }
-  
+
   return typeof value === 'string' ? value : undefined;
 }
 
@@ -318,53 +318,53 @@ export const lightThemeTokens: DesignTokens = {
     surface: 'oklch(100% 0 0)',
     surfaceSubtle: 'oklch(98% 0.005 250)',
     surfaceHover: 'oklch(97% 0.01 250)',
-    
+
     text: 'oklch(20% 0.01 250)',
     textSecondary: 'oklch(45% 0.015 250)',
     textMuted: 'oklch(60% 0.01 250)',
     textInverse: 'oklch(98% 0 0)',
-    
+
     border: 'oklch(90% 0.005 250)',
     borderSubtle: 'oklch(95% 0.003 250)',
     borderStrong: 'oklch(75% 0.01 250)',
-    
+
     primary: 'oklch(55% 0.18 250)',
     primaryHover: 'oklch(50% 0.20 250)',
     primaryActive: 'oklch(45% 0.22 250)',
     primarySubtle: 'oklch(95% 0.03 250)',
     primaryMuted: 'oklch(85% 0.08 250)',
     primaryForeground: 'oklch(98% 0.01 250)',
-    
+
     secondary: 'oklch(65% 0.08 280)',
     secondaryHover: 'oklch(60% 0.10 280)',
     secondaryActive: 'oklch(55% 0.12 280)',
     secondarySubtle: 'oklch(95% 0.02 280)',
     secondaryForeground: 'oklch(98% 0.01 280)',
-    
+
     accent: 'oklch(70% 0.15 160)',
     accentHover: 'oklch(65% 0.17 160)',
     accentForeground: 'oklch(10% 0.01 160)',
-    
+
     success: 'oklch(65% 0.15 145)',
     successSubtle: 'oklch(95% 0.03 145)',
     successForeground: 'oklch(98% 0.01 145)',
-    
+
     warning: 'oklch(75% 0.15 85)',
     warningSubtle: 'oklch(95% 0.05 85)',
     warningForeground: 'oklch(15% 0.02 85)',
-    
+
     danger: 'oklch(60% 0.20 25)',
     dangerSubtle: 'oklch(95% 0.04 25)',
     dangerForeground: 'oklch(98% 0.01 25)',
-    
+
     info: 'oklch(65% 0.12 230)',
     infoSubtle: 'oklch(95% 0.02 230)',
     infoForeground: 'oklch(98% 0.01 230)',
-    
+
     overlay: 'oklch(0% 0 0 / 0.5)',
     scrim: 'oklch(0% 0 0 / 0.3)',
   },
-  
+
   typography: {
     display: {
       fontSize: 'clamp(3rem, 2.5rem + 2vw, 4.5rem)',
@@ -415,13 +415,13 @@ export const lightThemeTokens: DesignTokens = {
       fontWeight: 400,
     },
   },
-  
+
   fontFamilies: {
     sans: "'Inter', system-ui, -apple-system, sans-serif",
     serif: "'Merriweather', Georgia, serif",
     mono: "'JetBrains Mono', 'Fira Code', monospace",
   },
-  
+
   spacing: {
     0: '0',
     px: '1px',
@@ -451,7 +451,7 @@ export const lightThemeTokens: DesignTokens = {
     56: '14rem',
     64: '16rem',
   },
-  
+
   radius: {
     none: '0',
     xs: '0.125rem',
@@ -463,7 +463,7 @@ export const lightThemeTokens: DesignTokens = {
     '3xl': '1.5rem',
     full: '9999px',
   },
-  
+
   shadows: {
     xs: '0 1px 2px 0 oklch(0% 0 0 / 0.05)',
     sm: '0 1px 3px 0 oklch(0% 0 0 / 0.1), 0 1px 2px -1px oklch(0% 0 0 / 0.1)',
@@ -474,25 +474,25 @@ export const lightThemeTokens: DesignTokens = {
     primary: '0 4px 12px -2px oklch(55% 0.18 250), 0 2px 6px -2px oklch(55% 0.18 250)',
     secondary: '0 4px 12px -2px oklch(65% 0.08 280), 0 2px 6px -2px oklch(65% 0.08 280)',
   },
-  
+
   motion: {
     instant: '0ms',
     fast: '150ms',
     base: '220ms',
     slow: '300ms',
     slower: '400ms',
-    
+
     easeIn: 'cubic-bezier(0.4, 0, 1, 1)',
     easeOut: 'cubic-bezier(0, 0, 0.2, 1)',
     easeInOut: 'cubic-bezier(0.4, 0, 0.2, 1)',
     easeBounce: 'cubic-bezier(0.68, -0.55, 0.265, 1.55)',
-    
+
     transitionColors: 'color 150ms cubic-bezier(0, 0, 0.2, 1), background-color 150ms cubic-bezier(0, 0, 0.2, 1), border-color 150ms cubic-bezier(0, 0, 0.2, 1)',
     transitionTransform: 'transform 220ms cubic-bezier(0, 0, 0.2, 1)',
     transitionOpacity: 'opacity 220ms cubic-bezier(0, 0, 0.2, 1)',
     transitionAll: 'all 220ms cubic-bezier(0.4, 0, 0.2, 1)',
   },
-  
+
   componentSizes: {
     button: {
       sm: '2.25rem',
@@ -521,7 +521,7 @@ export const lightThemeTokens: DesignTokens = {
       '2xl': '6rem',
     },
   },
-  
+
   zIndex: {
     base: 0,
     dropdown: 1000,
@@ -545,16 +545,16 @@ export const darkThemeColorOverrides: Partial<ColorTokens> = {
   surface: 'oklch(20% 0.015 250)',
   surfaceSubtle: 'oklch(25% 0.02 250)',
   surfaceHover: 'oklch(30% 0.025 250)',
-  
+
   text: 'oklch(95% 0.01 250)',
   textSecondary: 'oklch(70% 0.015 250)',
   textMuted: 'oklch(55% 0.01 250)',
   textInverse: 'oklch(15% 0 0)',
-  
+
   border: 'oklch(35% 0.01 250)',
   borderSubtle: 'oklch(25% 0.005 250)',
   borderStrong: 'oklch(50% 0.015 250)',
-  
+
   primary: 'oklch(65% 0.18 250)',
   primaryHover: 'oklch(70% 0.20 250)',
   primaryActive: 'oklch(75% 0.22 250)',

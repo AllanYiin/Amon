@@ -167,7 +167,7 @@ class PlannerLLMTests(unittest.TestCase):
         self.assertIn("taskSpec.executor 只能是 agent、tool、sandbox_run", system_prompt)
         self.assertIn("每個 node.id 都必須是非空且唯一的字串", system_prompt)
 
-    def test_generate_plan_with_llm_repairs_empty_tool_list_to_web_search(self) -> None:
+    def test_generate_plan_with_llm_marks_empty_tool_list_non_runnable(self) -> None:
         llm = _MockLLM([
             '{"version":"taskgraph.v3","nodes":[{"id":"task_concept_alignment","node_type":"TASK","title":"概念對齊","taskSpec":{"executor":"tool","tool":{"tools":[]},"display":{"label":"概念對齊"},"runnable":true}}],"edges":[]}',
         ])
@@ -176,7 +176,9 @@ class PlannerLLMTests(unittest.TestCase):
 
         task_node = next(node for node in plan.nodes if isinstance(node, TaskNode))
         self.assertEqual(task_node.task_spec.executor, "tool")
-        self.assertEqual([tool.name for tool in task_node.task_spec.tool.tools], ["web.search"])
+        self.assertEqual(task_node.task_spec.tool.tools, [])
+        self.assertFalse(task_node.task_spec.runnable)
+        self.assertIn("tool 缺少可執行工具定義", task_node.task_spec.non_runnable_reason)
 
 
 if __name__ == "__main__":

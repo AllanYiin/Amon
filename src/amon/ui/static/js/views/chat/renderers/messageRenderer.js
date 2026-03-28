@@ -2,7 +2,8 @@ import { t } from "../../../i18n.js";
 
 export function createMessageRenderer({ timelineEl, renderMarkdown }) {
   const state = {
-    pendingAssistantMessage: null,
+    pendingAssistantMessages: new Map(),
+    latestPendingKey: "assistant:default",
   };
 
   function stickToBottom() {
@@ -82,6 +83,13 @@ export function createMessageRenderer({ timelineEl, renderMarkdown }) {
     const bubble = document.createElement("div");
     bubble.className = `chat-msg__bubble chat-msg__bubble--${role}`;
 
+    if (role === "agent" && meta.label) {
+      const label = document.createElement("div");
+      label.className = "chat-msg__node-label";
+      label.textContent = meta.label;
+      bubble.appendChild(label);
+    }
+
     const bubbleBody = document.createElement("div");
     bubbleBody.className = "chat-msg__body";
     bubbleBody.innerHTML = renderMarkdown(text || "");
@@ -128,27 +136,55 @@ export function createMessageRenderer({ timelineEl, renderMarkdown }) {
     stickToBottom();
   }
 
-  function applyTokenChunk(text = "") {
-    if (!state.pendingAssistantMessage) {
-      state.pendingAssistantMessage = appendMessage("agent", "", { status: t("chat.status.streaming"), typing: true });
-      state.pendingAssistantMessage.bubble.dataset.buffer = "";
+  function pendingKeyForMeta(meta = {}) {
+    const nodeId = String(meta.nodeId || "").trim();
+    if (nodeId) return `assistant:${nodeId}`;
+    return "assistant:default";
+  }
+
+  function nodeLabelForMeta(meta = {}) {
+    const nodeTitle = String(meta.nodeTitle || "").trim();
+    if (nodeTitle) return `節點：${nodeTitle}`;
+    const nodeId = String(meta.nodeId || "").trim();
+    if (nodeId) return `節點：${nodeId}`;
+    return "";
+  }
+
+  function getOrCreatePendingAssistantMessage(meta = {}) {
+    const key = pendingKeyForMeta(meta);
+    state.latestPendingKey = key;
+    if (!state.pendingAssistantMessages.has(key)) {
+      const pendingAssistantMessage = appendMessage("agent", "", {
+        status: t("chat.status.streaming"),
+        typing: true,
+        label: nodeLabelForMeta(meta),
+      });
+      pendingAssistantMessage.bubble.dataset.buffer = "";
+      state.pendingAssistantMessages.set(key, pendingAssistantMessage);
     }
-    state.pendingAssistantMessage.bubble.dataset.buffer = `${state.pendingAssistantMessage.bubble.dataset.buffer || ""}${text}`;
-    state.pendingAssistantMessage.bubble.classList.remove("is-typing");
-    state.pendingAssistantMessage.bubbleBody.innerHTML = renderMarkdown(state.pendingAssistantMessage.bubble.dataset.buffer);
+    return state.pendingAssistantMessages.get(key);
+  }
+
+  function applyTokenChunk(text = "", meta = {}) {
+    const pendingAssistantMessage = getOrCreatePendingAssistantMessage(meta);
+    pendingAssistantMessage.bubble.dataset.buffer = `${pendingAssistantMessage.bubble.dataset.buffer || ""}${text}`;
+    pendingAssistantMessage.bubble.classList.remove("is-typing");
+    pendingAssistantMessage.bubbleBody.innerHTML = renderMarkdown(pendingAssistantMessage.bubble.dataset.buffer);
     stickToBottom();
   }
 
   function getPendingBuffer() {
-    if (!state.pendingAssistantMessage) return "";
-    return state.pendingAssistantMessage.bubble.dataset.buffer || "";
+    const pendingAssistantMessage = state.pendingAssistantMessages.get(state.latestPendingKey);
+    if (!pendingAssistantMessage) return "";
+    return pendingAssistantMessage.bubble.dataset.buffer || "";
   }
 
   function setArtifactBadge(label = "") {
-    if (!state.pendingAssistantMessage) return;
+    const pendingAssistantMessage = state.pendingAssistantMessages.get(state.latestPendingKey);
+    if (!pendingAssistantMessage) return;
 
     const normalizedLabel = String(label || "").trim();
-    const { bubble } = state.pendingAssistantMessage;
+    const { bubble } = pendingAssistantMessage;
     let badgeEl = bubble.querySelector(".chat-msg__artifact-badge");
 
     if (!normalizedLabel) {
@@ -165,20 +201,22 @@ export function createMessageRenderer({ timelineEl, renderMarkdown }) {
   }
 
   function finalizeAssistantBubble() {
-    if (state.pendingAssistantMessage) {
-      state.pendingAssistantMessage.bubble.classList.remove("is-typing");
-      if (state.pendingAssistantMessage.headerStatusEl) {
-        state.pendingAssistantMessage.headerStatusEl.hidden = true;
+    state.pendingAssistantMessages.forEach((pendingAssistantMessage) => {
+      pendingAssistantMessage.bubble.classList.remove("is-typing");
+      if (pendingAssistantMessage.headerStatusEl) {
+        pendingAssistantMessage.headerStatusEl.hidden = true;
       }
-      if (state.pendingAssistantMessage.footerStatusEl) {
-        state.pendingAssistantMessage.footerStatusEl.remove();
+      if (pendingAssistantMessage.footerStatusEl) {
+        pendingAssistantMessage.footerStatusEl.remove();
       }
-    }
-    state.pendingAssistantMessage = null;
+    });
+    state.pendingAssistantMessages.clear();
+    state.latestPendingKey = "assistant:default";
   }
 
   function reset() {
-    state.pendingAssistantMessage = null;
+    state.pendingAssistantMessages.clear();
+    state.latestPendingKey = "assistant:default";
   }
 
   return {

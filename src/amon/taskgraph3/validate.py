@@ -285,19 +285,23 @@ def _extract_task_spec(payload: dict[str, Any], title: str, *, node_id: str) -> 
     if canonical_type == "tool":
         tool_calls = []
         for item in _list_of_dicts(config.get("toolCalls")):
+            tool_name = _optional_str(item.get("name")) or _optional_str(item.get("toolId")) or _optional_str(item.get("tool"))
+            if not tool_name:
+                continue
             tool_calls.append(
                 ToolCallSpec(
-                    name=str(item.get("name") or ""),
+                    name=tool_name,
                     args=item.get("args") if isinstance(item.get("args"), dict) else {},
                     when_to_use=_optional_str(item.get("whenToUse")),
                 )
             )
         return TaskSpec(
             executor="tool",
-            tool=ToolTaskConfig(tools=tool_calls or [ToolCallSpec(name="web.search", args={})]),
+            tool=ToolTaskConfig(tools=tool_calls),
             input_bindings=input_bindings,
             display=TaskDisplayMetadata(label=title, summary=_optional_str(payload.get("description"))),
-            runnable=True,
+            runnable=bool(tool_calls),
+            non_runnable_reason=None if tool_calls else "tool 缺少 toolCalls 定義，節點不可直接執行",
         )
     if canonical_type == "delay":
         return TaskSpec(

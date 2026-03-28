@@ -10,7 +10,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from amon.core import AmonCore
-from amon.taskgraph3.payloads import AgentTaskConfig, InputBinding, TaskDisplayMetadata, TaskSpec
+from amon.taskgraph3.payloads import AgentTaskConfig, InputBinding, TaskDisplayMetadata, TaskSpec, ToolTaskConfig
 from amon.taskgraph3.serialize import dumps_graph_definition
 from amon.taskgraph3.schema import ArtifactNode, GraphDefinition, GraphEdge, TaskNode, validate_graph_definition
 
@@ -247,6 +247,52 @@ class CorePlanGenerationTests(unittest.TestCase):
         }
         self.assertIn(("concept_alignment", "requirements"), control_pairs)
         self.assertIn(("requirements", "packaging"), control_pairs)
+
+    def test_postprocess_planner_graph_repairs_non_runnable_concept_alignment_tool_node(self) -> None:
+        core = AmonCore(data_dir=Path(tempfile.mkdtemp()))
+        try:
+            graph = GraphDefinition(
+                version="taskgraph.v3",
+                nodes=[
+                    TaskNode(
+                        id="concept_alignment",
+                        title="概念對齊",
+                        task_spec=TaskSpec(
+                            executor="tool",
+                            tool=ToolTaskConfig(tools=[]),
+                            display=TaskDisplayMetadata(label="概念對齊"),
+                            runnable=False,
+                            non_runnable_reason="tool 缺少可執行工具定義，已降級為不可執行：概念對齊",
+                        ),
+                    ),
+                    TaskNode(
+                        id="design_definition",
+                        title="設計定義",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="完成設計"),
+                            display=TaskDisplayMetadata(label="設計定義", summary="完成設計", todo_hint="完成設計"),
+                        ),
+                    ),
+                ],
+                edges=[GraphEdge(from_node="concept_alignment", to_node="design_definition", edge_type="CONTROL", kind="DEPENDS_ON")],
+            )
+
+            processed = core._postprocess_planner_graph(
+                graph,
+                message="請協助我開發一個3d煙火模擬器，裡面要有屬性面板可以調整煙火外觀以及物理模擬",
+                available_tools=[{"name": "web.better_search"}, {"name": "web.search"}, {"name": "web.fetch"}],
+            )
+        finally:
+            shutil.rmtree(core.data_dir, ignore_errors=True)
+
+        concept_node = next(node for node in processed.nodes if isinstance(node, TaskNode) and node.id == "concept_alignment")
+        self.assertEqual(concept_node.task_spec.executor, "agent")
+        self.assertIsNotNone(concept_node.task_spec.agent)
+        self.assertTrue(concept_node.task_spec.runnable)
+        self.assertEqual(concept_node.task_spec.non_runnable_reason, None)
+        self.assertIn("concept-alignment", concept_node.task_spec.agent.skills)
+        self.assertIn("web.search", concept_node.task_spec.agent.allowed_tools)
 
     def test_postprocess_planner_graph_merges_spec_cluster_tasks(self) -> None:
         core = AmonCore(data_dir=Path(tempfile.mkdtemp()))
@@ -612,6 +658,59 @@ class CorePlanGenerationTests(unittest.TestCase):
                 "task_quality_packaging",
             ],
         )
+
+    def test_postprocess_planner_graph_assigns_code_tools_to_game_execution_node(self) -> None:
+        core = AmonCore(data_dir=Path(tempfile.mkdtemp()))
+        try:
+            graph = GraphDefinition(
+                version="taskgraph.v3",
+                nodes=[
+                    TaskNode(
+                        id="concept_alignment",
+                        title="概念對齊",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(prompt="先查概念"),
+                            display=TaskDisplayMetadata(label="概念對齊", summary="查概念", todo_hint="完成概念摘要"),
+                        ),
+                    ),
+                    TaskNode(
+                        id="task_execute",
+                        title="任務執行",
+                        task_spec=TaskSpec(
+                            executor="agent",
+                            agent=AgentTaskConfig(
+                                prompt="請幫我開發一個俄羅斯方塊遊戲，並直接完成可玩的單頁網頁版本。",
+                                instructions="延續前置摘要直接完成交付。",
+                            ),
+                            display=TaskDisplayMetadata(
+                                label="任務執行",
+                                summary="直接完成最小可行交付。",
+                                todo_hint="完成可玩的俄羅斯方塊與必要資產。",
+                            ),
+                        ),
+                    ),
+                ],
+                edges=[GraphEdge(from_node="concept_alignment", to_node="task_execute", edge_type="CONTROL", kind="DEPENDS_ON")],
+            )
+
+            processed = core._postprocess_planner_graph(
+                graph,
+                message="請幫我開發一個俄羅斯方塊遊戲，並直接完成可玩的單頁網頁版本。",
+                available_tools=[
+                    {"name": "web.search"},
+                    {"name": "filesystem.read"},
+                    {"name": "filesystem.patch"},
+                    {"name": "terminal.exec"},
+                ],
+            )
+        finally:
+            shutil.rmtree(core.data_dir, ignore_errors=True)
+
+        execution_node = next(node for node in processed.nodes if isinstance(node, TaskNode) and node.id == "task_execute")
+        self.assertIn("filesystem.read", execution_node.task_spec.agent.allowed_tools)
+        self.assertIn("filesystem.patch", execution_node.task_spec.agent.allowed_tools)
+        self.assertIn("terminal.exec", execution_node.task_spec.agent.allowed_tools)
 
     def test_postprocess_planner_graph_linearizes_control_edges_when_cycle_remains(self) -> None:
         core = AmonCore(data_dir=Path(tempfile.mkdtemp()))

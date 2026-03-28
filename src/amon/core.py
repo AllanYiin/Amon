@@ -385,6 +385,7 @@ class AmonCore:
         records_by_id = {record.project_id: record for record in records}
 
         merged: list[ProjectRecord] = []
+        merged_ids: set[str] = set()
         for meta in self.project_registry.list_projects():
             project_id = str(meta.get("project_id") or "")
             if not project_id:
@@ -395,6 +396,7 @@ class AmonCore:
                 if not existing.name:
                     existing.name = str(meta.get("project_name") or project_id)
                 merged.append(existing)
+                merged_ids.add(project_id)
                 continue
             timestamp = self._now()
             merged.append(
@@ -407,11 +409,19 @@ class AmonCore:
                     status="active",
                 )
             )
+            merged_ids.add(project_id)
 
-        if include_deleted:
-            for record in records:
-                if record.status == "deleted" and record.project_id not in {item.project_id for item in merged}:
+        for record in records:
+            if record.project_id in merged_ids:
+                continue
+            if record.status == "deleted":
+                if include_deleted:
                     merged.append(record)
+                continue
+            record_path = Path(record.path)
+            if record_path.exists():
+                merged.append(record)
+                merged_ids.add(record.project_id)
 
         if merged:
             merged = sorted(merged, key=lambda item: item.project_id)
@@ -987,6 +997,9 @@ class AmonCore:
         normalized_prompt = str(prompt or "").strip()
         if not normalized_prompt:
             return ""
+        search_query = self._build_auto_web_search_query(normalized_prompt)
+        if not search_query:
+            return ""
         if allowed_tools is not None:
             allowed = {str(item).strip() for item in allowed_tools if str(item).strip()}
             if not allowed.intersection({"web.search", "web.fetch", "web.better_search"}):
@@ -1013,7 +1026,7 @@ class AmonCore:
                 "node_id": node_id,
                 "thread_id": thread_id,
                 "request_id": request_id,
-                "args_preview": self._tool_args_preview({"query": normalized_prompt, "max_results": 5}),
+                "args_preview": self._tool_args_preview({"query": search_query, "max_results": 5}),
             }
             log_event(
                 {
@@ -1035,7 +1048,7 @@ class AmonCore:
             result = registry.call(
                 ToolCall(
                     tool="web.search",
-                    args={"query": normalized_prompt, "max_results": 5},
+                    args={"query": search_query, "max_results": 5},
                     caller="agent",
                     project_id=project_id,
                 )
@@ -1093,6 +1106,53 @@ class AmonCore:
         except Exception as exc:  # noqa: BLE001
             self.logger.warning("自動 web.search 失敗：%s", exc, exc_info=True)
             return ""
+
+    def _build_auto_web_search_query(self, prompt: str) -> str:
+        normalized = unicodedata.normalize("NFKC", str(prompt or ""))
+        if not normalized.strip():
+            return ""
+
+        trimmed = re.split(
+            r"前置概念摘要|前置節點輸出摘要|以下是剛剛使用 web\.search 取得的參考資料|##\s*Concept Alignment|\[附件摘要\]",
+            normalized,
+            maxsplit=1,
+        )[0]
+        cleaned = re.sub(r"```.*?```", " ", trimmed, flags=re.DOTALL)
+        cleaned = re.sub(r"https?://\S+", " ", cleaned)
+        cleaned = re.sub(r"[\r\n\t]+", " ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        if not cleaned:
+            return ""
+        candidate = re.split(r"[。！？]", cleaned, maxsplit=1)[0].strip()
+        for prefix in (
+            "請幫我",
+            "幫我",
+            "請你",
+            "請",
+            "麻煩你",
+            "麻煩",
+        ):
+            if candidate.startswith(prefix):
+                candidate = candidate[len(prefix):].strip()
+                break
+        for prefix in ("搜尋", "查詢", "查找", "找", "先搜尋", "先查詢", "先查找"):
+            if candidate.startswith(prefix):
+                candidate = candidate[len(prefix):].strip(" ：:，,")
+                break
+        candidate = re.sub(r"[，,;；]", " ", candidate)
+        candidate = re.sub(r"\s+", " ", candidate).strip()
+        if len(candidate) <= 120:
+            return candidate
+
+        tokens = re.findall(r"[A-Za-z][A-Za-z0-9_.-]*|\d+(?:\.\d+)+|[\u4e00-\u9fff]{2,}", candidate)
+        filtered = [
+            token
+            for token in tokens
+            if token not in {"開發", "完成", "直接", "請求", "需求", "最佳實踐"}
+        ]
+        if filtered:
+            return " ".join(filtered[:8])
+        return candidate[:120].strip()
 
     def _prompt_requires_web_search(self, prompt: str) -> bool:
         normalized = unicodedata.normalize("NFKC", prompt).strip().lower()
@@ -1843,7 +1903,12 @@ class AmonCore:
         message: str,
         tool_names: set[str],
     ) -> tuple[list[BaseNode], list[GraphEdge]]:
-        if any(node.id == "concept_alignment" for node in nodes):
+        existing_by_id = next(
+            (node for node in nodes if isinstance(node, TaskNode) and node.id == "concept_alignment"),
+            None,
+        )
+        if existing_by_id is not None:
+            self._repair_concept_alignment_node(existing_by_id, message=message, tool_names=tool_names)
             return nodes, edges
         existing_concept = next(
             (node for node in nodes if isinstance(node, TaskNode) and self._is_concept_alignment_like_task(node)),
@@ -1852,17 +1917,7 @@ class AmonCore:
         if existing_concept is not None:
             previous_id = existing_concept.id
             existing_concept.id = "concept_alignment"
-            existing_concept.title = "概念對齊"
-            existing_concept.task_spec.display.label = "概念對齊"
-            if not str(existing_concept.task_spec.display.summary or "").strip():
-                existing_concept.task_spec.display.summary = "先查證關鍵概念與限制，避免後續節點設計偏題。"
-            if not str(existing_concept.task_spec.display.todo_hint or "").strip():
-                existing_concept.task_spec.display.todo_hint = "完成關鍵概念、風險與查詢摘要。"
-            if existing_concept.task_spec.agent is not None:
-                existing_concept.task_spec.agent.instructions = self._merge_unique_text_segments(
-                    "輸出請先完成概念對齊，再把摘要提供給下游節點。",
-                    existing_concept.task_spec.agent.instructions or "",
-                )
+            self._repair_concept_alignment_node(existing_concept, message=message, tool_names=tool_names)
             rewritten_edges = [
                 self._clone_edge_with_nodes(
                     edge,
@@ -1906,6 +1961,58 @@ class AmonCore:
             ),
         )
         return [concept_node, *nodes], edges
+
+    def _repair_concept_alignment_node(
+        self,
+        node: TaskNode,
+        *,
+        message: str,
+        tool_names: set[str],
+    ) -> None:
+        keywords = self._extract_planning_keywords(message, limit=5)
+        keyword_text = "、".join(keywords) if keywords else "任務目標、限制條件、輸出格式"
+        concept_tools = [name for name in ("web.better_search", "web.search", "web.fetch") if name in tool_names]
+        existing_agent = node.task_spec.agent
+
+        node.title = "概念對齊"
+        if node.task_spec.display is None:
+            node.task_spec.display = TaskDisplayMetadata(label="概念對齊")
+        node.task_spec.display.label = "概念對齊"
+        if not str(node.task_spec.display.summary or "").strip():
+            node.task_spec.display.summary = "先查證關鍵概念與限制，避免後續節點設計偏題。"
+        if not str(node.task_spec.display.todo_hint or "").strip():
+            node.task_spec.display.todo_hint = "完成關鍵概念、風險與查詢摘要。"
+
+        generated_prompt = (
+            "請先做概念對齊。"
+            f"先抽取任務中的關鍵概念：{keyword_text}。"
+            "請用關鍵字策略先搜尋並整理：名詞定義、範圍邊界、易混淆點、目前版本差異、"
+            "接下來規劃 TaskGraph 時應注意的限制。"
+            "若資料不足，請明確標記限制與待補證據。"
+        )
+        generated_instructions = "輸出請使用繁體中文，並先給概念摘要，再給規劃注意事項。"
+
+        agent = AgentTaskConfig(
+            system_prompt=existing_agent.system_prompt if existing_agent is not None else None,
+            prompt=self._merge_unique_text_segments(
+                generated_prompt,
+                existing_agent.prompt if existing_agent is not None else "",
+            ),
+            instructions=self._merge_unique_text_segments(
+                generated_instructions,
+                "輸出請先完成概念對齊，再把摘要提供給下游節點。",
+                existing_agent.instructions if existing_agent is not None else "",
+            ),
+            model=existing_agent.model if existing_agent is not None else None,
+            allowed_tools=list(existing_agent.allowed_tools) if existing_agent and existing_agent.allowed_tools else concept_tools,
+            skills=list(existing_agent.skills) if existing_agent is not None else [],
+        )
+        node.task_spec.executor = "agent"
+        node.task_spec.agent = agent
+        node.task_spec.tool = None
+        node.task_spec.runnable = True
+        node.task_spec.non_runnable_reason = None
+        self._bind_agent_skills(node, "concept-alignment")
 
     @staticmethod
     def _promote_concept_alignment_to_entry(
@@ -2333,7 +2440,37 @@ class AmonCore:
 
         if any(token in normalized for token in {"概念", "查證", "搜尋", "研究", "資料來源", "比較", "最新", "search", "cite"}):
             _add("web.better_search", "web.search", "web.fetch")
-        if any(token in normalized for token in {"檔案", "程式", "修改", "修正", "讀取", "掃描", "patch", "file", "code", "test", "測試"}):
+        if any(
+            token in normalized
+            for token in {
+                "檔案",
+                "程式",
+                "修改",
+                "修正",
+                "讀取",
+                "掃描",
+                "開發",
+                "實作",
+                "實現",
+                "建置",
+                "遊戲",
+                "網頁",
+                "網站",
+                "前端",
+                "後端",
+                "ui",
+                "app",
+                "application",
+                "build",
+                "develop",
+                "implement",
+                "patch",
+                "file",
+                "code",
+                "test",
+                "測試",
+            }
+        ):
             _add(
                 "filesystem.list",
                 "filesystem.read",

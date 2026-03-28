@@ -1341,6 +1341,18 @@ body {
   border-bottom-left-radius: 6px;
 }
 
+.chat-msg__node-label {
+  display: inline-flex;
+  margin-bottom: 8px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--c-info) 28%, var(--c-border));
+  background: color-mix(in srgb, var(--c-info-soft) 82%, var(--c-surface-1));
+  color: var(--c-info);
+  font-size: 11px;
+  font-weight: 600;
+}
+
 .chat-msg__bubble.is-typing .chat-msg__body:empty::before {
   content: "Amon 正在輸入中…";
   color: var(--muted);

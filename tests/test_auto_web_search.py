@@ -47,6 +47,33 @@ class AutoWebSearchTests(unittest.TestCase):
         self.assertNotIn("web.search", fake_registry.policy.ask)
 
     @patch("amon.tooling.builtin.build_registry")
+    def test_auto_web_search_context_compacts_injected_prompt_before_search(self, build_registry_mock) -> None:
+        fake_registry = _FakeRegistry()
+        build_registry_mock.return_value = fake_registry
+
+        prompt = (
+            "請幫我開發一個俄羅斯方塊遊戲，先搜尋 HTML5 canvas 與 JavaScript game loop 的最佳實踐。\n\n"
+            "前置概念摘要（僅作背景，勿重複概念對齊）：\n"
+            "## Concept Alignment\n"
+            "- 這裡是很長的摘要\n"
+            "- https://example.com/very/long/reference\n"
+            "```json\n{\"huge\": \"payload\"}\n```"
+        )
+
+        self.core._auto_web_search_context(
+            prompt,
+            project_path=None,
+            config={"amon": {"auto_web_search": True}},
+        )
+
+        query = str(fake_registry.last_call.args.get("query", ""))
+        self.assertIn("俄羅斯方塊", query)
+        self.assertIn("JavaScript", query)
+        self.assertNotIn("前置概念摘要", query)
+        self.assertNotIn("https://example.com", query)
+        self.assertLess(len(query), len(prompt))
+
+    @patch("amon.tooling.builtin.build_registry")
     def test_auto_web_search_context_emits_args_preview_and_error_detail(self, build_registry_mock) -> None:
         fake_registry = _FakeRegistry()
         fake_registry.result = ToolResult(
@@ -71,7 +98,7 @@ class AutoWebSearchTests(unittest.TestCase):
             if is_event and payload.get("event") == "tool_call":
                 tool_events.append(payload)
         self.assertEqual(len(tool_events), 2)
-        self.assertIn('"query": "請搜尋最新 AI 新聞"', str(tool_events[0].get("args_preview") or ""))
+        self.assertIn('"query": "最新 AI 新聞"', str(tool_events[0].get("args_preview") or ""))
         self.assertEqual(tool_events[1].get("status"), "invalid_args")
         self.assertEqual(tool_events[1].get("error_detail"), "缺少 query 參數。")
 

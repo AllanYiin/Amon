@@ -1,18 +1,18 @@
 /**
  * Theme Provider — Theme Management System
- * 
+ *
  * This file provides a complete theme management system with:
  * - Light/dark/system theme support
  * - Theme persistence (localStorage)
  * - System preference detection
  * - Type-safe theme context
- * 
+ *
  * Location: {project_path}/skills/frontend-design/examples/typescript/theme-provider.tsx
- * 
+ *
  * Usage:
  * ```tsx
  * import { ThemeProvider, useTheme } from './theme-provider';
- * 
+ *
  * function App() {
  *   return (
  *     <ThemeProvider defaultTheme="system">
@@ -20,7 +20,7 @@
  *     </ThemeProvider>
  *   );
  * }
- * 
+ *
  * function ThemeToggle() {
  *   const { theme, setTheme } = useTheme();
  *   return <button onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>Toggle</button>;
@@ -107,7 +107,7 @@ export function ThemeProvider({
     if (theme !== 'system') return;
 
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    
+
     const handleChange = (e: MediaQueryListEvent) => {
       const systemTheme = e.matches ? 'dark' : 'light';
       const root = window.document.documentElement;
@@ -154,11 +154,11 @@ export function ThemeProvider({
 
 export function useTheme(): ThemeContextType {
   const context = useContext(ThemeContext);
-  
+
   if (context === undefined) {
     throw new Error('useTheme must be used within a ThemeProvider');
   }
-  
+
   return context;
 }
 

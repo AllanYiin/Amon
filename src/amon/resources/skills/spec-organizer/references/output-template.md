@@ -71,6 +71,46 @@
 逐步描述主要使用流程與關鍵分支。
 ### 開發應注意重點以及應避開誤區
 列出容易做錯的地方、取捨原則、避免踩雷點。
+### 任務模型與資訊優先級
+先用 `任務模型表` 列出唯一主目標、次目標、低頻目標、罕見目標；再用 `資訊分類表` 列出各資訊區塊的角色、頻率、是否首屏必須，以及不顯示的風險。
+
+#### 任務模型表
+| 層級 | 內容 | 為何屬於這一層 | 是否必須首屏支援 |
+|---|---|---|---|
+| 唯一主目標 |  |  |  |
+| 次目標 |  |  |  |
+| 低頻目標 |  |  |  |
+| 罕見目標 |  |  |  |
+
+#### 資訊分類表
+| 資訊項目 | 分類 | 使用頻率 | 是否首屏必須 | 不顯示的風險 |
+|---|---|---|---|---|
+|  | action-critical / decision-supporting / status-feedback / reference / exception-handling / audit-history |  |  |  |
+
+#### 資訊架構表
+| 資訊項目 | 使用頻率 | 是否首屏必須 | 所屬任務階段 | 顯示條件 | 建議容器 | 是否可收合 |
+|---|---|---|---|---|---|---|
+|  | 高 / 中 / 低 | 是 / 否 | empty / drafting / validating / resolved / blocked / submitted |  | inline / panel / sticky footer / accordion / drawer / modal / tab | 是 / 否 |
+### 狀態模型與揭露策略
+列出 `empty / drafting(editing) / validating / resolved / blocked / submitted` 或等價狀態，並說明各 state 要顯示什麼、隱藏什麼、主 CTA 是什麼。
+
+#### 狀態矩陣
+| State | 進入條件 | 使用者此刻目標 | 必顯資訊 | 隱藏資訊 | 主 CTA | 離開條件 |
+|---|---|---|---|---|---|---|
+| empty |  |  |  |  |  |  |
+| drafting |  |  |  |  |  |  |
+| validating |  |  |  |  |  |  |
+| resolved |  |  |  |  |  |  |
+| blocked |  |  |  |  |  |  |
+| submitted |  |  |  |  |  |  |
+
+#### Progressive disclosure 規則
+- 首屏最多只允許 1 個主操作區、1 個狀態區、1 個次要摘要。
+- `reference` 類資訊預設收合。
+- `exception-handling` 只有在錯誤 state 顯示。
+- 進階設定放進 accordion / drawer / modal，不要常駐。
+- 相同任務流中的說明文字嵌在元件旁，不要獨立一整塊 card。
+- 單頁最多 3 個視覺群組，超過要合併或延後揭露。
 ### UI 風格定調與色彩策略
 先定義介面風格走向，再定義 2-3 種主色/輔色與 1 種強調色，說明各自負責的場景與使用規則。
 ### 專案目錄規劃
@@ -136,9 +176,12 @@
 - 一定要定義核心資料模型與資料生命週期。
 - 一定要定義通知與背景執行的觸發、狀態、取消、重試與失敗處理。
 - 一定要定義錯誤處理、回退策略與可觀測性。
+- 若是工作台或流程型 UI，一定要定義 task model、state model、資訊分類與 visibility plan。
+- 若是工作台或流程型 UI，一定要先做資訊架構表，再做 UI layout 描述。
 - 一定要先定調 UI 風格，再定義色彩策略。
 - 一定要說明是否使用 tabs、wizard、step navigation 或同頁分段。
 - 一定要保留單一明確視覺重點，不可把所有區塊都做成同等強度。
+- 首屏只能保留少數主要群組；`reference` 類資訊預設收合，`exception-handling` 只在對應 state 顯示。
 - 一定要定義 UI 狀態保存與重新開始機制。
 - 任何新增物件都要有 Update / Delete。
 - 任何上傳都要有預覽。
@@ -181,18 +224,29 @@
 - 不討論內部結構、資料表、端點、服務邊界。
 - 用使用者看得到、做得到、理解得了的行為描述。
 
-## 3) Web 版 Codex 分階段開發計畫
+## 3) Codex / Claude Code 分階段開發計畫
 
 建議骨架：
 
 ````md
-## Web 版 Codex 分階段開發計畫
+## Codex / Claude Code 分階段開發計畫
 
 ### Stage 0：建立專案骨架與規範
 - 目標
 - 前置條件
-- Codex Web Instructions
+- Codex Instructions
 ```text
+[建議貼用方式]
+[任務範圍]
+[需修改/新增的檔案清單]
+[具體步驟]
+[輸出格式要求]
+[測試要求]
+[驗收標準 DoD]
+```
+- Claude Code Instructions
+```text
+[建議貼用方式]
 [任務範圍]
 [需修改/新增的檔案清單]
 [具體步驟]
@@ -216,8 +270,10 @@
 Stage 計畫硬規則：
 - Stage 數量依規格切分，不要硬塞成固定 4-6 階段。
 - 每個 Stage 都必須可交付、可測試、可回滾。
-- 若涉及 LLM，Instructions 要明寫 Streaming。
-- Instructions 要自足，不要假設 Codex 會自動懂上下文。
+- 若涉及 LLM，Codex 與 Claude Code 的 Instructions 都要明寫 Streaming。
+- 預設每個 Stage 同時提供 Codex 與 Claude Code 兩版；若使用者明確只要單一平台，才可省略另一版。
+- Codex Instructions 要自足，不要假設 Codex 會自動懂上下文；必要時指出應同步到哪個 `AGENTS.md`。
+- Claude Code Instructions 要自足，不要假設 Claude Code 會自動猜到長期規則；必要時指出應寫入 `CLAUDE.md` / `.claude/CLAUDE.md`，或做成 `.claude/skills/` / `.claude/commands/`。
 - 每個 Stage 都要寫實際內容，不能只放欄位名或一句空話。
 
 ## SVG minimum rules
@@ -249,8 +305,12 @@ Stage 計畫硬規則：
 
 - 先回答介面風格走向，再做顏色與控制項選擇。
 - 主色/輔色/強調色要有明確責任，不要隨意混用。
+- 工作台型 UI 先寫 primary task、task model、state model、資訊分類，再做版面。
+- 工作台型 UI 的 task model 至少拆成：唯一主目標 / 次目標 / 低頻目標 / 罕見目標。
+- 工作台型 UI 的 state model 至少對每個 state 寫：進入條件 / 必顯資訊 / 隱藏資訊 / 主 CTA / 離開條件。
 - 若任務具有明顯階段性，優先拆步驟，不要把所有操作塞在同一頁。
 - 每個畫面只保留一個主要視覺重點。
+- 首屏預設最多 2-3 個主要視覺群組，且只有 1 個主 CTA。
 - 優先讓主要操作在單一可視畫面內完成。
 - 沒有明確用途的控制項不要顯示。
 - 要有狀態保存，也要有重新開始。

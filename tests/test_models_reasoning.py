@@ -2,7 +2,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -50,6 +50,73 @@ class ModelsReasoningTests(unittest.TestCase):
         self.assertTrue(is_reasoning)
         self.assertEqual(reasoning_text, "先定義問題")
         self.assertEqual(chunks[1], "最終答案")
+
+    def test_run_tool_conversation_rejects_empty_tool_arguments_before_execute(self) -> None:
+        cfg = OpenAIProviderConfig(
+            base_url="https://api.openai.com/v1",
+            api_key_env="OPENAI_API_KEY",
+            default_model="gpt-5.2",
+            timeout_s=5,
+        )
+
+        class FakeToolConversationProvider(OpenAICompatibleProvider):
+            def __init__(self, config: OpenAIProviderConfig, rounds: list[list[dict[str, object]]]) -> None:
+                super().__init__(config)
+                self._rounds = rounds
+                self.payloads: list[dict[str, object]] = []
+
+            def _iter_streaming_chunks(self, payload: dict[str, object]):
+                self.payloads.append(payload)
+                round_index = len(self.payloads) - 1
+                yield from self._rounds[round_index]
+
+        provider = FakeToolConversationProvider(
+            cfg,
+            rounds=[
+                [
+                    {
+                        "choices": [
+                            {
+                                "delta": {
+                                    "tool_calls": [
+                                        {
+                                            "index": 0,
+                                            "id": "call_1",
+                                            "type": "function",
+                                            "function": {"name": "web.search"},
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
+                    },
+                    {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+                ],
+                [
+                    {"choices": [{"delta": {"content": "done"}}]},
+                    {"choices": [{"delta": {}, "finish_reason": "stop"}]},
+                ],
+            ],
+        )
+        execute_tool = Mock(return_value={"content_text": "should not run"})
+
+        result = provider.run_tool_conversation(
+            messages=[{"role": "user", "content": "請查詢"}],
+            model="gpt-5.2",
+            tools=[{"type": "function", "function": {"name": "web.search"}}],
+            execute_tool=execute_tool,
+        )
+
+        execute_tool.assert_not_called()
+        self.assertEqual(result["text"], "done")
+        self.assertTrue(
+            any(
+                message.get("role") == "tool"
+                and "工具呼叫缺少 arguments JSON。" in str(message.get("content") or "")
+                for message in result["messages"]
+                if isinstance(message, dict)
+            )
+        )
 
 
 if __name__ == "__main__":
